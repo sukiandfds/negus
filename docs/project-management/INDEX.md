@@ -2,7 +2,7 @@
 document_type: project_management_index
 schema_version: 1
 project_id: negus
-last_updated: 2026-08-05
+last_updated: 2026-09-11
 ---
 
 # 项目管理目录
@@ -37,6 +37,7 @@ last_updated: 2026-08-05
 | 条目编号 | 类型 | 分类 | 文件夹 | 排序 |
 | --- | --- | --- | --- | --- |
 | `PM-001` | feature | development | `items/PM-001/` | 1 |
+| `PM-002` | maintenance | maintenance | `items/PM-002/` | 17 |
 | `RESEARCH-001` | research | research | `items/RESEARCH-001/` | 2 |
 | `RESEARCH-002` | research | research | `items/RESEARCH-002/` | 3 |
 | `RESEARCH-003` | research | research | `items/RESEARCH-003/` | 4 |
