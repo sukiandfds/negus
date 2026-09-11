@@ -4,17 +4,17 @@ type: maintenance
 title: 现有实现功能介绍同步
 category: maintenance
 priority: P2
-status: docs_pending
+status: docs_synced
 updated_at: 2026-09-11 17:11 +08:00
 owner: Codex
 source: PROJECT.md
 related: [FEAT-001, FEAT-002, FEAT-015, FEAT-017, FEAT-018]
 product_base_commit: 2114b7c6275db02479b7ff708f47491fab8c53ef
 product_commit: 2114b7c6275db02479b7ff708f47491fab8c53ef
-docs_commit: pending
+docs_commit: e8f0ec33a63b860db5a4386bbe3dddf53fbc858d
 audited_product_commit: pending
-sync_status: docs_pending
-next_action: 保存文档提交并回写提交凭证
+sync_status: synced
+next_action: 按用户后续要求决定是否推送；本轮仅本地更新
 last_user_visible_change: 项目介绍补全七类现有能力、源码链接和未实现边界
 ---
 
