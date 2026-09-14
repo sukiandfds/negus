@@ -15,6 +15,10 @@ key_paths:
 
 # FEAT-005：Desktop/Web 连续性与同任务提示
 
+## 最新调研入口（2026-09-14）
+
+完整依据见 [RESEARCH-004：Codex Desktop 与 negus 同会话协作调研](../../research/CODEX_DESKTOP_SHARED_SESSION_RESEARCH_2026-09-14.md)。报告包含当前版本占用复现、共享服务路线、竞品与官方支持边界、风险和验收矩阵。功能仍为 discovery，尚未实施共享连接；以下旧版本记录保留其原始日期和适用范围，不能据此否定新版本接入口，也不能把新方案写成已实现能力。
+
 ## 当前快照
 
 - 手机或浏览器可以通过独立 Codex app-server 向真实持久化 Thread 发送消息并接收回复。
