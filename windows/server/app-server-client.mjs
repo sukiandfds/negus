@@ -151,6 +151,7 @@ export const createAppServerClient = ({
   let restartPromise;
   let probeFailures = 0;
   const pending = new Map();
+  const pendingUserInputs = new Map();
   const listeners = new Set();
   const healthListeners = new Set();
   const stderrLines = [];
@@ -224,6 +225,11 @@ export const createAppServerClient = ({
         try {
           const message = JSON.parse(line);
           if (message.method && message.id !== undefined) {
+            if (message.method === "item/tool/requestUserInput") {
+              pendingUserInputs.set(String(message.id), message);
+              emit(message);
+              continue;
+            }
             emit(message);
             writeMessage({ id: message.id, result: automaticResponse(message) });
             continue;
@@ -250,6 +256,7 @@ export const createAppServerClient = ({
     spawned.once("exit", (code) => {
       const tail = stderrLines.slice(-20).join("\n");
       rejectPending(new Error(`Codex app-server exited with code ${code ?? "unknown"}${tail ? `: ${tail}` : ""}`));
+      pendingUserInputs.clear();
       if (child === spawned) {
         child = undefined;
         initializePromise = undefined;
@@ -300,6 +307,7 @@ export const createAppServerClient = ({
       initializePromise = undefined;
       buffer = "";
       rejectPending(new Error(`Codex app-server restarting: ${reason}`));
+      pendingUserInputs.clear();
       previous?.kill();
       if (previous) {
         await Promise.race([
@@ -333,6 +341,7 @@ export const createAppServerClient = ({
 
   const close = () => {
     rejectPending(new Error("Codex app-server client closed"));
+    pendingUserInputs.clear();
     child?.kill();
     child = undefined;
     initializePromise = undefined;
@@ -349,5 +358,29 @@ export const createAppServerClient = ({
     return () => healthListeners.delete(listener);
   };
 
-  return { request, probe, restart, subscribe, subscribeHealth, close };
+  const getPendingUserInput = (threadId) => {
+    const requestedThreadId = String(threadId || "");
+    const requests = [...pendingUserInputs.values()].filter((message) => (
+      String(message.params?.threadId || "") === requestedThreadId
+    ));
+    return requests.at(-1) || null;
+  };
+
+  const respondToUserInput = (threadId, requestId, answers) => {
+    const key = String(requestId ?? "");
+    const message = pendingUserInputs.get(key);
+    if (!message || String(message.params?.threadId || "") !== String(threadId || "")) {
+      const error = new Error("该互动请求已结束或不存在");
+      error.statusCode = 409;
+      throw error;
+    }
+    writeMessage({ id: message.id, result: { answers } });
+    pendingUserInputs.delete(key);
+    return message;
+  };
+
+  return {
+    request, probe, restart, subscribe, subscribeHealth,
+    getPendingUserInput, respondToUserInput, close,
+  };
 };

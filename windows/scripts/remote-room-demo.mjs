@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { createJsonlConversationStore } from "../server/jsonl-conversation-store.mjs";
 import { createAppServerConversationStore } from "../server/app-server-conversation-store.mjs";
 import { createAppServerClient } from "../server/app-server-client.mjs";
+import { createProviderConversationStore } from "../server/provider-conversation-store.mjs";
 import { createConversationService } from "../server/conversation-service.mjs";
 import { createConversationVersionStore } from "../server/conversation-version-store.mjs";
 import { createMediaService } from "../server/media-service.mjs";
@@ -91,7 +92,8 @@ const modelProviders = createModelProviderService({
   projectRoot,
   defaultClient: appServerClient,
 });
-const appServerConversations = createAppServerConversationStore({
+const conversationStoreOptions = {
+  historyFallback: (...args) => jsonlConversations.findSession(...args),
   projectRoot,
   projectRoots,
   autoTitleStateFile: path.join(projectRoot, "runtime", "conversation-display-titles.json"),
@@ -129,6 +131,26 @@ const appServerConversations = createAppServerConversationStore({
     };
   },
   client: appServerClient,
+};
+const currentConversations = createAppServerConversationStore(conversationStoreOptions);
+const appServerConversations = createProviderConversationStore({
+  current: currentConversations,
+  providers: modelProviders,
+  stateFile: path.join(projectRoot, "runtime", "conversation-provider-routes.json"),
+  createStore: (client, providerId) => {
+    const history = createJsonlConversationStore({
+      sessionRoot: path.join(projectRoot, "runtime", "model-providers", providerId, "codex-home", "sessions"),
+      projectRoot, projectRoots, registerMedia: media.register,
+      onChange: realtime.broadcast,
+    });
+    const store = createAppServerConversationStore({
+    ...conversationStoreOptions, client,
+    historyFallback: (...args) => history.findSession(...args),
+    autoTitleStateFile: path.join(projectRoot, "runtime", `conversation-titles-${providerId}.json`),
+    autoTitleEnabled: false,
+    });
+    return { ...store, close: () => { store.close(); history.close(); } };
+  },
 });
 const conversationVersions = createConversationVersionStore({
   stateFile: path.join(projectRoot, "runtime", "conversation-versions.json"),

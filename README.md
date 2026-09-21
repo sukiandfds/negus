@@ -1,10 +1,14 @@
 # negus 仓库入口
 
-文档更新时间：2026-09-11 17:11 +08:00
+文档更新时间：2026-09-14 01:03 +08:00
+
+**Negus：你需要什么工作功能，直接说出来。**
+
+产品方向是一个可以用自然语言不断定制的个人／企业工作空间：有网络和浏览器即可访问已部署、获授权的工作区；按需求创建或调整功能页面，把入口放在需要的位置。每日资讯、项目进度、进销存入口、报销上传、会议预约和员工间 AI 通信都是目标场景，具体实现状态见[产品定义](./PRODUCT_DEFINITION.md#产品定位与核心卖点)。
 
 本仓库包含两套相互独立的产品代码：
 
-1. **negus Web 协作工作台**：查看和继续真实 Codex 工作，支持群聊、Agent 和交付物。
+1. **negus Web 工作空间**：当前提供真实 Codex 对话与控制、项目群聊、Agent 和交付物能力，逐步发展自然语言定制功能页面的完整流程。
 2. **Codex Dream Skin 换肤工具**：通过本机 CDP 给 Codex 桌面端加载外部主题。
 
 两套产品共用仓库，但文档、代码和运行方式分开维护。
@@ -21,6 +25,7 @@
 - 功能状态：[`docs/feature-development/FEATURE_STATUS_INDEX.md`](./docs/feature-development/FEATURE_STATUS_INDEX.md)
 - 功能开发说明：[`docs/feature-development/README.md`](./docs/feature-development/README.md)
 - 架构说明：[`docs/architecture/README.md`](./docs/architecture/README.md)
+- 宣传口径与演示建议：[`docs/promo-copy.md`](./docs/promo-copy.md)
 
 主要代码：
 

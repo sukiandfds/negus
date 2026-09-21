@@ -85,6 +85,7 @@ export function GroupComposer({ agents, members, disabled, error, onSend, onInte
   };
 
   const insertPersonnel = (option: MentionOption) => {
+    setPersonnelOpen(false);
     const textarea = textareaRef.current;
     const caret = textarea?.selectionStart ?? text.length;
     const prefix = caret > 0 && !/\s$/u.test(text.slice(0, caret)) ? " " : "";
@@ -142,6 +143,9 @@ export function GroupComposer({ agents, members, disabled, error, onSend, onInte
   useEffect(() => {
     if (!personnelOpen && !capabilityOpen) return;
     const closeOutside = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest("[data-capability-menu]")) {
+        setCapabilityOpen(false);
+      }
       if (!composerRef.current?.contains(event.target as Node)) {
         setPersonnelOpen(false);
         setCapabilityOpen(false);
@@ -256,6 +260,10 @@ export function GroupComposer({ agents, members, disabled, error, onSend, onInte
               type="button"
               aria-label="打开能力菜单"
               title="打开能力菜单"
+              data-capability-menu
+              aria-expanded={capabilityOpen}
+              aria-haspopup="listbox"
+              onMouseDown={(event) => event.preventDefault()}
               disabled={disabled}
               onClick={() => {
                 setMention(null);
@@ -272,6 +280,7 @@ export function GroupComposer({ agents, members, disabled, error, onSend, onInte
               aria-expanded={personnelOpen}
               aria-haspopup="listbox"
               aria-label="指定参与商讨的员工"
+              onMouseDown={(event) => event.preventDefault()}
               title={selectedAgentIds.length ? `已指定 ${selectedAgentIds.length} 人` : "指定人员"}
               disabled={disabled}
               onClick={() => {

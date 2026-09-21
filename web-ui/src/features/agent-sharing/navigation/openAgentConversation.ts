@@ -6,10 +6,16 @@ interface OpenAgentConversationResponse {
   threadId: string | null;
 }
 
-export async function openAgentConversation({ agentId, threadId = "", conversationId = "" }: {
+export async function openAgentConversation({ agentId, threadId = "", conversationId = "", projectContext }: {
   agentId: string;
   threadId?: string | null;
   conversationId?: string | null;
+  projectContext?: {
+    id?: string | null;
+    title?: string | null;
+    phase?: string | null;
+    goal?: string | null;
+  };
 }) {
   const opened = threadId ? { threadId, conversationId } : await postJson<OpenAgentConversationResponse>(
     "/api/agent-conversations/open",
@@ -23,6 +29,14 @@ export async function openAgentConversation({ agentId, threadId = "", conversati
   params.delete("employee");
   params.delete("employeeId");
   params.set("agent", agentId);
+  if (projectContext?.id) params.set("managerProjectId", projectContext.id);
+  else params.delete("managerProjectId");
+  if (projectContext?.title) params.set("managerProjectTitle", projectContext.title);
+  else params.delete("managerProjectTitle");
+  if (projectContext?.phase) params.set("managerProjectPhase", projectContext.phase);
+  else params.delete("managerProjectPhase");
+  if (projectContext?.goal) params.set("managerProjectGoal", projectContext.goal);
+  else params.delete("managerProjectGoal");
   params.set("thread", opened.threadId);
   if (opened.conversationId) params.set("conversation", opened.conversationId);
   else params.delete("conversation");

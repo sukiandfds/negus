@@ -1,6 +1,13 @@
 import path from "node:path";
 import { sendJson } from "../http/request-utils.mjs";
-import { readProjectManagement, readProjectManagementEntry } from "../project-management-store.mjs";
+import {
+  createProjectPageDraft,
+  readProjectManagement,
+  readProjectManagementEntry,
+  readProjectPageDraft,
+  readProjectPageDrafts,
+} from "../project-management-store.mjs";
+import { readJson } from "../http/request-utils.mjs";
 import { readProjectProgress } from "../project-progress-store.mjs";
 
 const createObserverReader = (observerPort) => async (threadId = "") => {
@@ -14,10 +21,51 @@ const createObserverReader = (observerPort) => async (threadId = "") => {
   }
 };
 
-export const createSystemRoutes = ({ token, project, projectRoot, device, observerPort, media, realtime }) => {
+export const createSystemRoutes = ({ token, project, projectRoot, device, observerPort, media, realtime, modelProviders, fushengUsage }) => {
   const readObserverStatus = createObserverReader(observerPort);
   const progressFile = path.join(projectRoot, "docs", "feature-development", "FEATURE_STATUS_INDEX.md");
   return async (request, response, url) => {
+    if (url.pathname === '/api/model-channels' && modelProviders?.sharedConfig) {
+      response.setHeader('Cache-Control', 'no-store');
+      if (request.method === 'GET') {
+        sendJson(response, { channels: await modelProviders.sharedConfig.list(fushengUsage?.readChannelRatios) });
+        return true;
+      }
+      if (request.method === 'POST') {
+        const result = await modelProviders.sharedConfig.save(await readJson(request, 16384));
+        await modelProviders.refreshShared();
+        sendJson(response, result);
+        return true;
+      }
+    }
+    if (url.pathname === "/api/fusheng/models/check" && request.method === "POST") {
+      const body = await readJson(request, 8192);
+      const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+      if (!apiKey || apiKey.length > 4096 || /[\r\n]/u.test(apiKey)) {
+        sendJson(response, { error: "请输入有效的 API Key" }, 400);
+        return true;
+      }
+      try {
+        const upstream = await fetch("https://fushengyunsuan.cn/v1/models", {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          redirect: "error",
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!upstream.ok) {
+          sendJson(response, { error: upstream.status === 401 || upstream.status === 403
+            ? "Key 无效或没有查询权限" : `渠道暂时不可用（HTTP ${upstream.status}）` }, 502);
+          return true;
+        }
+        const payload = await upstream.json();
+        if (!Array.isArray(payload.data)) throw new Error("Invalid model list");
+        const models = [...new Set(payload.data.map((entry) => entry?.id)
+          .filter((id) => typeof id === "string" && id.length <= 200))].sort();
+        sendJson(response, { models });
+      } catch {
+        sendJson(response, { error: "查询超时或渠道返回异常，请稍后重试" }, 502);
+      }
+      return true;
+    }
     if (url.pathname === "/api/project") {
       sendJson(response, { name: project, root: projectRoot, mode: "interactive" });
       return true;
@@ -36,6 +84,24 @@ export const createSystemRoutes = ({ token, project, projectRoot, device, observ
     }
     if (url.pathname === "/api/project-management" && request.method === "GET") {
       sendJson(response, await readProjectManagement({ project, projectRoot }));
+      return true;
+    }
+    if (url.pathname === "/api/project-management/page-drafts" && request.method === "GET") {
+      sendJson(response, { drafts: await readProjectPageDrafts({ projectRoot }), source: "runtime/project-page-drafts.json" });
+      return true;
+    }
+    if (url.pathname === "/api/project-management/page-drafts" && request.method === "POST") {
+      const body = await readJson(request);
+      sendJson(response, await createProjectPageDraft({
+        projectRoot,
+        request: body.request,
+        location: body.location,
+      }), 201);
+      return true;
+    }
+    const pageDraftMatch = /^\/api\/project-management\/page-drafts\/([^/]+)$/u.exec(url.pathname);
+    if (pageDraftMatch && request.method === "GET") {
+      sendJson(response, await readProjectPageDraft({ projectRoot, draftId: decodeURIComponent(pageDraftMatch[1]) }));
       return true;
     }
     const projectManagementEntryMatch = /^\/api\/project-management\/entries\/([A-Z][A-Z0-9]+-\d{3})$/u.exec(url.pathname);

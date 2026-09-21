@@ -2,7 +2,7 @@
 document_type: project_management_index
 schema_version: 1
 project_id: negus
-last_updated: 2026-09-11
+last_updated: 2026-09-14 01:03 +08:00
 ---
 
 # 项目管理目录
@@ -53,6 +53,7 @@ last_updated: 2026-09-11
 | `FEAT-011` | feature | development | `items/FEAT-011/` | 14 |
 | `FEAT-015` | feature | development | `items/FEAT-015/` | 15 |
 | `FEAT-016` | feature | maintenance | `items/FEAT-016/` | 16 |
+| `PM-002` | maintenance | maintenance | `items/PM-002/` | 17 |
 
 条目的摘要、级别、状态和更新时间均从对应 `item.md` 读取；不要在本表重复维护。
 

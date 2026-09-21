@@ -1,6 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createProjectStatusService } from "../server/project-status-service.mjs";
+import { createProjectStatusService, createModelSummarizer } from "../server/project-status-service.mjs";
+
+test("summary uses provider credentials without auth.json and never falls back to the chat model", async () => {
+  const requests = [];
+  const summarize = createModelSummarizer({
+    readFile: async (file) => {
+      if (file.endsWith("auth.json")) throw Object.assign(new Error("missing"), { code: "ENOENT" });
+      return 'model_provider = "test"\nmodel = "expensive-chat-model"\n[model_providers.test]\nbase_url = "https://example.invalid/v1"\nexperimental_bearer_token = "test-secret"';
+    },
+    fetchResponse: async (_url, options) => {
+      requests.push(options);
+      return { ok: false, status: 503, json: async () => ({}) };
+    },
+  });
+  await assert.rejects(summarize({ dayKey: "2026-09-17" }), /503/);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].headers.Authorization, "Bearer test-secret");
+  assert.equal(JSON.parse(requests[0].body).model, "gpt-5.6-terra");
+});
 
 const identity = { projectId: "project:personal:test", name: "测试项目", root: "D:\\test" };
 const waitFor = async (read, predicate) => {

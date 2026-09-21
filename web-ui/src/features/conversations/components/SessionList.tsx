@@ -166,7 +166,7 @@ export function SessionList({
             >
               <span className={styles.content}>
                 <span className={styles.textColumn}>
-                  <span className={styles.title}>{session.title}</span>
+                  <span className={styles.title}>{session.model ? <span className={styles.modelBadge} title={session.model} aria-label={`模型 ${session.model}`}>{/^grok-/i.test(session.model) ? "Grok" : /^gpt-/i.test(session.model) ? "GPT" : "AI"}</span> : null}{session.title}</span>
                   {metadata ? <span className={styles.meta}>{metadata}</span> : null}
                 </span>
                 <span className={styles.statusSlot}>

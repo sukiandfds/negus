@@ -46,20 +46,27 @@ const parseJsonObject = (text) => {
   return JSON.parse(stripped.slice(start, end + 1));
 };
 
-const createModelSummarizer = ({
+export const createModelSummarizer = ({
   model = "gpt-5.6-terra",
   codexRoot = process.env.CODEX_HOME || path.join(os.homedir(), ".codex"),
+  fetchResponse = fetch,
+  readFile = fs.readFile,
 } = {}) => async ({ dayKey, previousProgress, previousEvents, messages, managementCandidates }) => {
   const [configText, authText] = await Promise.all([
-    fs.readFile(path.join(codexRoot, "config.toml"), "utf8"),
-    fs.readFile(path.join(codexRoot, "auth.json"), "utf8"),
+    readFile(path.join(codexRoot, "config.toml"), "utf8"),
+    readFile(path.join(codexRoot, "auth.json"), "utf8").catch((error) => {
+      if (error.code === "ENOENT") return "{}";
+      throw error;
+    }),
   ]);
   const provider = parseSetting(configText, "model_provider");
-  const configuredModel = parseSetting(configText, "model");
   const escapedProvider = provider.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const section = new RegExp(`\\[model_providers\\.${escapedProvider}\\]([\\s\\S]*?)(?=\\n\\[|$)`).exec(configText)?.[1] || "";
   const baseUrl = parseSetting(section, "base_url").replace(/\/$/u, "");
-  const apiKey = JSON.parse(authText)?.OPENAI_API_KEY;
+  const envKey = parseSetting(section, "env_key");
+  const apiKey = (envKey ? process.env[envKey] : "")
+    || parseSetting(section, "experimental_bearer_token")
+    || JSON.parse(authText)?.OPENAI_API_KEY;
   if (!provider || !baseUrl || !apiKey) throw new Error("小型整理模型尚未配置");
 
   const prompt = [
@@ -75,9 +82,9 @@ const createModelSummarizer = ({
   ].join("\n\n");
 
   let lastError = null;
-  for (const selectedModel of unique([model, configuredModel])) {
+  for (const selectedModel of [model]) {
     try {
-      const response = await fetch(`${baseUrl}/responses`, {
+      const response = await fetchResponse(`${baseUrl}/responses`, {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -193,6 +200,7 @@ const publicState = (state, dayKey) => {
     todayProgress: selected?.phrases || [],
     progressDay: selected?.dayKey || null,
     progressUpdatedAt: selected?.updatedAt || null,
+    updateError: state.updateError || null,
     conversations: state.conversations
       .map((conversation) => ({
         ...conversation,
@@ -406,6 +414,7 @@ export const createProjectStatusService = ({
         lastSummarizedBySource,
         progressByDay,
         retryAfter: 0,
+        updateError: null,
       };
 
       if (!currentDay.activities.length) {
@@ -456,7 +465,8 @@ export const createProjectStatusService = ({
         fallbackProgress: null,
       });
     } catch {
-      states.set(key, { ...previous, dayKey, retryAfter: nowMs + 30_000 });
+      states.set(key, { ...previous, dayKey, retryAfter: nowMs + 30_000,
+        updateError: "进度更新失败，稍后自动重试。已有内容仍保留。" });
     }
   };
 

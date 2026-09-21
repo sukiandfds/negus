@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Send, Sparkles, Square, X } from "lucide-react";
 import { FollowUpQueue } from "./FollowUpQueue";
 import type { FollowUpQueueItem } from "../model/followUpQueue";
@@ -40,6 +40,7 @@ const findSlash = (value: string, caret: number): SlashState | null => {
 };
 
 interface ConversationComposerProps {
+  desktopContext?: ReactNode;
   connected: boolean;
   selected: boolean;
   archived: boolean;
@@ -74,11 +75,12 @@ interface ConversationComposerProps {
   onClearGoal: () => Promise<boolean>;
   onCompactContext: () => Promise<boolean>;
   onAutoCompactThresholdChange: (threshold: number | null) => Promise<boolean>;
-  onModelChange: (model: string) => Promise<boolean>;
+  onModelChange: (model: string, reasoningEffort?: string) => Promise<boolean>;
   onReasoningEffortChange: (reasoningEffort: string) => Promise<boolean>;
 }
 
 export function ConversationComposer({
+  desktopContext,
   connected, selected, archived, sending, sendingSlow, status, commentary, contextStatus,
   models, modelsLoading, modelChanging, modelError,
   onSend, onQueue, queueing, queueItems, queueError, onEditQueueItem, onRemoveQueueItem, onMoveQueueItem, onRetryQueueItem,
@@ -137,16 +139,32 @@ export function ConversationComposer({
   };
 
   const openSlashMenu = () => {
+    if (slash) {
+      setSlash(null);
+      return;
+    }
     const textarea = textareaRef.current;
     const caret = textarea?.selectionStart ?? text.length;
     const hasDraft = Boolean(text.trim());
     setSlash({ start: hasDraft ? 0 : caret, end: hasDraft ? text.length : caret, query: "", replaceDraft: hasDraft });
     setActiveSlash(0);
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(hasDraft ? text.length : caret, hasDraft ? text.length : caret);
-    });
   };
+
+  useEffect(() => {
+    if (!slash) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest("[data-capability-menu]")) setSlash(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSlash(null);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [Boolean(slash)]);
 
   useEffect(() => {
     if (!editingMessage) return;
@@ -226,7 +244,8 @@ export function ConversationComposer({
   }, [text]);
 
   return (
-    <div className={styles.positioner}>
+      <div className={styles.positioner}>
+        {desktopContext}
       <FollowUpQueue
         items={queueItems}
         busy={queueing}
@@ -289,6 +308,7 @@ export function ConversationComposer({
           }}
           onClick={(event) => updateSlash(event.currentTarget.value, event.currentTarget.selectionStart)}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) return;
             if (slash && visibleSlashOptions.length) {
               if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                 event.preventDefault();
@@ -330,6 +350,10 @@ export function ConversationComposer({
               type="button"
               aria-label="打开能力菜单"
               title="打开能力菜单"
+              data-capability-menu
+              aria-expanded={Boolean(slash)}
+              aria-haspopup="listbox"
+              onMouseDown={(event) => event.preventDefault()}
               disabled={inputDisabled}
               onClick={openSlashMenu}
             >

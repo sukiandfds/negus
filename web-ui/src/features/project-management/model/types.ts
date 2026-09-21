@@ -46,6 +46,29 @@ export interface ProjectManagementEntryDetail extends ProjectManagementEntry {
   evidence: string[];
 }
 
+export interface ProjectPageDraftComponent {
+  id: string;
+  type: string;
+  label: string;
+  description: string;
+}
+
+export interface ProjectPageDraft {
+  id: string;
+  type: "page_draft";
+  title: string;
+  request: string;
+  location: string;
+  status: "draft";
+  statusLabel: string;
+  createdAt: string;
+  updatedAt: string;
+  components: ProjectPageDraftComponent[];
+  dataBinding: { status: string; statusLabel: string; message: string };
+  publication: { status: string; statusLabel: string; canPublish: boolean };
+  source: string;
+}
+
 export interface ProjectManagementCategory {
   name: string;
   entries: ProjectManagementEntry[];
@@ -71,6 +94,7 @@ export interface ProjectManagementDocument {
   categories: ProjectManagementCategory[];
   entries: ProjectManagementEntry[];
   recentUpdates: ProjectManagementUpdate[];
+  pageDrafts?: ProjectPageDraft[];
   stats: {
     total: number;
     inProgress: number;

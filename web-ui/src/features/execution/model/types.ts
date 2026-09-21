@@ -105,10 +105,45 @@ export interface GoalStatusEvent {
   goal: ThreadGoal | null;
 }
 
+export interface UserInputOption {
+  label: string;
+  description: string;
+}
+
+export interface UserInputQuestion {
+  id: string;
+  header: string;
+  question: string;
+  isOther: boolean;
+  isSecret: boolean;
+  options: UserInputOption[] | null;
+}
+
+export interface UserInputRequest {
+  requestId: string | number;
+  threadId: string;
+  turnId: string;
+  itemId: string;
+  isBlocking: boolean;
+  questions: UserInputQuestion[];
+}
+
+export interface UserInputRequestedEvent {
+  type: "user_input_requested";
+  threadId: string;
+  request: UserInputRequest;
+}
+
+export interface UserInputResolvedEvent {
+  type: "user_input_resolved";
+  threadId: string;
+  requestId: string | number;
+}
+
 export interface HeartbeatEvent {
   type: "heartbeat";
   active: boolean;
   at: string;
 }
 
-export type ProjectEvent = ExecutionStatus | AssistantDeltaEvent | AssistantCommentaryEvent | SessionsChangedEvent | UserMessageSubmittedEvent | QueueChangedEvent | GoalStatusEvent | ContextStatus | HeartbeatEvent | RealtimeConnectedEvent;
+export type ProjectEvent = ExecutionStatus | AssistantDeltaEvent | AssistantCommentaryEvent | SessionsChangedEvent | UserMessageSubmittedEvent | QueueChangedEvent | GoalStatusEvent | UserInputRequestedEvent | UserInputResolvedEvent | ContextStatus | HeartbeatEvent | RealtimeConnectedEvent;

@@ -1,12 +1,15 @@
-import { ClipboardList, RefreshCw } from "lucide-react";
+import { ArrowUpRight, BriefcaseBusiness, ClipboardList, Eye, RefreshCw, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import { ViewSwitcher } from "../../components/ViewSwitcher/ViewSwitcher";
 import { formatRecordedTimestamp as formatProjectManagementTimestamp } from "../../shared/format/dateTime";
-import { fetchProjectManagement, fetchProjectManagementEntry, readProjectManagementCache } from "./data/projectManagementApi";
+import { createProjectPageDraft, fetchProjectManagement, fetchProjectManagementEntry, readProjectManagementCache } from "./data/projectManagementApi";
 import { EntryDetailPanel } from "./components/EntryDetailPanel";
 import { EntrySummaryRow } from "./components/EntrySummaryRow";
 import { UpdateLogPanel } from "./components/UpdateLogPanel";
-import type { ProjectManagementDocument, ProjectManagementEntry } from "./model/types";
+import { ProjectMemoryPanel } from "./components/ProjectMemoryPanel";
+import { openAgentConversation } from "../agent-sharing/navigation/openAgentConversation";
+import type { ProjectManagementDocument, ProjectManagementEntry, ProjectPageDraft } from "./model/types";
 import styles from "./ProjectManagementApp.module.css";
 
 export function ProjectManagementApp() {
@@ -16,6 +19,12 @@ export function ProjectManagementApp() {
   const [detailError, setDetailError] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [managerOpening, setManagerOpening] = useState(false);
+  const [managerError, setManagerError] = useState("");
+  const [pageRequest, setPageRequest] = useState("");
+  const [pageLocation, setPageLocation] = useState("");
+  const [pageDraftError, setPageDraftError] = useState("");
+  const [pageDraftSubmitting, setPageDraftSubmitting] = useState(false);
   const summaryRequestRef = useRef<AbortController | null>(null);
   const detailRequestRef = useRef<AbortController | null>(null);
 
@@ -76,6 +85,44 @@ export function ProjectManagementApp() {
     setDetailError("");
   }, []);
 
+  const openProjectManager = useCallback(async () => {
+    if (!document?.project || managerOpening) return;
+    setManagerError("");
+    setManagerOpening(true);
+    try {
+      await openAgentConversation({
+        agentId: "manager",
+        projectContext: {
+          id: document.project.id,
+          title: document.project.title,
+          phase: document.project.phase,
+          goal: document.project.goal,
+        },
+      });
+    } catch (reason) {
+      setManagerError(reason instanceof Error ? reason.message : "暂时无法进入项目经理单聊");
+    } finally {
+      setManagerOpening(false);
+    }
+  }, [document?.project, managerOpening]);
+
+  const submitPageDraft = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!pageRequest.trim() || pageDraftSubmitting) return;
+    setPageDraftSubmitting(true);
+    setPageDraftError("");
+    try {
+      const draft = await createProjectPageDraft({ request: pageRequest.trim(), location: pageLocation.trim() });
+      setDocument((current) => current ? { ...current, pageDrafts: [draft, ...(current.pageDrafts || [])] } : current);
+      setPageRequest("");
+      setPageLocation("");
+    } catch (reason) {
+      setPageDraftError(reason instanceof Error ? reason.message : "页面草稿创建失败");
+    } finally {
+      setPageDraftSubmitting(false);
+    }
+  }, [pageLocation, pageDraftSubmitting, pageRequest]);
+
   return (
     <main className={styles.page}>
       <header className={styles.header}>
@@ -116,7 +163,42 @@ export function ProjectManagementApp() {
                   <span><small>健康</small><strong className={styles[`health-${document.project.health}`] || styles.healthNormal}>{document.project.statusLabel}</strong></span>
                   <span><small>数据更新</small><strong>{formatProjectManagementTimestamp(document.updatedAt)}</strong></span>
                 </div>
+                <div className={styles.managerAction}>
+                  <button className={styles.managerButton} type="button" onClick={() => void openProjectManager()} disabled={managerOpening}>
+                    <BriefcaseBusiness aria-hidden="true" />
+                    <span>{managerOpening ? "正在进入" : "与项目经理讨论"}</span>
+                  </button>
+                  {managerError ? <span className={styles.managerError} role="alert">{managerError}</span> : null}
+                </div>
               </section>
+
+              <section className={styles.pageBuilder} aria-labelledby="page-builder-title">
+                <div className={styles.sectionHeading}>
+                  <div>
+                    <h2 id="page-builder-title"><Sparkles aria-hidden="true" />按需求创建页面</h2>
+                    <p>告诉 Negus 需要什么功能、放在哪里；先生成可检查的结构化草稿，不会自动发布。</p>
+                  </div>
+                  <span className={styles.draftCount}>{document.pageDrafts?.length || 0} 个草稿</span>
+                </div>
+                <form className={styles.pageBuilderForm} onSubmit={submitPageDraft}>
+                  <label>
+                    <span>你需要什么页面或功能</span>
+                    <textarea value={pageRequest} onChange={(event) => setPageRequest(event.target.value)} placeholder="例如：给团队增加一个报销发票上传页面，能查看提交记录" maxLength={2000} rows={3} />
+                  </label>
+                  <label>
+                    <span>放在哪里（可选）</span>
+                    <input value={pageLocation} onChange={(event) => setPageLocation(event.target.value)} placeholder="例如：项目首页 / 财务区" maxLength={300} />
+                  </label>
+                  <div className={styles.pageBuilderActions}>
+                    <span className={styles.pageBuilderHint}>草稿会保存到当前项目，可继续讨论后再决定发布。</span>
+                    <button type="submit" disabled={pageDraftSubmitting || pageRequest.trim().length < 4}><ArrowUpRight aria-hidden="true" />{pageDraftSubmitting ? "生成中" : "生成预览草稿"}</button>
+                  </div>
+                  {pageDraftError ? <span className={styles.pageBuilderError} role="alert">{pageDraftError}</span> : null}
+                </form>
+                {document.pageDrafts?.length ? <div className={styles.pageDraftList}>{document.pageDrafts.map((draft) => <PageDraftCard key={draft.id} draft={draft} />)}</div> : <p className={styles.empty}>还没有页面草稿。提交一条需求后，结构化预览会出现在这里。</p>}
+              </section>
+
+              <ProjectMemoryPanel document={document} onOpenEntry={openEntry} />
 
               <section className={styles.section}>
                 <div className={styles.sectionHeading}>
@@ -176,5 +258,22 @@ export function ProjectManagementApp() {
         />
       ) : null}
     </main>
+  );
+}
+
+function PageDraftCard({ draft }: { draft: ProjectPageDraft }) {
+  return (
+    <article className={styles.pageDraftCard}>
+      <div className={styles.pageDraftHeader}>
+        <div><span className={styles.entryId}>{draft.id}</span><h3>{draft.title}</h3></div>
+        <span className={styles.draftStatus}><Eye aria-hidden="true" />{draft.statusLabel}</span>
+      </div>
+      <p className={styles.pageDraftRequest}>{draft.request}</p>
+      <p className={styles.pageDraftLocation}>页面位置：{draft.location}</p>
+      <div className={styles.pageDraftComponents}>
+        {draft.components.map((component) => <span key={component.id} title={component.description}>{component.label}</span>)}
+      </div>
+      <div className={styles.pageDraftBoundary}><strong>{draft.dataBinding.statusLabel}</strong><span>{draft.dataBinding.message}</span></div>
+    </article>
   );
 }

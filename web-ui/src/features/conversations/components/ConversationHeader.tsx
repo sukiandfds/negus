@@ -1,5 +1,5 @@
 import { useCallback, useState, type ReactNode } from "react";
-import { Check, Edit3, Folder, PanelLeft, Share2, X } from "lucide-react";
+import { Check, Edit3, Folder, PanelLeft, Scan, Share2, X } from "lucide-react";
 import { ViewSwitcher, type ViewSurface } from "../../../components/ViewSwitcher/ViewSwitcher";
 import { ShareConversationDialog } from "../../conversation-sharing/components/ShareConversationDialog";
 import { DeviceStatus } from "../../device/components/DeviceStatus";
@@ -7,6 +7,9 @@ import type { ProjectInfo, SessionDetail } from "../model/types";
 import styles from "./ConversationHeader.module.css";
 
 interface ConversationHeaderProps {
+  desktop?: boolean;
+  desktopEditing?: boolean;
+  onToggleDesktopEditing?: () => void;
   project: ProjectInfo | null;
   session: SessionDetail | null;
   deviceName?: string;
@@ -19,11 +22,19 @@ interface ConversationHeaderProps {
   onViewChange?: (surface: Exclude<ViewSurface, "progress">) => void;
 }
 
-export function ConversationHeader({ project, session, deviceName, connected, sidebarAvailable = true, onOpenSidebar, onRename, renaming, usage, onViewChange }: ConversationHeaderProps) {
+export function ConversationHeader({ desktop = false, desktopEditing = false, onToggleDesktopEditing, project, session, deviceName, connected, sidebarAvailable = true, onOpenSidebar, onRename, renaming, usage, onViewChange }: ConversationHeaderProps) {
   const [sharing, setSharing] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [renameError, setRenameError] = useState("");
+  const managerProject = (() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("agent") !== "manager") return null;
+    const title = params.get("managerProjectTitle") || "";
+    const phase = params.get("managerProjectPhase") || "";
+    const goal = params.get("managerProjectGoal") || "";
+    return title || phase || goal ? { title, phase, goal } : null;
+  })();
   const closeSharing = useCallback(() => setSharing(false), []);
   const title = session?.title || project?.name || "当前对话";
   const startEditing = () => {
@@ -74,7 +85,7 @@ export function ConversationHeader({ project, session, deviceName, connected, si
                   }}
                 />
               ) : (
-                <h1 className={styles.title}>{session?.title || project?.name || "正在读取会话"}</h1>
+                <h1 className={styles.title}>{desktop ? "桌面" : session?.title || project?.name || "正在读取会话"}</h1>
               )}
               {session && !editing ? (
                 <button className={styles.titleEdit} type="button" aria-label="重命名对话" title="重命名对话" disabled={renaming} onClick={startEditing}>
@@ -93,14 +104,16 @@ export function ConversationHeader({ project, session, deviceName, connected, si
               ) : null}
             </div>
             {session ? <span className={styles.meta}>{session.source === "happy" ? "Happy Coder" : "Codex Desktop"}{session.messageCount === null ? "" : ` · ${session.messageCount} 条消息`}</span> : null}
+            {managerProject ? <span className={styles.meta}>项目经理上下文：{managerProject.title || "当前项目"}{managerProject.phase ? ` · ${managerProject.phase}` : ""}</span> : null}
             {renameError ? <span className={styles.renameError}>{renameError}</span> : null}
           </div>
           <span className={styles.spacer} />
+          {desktop && <button className={styles.iconButton} type="button" aria-label={desktopEditing ? "完成定制" : "定制桌面"} title={desktopEditing ? "完成定制" : "定制桌面"} aria-pressed={desktopEditing} onClick={onToggleDesktopEditing}>{desktopEditing ? <Check aria-hidden="true" /> : <Scan aria-hidden="true" />}</button>}
           <button className={styles.iconButton} type="button" aria-label="分享当前对话" title="分享" onClick={() => setSharing(true)}>
             <Share2 aria-hidden="true" />
           </button>
           <ViewSwitcher
-            current="conversation"
+            current={desktop ? "desktop" : "conversation"}
             onViewChange={onViewChange}
             projectRoot={session?.cwd || project?.root || ""}
             currentSourceId={session?.threadId ? `conversation:${session.threadId}` : ""}

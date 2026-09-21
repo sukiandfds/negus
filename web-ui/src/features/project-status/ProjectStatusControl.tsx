@@ -2,6 +2,7 @@ import { Activity, ChevronDown, MessageSquare, MessagesSquare, X } from "lucide-
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchJson } from "../../shared/api/http";
 import styles from "./ProjectStatusControl.module.css";
+import { ModelCheckDialog } from "./ModelCheckDialog";
 
 interface ProjectEvent {
   id: string;
@@ -28,6 +29,7 @@ interface ProjectStatus {
   todayProgress: string[];
   progressDay: string | null;
   progressUpdatedAt: string | null;
+  updateError?: string | null;
   conversations: StatusConversation[];
 }
 
@@ -122,6 +124,7 @@ export function ProjectStatusControl({
 }: ProjectStatusControlProps) {
   const identityKey = projectId || projectRoot;
   const [open, setOpen] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [status, setStatus] = useState<ProjectStatus | null>(() => readCache(identityKey));
   const [expandedIds, setExpandedIds] = useState<string[] | null>(() => readExpanded(identityKey));
   const controlRef = useRef<HTMLDivElement>(null);
@@ -156,9 +159,10 @@ export function ProjectStatusControl({
         .then((next) => {
           if (!active || !validStatus(next)) return;
           setStatus(next);
+          setLoadError(false);
           writeCache(identityKey, next);
         })
-        .catch(() => {});
+        .catch(() => { if (active) setLoadError(true); });
     };
     load();
     const timer = window.setInterval(load, 2500);
@@ -235,7 +239,7 @@ export function ProjectStatusControl({
           <header className={styles.header}>
             <div>
               <strong>{status?.project.name || "项目状态"}</strong>
-              <span>项目日 04:00 更新</span>
+              <span>每日 04:00 切换日期</span>
             </div>
             <button className={styles.closeButton} type="button" title="关闭" aria-label="关闭项目状态" onClick={() => setOpen(false)}>
               <X aria-hidden="true" />
@@ -244,6 +248,8 @@ export function ProjectStatusControl({
           <div className={styles.body}>
             <section className={styles.progress}>
               <h2>今日进度</h2>
+              <ModelCheckDialog />
+              {loadError || status?.updateError ? <p role="status" className={styles.empty}>{loadError ? "进度暂时读取失败，正在重试。" : status?.updateError}</p> : null}
               {status?.todayProgress.length ? (
                 <ul>{status.todayProgress.map((item) => <li key={item}>{item}</li>)}</ul>
               ) : <p className={styles.empty}>暂无最新内容</p>}

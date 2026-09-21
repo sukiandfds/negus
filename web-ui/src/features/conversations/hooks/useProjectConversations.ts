@@ -4,7 +4,7 @@ import type { RealtimeRecoveryReason } from "../../../shared/model/realtime";
 import { useContextManagement } from "../../context-management/hooks/useContextManagement";
 import { executionApi } from "../../execution/data/executionApi";
 import { useCodexExecution } from "../../execution/hooks/useCodexExecution";
-import type { ProjectEvent } from "../../execution/model/types";
+import type { ProjectEvent, UserInputRequest } from "../../execution/model/types";
 import { useModels } from "../../models/hooks/useModels";
 import { writeConversationSnapshot } from "../data/conversationSnapshot";
 import { conversationApi } from "../data/conversationApi";
@@ -16,6 +16,7 @@ import { useConversationSession } from "./useConversationSession";
 import { useFollowUpQueue } from "./useFollowUpQueue";
 import { useThreadGoal } from "../../goals/hooks/useThreadGoal";
 import type { SessionMessage } from "../model/types";
+import { readLocalCache, writeLocalCache } from "../../../shared/state/localCache";
 
 const attachmentsFromMessage = (message: SessionMessage): MediaFile[] => {
   const attachments = new Map<string, MediaFile>();
@@ -46,6 +47,7 @@ export function useProjectConversations() {
   const [forkingMessageId, setForkingMessageId] = useState("");
   const [editingMessage, setEditingMessage] = useState<SessionMessage | null>(null);
   const editingMessageRef = useRef<SessionMessage | null>(null);
+  const desktopPreparingRef = useRef<Promise<boolean> | null>(null);
   const pendingEditRef = useRef<{
     threadId: string;
     text: string;
@@ -56,12 +58,11 @@ export function useProjectConversations() {
   const [renaming, setRenaming] = useState(false);
   const [retryingMessageId, setRetryingMessageId] = useState("");
   const [localSendVersion, setLocalSendVersion] = useState(0);
+  const [userInputRequest, setUserInputRequest] = useState<UserInputRequest | null>(null);
+  const [userInputBusy, setUserInputBusy] = useState(false);
+  const [userInputError, setUserInputError] = useState("");
   const reconcilingSubmissionsRef = useRef(new Set<string>());
   const contextManagement = useContextManagement(selection.selectedId);
-  const onModelChanged = useCallback(() => {
-    void contextManagement.refresh();
-  }, [contextManagement.refresh]);
-  const modelManager = useModels(selection.selectedId, onModelChanged);
   const catalog = useConversationCatalog(initial, {
     selectedIdRef: selection.selectedIdRef,
     loadSession: selection.loadSession,
@@ -69,6 +70,57 @@ export function useProjectConversations() {
     clearSelection: selection.clearSelection,
     setCreatedSession: selection.setCreatedSession,
   }, contextManagement.status.model);
+  const modelManager = useModels(selection.selectedId, (threadId, result) => {
+    if (result.threadId && result.threadId !== threadId) {
+      contextManagement.applyModelSettings(result.threadId, result);
+      if (selection.selectedIdRef.current === threadId) {
+        selection.selectSession(result.threadId);
+      }
+    } else {
+      contextManagement.applyModelSettings(threadId, result);
+    }
+    void catalog.refreshSessions();
+  });
+
+  const refreshUserInput = useCallback(async (signal?: AbortSignal) => {
+    const threadId = selection.selectedIdRef.current;
+    if (!threadId) {
+      setUserInputRequest(null);
+      return;
+    }
+    try {
+      const result = await executionApi.pendingUserInput(threadId, signal);
+      if (selection.selectedIdRef.current === threadId) setUserInputRequest(result.request);
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) setUserInputRequest(null);
+    }
+  }, [selection.selectedIdRef]);
+
+  useEffect(() => {
+    setUserInputRequest(null);
+    setUserInputError("");
+    const controller = new AbortController();
+    void refreshUserInput(controller.signal);
+    return () => controller.abort();
+  }, [refreshUserInput, selection.selectedId]);
+
+  const answerUserInput = useCallback(async (answers: Record<string, { answers: string[] }>) => {
+    const request = userInputRequest;
+    if (!request || userInputBusy) return false;
+    setUserInputBusy(true);
+    setUserInputError("");
+    try {
+      await executionApi.answerUserInput(request.threadId, request.requestId, answers);
+      setUserInputRequest((current) => String(current?.requestId) === String(request.requestId) ? null : current);
+      return true;
+    } catch (error) {
+      setUserInputError(error instanceof Error ? error.message : "提交失败，请重试");
+      await refreshUserInput();
+      return false;
+    } finally {
+      setUserInputBusy(false);
+    }
+  }, [refreshUserInput, userInputBusy, userInputRequest]);
 
   const syncLocation = useCallback(async () => {
     const params = new URLSearchParams(window.location.search);
@@ -240,7 +292,12 @@ export function useProjectConversations() {
 
   useEffect(() => {
     const pending = pendingEditRef.current;
-    if (!pending || pending.threadId !== selection.selectedId) return;
+    if (!pending) return;
+    if (pending.threadId !== selection.selectedId) {
+      pendingEditRef.current = null;
+      pending.resolve(false);
+      return;
+    }
     pendingEditRef.current = null;
     void sendDirectMessage(pending.text, pending.attachments)
       .then(pending.resolve)
@@ -278,6 +335,28 @@ export function useProjectConversations() {
       setForkingMessageId("");
     }
   }, [catalog.createSession, catalog.forkSession, execution.status.active, selection.selectedIdRef, selection.session, sendDirectMessage]);
+
+  const prepareDesktopConversation = useCallback((projectRoot: string) => {
+    if (desktopPreparingRef.current) return desktopPreparingRef.current;
+    const task = (async () => {
+      if (!projectRoot) return false;
+      const key = `negus:desktop-thread:v1:${projectRoot}`;
+      const saved = readLocalCache(key, (value): value is string => typeof value === "string");
+      const existing = saved && catalog.sessions.find((session) => session.threadId === saved && session.cwd?.replace(/\\/g, "/").toLowerCase() === projectRoot.replace(/\\/g, "/").toLowerCase() && !session.archived && !session.readOnly);
+      if (existing) {
+        selection.selectSession(existing.threadId);
+      } else {
+        if (!await catalog.createSession(projectRoot)) return false;
+        writeLocalCache(key, selection.selectedIdRef.current);
+      }
+      setEditingMessage(null);
+      editingMessageRef.current = null;
+      return true;
+    })();
+    desktopPreparingRef.current = task;
+    void task.finally(() => { desktopPreparingRef.current = null; });
+    return task;
+  }, [catalog.createSession, catalog.sessions, selection.selectSession, selection.selectedIdRef]);
 
   const startGoal = useCallback(async (objective: string) => {
     const normalized = objective.trim();
@@ -377,7 +456,14 @@ export function useProjectConversations() {
       const message = generated.id === event.messageId ? generated : { ...generated, id: event.messageId };
       selection.addOptimisticMessage(event.threadId, message);
     }
-  }, [contextManagement.handleEvent, execution.handleEvent, followUpQueue.handleEvent, goal.handleEvent, selection.addOptimisticMessage]);
+    if (event.type === "user_input_requested" && event.threadId === selection.selectedIdRef.current) {
+      setUserInputError("");
+      setUserInputRequest(event.request);
+    }
+    if (event.type === "user_input_resolved" && event.threadId === selection.selectedIdRef.current) {
+      setUserInputRequest((current) => String(current?.requestId) === String(event.requestId) ? null : current);
+    }
+  }, [contextManagement.handleEvent, execution.handleEvent, followUpQueue.handleEvent, goal.handleEvent, selection.addOptimisticMessage, selection.selectedIdRef]);
   const recoverRealtime = useCallback((_reason: RealtimeRecoveryReason) => {
     const selected = selection.selectedIdRef.current;
     if (selected) void selection.loadSession(selected, { quiet: true, retry: false, recovery: true });
@@ -386,7 +472,8 @@ export function useProjectConversations() {
       onSessionsChanged(selection.selectedIdRef.current || undefined);
     });
     void followUpQueue.refresh();
-  }, [execution.refreshStatus, followUpQueue.refresh, goal.refresh, onSessionsChanged, selection.selectedIdRef]);
+    void refreshUserInput();
+  }, [execution.refreshStatus, followUpQueue.refresh, goal.refresh, onSessionsChanged, refreshUserInput, selection.selectedIdRef]);
   const connected = useConversationEvents(
     onSessionsChanged,
     handleEvent,
@@ -441,6 +528,7 @@ export function useProjectConversations() {
     sending: execution.sending,
     sendingSlow: execution.sendingSlow,
     sendMessage,
+    prepareDesktopConversation,
     queueMessage,
     queueItems: followUpQueue.items,
     queueLoading: followUpQueue.loading,
@@ -452,6 +540,10 @@ export function useProjectConversations() {
     retryQueueItem: followUpQueue.retry,
     sendQueueItem: followUpQueue.sendNow,
     interrupt: execution.interrupt,
+    userInputRequest,
+    userInputBusy,
+    userInputError,
+    answerUserInput,
     review,
     compactContext: contextManagement.compact,
     setAutoCompactThreshold: contextManagement.setThreshold,

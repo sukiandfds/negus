@@ -1,8 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import os from 'node:os';
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createHash } from 'node:crypto';
 import { createAppServerClient } from "./app-server-client.mjs";
+import { createCcSwitchConfigService } from "./cc-switch-config-service.mjs";
 
 export const CURRENT_MODEL_PROVIDER_ID = "current";
 export const GROK_MODEL_PROVIDER_ID = "fusheng-grok";
@@ -64,7 +67,14 @@ export const defaultModelProviders = () => [
       model: GROK_MODEL_ID,
       displayName: "Grok 4.6 (Test)",
       description: "Grok 4.6 through the configured Fusheng provider.",
-      supportedReasoningEfforts: [],
+      supportedReasoningEfforts: ["low", "medium", "high"].map((reasoningEffort) => ({ reasoningEffort, description: "" })),
+      experimental: true,
+    }, {
+      id: "grok-4.5",
+      model: "grok-4.5",
+      displayName: "Grok 4.5",
+      description: "Fusheng Grok",
+      supportedReasoningEfforts: ["low", "medium", "high"].map((reasoningEffort) => ({ reasoningEffort, description: "" })),
       experimental: true,
     }],
   }),
@@ -208,6 +218,7 @@ export const createModelProviderService = ({
   credentialHelper = helperScript,
   credentialStore = createModelProviderCredentialStore({ root: credentialRoot, credentialHelper }),
   createClient = createAppServerClient,
+  sharedConfig = createCcSwitchConfigService(),
 } = {}) => {
   if (!projectRoot) throw new Error("Project root is required for model provider routing.");
   const providerMap = new Map(providers.map(normalizeProvider).map((provider) => [provider.id, provider]));
@@ -217,24 +228,46 @@ export const createModelProviderService = ({
   }
   const clientPromises = new Map();
   const ownedClients = new Map();
+  let refreshing = null;
+  const fingerprints = new Map();
+  const refreshShared = () => {
+    if (!refreshing) refreshing = (async () => {
+      const entries = await sharedConfig.runtimeProviders();
+      for (const entry of entries) {
+        // Running clients retain their configuration until the service is safely restarted.
+        if (clientPromises.has(entry.id)) continue;
+        const fingerprint = createHash('sha256').update(JSON.stringify(entry)).digest('hex');
+        if (fingerprints.get(entry.id) === fingerprint) continue;
+        await credentialStore.save(entry.id, entry.key);
+        providerMap.set(entry.id, normalizeProvider(entry));
+        fingerprints.set(entry.id, fingerprint);
+      }
+      const known = new Set(entries.map((entry) => entry.id));
+      for (const id of providerMap.keys()) {
+        if (id.startsWith('ccswitch_') && !known.has(id) && !clientPromises.has(id)) { providerMap.delete(id); fingerprints.delete(id); }
+      }
+    })().finally(() => { refreshing = null; });
+    return refreshing;
+  };
 
   const modelOwner = (model) => {
     const modelId = clean(model, 120);
     return [...providerMap.values()].find((provider) => (
-      provider.mode === "isolated" && provider.models.some((entry) => entry.model === modelId)
+      provider.mode === "isolated" && !provider.id.startsWith('ccswitch_') && provider.models.some((entry) => entry.model === modelId)
     )) || currentProvider;
   };
 
   const resolveRoute = ({ model = "", modelProviderId = "" } = {}) => {
-    const requestedModel = clean(model, 120);
-    const requestedProviderId = modelProviderId ? requireProviderId(modelProviderId) : "";
+    const parts = String(model).split('::');
+    const requestedModel = clean(parts.length === 2 ? parts[1] : model, 120);
+    const requestedProviderId = modelProviderId ? requireProviderId(modelProviderId) : parts.length === 2 ? requireProviderId(parts[0]) : "";
     const requestedProvider = requestedProviderId ? providerMap.get(requestedProviderId) : null;
     if (requestedProviderId && !requestedProvider) throw statusError("Model provider is not registered.", 400);
     const modelId = requestedModel || requestedProvider?.defaultModel || "";
     const inferred = modelOwner(modelId);
     const provider = requestedProvider || inferred;
     if (!provider) throw statusError("Model provider is not registered.", 400);
-    if (provider.id !== inferred.id) {
+    if (provider.id.startsWith('ccswitch_') ? Boolean(modelId && !provider.models.some((entry) => entry.model === modelId)) : provider.id !== inferred.id) {
       throw statusError(`Model ${modelId || "(default)"} does not belong to provider ${provider.id}.`, 400);
     }
     return { modelProviderId: provider.id, model: modelId, provider };
@@ -247,7 +280,8 @@ export const createModelProviderService = ({
   };
 
   const listModels = async (currentModels = []) => {
-    const current = (Array.isArray(currentModels) ? currentModels : []).map((model) => ({
+    await refreshShared().catch(() => {});
+    const current = (Array.isArray(currentModels) ? currentModels : []).filter((model) => !model.modelProviderId || model.modelProviderId === CURRENT_MODEL_PROVIDER_ID).map((model) => ({
       ...model,
       modelProviderId: CURRENT_MODEL_PROVIDER_ID,
       providerDisplayName: currentProvider.displayName,
@@ -260,6 +294,8 @@ export const createModelProviderService = ({
       const available = await credentialStore.isConfigured(provider.id);
       external.push(...provider.models.map((model) => ({
         ...model,
+        ...(provider.id.startsWith('ccswitch_') ? { supportedReasoningEfforts: current.find((entry) => entry.model === model.model)?.supportedReasoningEfforts || model.supportedReasoningEfforts } : {}),
+        ...(provider.id.startsWith('ccswitch_') ? { id: `${provider.id}::${model.model}`, model: `${provider.id}::${model.model}`, displayName: `${provider.displayName} · ${model.model}` } : {}),
         modelProviderId: provider.id,
         providerDisplayName: provider.displayName,
         available,
@@ -269,6 +305,7 @@ export const createModelProviderService = ({
   };
 
   const getClient = async (routeInput = {}) => {
+    if (String(routeInput.modelProviderId || routeInput.model).startsWith('ccswitch_')) await refreshShared();
     const route = resolveRoute(routeInput);
     if (route.provider.mode === "current") {
       if (!defaultClient) throw statusError("Current Codex provider is unavailable.", 503);
@@ -307,6 +344,23 @@ export const createModelProviderService = ({
     ownedClients.clear();
     clientPromises.clear();
   };
+  const prepareResumeFile = async (providerId, info) => {
+    const home = providerId === CURRENT_MODEL_PROVIDER_ID
+      ? process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
+      : path.join(path.resolve(runtimeRoot), providerId, 'codex-home');
+    const basename = path.basename(info.path);
+    const date = /^rollout-(\d{4})-(\d{2})-(\d{2})T/u.exec(basename);
+    if (!date || !path.isAbsolute(info.path)) throw new Error('原会话记录位置无效');
+    const destination = path.join(home, 'sessions', date[1], date[2], date[3], basename);
+    if (path.resolve(destination).toLowerCase() !== path.resolve(info.path).toLowerCase()) {
+      await fs.mkdir(path.dirname(destination), { recursive: true });
+      // Preserve the complete native rollout and its thread ID, not a text summary/new conversation.
+      const temporary = `${destination}.resume-${process.pid}`;
+      await fs.copyFile(info.path, temporary);
+      await fs.rename(temporary, destination);
+    }
+    return { ...info, path: destination };
+  };
 
   return {
     providers: () => [...providerMap.values()].map((provider) => ({ ...provider })),
@@ -315,6 +369,9 @@ export const createModelProviderService = ({
     isProviderConfigured,
     getClient,
     credentials: credentialStore,
+    sharedConfig,
+    refreshShared,
+    prepareResumeFile,
     close,
   };
 };

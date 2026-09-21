@@ -2,6 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { messagesFromTurns } from "../server/codex-thread-history.mjs";
 
+test("steered replies retain item order without borrowing the final reply timestamp", () => {
+  const messages = messagesFromTurns([{id:"steered",startedAt:100,completedAt:200,status:"completed",items:[
+    {type:"userMessage",id:"u1",content:[{type:"text",text:"First"}]},
+    {type:"agentMessage",id:"a1",text:"Earlier answer"},
+    {type:"userMessage",id:"u2",createdAt:150,content:[{type:"text",text:"Correction"}]},
+    {type:"agentMessage",id:"a2",text:"Final answer"},
+  ]}]);
+  assert.deepEqual(messages.map((m)=>m.turnItemIndex),[0,1,2,3]);
+  assert.equal(messages[1].createdAt,undefined);
+  assert.equal(messages[1].superseded,true);
+  assert.equal(messages[3].superseded,false);
+  assert.equal(messages[3].createdAt,new Date(200000).toISOString());
+});
+
 test("scopes app-server message ids to their turn", () => {
   const messages = messagesFromTurns([
     {

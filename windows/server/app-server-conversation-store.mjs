@@ -25,7 +25,7 @@ const latestIsoFromEpochMilliseconds = (values, fallback = "") => {
 };
 
 const AUTO_TITLE_MODEL = "gpt-5.6-terra";
-const AUTO_TITLE_TIMEOUT_MS = 20000;
+const AUTO_TITLE_TIMEOUT_MS = 60000;
 const AUTO_TITLE_SCHEMA = {
   type: "object",
   properties: { title: { type: "string", minLength: 1, maxLength: 36 } },
@@ -95,6 +95,8 @@ const promptFromSlashCommand = (text, attachments = []) => {
 export const createAppServerConversationStore = ({
   projectRoot, projectRoots = [projectRoot], registerMedia, onProtocolMessage, onSubmitted, onFailed, onHealthState,
   autoTitleStateFile = "", onAutoTitleChanged,
+  autoTitleEnabled = true,
+  historyFallback,
   attachmentContent,
   threadRuntimeOptions = async () => null,
   client = createAppServerClient(),
@@ -281,7 +283,8 @@ export const createAppServerConversationStore = ({
   const summaryFromThread = (thread, archived = archivedFromThread(thread)) => ({
     threadId: thread.id,
     source: sourceFromThread(thread),
-    title: thread.name?.trim() || autoTitles.get(thread.id)?.title || "未命名会话",
+    title: thread.name?.trim() || autoTitles.get(thread.id)?.title
+      || cleanAutoTitle(thread.preview) || `新对话 · ${thread.id.slice(-6)}`,
     updatedAt: isoFromUnixSeconds(thread.updatedAt),
     messageCount: null,
     latestUser: "",
@@ -289,6 +292,7 @@ export const createAppServerConversationStore = ({
     archived,
     forkedFromId: thread.forkedFromId || null,
     cwd: thread.cwd || null,
+    ...(thread.model ? { model: thread.model } : {}),
   });
 
   const listSessions = async (source = "all", archived = false) => {
@@ -356,6 +360,8 @@ export const createAppServerConversationStore = ({
       timer.unref?.();
       autoTitleThreads.set(titleThreadId, { resolve, text: "" });
     });
+    // turn/start can still be pending when the response deadline expires.
+    void response.catch(() => {});
     try {
       await client.request("turn/start", {
         threadId: titleThreadId,
@@ -446,7 +452,7 @@ export const createAppServerConversationStore = ({
     return result.thread;
   };
 
-  const findSession = async (threadId, source = "all", { before, cursor, limit } = {}) => {
+  const readNativeSession = async (threadId, source = "all", { before, cursor, limit } = {}) => {
     await loadAutoTitles();
     const cached = threadCache.get(threadId);
     if (cached && source !== "all" && sourceFromThread(cached) !== source) return null;
@@ -489,6 +495,20 @@ export const createAppServerConversationStore = ({
       nextBefore: start || null,
       preferMessageUpdatedAt: before === undefined,
     });
+  };
+
+  const findSession = async (threadId, source = "all", options = {}) => {
+    // Newly created threads have no persisted turns to read yet.
+    if (freshThreadRuntime.has(threadId) && threadCache.has(threadId)) {
+      return detailFromMessages(threadCache.get(threadId), [], { messageCount: 0 });
+    }
+    try { return await readNativeSession(threadId, source, options); }
+    catch (error) {
+      if (!historyFallback || options.cursor !== undefined) throw error;
+      const fallback = await historyFallback(threadId, source, options);
+      if (!fallback) throw error;
+      return fallback;
+    }
   };
 
   const getThread = async (threadId) => threadCache.get(threadId)
@@ -555,7 +575,11 @@ export const createAppServerConversationStore = ({
         ...(runtimeOptions?.turn || {}),
       });
       freshThreadRuntime.delete(threadId);
-      void autoTitleSession(threadId, text).catch((error) => {
+      const cached = threadCache.get(threadId);
+      if (cached && !cached.preview) {
+        cached.preview = text.trim() || attachments.map((item) => item.name).filter(Boolean).join("、");
+      }
+      if (autoTitleEnabled) void autoTitleSession(threadId, text).catch((error) => {
         console.warn(`[auto-title] failed for ${threadId}: ${error.message}`);
       });
       return result;
@@ -631,6 +655,38 @@ export const createAppServerConversationStore = ({
     return getRuntimeContext(threadId);
   };
 
+  const getSessionResumeInfo = async (threadId) => {
+    await ensureProjectThread(threadId);
+    const { thread } = await client.request('thread/read', { threadId, includeTurns: false });
+    if (!thread?.path || !isAllowedProjectRoot(thread.cwd)) throw new Error('原会话记录尚未持久化，暂时无法切换渠道');
+    await fs.access(thread.path).catch(() => { throw new Error('原会话记录尚未持久化，暂时无法切换渠道'); });
+    return { path: thread.path, cwd: thread.cwd, model: thread.model, reasoningEffort: thread.reasoningEffort, summary: summaryFromThread(thread) };
+  };
+
+  const releaseSession = async (threadId) => {
+    await ensureProjectThread(threadId);
+    const status = await getThreadStatus(threadId);
+    if (status?.type === 'active') throw Object.assign(new Error('当前会话正在运行，请完成后再切换渠道'), { statusCode: 409 });
+    await client.request('thread/unsubscribe', { threadId });
+    freshThreadRuntime.delete(threadId);
+    threadCache.delete(threadId);
+  };
+
+  const resumeProviderSession = async (threadId, options) => {
+    if (!isAllowedProjectRoot(options.cwd) || !path.isAbsolute(options.path)) throw new Error('无法验证原会话记录的位置');
+    const result = await client.request('thread/resume', {
+      threadId, path: options.path, cwd: options.cwd, model: options.model,
+      ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
+      ...(options.reasoningEffort ? { config: { model_reasoning_effort: options.reasoningEffort } } : {}),
+      excludeTurns: true,
+    });
+    if (result.thread?.id !== threadId || !isSameProjectRoot(result.thread.cwd, options.cwd)) throw new Error('原会话恢复未通过校验，未发送消息');
+    threadCache.set(threadId, result.thread);
+    // This is a restored thread, not an empty freshly-created one.
+    freshThreadRuntime.delete(threadId);
+    return result;
+  };
+
   const updateReasoningEffort = async (threadId, reasoningEffort) => {
     const runtime = await resumeThread(threadId);
     await client.request("thread/settings/update", { threadId, effort: reasoningEffort });
@@ -639,6 +695,12 @@ export const createAppServerConversationStore = ({
     }
     return getRuntimeContext(threadId);
   };
+
+  const getPendingUserInput = async (threadId) => client.getPendingUserInput?.(threadId) || null;
+
+  const respondToUserInput = async (threadId, requestId, answers) => (
+    client.respondToUserInput?.(threadId, requestId, answers)
+  );
 
   const close = () => {
     if (monitorTimer) clearInterval(monitorTimer);
@@ -653,6 +715,8 @@ export const createAppServerConversationStore = ({
     listSessions, createSession, renameSession, findSession, sendMessage, steerMessage, interrupt,
     forkSession, archiveSession, unarchiveSession,
     listModels, updateModel, updateReasoningEffort, getRuntimeContext, getThreadStatus,
-    compactContext, reviewSession, getGoal, setGoal, clearGoal, close,
+    compactContext, reviewSession, getGoal, setGoal, clearGoal,
+    getPendingUserInput, respondToUserInput, close,
+    getSessionResumeInfo, releaseSession, resumeProviderSession,
   };
 };

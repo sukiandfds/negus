@@ -156,6 +156,13 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
     if (!line.trim()) return;
     try {
       const item = JSON.parse(line);
+      if (item.type === "event_msg" && item.payload?.type === "task_started") state.currentTurnId = item.payload.turn_id;
+      if (item.type === "event_msg" && ["task_complete", "turn_aborted"].includes(item.payload?.type)) {
+        const turnId = item.payload.turn_id || state.currentTurnId;
+        for (const previous of state.messages) {
+          if (turnId && previous.turnId === turnId) previous.turnStatus = item.payload.type === "turn_aborted" ? "interrupted" : "completed";
+        }
+      }
       if (item?.type === "response_item" && item.payload?.type === "custom_tool_call_output") {
         const media = blocksFromContent(item.payload.output, registerMedia)
           .filter((block) => ["image", "audio", "video"].includes(block.type));
@@ -175,7 +182,15 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
       const messageIndex = state.messageSequence;
       state.messageSequence += 1;
       const itemId = item.id || item.payload?.id || item.payload?.client_id || message.itemId || "";
-      const turnId = message.turnId || item.turnId || item.payload?.internal_chat_message_metadata_passthrough?.turn_id || "";
+      const turnId = message.turnId || item.turnId || item.payload?.internal_chat_message_metadata_passthrough?.turn_id || state.currentTurnId || "";
+      if (turnId) {
+        message.turnId = turnId;
+        message.turnItemIndex = messageIndex;
+        if (message.role === "user") {
+          const previousReply = state.messages.findLast((entry) => entry.role === "assistant" && entry.turnId === turnId);
+          if (previousReply) previousReply.superseded = true;
+        }
+      }
       const identity = itemId || `${item.timestamp || "unknown"}:${messageIndex}`;
       message.id = `jsonl:${encodeURIComponent(state.threadId)}:${encodeURIComponent(String(turnId || "unknown"))}:${encodeURIComponent(String(identity))}`;
       const previous = state.messages.at(-1);
@@ -225,7 +240,9 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
       threadId: state.threadId,
       file: path.basename(header.file),
       source: state.cliVersion === "0.122.0" ? "happy" : "codex",
-      title: header.title?.trim() || "未命名会话",
+      title: header.title?.trim()
+        || previewText(state.messages.find((item) => item.role === "user" && item.text?.trim())?.text || "", 36)
+        || `新对话 · ${state.threadId.slice(-6)}`,
       updatedAt: stat.mtime.toISOString(),
       messageCount: state.messages.length,
       latestUser: previewText(latestUser, 260),

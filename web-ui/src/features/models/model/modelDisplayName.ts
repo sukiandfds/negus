@@ -1,5 +1,5 @@
 export function formatModelDisplayName(model: string, displayName = ""): string {
-  const normalized = model.trim();
+  const normalized = model.trim().split('::').at(-1) || '';
   const match = /^([a-z][a-z0-9]*)-(.+)$/iu.exec(normalized);
   if (!match) return displayName || normalized;
 

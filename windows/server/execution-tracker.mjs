@@ -371,6 +371,30 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
     }
     if (method === "item/tool/requestUserInput" || method === "mcpServer/elicitation/request") {
       publish(threadId, { phase: "waitingOnUserInput", label: "Codex 正在等待补充信息" });
+      if (method === "item/tool/requestUserInput") {
+        broadcastThreadEvent(threadId, {
+          type: "user_input_requested",
+          threadId,
+          request: {
+            requestId: message.id,
+            threadId,
+            turnId: String(params.turnId || ""),
+            itemId: String(params.itemId || ""),
+            isBlocking: params.isBlocking !== false,
+            questions: (Array.isArray(params.questions) ? params.questions : []).slice(0, 3).map((question) => ({
+              id: String(question?.id || ""),
+              header: String(question?.header || "").slice(0, 120),
+              question: String(question?.question || "").slice(0, 4000),
+              isOther: question?.isOther === true,
+              isSecret: question?.isSecret === true,
+              options: Array.isArray(question?.options) ? question.options.slice(0, 20).map((option) => ({
+                label: String(option?.label || "").slice(0, 240),
+                description: String(option?.description || "").slice(0, 1000),
+              })) : null,
+            })).filter((question) => question.id && question.question),
+          },
+        });
+      }
     }
   };
 

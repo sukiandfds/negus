@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { hasAccessToken, withAccessToken } from "../../../shared/api/http";
 import { readLocalCache, writeLocalCache } from "../../../shared/state/localCache";
 import type { ExecutionStatus } from "../../execution/model/types";
+import type { ThreadGoal } from "../../goals/model/types";
 import { projectDirectoryApi } from "../data/projectDirectoryApi";
 import type { DirectoryProject, ProjectRuntimeStatus } from "../model/types";
 
@@ -18,18 +19,21 @@ type DirectoryEvent = {
   label?: string;
   active?: boolean;
   turnId?: string | null;
+  goal?: ThreadGoal | null;
 };
 
 const sameStatus = (left?: ProjectRuntimeStatus, right?: ProjectRuntimeStatus) => (
   String(left?.phase || "") === String(right?.phase || "")
   && Boolean(left?.active) === Boolean(right?.active)
   && String(left?.turnId || "") === String(right?.turnId || "")
+  && left?.updatedAt === right?.updatedAt && left?.label === right?.label
 );
 
 export function useProjectDirectory(currentStatus?: ExecutionStatus) {
   const [initialProjects] = useState(() => readLocalCache(projectDirectoryCacheKey, validProjects) || []);
   const [projects, setProjects] = useState<DirectoryProject[]>(initialProjects);
   const [statusByThread, setStatusByThread] = useState<StatusByThread>({});
+  const [goalByThread, setGoalByThread] = useState<Record<string, ThreadGoal | null>>({});
   const [loading, setLoading] = useState(!initialProjects.length);
   const [error, setError] = useState("");
   const projectsRef = useRef(projects);
@@ -80,6 +84,10 @@ export function useProjectDirectory(currentStatus?: ExecutionStatus) {
     source.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data) as DirectoryEvent;
+        if (payload.type === "goal_status" && payload.threadId) {
+          setGoalByThread((current) => ({ ...current, [payload.threadId!]: payload.goal || null }));
+          return;
+        }
         if (payload.type === "execution_status" && payload.threadId) {
           cacheStatus(payload.threadId, payload);
           return;
@@ -92,6 +100,8 @@ export function useProjectDirectory(currentStatus?: ExecutionStatus) {
         if (payload.type === "sessions_changed" || payload.type === "employee_message_completed") scheduleActivityRefresh();
       } catch { /* Existing conversation SSE remains the source of truth. */ }
     };
+    let opened = false;
+    source.onopen = () => { if (opened) void refresh(controller.signal); opened = true; };
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void refresh();
     };
@@ -106,5 +116,5 @@ export function useProjectDirectory(currentStatus?: ExecutionStatus) {
     };
   }, [cacheStatus, refresh]);
 
-  return { projects, statusByThread, loading, error, refresh };
+  return { projects, statusByThread, goalByThread, loading, error, refresh };
 }

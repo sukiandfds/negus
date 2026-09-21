@@ -1,13 +1,31 @@
 const token = new URLSearchParams(window.location.search).get("token") || "";
 
+// The token is only needed for the first same-origin request. The server then
+// remembers authorization in an HttpOnly cookie. Remove it from the visible
+// address bar so users do not accidentally copy it into screenshots, chat, or
+// referrer-bearing links.
+if (token) {
+  try {
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete("token");
+    window.history.replaceState(window.history.state, document.title, `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+  } catch {
+    // An unusual embedded browser may not allow history updates; API calls
+    // still retain the in-memory token for this page load.
+  }
+}
+
 // Installed PWAs reopen without the original query string; the server-issued
 // HttpOnly cookie carries access in that case.
 export const hasAccessToken = true;
 
 export const withAccessToken = (pathname: string, params: Record<string, string> = {}) => {
   if (/^(?:https?:|data:|blob:)/iu.test(pathname)) return pathname;
-  const query = new URLSearchParams({ ...params, token });
-  return `${pathname}${pathname.includes("?") ? "&" : "?"}${query}`;
+  const query = new URLSearchParams(params);
+  if (token) query.set("token", token);
+  const encoded = query.toString();
+  if (!encoded) return pathname;
+  return `${pathname}${pathname.includes("?") ? "&" : "?"}${encoded}`;
 };
 
 export const fetchJson = async <T,>(pathname: string, signal?: AbortSignal): Promise<T> => {

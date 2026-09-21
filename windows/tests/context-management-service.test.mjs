@@ -48,6 +48,44 @@ test("tracks the protocol effort field after thread settings change", async () =
   assert.equal(service.getStatus("thread-1").reasoningEffort, "high");
 });
 
+test("clears stale usage when the runtime model changes", async () => {
+  const { service } = await createService();
+  await service.load("thread-1");
+  service.handleProtocolMessage({
+    method: "thread/tokenUsage/updated",
+    params: {
+      threadId: "thread-1",
+      tokenUsage: { last: { totalTokens: 120000 }, modelContextWindow: 240000 },
+    },
+  });
+  service.handleProtocolMessage({
+    method: "thread/settings/updated",
+    params: { threadId: "thread-1", threadSettings: { model: "gpt-6-astra", effort: "high" } },
+  });
+
+  const status = service.getStatus("thread-1");
+  assert.equal(status.model, "gpt-6-astra");
+  assert.equal(status.usedTokens, null);
+  assert.equal(status.contextWindow, null);
+  assert.equal(status.percentage, null);
+});
+
+test("does not auto compact from a rounded-up display percentage", async () => {
+  const { service, compacted } = await createService();
+  await service.load("thread-1");
+  service.handleProtocolMessage({
+    method: "thread/tokenUsage/updated",
+    params: {
+      threadId: "thread-1",
+      tokenUsage: { last: { totalTokens: 190800 }, modelContextWindow: 240000 },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(service.getStatus("thread-1").percentage, 80);
+  assert.deepEqual(compacted, []);
+});
+
 test("queues auto compaction until the active turn completes", async () => {
   const { service, compacted, setExecutionActive } = await createService({ active: true });
   await service.load("thread-1");

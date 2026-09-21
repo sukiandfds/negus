@@ -1,14 +1,14 @@
-import { Bot, ListChecks, MessagesSquare } from "lucide-react";
+import { Bot, House, ListChecks, MessagesSquare } from "lucide-react";
 import type { MouseEvent } from "react";
 import { ProjectStatusControl } from "../../features/project-status/ProjectStatusControl";
 import styles from "./ViewSwitcher.module.css";
 
-export type ViewSurface = "conversation" | "group" | "progress";
+export type ViewSurface = "desktop" | "conversation" | "group" | "progress";
 
 const surfaceHref = (surface: ViewSurface) => {
   const params = new URLSearchParams(window.location.search);
   params.delete("view");
-  if (surface === "group") params.set("view", "group");
+  if (surface !== "progress") params.set("view", surface);
   const query = params.toString();
   const path = surface === "progress" ? "/progress" : "/";
   return `${path}${query ? `?${query}` : ""}`;
@@ -16,18 +16,21 @@ const surfaceHref = (surface: ViewSurface) => {
 
 export function ViewSwitcher({ current, onViewChange, projectId = "", projectRoot = "", currentSourceId = "" }: {
   current: ViewSurface;
-  onViewChange?: (surface: "conversation" | "group") => void;
+  onViewChange?: (surface: Exclude<ViewSurface, "progress">) => void;
   projectId?: string;
   projectRoot?: string;
   currentSourceId?: string;
 }) {
-  const handleView = (surface: "conversation" | "group") => (event: MouseEvent<HTMLAnchorElement>) => {
+  const handleView = (surface: Exclude<ViewSurface, "progress">) => (event: MouseEvent<HTMLAnchorElement>) => {
     if (!onViewChange || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     onViewChange(surface);
   };
   return (
     <nav className={styles.root} aria-label="切换对话模式">
+      <a className={current === "desktop" ? styles.active : ""} href={surfaceHref("desktop")} onClick={handleView("desktop")} title="回到桌面" aria-label="回到桌面">
+        <House aria-hidden="true" /><span>桌面</span>
+      </a>
       <a className={current === "conversation" ? styles.active : ""} href={surfaceHref("conversation")} onClick={handleView("conversation")} title="单人 Codex 对话" aria-label="单人 Codex 对话">
         <Bot aria-hidden="true" /><span>对话</span>
       </a>

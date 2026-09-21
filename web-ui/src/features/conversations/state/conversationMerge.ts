@@ -54,9 +54,12 @@ export const mergeMessageList = (baseMessages: SessionMessage[], incomingMessage
     }
 
     const timestamp = timestampOf(message);
-    const insertAt = timestamp === null
-      ? -1
-      : merged.findIndex((current) => {
+    const insertAt = merged.findIndex((current) => {
+        if (message.turnId && message.turnId === current.turnId
+          && message.turnItemIndex !== undefined && current.turnItemIndex !== undefined) {
+          return current.turnItemIndex > message.turnItemIndex;
+        }
+        if (timestamp === null) return false;
         const currentTimestamp = timestampOf(current);
         return currentTimestamp !== null && currentTimestamp > timestamp;
       });

@@ -20,7 +20,7 @@
   border: 1px solid var(--color-border-strong);
   border-radius: 16px;
   background: var(--color-composer);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, .3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .16);
   pointer-events: auto;
 }
 
@@ -48,7 +48,7 @@
   width: 100%;
   min-height: 51px;
   max-height: 160px;
-  padding: 10px 14px 6px;
+  padding: 12px 14px 4px;
   resize: none;
   overflow-y: auto;
   border: 0;
@@ -93,7 +93,7 @@
   place-items: center;
   padding: 0;
   border: 0;
-  border-radius: 50%;
+  border-radius: var(--control-radius);
   background: transparent;
   color: var(--color-text-secondary, #bbb);
   cursor: pointer;
@@ -101,6 +101,7 @@
 }
 
 .commandButton:hover,
+.commandButton[aria-expanded="true"],
 .commandButton:focus-visible {
   background: var(--color-control-hover);
   color: var(--color-text, #eee);
@@ -115,7 +116,7 @@
   width: var(--control-icon-button-size);
   height: var(--control-icon-button-size);
   border: 0;
-  border-radius: 50%;
+  border-radius: 10px;
   background: #777;
   color: #292929;
   opacity: .55;
@@ -123,7 +124,7 @@
 }
 
 .sendButton:not(:disabled) {
-  background: var(--color-text);
+  background: #cdd0d2;
   color: var(--color-bg);
   opacity: 1;
   cursor: pointer;
@@ -148,15 +149,19 @@
   .footer {
     display: grid;
     grid-template-columns: minmax(0, 1fr) var(--control-touch-icon-button-size);
-    row-gap: 2px;
-    padding: 0 9px 8px 10px;
+    row-gap: 0;
+    column-gap: 8px;
+    padding: 0 10px 6px;
   }
 
   .leadingControls {
     grid-column: 1;
     grid-row: 1;
     overflow: hidden;
+    gap: 2px;
   }
+
+  .leadingControls > :last-child { margin-left: 4px; font-size: 10px; }
 
   .leadingControls > label {
     width: var(--control-touch-icon-button-size);
@@ -177,8 +182,11 @@
     grid-row: 2;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 4px;
+    gap: 8px;
     width: 100%;
+    margin-top: 3px;
+    border-top: 1px solid rgba(255, 255, 255, .045);
+    padding-top: 2px;
   }
 
   .sendButton {
@@ -186,6 +194,8 @@
     grid-row: 1;
     width: var(--control-touch-icon-button-size);
     height: var(--control-touch-icon-button-size);
+    border: 3px solid transparent;
+    background-clip: padding-box;
   }
 
 }

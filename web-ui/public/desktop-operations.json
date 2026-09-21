@@ -1,0 +1,12 @@
+[
+  {
+    "id": "20260921-kobe-photo-71a78168",
+    "regionId": "71a78168-96f5-4cd3-841c-b1185776b8d5",
+    "action": "set-image",
+    "image": {
+      "src": "/desktop-assets/kobe-bryant.png",
+      "alt": "科比·布莱恩特，洛杉矶湖人队官方球员照片；来源 NBA.com",
+      "shape": "rectangle"
+    }
+  }
+]

@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import type { FushengUsageSnapshot } from "../model/types";
 import styles from "./UsageSummaryControl.module.css";
+import { fetchJson } from '../../../shared/api/http';
 
 interface UsageSummaryControlProps {
+  currentModel?: string;
   snapshot: FushengUsageSnapshot | null;
   loading: boolean;
   error: string;
@@ -37,9 +39,20 @@ const preciseAmount = (value: number) => `$${value.toFixed(6)}`;
 const formatRatio = (value: number | null) => value === null ? "--" : `${value.toFixed(2)}×`;
 const formatCount = (value: number) => new Intl.NumberFormat("en-US").format(value);
 
-export function UsageSummaryControl({ snapshot, loading, error, onRefresh }: UsageSummaryControlProps) {
+export function UsageSummaryControl({ snapshot, loading, error, onRefresh, currentModel = "" }: UsageSummaryControlProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const [channelRatio, setChannelRatio] = useState<number | null>(null);
+  useEffect(() => {
+    setChannelRatio(null);
+    if (!currentModel.startsWith('ccswitch_')) return;
+    const controller = new AbortController();
+    void fetchJson<{ channels: Array<{ id: string; priceRatio?: number }> }>('/api/model-channels', controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) setChannelRatio(result.channels.find((entry) => `ccswitch_${entry.id}` === currentModel.split('::')[0])?.priceRatio ?? null);
+      }).catch(() => {});
+    return () => controller.abort();
+  }, [currentModel]);
   const currentTodayAmount = snapshot?.queryDate === shanghaiDateKey(new Date())
     ? snapshot.today.amountUsd
     : null;
@@ -61,7 +74,8 @@ export function UsageSummaryControl({ snapshot, loading, error, onRefresh }: Usa
   }, [open]);
 
   const updatedAt = snapshot ? formatUpdatedAt(snapshot.updatedAt) : "未更新";
-  const featuredRatio = snapshot?.featuredGroup.ratio ?? null;
+  const isGrok = /^grok-/i.test(currentModel);
+  const featuredRatio = currentModel.startsWith('ccswitch_') ? channelRatio : isGrok ? null : snapshot?.featuredGroup.ratio ?? null;
   const groupEntries = Object.entries(snapshot?.groupRatios || {}).sort(([left], [right]) => left.localeCompare(right, "zh-CN"));
 
   const toggleDetails = () => {
@@ -87,9 +101,9 @@ export function UsageSummaryControl({ snapshot, loading, error, onRefresh }: Usa
           </span>
           <span className={styles.divider} aria-hidden="true" />
           <span className={styles.metric}>
-            <span className={`${styles.metricLabel} ${styles.desktopGroupLabel}`}>gpt 易燃易爆炸</span>
+            <span className={`${styles.metricLabel} ${styles.desktopGroupLabel}`}>{currentModel.startsWith('ccswitch_') ? '当前渠道' : isGrok ? "Grok" : snapshot?.featuredGroup.name || "分组"}</span>
             <span className={`${styles.metricLabel} ${styles.compactGroupLabel}`}>倍率</span>
-            <strong>{formatRatio(featuredRatio)}</strong>
+            <strong>{isGrok ? "未知" : formatRatio(featuredRatio)}</strong>
           </span>
         </span>
         {loading ? <span className={styles.loadingText}>更新中</span> : null}
@@ -100,7 +114,7 @@ export function UsageSummaryControl({ snapshot, loading, error, onRefresh }: Usa
           <header className={styles.popoverHeader}>
             <div>
               <h2>浮生云算</h2>
-              <p>{updatedAt} 更新</p>
+              <p>{updatedAt} 更新 · 账户用量</p>
             </div>
             <button className={styles.refreshButton} type="button" aria-label="刷新用量" title="刷新用量" disabled={loading} onClick={onRefresh}>
               <RefreshCw className={loading ? styles.spinning : ""} aria-hidden="true" />
@@ -118,6 +132,7 @@ export function UsageSummaryControl({ snapshot, loading, error, onRefresh }: Usa
                 <div><dt>历史请求</dt><dd>{formatCount(snapshot.account.historicalRequests)}</dd></div>
               </dl>
               <div className={styles.groups}>
+                {isGrok ? <p>Grok 使用独立 Key，当前分组倍率未知；以下为账户分组表。</p> : null}
                 <h3>分组倍率</h3>
                 <div className={styles.featuredGroup}>
                   <span>{snapshot.featuredGroup.name}</span><strong>{formatRatio(snapshot.featuredGroup.ratio)}</strong>

@@ -114,6 +114,7 @@
 @media (max-width: 760px) {
   .select { max-width: 92px; }
   .settings { width: 100%; }
-  .trigger { width: 100%; max-width: none; height: var(--control-touch-text-height); justify-content: space-between; }
+  .trigger { width: auto; max-width: 100%; height: var(--control-touch-text-height); justify-content: flex-start; gap: 5px; padding: 0 4px; font-size: 11px; color: var(--color-text-secondary); }
+  .trigger svg { width: 13px; height: 13px; flex-basis: 13px; color: var(--color-text-muted); }
   .settingsMenu { width: min(300px, calc(100vw - 44px)); }
 }

@@ -82,7 +82,8 @@ function Message({
         </time>
       ) : null}
       {!executionPlaceholder ? <div className={styles.body}>
-        {streaming ? <div className={styles.streamingText}>{message.text}<i className={styles.cursor} /></div> : <ContentRenderer message={message} />}
+        {message.turnStatus === "interrupted" ? <small>已中断</small> : null}
+        {streaming ? <div className={styles.streamingText}>{message.text}<i className={styles.cursor} /></div> : message.superseded ? <details><summary>追加指令前的回复</summary><ContentRenderer message={message} /></details> : <ContentRenderer message={message} />}
         {message.deliveryState === "pending" ? (
           <span className={styles.deliveryState} title="正在确认指令是否已送达" aria-label="正在确认指令是否已送达">
             <Clock3 aria-hidden="true" />
@@ -188,6 +189,7 @@ export function ConversationView({
       && completedExecution
       && finalMessageLoaded
       && message.role === "assistant"
+      && message.id === latestAssistant?.id
       && message.turnId === executionStatus.turnId
       ? { ...message, createdAt: executionStatus.updatedAt || executionStatus.startedAt || undefined }
       : message

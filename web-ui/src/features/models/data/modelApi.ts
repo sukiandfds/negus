@@ -11,9 +11,9 @@ export const modelApi = {
     );
   },
   listForAgents: (signal?: AbortSignal) => fetchJson<CodexModel[]>("/api/models?scope=agents", signal),
-  update: (threadId: string, model: string, signal?: AbortSignal) => postJson<ModelUpdateResult>(
+  update: (threadId: string, model: string, signal?: AbortSignal, reasoningEffort?: string) => postJson<ModelUpdateResult>(
     "/api/session/model",
-    withConversation({ threadId, model }),
+    withConversation({ threadId, model, allowProviderSwitch: true, reasoningEffort }),
     signal,
   ),
   updateReasoningEffort: (threadId: string, reasoningEffort: string, signal?: AbortSignal) => postJson<ModelUpdateResult>(

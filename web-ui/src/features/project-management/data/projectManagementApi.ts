@@ -1,5 +1,5 @@
-import { fetchJson } from "../../../shared/api/http";
-import type { ProjectManagementDocument, ProjectManagementEntryDetail } from "../model/types";
+import { fetchJson, postJson } from "../../../shared/api/http";
+import type { ProjectManagementDocument, ProjectManagementEntryDetail, ProjectPageDraft } from "../model/types";
 
 const CACHE_MAX_AGE_MS = 30_000;
 const SUMMARY_CACHE_KEY = "negus:project-management:summary";
@@ -60,3 +60,6 @@ export const fetchProjectManagementEntry = async (entryId: string, signal?: Abor
   writeCache(key, value);
   return value;
 };
+
+export const createProjectPageDraft = (input: { request: string; location: string }, signal?: AbortSignal) =>
+  postJson<ProjectPageDraft>("/api/project-management/page-drafts", input, signal);

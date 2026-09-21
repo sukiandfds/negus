@@ -1,6 +1,6 @@
 import { fetchJson, postJson } from "../../../shared/api/http";
 import { conversationQuery, withConversation } from "../../../shared/api/conversationScope";
-import type { ExecutionStatus } from "../model/types";
+import type { ExecutionStatus, UserInputRequest } from "../model/types";
 
 export interface SendMessageResult {
   threadId: string;
@@ -51,6 +51,20 @@ export const executionApi = {
   review: (threadId: string, signal?: AbortSignal) => postJson<{ threadId: string; status: string }>(
     "/api/session/review",
     withConversation({ threadId }),
+    signal,
+  ),
+  pendingUserInput: (threadId: string, signal?: AbortSignal) => fetchJson<{ request: UserInputRequest | null }>(
+    `/api/session/user-input?threadId=${encodeURIComponent(threadId)}${conversationQuery()}`,
+    signal,
+  ),
+  answerUserInput: (
+    threadId: string,
+    requestId: string | number,
+    answers: Record<string, { answers: string[] }>,
+    signal?: AbortSignal,
+  ) => postJson<{ threadId: string; requestId: string | number; status: string }>(
+    "/api/session/user-input",
+    withConversation({ threadId, requestId, answers }),
     signal,
   ),
 };

@@ -11,6 +11,29 @@ const publicAttachment = ({ id, name, mimeType, url, width, height, readStatus, 
   ...(readError ? { readError } : {}),
 });
 
+const publicUserInputRequest = (message) => {
+  if (!message || message.method !== "item/tool/requestUserInput") return null;
+  const params = message.params || {};
+  return {
+    requestId: message.id,
+    threadId: String(params.threadId || ""),
+    turnId: String(params.turnId || ""),
+    itemId: String(params.itemId || ""),
+    isBlocking: params.isBlocking !== false,
+    questions: (Array.isArray(params.questions) ? params.questions : []).slice(0, 3).map((question) => ({
+      id: String(question?.id || ""),
+      header: String(question?.header || "").slice(0, 120),
+      question: String(question?.question || "").slice(0, 4000),
+      isOther: question?.isOther === true,
+      isSecret: question?.isSecret === true,
+      options: Array.isArray(question?.options) ? question.options.slice(0, 20).map((option) => ({
+        label: String(option?.label || "").slice(0, 240),
+        description: String(option?.description || "").slice(0, 1000),
+      })) : null,
+    })).filter((question) => question.id && question.question),
+  };
+};
+
 export const createConversationRoutes = ({
   conversations, execution, followUpQueue, contextManagement, media, submissionStore,
   broadcast = () => {}, publishThreadEvent = (_threadId, event) => broadcast(event), agentConversationStore,
@@ -126,6 +149,67 @@ export const createConversationRoutes = ({
   };
 
   return async (request, response, url) => {
+  if (url.pathname === "/api/session/user-input" && request.method === "GET") {
+    const threadId = String(url.searchParams.get("threadId") || "").trim();
+    const conversationId = String(url.searchParams.get("conversationId") || "").trim();
+    if (!threadId) {
+      sendJson(response, { error: "threadId is required" }, 400);
+      return true;
+    }
+    const binding = await authorizeAgentThread({ threadId, conversationId });
+    const pending = isEmployeeDirectBinding(binding)
+      ? await employeeRuntime.getPendingUserInput(threadId)
+      : await conversations.getPendingUserInput(threadId);
+    sendJson(response, { request: publicUserInputRequest(pending) });
+    return true;
+  }
+  if (url.pathname === "/api/session/user-input" && request.method === "POST") {
+    const body = await readJson(request);
+    const threadId = String(body.threadId || "").trim();
+    const conversationId = String(body.conversationId || "").trim();
+    const requestId = body.requestId;
+    if (!threadId || (typeof requestId !== "string" && typeof requestId !== "number")) {
+      sendJson(response, { error: "threadId and requestId are required" }, 400);
+      return true;
+    }
+    const binding = await authorizeAgentThread({ threadId, conversationId });
+    const source = isEmployeeDirectBinding(binding) ? employeeRuntime : conversations;
+    const pending = await source.getPendingUserInput(threadId);
+    const publicRequest = publicUserInputRequest(pending);
+    if (!publicRequest || String(publicRequest.requestId) !== String(requestId)) {
+      sendJson(response, { error: "该互动请求已结束或不存在" }, 409);
+      return true;
+    }
+    const rawAnswers = body.answers && typeof body.answers === "object" && !Array.isArray(body.answers)
+      ? body.answers
+      : {};
+    const answers = {};
+    for (const question of publicRequest.questions) {
+      const values = rawAnswers[question.id]?.answers;
+      if (!Array.isArray(values) || !values.length) {
+        sendJson(response, { error: `请回答：${question.header || question.question}` }, 400);
+        return true;
+      }
+      answers[question.id] = {
+        answers: values.map((value) => String(value).trim()).filter(Boolean).slice(0, 20),
+      };
+      if (!answers[question.id].answers.length) {
+        sendJson(response, { error: `请回答：${question.header || question.question}` }, 400);
+        return true;
+      }
+    }
+    await source.respondToUserInput(threadId, requestId, answers);
+    execution.publishStatus?.(threadId, {
+      phase: "working",
+      label: "Codex 正在继续处理",
+      detail: "",
+      active: true,
+      turnId: publicRequest.turnId,
+    });
+    publishThreadEvent(threadId, { type: "user_input_resolved", threadId, requestId });
+    sendJson(response, { threadId, requestId, status: "submitted" });
+    return true;
+  }
   if (url.pathname === "/api/models" && request.method === "GET") {
     const currentModels = await conversations.listModels();
     let includeAgentProviders = url.searchParams.get("scope") === "agents";
@@ -343,7 +427,7 @@ export const createConversationRoutes = ({
       });
       return true;
     }
-    sendJson(response, await conversations.updateModel(threadId, model));
+    sendJson(response, await conversations.updateModel(threadId, model, { allowProviderSwitch: body.allowProviderSwitch === true, reasoningEffort: body.reasoningEffort }));
     return true;
   }
   if (url.pathname === "/api/session/reasoning-effort" && request.method === "POST") {

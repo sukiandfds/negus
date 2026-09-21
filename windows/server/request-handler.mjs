@@ -12,6 +12,7 @@ import { createEmployeeRoutes } from "./routes/employee-routes.mjs";
 import { createEmployeeProjectDirectoryRoutes } from "./routes/employee-project-directory-routes.mjs";
 import { createEmployeeGrowthRoutes } from "./routes/employee-growth-routes.mjs";
 import { createProjectReviewRoutes } from "./routes/project-review-routes.mjs";
+import { createDesktopAutomationReader } from "./desktop-automations.mjs";
 
 export const createRequestHandler = ({
   token, project, projectRoot, device, observerPort, conversations, execution, media, realtime, submissions,
@@ -19,7 +20,13 @@ export const createRequestHandler = ({
   agentConversationStore, agentPublicationService,
   employeeRuntime, employeeProjectDirectory, employeeGrowth, modelProviders, projectActivityIndex, projectStatus,
 }) => {
+  const readAutomations = createDesktopAutomationReader();
   const routes = [
+    async (request, response, url) => {
+      if (url.pathname !== '/api/desktop/automations' || request.method !== 'GET') return false;
+      sendJson(response, await readAutomations());
+      return true;
+    },
     createVersionRoutes({ readWebVersion }),
     createArtifactRoutes({ groupRoom, roomDirectory, artifacts, webOutputs }),
     createAgentPublicationRoutes({
@@ -43,7 +50,7 @@ export const createRequestHandler = ({
       modelProviders,
     }),
     createUsageRoutes({ fushengUsage }),
-    createSystemRoutes({ token, project, projectRoot, device, observerPort, media, realtime }),
+    createSystemRoutes({ token, project, projectRoot, device, observerPort, media, realtime, modelProviders, fushengUsage }),
   ];
 
   return async (request, response) => {

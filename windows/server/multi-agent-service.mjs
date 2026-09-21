@@ -341,6 +341,7 @@ export const createMultiAgentService = ({
       agent,
       agents: roomSnapshot.agents,
       messages: context.messages,
+      omittedMessageCount: context.omittedMessageCount,
       outputInstructions,
       targetProjectRoot: projectRoot,
     });

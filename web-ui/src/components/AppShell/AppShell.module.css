@@ -63,6 +63,12 @@
     grid-column: 1;
     grid-row: 1;
   }
+}
+
+@media (max-width: 760px), (any-pointer: coarse) {
+  .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  .chrome { display: none; }
+  .workspace { grid-column: 1; grid-row: 1; }
 
   .sidebarSlot {
     position: fixed;

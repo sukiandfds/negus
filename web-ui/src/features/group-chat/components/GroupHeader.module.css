@@ -82,7 +82,7 @@
 }
 
 @media (max-width: 760px) {
-  .topbar { position: relative; gap: 7px; padding-right: 112px; }
+  .topbar { position: relative; gap: 7px; padding-right: 146px; }
   .statusbar { padding: 0 12px 0 54px; }
   .mobileOnly { display: grid; }
   .titleIcon { display: none; }

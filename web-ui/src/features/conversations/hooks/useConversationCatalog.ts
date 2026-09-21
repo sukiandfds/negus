@@ -4,6 +4,7 @@ import { hasAccessToken } from "../../../shared/api/http";
 import { conversationApi } from "../data/conversationApi";
 import type { ProjectInfo, SessionDetail, SessionSummary } from "../model/types";
 import type { InitialConversationState } from "../state/initialConversation";
+import { readLocalCache } from "../../../shared/state/localCache";
 
 interface ConversationSelection {
   selectedIdRef: MutableRefObject<string>;
@@ -61,6 +62,8 @@ export function useConversationCatalog(
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
   const archivedViewRef = useRef(initialArchivedView);
+  const viewCacheRef = useRef(new Map<boolean, SessionSummary[]>());
+  const archiveSwitchTimerRef = useRef(0);
   const creatingRef = useRef(false);
   const archiveBusyIdsRef = useRef(new Set<string>());
   const listRetryTimerRef = useRef(0);
@@ -88,6 +91,7 @@ export function useConversationCatalog(
         ? []
         : Array.from(transientSessionsRef.current.values()).reverse();
       const nextSessions = [...transientSessions, ...serverSessions];
+      viewCacheRef.current.set(requestedArchivedView, nextSessions);
       if (!sameSessionList(sessionsRef.current, nextSessions)) {
         sessionsRef.current = nextSessions;
         setSessions(nextSessions);
@@ -159,13 +163,23 @@ export function useConversationCatalog(
 
   const setArchiveViewMode = useCallback(async (archived: boolean) => {
     if (archived === archivedViewRef.current) return;
+    window.clearTimeout(archiveSwitchTimerRef.current);
+    window.clearTimeout(listRetryTimerRef.current);
+    listAbortControllerRef.current?.abort();
+    ++listRequestRef.current;
+    viewCacheRef.current.set(archivedViewRef.current, sessionsRef.current);
     archivedViewRef.current = archived;
     setArchivedView(archived);
-    sessionsRef.current = [];
-    setSessions([]);
+    const cached = viewCacheRef.current.get(archived);
+    sessionsRef.current = cached || [];
+    setSessions(cached || []);
+    setLoadingList(!cached);
+    setListError("");
     selection.clearSelection();
     updateArchiveQuery(archived);
-    await refreshSessions(true, undefined, false);
+    archiveSwitchTimerRef.current = window.setTimeout(() => {
+      void refreshSessions(!cached, undefined, false);
+    }, 180);
   }, [refreshSessions, selection.clearSelection, updateArchiveQuery]);
 
   useEffect(() => {
@@ -217,7 +231,8 @@ export function useConversationCatalog(
         selection.clearSelection();
         updateArchiveQuery(false);
       }
-      const created = await conversationApi.create(currentModel, projectRoot);
+      const preferredModel = readLocalCache("negus-preferred-model-v1", (value): value is string => typeof value === "string");
+      const created = await conversationApi.create(preferredModel || currentModel, projectRoot);
       const detail: SessionDetail = { ...created, messages: [] };
       transientSessionsRef.current.set(created.threadId, created);
       selection.setCreatedSession(detail);
@@ -348,6 +363,7 @@ export function useConversationCatalog(
   }, [beginArchiveOperation, finishArchiveOperation, removeSessionOptimistically, restoreRemovedSession, selection.clearSelection, selection.selectedIdRef]);
 
   useEffect(() => () => {
+    window.clearTimeout(archiveSwitchTimerRef.current);
     window.clearTimeout(listRetryTimerRef.current);
     listAbortControllerRef.current?.abort();
   }, []);

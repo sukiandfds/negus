@@ -77,6 +77,32 @@ export const createFushengUsageService = ({
   let cachedKey = "";
   let inFlight = null;
 
+  const readChannelRatios = async (entries) => {
+    const credentials = await readCredentials(credentialsFile);
+    const timedFetch = (url, options) => fetchImpl(url, { ...options, signal: AbortSignal.timeout(6000), redirect: 'error' });
+    const headers = { Authorization: `Bearer ${credentials.accessToken}`, 'New-Api-User': String(credentials.userId) };
+    const [tokens, pricing] = await Promise.all([
+      requestJson(timedFetch, new URL('/api/token/?p=1&page_size=100', credentials.baseUrl), headers),
+      requestJson(timedFetch, new URL('/api/pricing', credentials.baseUrl)),
+    ]);
+    const items = Array.isArray(tokens.data) ? tokens.data : tokens.data?.items || [];
+    if (Number(tokens.data?.total || items.length) > items.length) return {};
+    const result = {};
+    await Promise.all(entries.map(async (entry) => {
+      if (!entry.key || !entry.baseUrl || new URL(entry.baseUrl).origin !== new URL(credentials.baseUrl).origin) return;
+      try {
+        const token = await requestJson(timedFetch, new URL('/api/usage/token/', entry.baseUrl), { Authorization: `Bearer ${entry.key}` });
+        const matches = items.filter((item) => item.name === token.data?.name);
+        const groups = [...new Set(matches.map((item) => item.group).filter(Boolean))];
+        if (groups.length !== 1) return;
+        const ratio = pricing.group_ratio?.[groups[0]];
+        if (ratio === undefined || !Number.isFinite(Number(ratio))) return;
+        result[entry.id] = { priceRatio: Number(ratio), priceGroup: groups[0], ratioSource: 'supplier' };
+      } catch { /* Unverified prices remain explicitly configured/unknown. */ }
+    }));
+    return result;
+  };
+
   const query = async () => {
     const currentDate = now();
     const range = shanghaiRange(currentDate);
@@ -158,5 +184,5 @@ export const createFushengUsageService = ({
     return inFlight;
   };
 
-  return { read };
+  return { read, readChannelRatios };
 };

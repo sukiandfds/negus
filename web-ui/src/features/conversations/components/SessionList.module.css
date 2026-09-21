@@ -44,3 +44,4 @@
   .revealed .item { transform: translateX(-44px); }
   .revealed .itemAction { opacity: 1; pointer-events: auto; }
 }
+.modelBadge { display: inline-block; margin-right: 6px; padding: 1px 4px; border: 1px solid var(--color-border); border-radius: 4px; color: var(--color-text-muted); font-size: 9px; font-weight: 500; line-height: 1.4; vertical-align: 1px; }

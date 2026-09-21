@@ -108,6 +108,30 @@ test("keeps automatic titles local to Negus without renaming the Codex thread", 
   assert.equal(calls.some((call) => call.method === "thread/name/set"), false);
 });
 
+test("historical unnamed threads use previews without model calls and preserve manual names", async () => {
+  const threads = [
+    { id: "history", name: "", preview: "讨论手机端标题生成和失败恢复" },
+    { id: "manual", name: "我的项目", preview: "不要覆盖" },
+    { id: "empty-123456", name: "", preview: "" },
+  ];
+  const store = createAppServerConversationStore({
+    projectRoot: "D:\\project",
+    client: {
+      subscribe: () => () => {},
+      close: () => {},
+      request: async (method) => {
+        assert.equal(method, "thread/list");
+        return { data: threads, nextCursor: null };
+      },
+    },
+  });
+  try {
+    assert.deepEqual((await store.listSessions()).map((item) => item.title), [
+      "讨论手机端标题生成和失败恢复", "我的项目", "新对话 · 123456",
+    ]);
+  } finally { store.close(); }
+});
+
 test("creates a thread in a registered business project and rejects unknown folders", async () => {
   const calls = [];
   const client = {
@@ -184,6 +208,9 @@ test("updates a fresh thread before its first turn without trying to resume it",
   });
 
   await store.createSession("gpt-5.6-sol");
+  const empty = await store.findSession("thread-new");
+  assert.equal(empty.messageCount, 0);
+  assert.deepEqual(empty.messages, []);
   const modelResult = await store.updateModel("thread-new", "gpt-5.6-terra");
   const effortResult = await store.updateReasoningEffort("thread-new", "high");
 

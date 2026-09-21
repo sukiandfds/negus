@@ -200,6 +200,8 @@ export const createConversationService = ({ primary, fallback, contentVersionSto
     getGoal: (...args) => primary.getGoal(...args),
     setGoal: (...args) => primary.setGoal(...args),
     clearGoal: (...args) => primary.clearGoal(...args),
+    getPendingUserInput: (...args) => primary.getPendingUserInput(...args),
+    respondToUserInput: (...args) => primary.respondToUserInput(...args),
     close: () => {
       inFlightFinds.clear();
       primary.close();

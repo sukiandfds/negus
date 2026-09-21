@@ -50,7 +50,8 @@ const messagesFromTurn = (turn, registerMedia) => dedupeAssistantMediaMessages((
     if (!message) return null;
     const timestamp = message.role === "user"
       ? userMessageTimestamp(item, turn.startedAt)
-      : timestampFromValue(turn.completedAt);
+      : timestampFromValue(item.createdAt ?? item.timestamp ?? item.created_at)
+        ?? (index === turn.items.findLastIndex((entry) => entry.type === "agentMessage") ? timestampFromValue(turn.completedAt) : null);
     const itemId = item.id || message.itemId || "";
     const withTurn = turn.id
       ? {
@@ -58,6 +59,9 @@ const messagesFromTurn = (turn, registerMedia) => dedupeAssistantMediaMessages((
         id: stableMessageId(turn.id, itemId, index, message),
         turnId: turn.id,
         itemId,
+        turnItemIndex: index,
+        turnStatus: turn.status || "",
+        superseded: message.role === "assistant" && turn.items.slice(index + 1).some((entry) => entry.type === "userMessage"),
       }
       : { ...message, id: stableMessageId("unknown", itemId, index, message), itemId };
     return timestamp !== null

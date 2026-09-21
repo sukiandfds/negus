@@ -1,4 +1,12 @@
 .control { position: relative; }
+.modelDialog { width: min(420px, calc(100vw - 32px)); box-sizing: border-box; max-height: 80dvh; overflow: auto; padding: 20px; border: 1px solid var(--color-border, #383838); border-radius: 12px; background: var(--color-surface, #171717); color: var(--color-text, #ededed); }
+.modelDialog::backdrop { background: rgb(0 0 0 / 60%); }
+.modelDialog h2 { margin: 0 0 12px; font-size: 17px; }
+.modelDialog p { font-size: 13px; line-height: 1.6; }
+.modelDialog label { display: block; margin-bottom: 6px; }
+.modelDialog input { box-sizing: border-box; width: 100%; padding: 10px; font-size: 16px; background: var(--color-surface, #171717); color: inherit; border: 1px solid var(--color-border, #555); border-radius: 6px; }
+.modelActions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 14px; }
+.modelDialog li { overflow-wrap: anywhere; font-size: 13px; line-height: 1.8; }
 .control > button { border: 0; background: transparent; }
 .activeButton { background: var(--color-surface-active, #303030) !important; color: var(--color-text, #ededed) !important; }
 .panel {

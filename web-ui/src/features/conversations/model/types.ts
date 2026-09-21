@@ -27,6 +27,9 @@ export interface SessionMessage {
   blocks?: ContentBlock[];
   createdAt?: string;
   turnId?: string;
+  turnItemIndex?: number;
+  turnStatus?: string;
+  superseded?: boolean;
   itemId?: string;
   authorId?: string;
   authorName?: string;
@@ -35,6 +38,8 @@ export interface SessionMessage {
 }
 
 export interface SessionSummary {
+  model?: string;
+  modelProviderId?: string;
   threadId: string;
   source: SessionSource;
   title: string;

@@ -47,7 +47,7 @@
 .meter i { display: block; height: 100%; border-radius: inherit; background: var(--color-text-secondary); }
 
 .threshold {
-  width: 82px;
+  width: 116px;
   height: 30px;
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-small);
@@ -86,6 +86,7 @@
 @keyframes context-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 760px) {
-  .trigger { height: var(--control-touch-text-height); }
+  .trigger { height: var(--control-touch-text-height); gap: 4px; padding: 0 4px; font-size: 11px; color: var(--color-text-secondary); }
+  .trigger svg { width: 13px; height: 13px; color: var(--color-text-muted); }
   .menu { width: min(260px, calc(100vw - 44px)); }
 }

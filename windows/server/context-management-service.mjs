@@ -112,7 +112,12 @@ export const createContextManagementService = async ({
   const maybeAutoCompact = (threadId) => {
     const current = statusFor(threadId);
     const threshold = current.autoCompactThreshold;
-    if (threshold === null || current.percentage === null || current.percentage < threshold) {
+    const reachedThreshold = threshold !== null
+      && Number.isFinite(current.usedTokens)
+      && Number.isFinite(current.contextWindow)
+      && current.contextWindow > 0
+      && current.usedTokens >= (current.contextWindow * threshold) / 100;
+    if (!reachedThreshold) {
       if (current.lastAutoTriggerTokens !== null) states.set(threadId, { ...current, lastAutoTriggerTokens: null });
       return;
     }
@@ -124,9 +129,12 @@ export const createContextManagementService = async ({
 
   const load = async (threadId) => {
     const runtime = await getRuntimeContext(threadId);
+    const model = runtime.model || statusFor(threadId).model;
+    const modelChanged = Boolean(model && statusFor(threadId).model && model !== statusFor(threadId).model);
     publish(threadId, {
-      model: runtime.model || statusFor(threadId).model,
+      model,
       reasoningEffort: runtime.reasoningEffort || statusFor(threadId).reasoningEffort,
+      ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null } : {}),
     });
     maybeAutoCompact(threadId);
     return publicStatus(statusFor(threadId));
@@ -164,14 +172,22 @@ export const createContextManagementService = async ({
       return;
     }
     if (method === "thread/settings/updated") {
+      const model = params.threadSettings?.model || statusFor(threadId).model;
+      const modelChanged = Boolean(model && statusFor(threadId).model && model !== statusFor(threadId).model);
       publish(threadId, {
-        model: params.threadSettings?.model || statusFor(threadId).model,
+        model,
         reasoningEffort: params.threadSettings?.effort || statusFor(threadId).reasoningEffort,
+        ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null } : {}),
       });
       return;
     }
     if (method === "model/rerouted") {
-      publish(threadId, { model: params.toModel || statusFor(threadId).model });
+      const model = params.toModel || statusFor(threadId).model;
+      const modelChanged = Boolean(model && statusFor(threadId).model && model !== statusFor(threadId).model);
+      publish(threadId, {
+        model,
+        ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null } : {}),
+      });
       return;
     }
     if (method === "thread/compacted" || (method === "item/completed" && params.item?.type === "contextCompaction")) {

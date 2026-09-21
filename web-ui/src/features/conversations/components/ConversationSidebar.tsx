@@ -3,12 +3,13 @@ import { useEffect, useState } from "react";
 import { SidebarHeader } from "../../../components/Sidebar/SidebarHeader";
 import type { ProjectInfo, SessionSummary } from "../model/types";
 import type { ExecutionStatus } from "../../execution/model/types";
-import { useProjectDirectory } from "../../project-directory/hooks/useProjectDirectory";
+import type { useProjectDirectory } from "../../project-directory/hooks/useProjectDirectory";
 import { ProjectDirectory } from "../../project-directory/components/ProjectDirectory";
 import { ConnectionStatus } from "./ConnectionStatus";
 import styles from "./ConversationSidebar.module.css";
 
 interface ConversationSidebarProps {
+  directory: ReturnType<typeof useProjectDirectory>;
   project: ProjectInfo | null;
   sessions: SessionSummary[];
   selectedId: string;
@@ -29,6 +30,7 @@ interface ConversationSidebarProps {
 }
 
 export function ConversationSidebar({
+  directory,
   project,
   sessions,
   selectedId,
@@ -47,7 +49,6 @@ export function ConversationSidebar({
   currentStatus,
   onCloseSidebar,
 }: ConversationSidebarProps) {
-  const directory = useProjectDirectory(currentStatus);
   const defaultProjectRoot = directory.projects.find((entry) => entry.kind === "personal")?.root || project?.root || "";
   const [activeProjectRoot, setActiveProjectRoot] = useState(defaultProjectRoot);
   useEffect(() => {

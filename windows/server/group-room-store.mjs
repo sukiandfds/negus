@@ -7,6 +7,10 @@ import { CURRENT_MODEL_PROVIDER_ID } from "./model-provider-service.mjs";
 const cleanText = (value, maxLength) => String(value || "").trim().slice(0, maxLength);
 const safeSequence = (value) => Number.isSafeInteger(value) && value >= 0 ? value : 0;
 const pageSize = (value) => Math.max(1, Math.min(100, Number.parseInt(value, 10) || 50));
+// Keep each Agent turn bounded even when a room has a long-lived public history.
+// The full history remains available through getMessagePage()/the history API.
+const agentContextMessageLimit = 80;
+const agentContextCharacterLimit = 48000;
 const dateKey = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
@@ -257,11 +261,24 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
   const getAgentContext = (agentId) => {
     const afterSequence = agentContextSequences.get(agentId) || 0;
     const throughSequence = nextMessageSequence;
+    const available = messages.filter((message) => message.sequence > afterSequence
+      && message.sequence <= throughSequence);
+    let start = available.length;
+    let characterCount = 0;
+    while (start > 0 && available.length - start < agentContextMessageLimit) {
+      const candidate = available[start - 1];
+      const candidateCharacters = String(candidate.text || "").length
+        + (Array.isArray(candidate.attachments) ? candidate.attachments.reduce((sum, file) => sum + String(file?.name || "").length, 0) : 0);
+      if (characterCount > 0 && characterCount + candidateCharacters > agentContextCharacterLimit) break;
+      characterCount += candidateCharacters;
+      start -= 1;
+    }
     return {
       afterSequence,
       throughSequence,
-      messages: messages.filter((message) => message.sequence > afterSequence
-        && message.sequence <= throughSequence),
+      messages: available.slice(start),
+      omittedMessageCount: start,
+      totalMessageCount: available.length,
     };
   };
 

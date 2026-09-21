@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { readLocalCache, writeLocalCache } from "../../../shared/state/localCache";
 import { contextApi } from "../data/contextApi";
 import type { ContextStatus } from "../model/types";
@@ -53,6 +53,9 @@ const cachedStatus = (threadId: string) => {
 };
 
 export function useContextManagement(threadId: string) {
+  const refreshVersion = useRef(0);
+  const activeThread = useRef(threadId);
+  activeThread.current = threadId;
   const [storedStatus, setStoredStatus] = useState<ContextStatus>(() => cachedStatus(threadId));
   const status = storedStatus.threadId === threadId
     ? storedStatus
@@ -63,12 +66,14 @@ export function useContextManagement(threadId: string) {
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     if (!threadId) return null;
+    const version = ++refreshVersion.current;
     try {
       const next = await contextApi.status(threadId, signal);
+      if (signal?.aborted || version !== refreshVersion.current || activeThread.current !== threadId) return null;
       setStatus(next);
       return next;
     } catch (reason) {
-      if (!signal?.aborted) {
+      if (!signal?.aborted && version === refreshVersion.current && activeThread.current === threadId) {
         setStatus((current) => ({
           ...current,
           phase: "failed",
@@ -88,8 +93,25 @@ export function useContextManagement(threadId: string) {
   }, [refresh, threadId]);
 
   const handleEvent = useCallback((event: ContextStatus) => {
-    if (event.type === "context_status" && event.threadId === threadId) setStatus(event);
+    if (event.type === "context_status" && event.threadId === activeThread.current) {
+      ++refreshVersion.current;
+      setStatus((current) => current.threadId === event.threadId && current.updatedAt && event.updatedAt
+        && Date.parse(event.updatedAt) < Date.parse(current.updatedAt) ? current : event);
+    }
   }, [threadId]);
+
+  const applyModelSettings = useCallback((changedThreadId: string, settings: { model: string; reasoningEffort: string }) => {
+    if (activeThread.current === changedThreadId) ++refreshVersion.current;
+    const current = cachedStatus(changedThreadId);
+    const modelChanged = Boolean(settings.model && current.model && settings.model !== current.model);
+    const next = rememberStatus({
+      ...current,
+      ...settings,
+      ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null } : {}),
+      updatedAt: new Date().toISOString(),
+    });
+    if (activeThread.current === changedThreadId) setStoredStatus(next);
+  }, []);
 
   const compact = useCallback(async () => {
     if (!threadId || status.phase === "compacting") return false;
@@ -121,5 +143,5 @@ export function useContextManagement(threadId: string) {
     }
   }, [threadId]);
 
-  return { status, handleEvent, compact, setThreshold, refresh };
+  return { status, handleEvent, compact, setThreshold, refresh, applyModelSettings };
 }

@@ -32,7 +32,7 @@ export function SlashCommandMenu({ options, collapsedGroups, activeIndex, onActi
   let visibleIndex = 0;
 
   return (
-    <div className={styles.menu} role="listbox" aria-label="选择 Codex 命令">
+    <div className={styles.menu} data-capability-menu role="listbox" aria-label="选择 Codex 命令">
       <div className={styles.heading}>命令</div>
       {groups.map((group) => {
         const GroupIcon = iconForGroup[group] || Bot;

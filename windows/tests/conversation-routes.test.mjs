@@ -29,6 +29,73 @@ const invokeGet = (route, pathname) => {
   return { response, promise: route(request, response, new URL(`http://127.0.0.1${pathname}`)) };
 };
 
+const invokePost = (route, pathname, body) => {
+  const request = Readable.from([Buffer.from(JSON.stringify(body))]);
+  request.method = "POST";
+  request.url = pathname;
+  const response = {
+    status: 0,
+    body: "",
+    writeHead(status) { this.status = status; },
+    end(value) { this.body = value || ""; },
+  };
+  return { response, promise: route(request, response, new URL(`http://127.0.0.1${pathname}`)) };
+};
+
+test("reads and answers the matching Codex user-input request", async () => {
+  const pending = {
+    id: 41,
+    method: "item/tool/requestUserInput",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      isBlocking: true,
+      questions: [{
+        id: "choice",
+        header: "处理方式",
+        question: "请选择下一步",
+        isOther: true,
+        isSecret: false,
+        options: [{ label: "继续", description: "沿用当前设置" }],
+      }],
+    },
+  };
+  const submitted = [];
+  const events = [];
+  const statuses = [];
+  const route = createConversationRoutes({
+    conversations: {
+      getPendingUserInput: async () => pending,
+      respondToUserInput: async (...args) => submitted.push(args),
+    },
+    execution: {
+      getStatus: () => ({ active: true, turnId: "turn-1" }),
+      publishStatus: (...args) => statuses.push(args),
+    },
+    contextManagement: {},
+    media: { resolveMany: () => [] },
+    publishThreadEvent: (...args) => events.push(args),
+  });
+
+  const read = invokeGet(route, "/api/session/user-input?threadId=thread-1");
+  await read.promise;
+  assert.equal(read.response.status, 200);
+  assert.equal(JSON.parse(read.response.body).request.questions[0].question, "请选择下一步");
+
+  const answer = invokePost(route, "/api/session/user-input", {
+    threadId: "thread-1",
+    requestId: 41,
+    answers: { choice: { answers: ["继续"] } },
+  });
+  await answer.promise;
+
+  assert.equal(answer.response.status, 200);
+  assert.deepEqual(submitted, [["thread-1", 41, { choice: { answers: ["继续"] } }]]);
+  assert.equal(statuses[0][1].phase, "working");
+  assert.equal(events[0][1].type, "user_input_resolved");
+});
+
 test("shows the real Runtime thread for a group employee conversation while keeping it read-only", async () => {
   const binding = {
     conversationId: "group:current-project:manager",

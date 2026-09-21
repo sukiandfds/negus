@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 const STATUS_LABELS = {
   planned: "待处理",
@@ -142,6 +143,110 @@ const within = (root, target) => {
   return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}${path.sep}`);
 };
 
+const pageDraftStateFile = (projectRoot) => path.resolve(projectRoot, "runtime", "project-page-drafts.json");
+
+const readPageDraftState = async (projectRoot) => {
+  try {
+    const parsed = JSON.parse(await fs.readFile(pageDraftStateFile(projectRoot), "utf8"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const writePageDraftState = async (projectRoot, drafts) => {
+  const file = pageDraftStateFile(projectRoot);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  await fs.writeFile(temporary, `${JSON.stringify(drafts, null, 2)}\n`, "utf8");
+  await fs.rename(temporary, file);
+};
+
+const inferPageComponents = (request) => {
+  const text = String(request || "").toLowerCase();
+  const components = [{ type: "heading", label: "页面标题", description: "用于说明这个工作页面的目的" }];
+  if (/上传|附件|发票|文件|图片|upload|file/u.test(text)) {
+    components.push({ type: "file-upload", label: "文件上传", description: "选择文件并保留待处理记录" });
+  }
+  if (/表格|列表|记录|进度|table|list|status/u.test(text)) {
+    components.push({ type: "table", label: "记录列表", description: "展示后续接入的数据记录" });
+  }
+  if (/预约|会议|日期|时间|calendar|schedule/u.test(text)) {
+    components.push({ type: "date-time", label: "日期与时间", description: "为预约或排期预留输入" });
+  }
+  if (/按钮|提交|申请|审批|button|submit/u.test(text)) {
+    components.push({ type: "action", label: "提交操作", description: "提交前需要接入真实业务处理" });
+  }
+  if (components.length === 1) components.push({ type: "content", label: "说明内容", description: "根据需求补充的工作说明区域" });
+  components.push({ type: "empty-state", label: "空状态", description: "暂无真实数据时显示清晰提示" });
+  return components.map((component, index) => ({ id: `component-${index + 1}`, ...component }));
+};
+
+const pageDraft = ({ id, request, location, createdAt, updatedAt }) => {
+  const cleanRequest = String(request || "").trim();
+  const cleanLocation = String(location || "").trim();
+  const title = cleanRequest.split(/[。.!！?？\n]/u)[0].slice(0, 80) || "未命名工作页面";
+  return {
+    id,
+    type: "page_draft",
+    title,
+    request: cleanRequest,
+    location: cleanLocation,
+    status: "draft",
+    statusLabel: "待发布",
+    createdAt,
+    updatedAt,
+    components: inferPageComponents(cleanRequest),
+    dataBinding: {
+      status: "not_connected",
+      statusLabel: "未连接真实业务数据",
+      message: "这是结构化页面草稿；发布前需要确认数据来源、权限和业务动作。",
+    },
+    publication: { status: "draft", statusLabel: "待确认发布", canPublish: false },
+    source: "runtime/project-page-drafts.json",
+  };
+};
+
+export const readProjectPageDrafts = async ({ projectRoot }) => (await readPageDraftState(projectRoot))
+  .filter((draft) => draft && typeof draft === "object" && draft.id)
+  .sort((left, right) => String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")));
+
+export const readProjectPageDraft = async ({ projectRoot, draftId }) => {
+  const draft = (await readProjectPageDrafts({ projectRoot })).find((candidate) => candidate.id === draftId);
+  if (!draft) {
+    const error = new Error("页面草稿不存在");
+    error.statusCode = 404;
+    throw error;
+  }
+  return draft;
+};
+
+export const createProjectPageDraft = async ({ projectRoot, request, location }) => {
+  const cleanRequest = String(request || "").trim();
+  const cleanLocation = String(location || "").trim();
+  if (cleanRequest.length < 4) {
+    const error = new Error("请至少描述需要什么页面或功能");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (cleanRequest.length > 2000 || cleanLocation.length > 300) {
+    const error = new Error("页面需求或位置描述过长");
+    error.statusCode = 413;
+    throw error;
+  }
+  const now = new Date().toISOString();
+  const draft = pageDraft({
+    id: `PAGE-${now.replace(/\D/g, "").slice(0, 14)}-${randomUUID().slice(0, 8).toUpperCase()}`,
+    request: cleanRequest,
+    location: cleanLocation || "项目工作区",
+    createdAt: now,
+    updatedAt: now,
+  });
+  const drafts = await readPageDraftState(projectRoot);
+  await writePageDraftState(projectRoot, [draft, ...drafts].slice(0, 200));
+  return draft;
+};
+
 const readText = async (file) => {
   try {
     return await fs.readFile(file, "utf8");
@@ -279,11 +384,12 @@ export const readProjectManagement = async ({ project, projectRoot }) => {
   const dataRoot = path.resolve(projectRoot, "docs", "project-management");
   const projectPath = path.join(dataRoot, "PROJECT.md");
   const indexPath = path.join(dataRoot, "INDEX.md");
-  const [projectMarkdown, indexMarkdown, projectStat, indexStat] = await Promise.all([
+  const [projectMarkdown, indexMarkdown, projectStat, indexStat, pageDrafts] = await Promise.all([
     fs.readFile(projectPath, "utf8"),
     fs.readFile(indexPath, "utf8"),
     fs.stat(projectPath),
     fs.stat(indexPath),
+    readProjectPageDrafts({ projectRoot }),
   ]);
   const indexRows = parseTable(sectionByHeading(indexMarkdown, ["条目目录", "项目条目", "工作项目录"]));
   const entries = (await Promise.all(indexRows.map((row) => readEntry({ dataRoot, row })))).filter(Boolean);
@@ -323,6 +429,7 @@ export const readProjectManagement = async ({ project, projectRoot }) => {
       blocked: entries.filter((entry) => entry.status === "blocked").length,
       completed: entries.filter((entry) => ["completed", "accepted"].includes(entry.status)).length,
     },
+    pageDrafts,
     updatedAt: updatedAt === undefined ? indexStat.mtime.toISOString() : new Date(updatedAt).toISOString(),
     source: "docs/project-management",
   };

@@ -167,7 +167,10 @@ export function GroupApp({ active = true, onViewChange }: { active?: boolean; on
         />
         ) : <div className={styles.composerPlaceholder} />}
       />
-      <MemberDialog initialName={group.member?.name || ""} open={!group.member} onSubmit={join} />
+      {/* Do not cover the connection recovery state with a join dialog. If the
+          first snapshot failed and there is no cached room, the user needs the
+          refresh action to recover before choosing a member name. */}
+      <MemberDialog initialName={group.member?.name || ""} open={!group.member && Boolean(snapshot)} onSubmit={join} />
       <MemberProfileDrawer
         profile={profile}
         roomId={group.roomId}

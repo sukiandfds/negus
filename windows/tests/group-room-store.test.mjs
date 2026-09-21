@@ -96,6 +96,31 @@ test("keeps full history and returns date and cursor pages", async (t) => {
   await reloaded.close();
 });
 
+test("bounds Agent context while keeping the full room history readable", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "negus-group-context-limit-"));
+  const stateFile = path.join(directory, "group-room.json");
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  await fs.writeFile(stateFile, JSON.stringify({
+    messages: Array.from({ length: 100 }, (_, index) => ({
+      id: `m-${index + 1}`,
+      sequence: index + 1,
+      createdAt: `2026-08-10T${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}:00.000Z`,
+      authorId: "member-1",
+      authorName: "Hans",
+      text: `message-${index + 1}`,
+    })),
+  }), "utf8");
+  const room = await createGroupRoomStore({ stateFile, project: "negus", broadcast: () => {} });
+  const context = room.getAgentContext("manager");
+
+  assert.equal(room.snapshot().messages.length, 100);
+  assert.equal(context.totalMessageCount, 100);
+  assert.equal(context.omittedMessageCount, 20);
+  assert.deepEqual(context.messages.map((message) => message.text), Array.from({ length: 80 }, (_, index) => `message-${index + 21}`));
+  assert.equal(context.messages.at(-1).sequence, 100);
+  await room.close();
+});
+
 test("deduplicates repeated agent completions by work id", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "negus-group-work-"));
   const stateFile = path.join(directory, "group-room.json");

@@ -39,6 +39,28 @@ test("streams final answers but keeps commentary updates complete", () => {
   assert.equal(tracker.getStatus("thread-1").activities.at(-1).label, "已经完成分析");
 });
 
+test("publishes Codex user-input requests for the web conversation", () => {
+  const events = [];
+  const tracker = createExecutionTracker({ broadcast: (event) => events.push(event) });
+  tracker.markSubmitted("thread-1");
+  tracker.handleProtocolMessage({
+    id: 19,
+    method: "item/tool/requestUserInput",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      isBlocking: true,
+      questions: [{ id: "scope", header: "范围", question: "处理哪些内容？", isOther: true, isSecret: false, options: [] }],
+    },
+  });
+
+  assert.equal(tracker.getStatus("thread-1").phase, "waitingOnUserInput");
+  const requested = events.find((event) => event.type === "user_input_requested");
+  assert.equal(requested.request.requestId, 19);
+  assert.equal(requested.request.questions[0].id, "scope");
+});
+
 test("tracks the active turn id and completed tool activity", () => {
   const tracker = createExecutionTracker({ broadcast: () => {} });
   tracker.markSubmitted("thread-1");

@@ -15,6 +15,7 @@ export interface CodexModel {
 }
 
 export interface ModelUpdateResult {
+  threadId?: string;
   model: string;
   modelProvider: string;
   reasoningEffort: string;

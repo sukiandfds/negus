@@ -654,6 +654,22 @@ export const createEmployeeRuntimeService = ({
     return { employeeId: employee.id, threadId, turnId: current.turnId, status: "interrupted" };
   };
 
+  const pendingUserInput = async (threadId) => {
+    const cleanThreadId = clean(threadId, 120);
+    const employeeId = threadEmployees.get(cleanThreadId);
+    if (!employeeId) throw statusError("员工 Thread 不存在", 404);
+    const runtimeClient = await clientForThread(cleanThreadId, registry.require(employeeId));
+    return runtimeClient.getPendingUserInput?.(cleanThreadId) || null;
+  };
+
+  const respondToUserInput = async (threadId, requestId, answers) => {
+    const cleanThreadId = clean(threadId, 120);
+    const employeeId = threadEmployees.get(cleanThreadId);
+    if (!employeeId) throw statusError("员工 Thread 不存在", 404);
+    const runtimeClient = await clientForThread(cleanThreadId, registry.require(employeeId));
+    return runtimeClient.respondToUserInput?.(cleanThreadId, requestId, answers);
+  };
+
   const close = () => {
     closed = true;
     for (const unsubscribe of clientSubscriptions.values()) unsubscribe?.();
@@ -672,6 +688,8 @@ export const createEmployeeRuntimeService = ({
     getThreadStatus: threadStatus,
     compactContext,
     interrupt,
+    getPendingUserInput: pendingUserInput,
+    respondToUserInput,
     supportsEmployee: (employeeId) => Boolean(registry.get(employeeId)),
     ownsConversation: (binding) => {
       const employee = registry.get(binding?.agentId);
