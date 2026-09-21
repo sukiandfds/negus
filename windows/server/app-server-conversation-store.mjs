@@ -517,9 +517,18 @@ export const createAppServerConversationStore = ({
   const ensureProjectThread = async (threadId) => {
     const thread = await getThread(threadId);
     const belongsToProject = isAllowedProjectRoot(thread?.cwd);
-    const runtimeOptions = belongsToProject ? null : await threadRuntimeOptions(thread);
+    let runtimeOptions = belongsToProject ? null : await threadRuntimeOptions(thread);
     if (!belongsToProject && !runtimeOptions) {
       throw new Error("This conversation does not belong to the current project.");
+    }
+    if (belongsToProject) {
+      let permissions = {};
+      try { permissions = JSON.parse(await fs.readFile(path.join(projectRoot, "runtime", "thread-permissions.json"), "utf8")); }
+      catch (error) { if (error.code !== "ENOENT") throw error; }
+      if (permissions[threadId] === "full-access") runtimeOptions = {
+        resume: { sandbox: "danger-full-access", approvalPolicy: "never" },
+        turn: { sandboxPolicy: { type: "dangerFullAccess" }, approvalPolicy: "never" },
+      };
     }
     threadCache.set(thread.id, thread);
     return { thread, runtimeOptions };
@@ -528,7 +537,7 @@ export const createAppServerConversationStore = ({
   const resumeThread = async (threadId) => {
     const { runtimeOptions } = await ensureProjectThread(threadId);
     const freshRuntime = freshThreadRuntime.get(threadId);
-    if (freshRuntime) return freshRuntime;
+    if (freshRuntime && !runtimeOptions?.resume) return freshRuntime;
     return client.request("thread/resume", { threadId, persistExtendedHistory: true, ...(runtimeOptions?.resume || {}) });
   };
 

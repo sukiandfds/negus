@@ -93,7 +93,7 @@ export function CurrentTasksWidget({ directory, active, connected, onSelect }: {
       <div className={styles.headingRow}><button ref={trigger} className={styles.heading} type="button" aria-haspopup="dialog" onClick={() => setView("expanded")}>
         <Activity size={18} aria-hidden="true" /><h2>当前任务</h2><Maximize2 size={14} aria-label="放大当前任务" />
       </button><button className={styles.refreshButton} type="button" aria-label="刷新当前任务" title="刷新当前任务" disabled={directory.loading || checking} onClick={retry}><RefreshCw size={15} aria-hidden="true" /></button></div>
-      <p className={styles.caption}>{warning ? tasks.length ? "上次更新的任务" : "正在连接" : running.length ? `${running.length} 项进行中` : directory.loading || checking ? "正在同步" : "最近完成"}</p>
+      <p className={styles.caption}>{warning ? tasks.length ? "上次更新的任务" : "正在连接" : running.length ? `${running.length} 项进行中` : !tasks.length && (directory.loading || checking) ? "正在同步" : "最近完成"}</p>
       {items.length ? rows(items) : empty}
       {openError && <p className={styles.warning} role="alert">{openError}</p>}
     </section>
@@ -108,7 +108,7 @@ export function CurrentTasksWidget({ directory, active, connected, onSelect }: {
             <div className={styles.filters} aria-label="任务筛选">{([ ["running", "进行中", running.length], ["completed", "已完成", completed.length], ["other", "暂停与异常", tasks.filter((task) => task.category === "other").length] ] as const).map(([key, title, count]) => <button type="button" key={key} aria-pressed={filter === key} onClick={() => setFilter(key)}>{title} <span>{count}</span></button>)}</div>
             {list.length ? rows(list, true) : <p className={styles.empty}>这里暂时没有任务。</p>}
           </> : <>
-            <p className={styles.summary}>{warning ? "上次读取的任务记录" : directory.loading || checking ? "正在同步任务状态" : running.length ? <><Activity size={17} />{running.length} 项任务正在进行</> : <><CheckCircle2 size={17} />最近完成的任务</>}</p>
+            <p className={styles.summary}>{warning ? "上次读取的任务记录" : !tasks.length && (directory.loading || checking) ? "正在同步任务状态" : running.length ? <><Activity size={17} />{running.length} 项任务正在进行</> : <><CheckCircle2 size={17} />最近完成的任务</>}</p>
             {items.length ? rows(items, true) : empty}
           </>}
           {openError && <p className={styles.warning} role="alert">{openError}</p>}

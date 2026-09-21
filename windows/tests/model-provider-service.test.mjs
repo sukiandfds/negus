@@ -18,6 +18,37 @@ const withTemporaryRoot = async (run) => {
   try { await run(root); } finally { await fs.rm(root, { recursive: true, force: true }); }
 };
 
+test("manual provider discovery adds new Grok models, persists routing and retains cache on failure", async () => {
+  await withTemporaryRoot(async (root) => {
+    let fail = false;
+    let calls = 0;
+    const options = { projectRoot: root,
+      sharedConfig: { runtimeProviders: async () => [] },
+      credentialStore: { read: async () => 'test-key', isConfigured: async () => true },
+      fetchModels: async (url, init) => {
+        calls += 1;
+        assert.equal(url.href, 'https://fushengyunsuan.cn/v1/models');
+        assert.equal(init.headers.Authorization, 'Bearer test-key');
+        assert.equal(init.redirect, 'error');
+        if (fail) throw new Error('offline');
+        return { ok: true, json: async () => ({ data: [{ id: 'grok-4.7' }, { id: 'gpt-other' }] }) };
+      },
+    };
+    const service = createModelProviderService(options);
+    await Promise.all([service.refreshProviderModels('fusheng-grok'), service.refreshProviderModels('fusheng-grok')]);
+    assert.equal(calls, 1);
+    assert.equal(service.resolveRoute({ model: 'grok-4.7' }).modelProviderId, 'fusheng-grok');
+    assert.equal(service.resolveRoute({ model: 'gpt-other' }).modelProviderId, 'current');
+    const restored = createModelProviderService(options);
+    assert.ok((await restored.listModels()).some((entry) => entry.model === 'grok-4.7'));
+    assert.equal(restored.resolveRoute({ model: 'grok-4.7' }).modelProviderId, 'fusheng-grok');
+    fail = true;
+    await assert.rejects(service.refreshProviderModels('fusheng-grok'), /目录读取失败/);
+    assert.ok((await service.listModels()).some((entry) => entry.model === 'grok-4.7'));
+    service.close(); restored.close();
+  });
+});
+
 test("app-server environment keeps the default behavior unless isolation is requested", () => {
   const base = {
     PATH: "C:\\tools",

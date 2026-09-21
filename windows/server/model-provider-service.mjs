@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from 'node:os';
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { createHash } from 'node:crypto';
 import { createAppServerClient } from "./app-server-client.mjs";
@@ -148,7 +149,15 @@ export const createModelProviderCredentialStore = ({
     return { providerId: requireProviderId(providerId), file };
   };
 
-  return { credentialPath, isConfigured, save };
+  const read = async (providerId) => {
+    try {
+      const { stdout } = await promisify(execFile)("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+        "-File", credentialHelper, "-Mode", "read", "-CredentialFile", credentialPath(providerId)],
+      { windowsHide: true, timeout: 5000, maxBuffer: 16384 });
+      return stdout.trim();
+    } catch { throw statusError("无法读取渠道凭据", 503); }
+  };
+  return { credentialPath, isConfigured, save, read };
 };
 
 export const renderModelProviderConfig = ({
@@ -219,6 +228,7 @@ export const createModelProviderService = ({
   credentialStore = createModelProviderCredentialStore({ root: credentialRoot, credentialHelper }),
   createClient = createAppServerClient,
   sharedConfig = createCcSwitchConfigService(),
+  fetchModels = globalThis.fetch,
 } = {}) => {
   if (!projectRoot) throw new Error("Project root is required for model provider routing.");
   const providerMap = new Map(providers.map(normalizeProvider).map((provider) => [provider.id, provider]));
@@ -230,8 +240,17 @@ export const createModelProviderService = ({
   const ownedClients = new Map();
   let refreshing = null;
   const fingerprints = new Map();
+  const catalogFile = path.join(runtimeRoot, 'model-catalog.json');
+  let catalogs = {};
+  const catalogReady = fs.readFile(catalogFile, 'utf8').then((text) => { catalogs = JSON.parse(text); }).catch(() => {});
+  const applyCatalog = (provider) => {
+    const cached = catalogs?.[provider.id];
+    if (cached?.baseUrl !== provider.baseUrl || !Array.isArray(cached.models)) return;
+    provider.models = [...new Map([...provider.models, ...cached.models].map((model) => [model.model, model])).values()];
+  };
   const refreshShared = () => {
     if (!refreshing) refreshing = (async () => {
+      await catalogReady;
       const entries = await sharedConfig.runtimeProviders();
       for (const entry of entries) {
         // Running clients retain their configuration until the service is safely restarted.
@@ -246,8 +265,51 @@ export const createModelProviderService = ({
       for (const id of providerMap.keys()) {
         if (id.startsWith('ccswitch_') && !known.has(id) && !clientPromises.has(id)) { providerMap.delete(id); fingerprints.delete(id); }
       }
+      for (const provider of providerMap.values()) applyCatalog(provider);
     })().finally(() => { refreshing = null; });
     return refreshing;
+  };
+
+  const catalogRequests = new Map();
+  let catalogWrite = Promise.resolve();
+  const refreshProviderModels = (providerId) => {
+    const id = requireProviderId(providerId);
+    if (catalogRequests.has(id)) return catalogRequests.get(id);
+    const request = (async () => {
+      await refreshShared();
+      const provider = providerMap.get(id);
+      if (!provider || provider.mode === 'current') return;
+      const credential = await credentialStore.read(id);
+      let payload;
+      try {
+        const url = new URL(`${provider.baseUrl.replace(/\/$/, '')}/models`);
+        if (url.protocol !== 'https:' || url.username || url.password) throw new Error('invalid URL');
+        const response = await fetchModels(url, { headers: { Authorization: `Bearer ${credential}` }, redirect: 'error', signal: AbortSignal.timeout(10000) });
+        if (!response.ok) throw new Error('upstream failed');
+        payload = await response.json();
+        if (!Array.isArray(payload.data)) throw new Error('invalid models');
+      } catch { throw statusError('渠道模型目录读取失败，请稍后重试', 502); }
+      const ids = [...new Set(payload.data.map((entry) => entry?.id).filter((model) => typeof model === 'string'
+        && model.length > 0 && model.length <= 120 && !model.includes('::')
+        && (id !== GROK_MODEL_PROVIDER_ID || /^grok-/i.test(model))))];
+      if (!ids.length) throw statusError('渠道未返回可用模型', 502);
+      const models = ids.map((model) => provider.models.find((entry) => entry.model === model) || {
+        id: model, model, displayName: model, description: provider.displayName, isDefault: false,
+        supportedReasoningEfforts: [], experimental: false,
+      });
+      catalogs[id] = { baseUrl: provider.baseUrl, models };
+      applyCatalog(provider);
+      catalogWrite = catalogWrite.catch(() => {}).then(async () => {
+        await fs.mkdir(runtimeRoot, { recursive: true });
+        const temporary = `${catalogFile}.tmp`;
+        await fs.writeFile(temporary, JSON.stringify(catalogs), 'utf8');
+        await fs.rename(temporary, catalogFile);
+      });
+      await catalogWrite;
+    })();
+    catalogRequests.set(id, request);
+    void request.finally(() => catalogRequests.delete(id)).catch(() => {});
+    return request;
   };
 
   const modelOwner = (model) => {
@@ -294,6 +356,9 @@ export const createModelProviderService = ({
       const available = await credentialStore.isConfigured(provider.id);
       external.push(...provider.models.map((model) => ({
         ...model,
+        ...(provider.id === GROK_MODEL_PROVIDER_ID && model.model === 'grok-4.7'
+          ? { supportedReasoningEfforts: ['low', 'medium', 'high'].map((reasoningEffort) => ({ reasoningEffort, description: '' })) }
+          : {}),
         ...(provider.id.startsWith('ccswitch_') ? { supportedReasoningEfforts: current.find((entry) => entry.model === model.model)?.supportedReasoningEfforts || model.supportedReasoningEfforts } : {}),
         ...(provider.id.startsWith('ccswitch_') ? { id: `${provider.id}::${model.model}`, model: `${provider.id}::${model.model}`, displayName: `${provider.displayName} · ${model.model}` } : {}),
         modelProviderId: provider.id,
@@ -371,6 +436,7 @@ export const createModelProviderService = ({
     credentials: credentialStore,
     sharedConfig,
     refreshShared,
+    refreshProviderModels,
     prepareResumeFile,
     close,
   };

@@ -152,24 +152,30 @@ export function ProjectStatusControl({
   useEffect(() => {
     if (!open || !identityKey) return undefined;
     let active = true;
+    let busy = false;
     const controller = new AbortController();
     const load = () => {
+      if (!active || busy || document.hidden) return;
+      busy = true;
       const query = new URLSearchParams(projectId ? { projectId } : { projectRoot });
-      void fetchJson<ProjectStatus>(`/api/project-status?${query}`, controller.signal)
+      void fetchJson<ProjectStatus>(`/api/project-status?${query}`, AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]))
         .then((next) => {
           if (!active || !validStatus(next)) return;
-          setStatus(next);
+          setStatus((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
           setLoadError(false);
           writeCache(identityKey, next);
         })
-        .catch(() => { if (active) setLoadError(true); });
+        .catch(() => { if (active) setLoadError(true); })
+        .finally(() => { busy = false; });
     };
     load();
     const timer = window.setInterval(load, 2500);
+    document.addEventListener("visibilitychange", load);
     return () => {
       active = false;
       controller.abort();
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", load);
     };
   }, [identityKey, open, projectId, projectRoot]);
 

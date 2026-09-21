@@ -15,6 +15,7 @@ export function useCurrentTasks(directory: ReturnType<typeof useProjectDirectory
   const [checking, setChecking] = useState(false);
   const [goalError, setGoalError] = useState(false);
   const [revision, setRevision] = useState(0);
+  const [checkRevision, setCheckRevision] = useState(0);
   const latest = useRef(directory);
   latest.current = directory;
   useEffect(() => {
@@ -31,7 +32,7 @@ export function useCurrentTasks(directory: ReturnType<typeof useProjectDirectory
   useEffect(() => {
     const timer = window.setTimeout(() => writeLocalCache(cacheKey, { goals, checks: [...checked.current] }), 300);
     return () => window.clearTimeout(timer);
-  }, [goals]);
+  }, [goals, checkRevision]);
   const eventVersions = useRef<Record<string, ThreadGoal | null>>({});
   useEffect(() => {
     const changed = Object.fromEntries(Object.entries(directory.goalByThread).filter(([id, goal]) => eventVersions.current[id] !== goal));
@@ -59,6 +60,7 @@ export function useCurrentTasks(directory: ReturnType<typeof useProjectDirectory
         return previous.signature !== signature || Date.now() - previous.at > 300_000
           || (goal && goal.status !== "complete" && Date.now() - previous.at > 15_000);
       });
+      const hasChecks = queue.length > 0;
       queue.sort((a, b) => Number(Boolean(latest.current.statusByThread[b.threadId!]?.active || goalsRef.current[b.threadId!])) - Number(Boolean(latest.current.statusByThread[a.threadId!]?.active || goalsRef.current[a.threadId!])));
       setChecking(queue.length > 0);
       // Read-only native goal queries; bounded concurrency and no model generation.
@@ -73,7 +75,7 @@ export function useCurrentTasks(directory: ReturnType<typeof useProjectDirectory
           try {
             const result = await fetchJson<GoalResponse>(`/api/session/goal?${query}`, AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]));
             if (controller.signal.aborted) return;
-            if (eventVersions.current[id] === version) setGoals((current) => ({ ...current, [id]: result.goal || null }));
+            if (eventVersions.current[id] === version) setGoals((current) => JSON.stringify(current[id] ?? null) === JSON.stringify(result.goal || null) ? current : ({ ...current, [id]: result.goal || null }));
             checked.current.set(id, { signature, at: Date.now(), failed: false });
           } catch {
             if (controller.signal.aborted) return;
@@ -82,6 +84,7 @@ export function useCurrentTasks(directory: ReturnType<typeof useProjectDirectory
         }
       }));
       if (!controller.signal.aborted) {
+        if (hasChecks) setCheckRevision((value) => value + 1);
         setGoalError(unique.some((entry) => checked.current.get(entry.threadId!)?.failed));
         setChecking(false);
         busy = false;

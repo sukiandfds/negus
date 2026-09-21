@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, RefreshCw } from "lucide-react";
 import { ChannelManager } from './ChannelManager';
 import type { CodexModel } from "../model/types";
 import { formatModelDisplayName } from "../model/modelDisplayName";
@@ -60,7 +60,6 @@ export function ModelSettingsControl({
     setDraftModel(currentModel);
     setDraftEffort(currentEffort);
     setApplyError("");
-    window.dispatchEvent(new Event('negus-channels-updated'));
     setOpen(true);
   };
 
@@ -132,8 +131,9 @@ export function ModelSettingsControl({
       </button>
       {open ? (
         <div className={styles.settingsMenu} role="dialog" aria-label="模型设置">
-          <label className={styles.settingRow}>
+          <div className={styles.settingRow}>
             <span>模型</span>
+            <div className={styles.modelPicker}>
             <ModelSelect
               currentModel={draftModel}
               models={visibleModels}
@@ -143,7 +143,15 @@ export function ModelSettingsControl({
               disabled={disabled}
               onChange={stageModel}
             />
-          </label>
+            <button className={styles.refreshButton} type="button"
+              title={loading ? "正在刷新模型" : "刷新渠道模型"}
+              aria-label="刷新渠道模型" aria-busy={loading}
+              disabled={loading || busy}
+              onClick={() => window.dispatchEvent(new CustomEvent('negus-channels-updated', { detail: { providerId: selectedProvider } }))}>
+              <RefreshCw size={14} aria-hidden="true" />
+            </button>
+            </div>
+          </div>
           <label className={styles.settingRow}>
             <span>推理强度</span>
             <ReasoningEffortSelect
@@ -173,7 +181,7 @@ export function ModelSettingsControl({
           </div>
         </div>
       ) : null}
-      {channelsOpen ? <ChannelManager currentModel={currentModel} disabled={disabled} onSwitch={(model) => onModelChange(model, currentEffort)} onClose={() => setChannelsOpen(false)} /> : null}
+      {channelsOpen ? <ChannelManager currentModel={currentModel} models={models} disabled={disabled} onSwitch={(model) => onModelChange(model, currentEffort)} onClose={() => setChannelsOpen(false)} /> : null}
     </div>
   );
 }

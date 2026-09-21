@@ -90,3 +90,45 @@ test("reviewer failures return a failed result without throwing", async (t) => {
   assert.match(result.error, /review unavailable/);
   assert.equal(events.at(-1).type, "employee_growth_failed");
 });
+
+test("directory bounds employee history reads and shares concurrent scans without retaining stale results", async () => {
+  let release;
+  let scans = 0;
+  const reads = [];
+  let activity = "2026-09-22T01:00:00.000Z";
+  const directory = createEmployeeProjectDirectory({
+    project: "negus", projectRoot: "D:/fixture",
+    registry: { list: () => [{ id: "developer", mainThreadId: "employee-thread", conversationId: "employee-conversation" }] },
+    employeeConversations: { readMessages: async () => [{ role: "user", createdAt: "2026-09-21T00:00:00.000Z" }] },
+    conversations: {
+      findSession: async (...args) => { reads.push(args); return { updatedAt: activity }; },
+      listSessions: async () => { scans += 1; await new Promise((resolve) => { release = resolve; }); return []; },
+    },
+  });
+  const first = directory.list();
+  const duplicate = directory.list();
+  assert.equal(first, duplicate);
+  await new Promise(setImmediate);
+  assert.equal(scans, 1);
+  release();
+  const result = await first;
+  assert.deepEqual(reads, [["employee-thread", "all", { limit: 1 }]]);
+  assert.equal(result.projects.find((project) => project.kind === "employee").lastActivityAt, activity);
+  activity = "2026-09-22T02:00:00.000Z";
+  const next = directory.list();
+  await new Promise(setImmediate);
+  assert.equal(scans, 2);
+  release();
+  assert.equal((await next).projects.find((project) => project.kind === "employee").lastActivityAt, activity);
+});
+
+test("failed directory scan releases the shared request for retry", async () => {
+  let fail = true;
+  const directory = createEmployeeProjectDirectory({
+    project: "negus", projectRoot: "D:/fixture",
+    registry: { list: () => { if (fail) throw new Error("unavailable"); return []; } },
+  });
+  await assert.rejects(directory.list(), /unavailable/);
+  fail = false;
+  assert.equal((await directory.list()).projects.length, 1);
+});

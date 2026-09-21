@@ -211,6 +211,8 @@ export const createConversationRoutes = ({
     return true;
   }
   if (url.pathname === "/api/models" && request.method === "GET") {
+    const refreshProvider = url.searchParams.get("refreshProvider");
+    if (refreshProvider && modelProviders) await modelProviders.refreshProviderModels(refreshProvider);
     const currentModels = await conversations.listModels();
     let includeAgentProviders = url.searchParams.get("scope") === "agents";
     const conversationId = String(url.searchParams.get("conversationId") || "").trim();

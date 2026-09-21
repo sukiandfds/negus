@@ -23,6 +23,9 @@ export function useGroupRoom() {
   const sendingRef = useRef(false);
   const activeRoomIdRef = useRef(roomId);
   const sendGenerationRef = useRef(0);
+  const roomGenerationRef = useRef(0);
+  const refreshVersionRef = useRef(0);
+  const historyRequestRef = useRef<AbortController | null>(null);
   const pendingMessagesRef = useRef(new Map<string, GroupMessage>());
   const historyLoadingRef = useRef(false);
   activeRoomIdRef.current = roomId;
@@ -39,24 +42,29 @@ export function useGroupRoom() {
   }, []);
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
+    const generation = roomGenerationRef.current;
+    const version = ++refreshVersionRef.current;
+    const isCurrent = () => !signal?.aborted && generation === roomGenerationRef.current
+      && roomId === activeRoomIdRef.current && version === refreshVersionRef.current;
     try {
       const next = await groupApi.snapshot(roomId, signal);
-      setSnapshot((current) => reconcileGroupSnapshot(
+      if (!isCurrent()) return;
+      setSnapshot((current) => isCurrent() ? reconcileGroupSnapshot(
         next,
         current,
         [...pendingMessagesRef.current.values()],
-      ));
+      ) : current);
       setError("");
     } catch (reason) {
-      if (!signal?.aborted) setError(reason instanceof Error ? reason.message : String(reason));
+      if (isCurrent()) setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [roomId]);
 
-  const applyHistoryPage = useCallback((page: GroupMessagePage, replace = false) => {
+  const applyHistoryPage = useCallback((page: GroupMessagePage, replace: boolean, generation: number) => {
     setSnapshot((current) => {
-      if (!current) return current;
+      if (!current || generation !== roomGenerationRef.current) return current;
       const messages = replace
         ? page.messages
         : page.messages.reduce((next, message) => upsertGroupMessage(next, message), current.messages);
@@ -84,47 +92,64 @@ export function useGroupRoom() {
 
   const loadHistory = useCallback(async (params: Record<string, string | number | undefined>, replace = false) => {
     if (historyLoadingRef.current) return false;
+    const generation = roomGenerationRef.current;
+    const controller = new AbortController();
+    historyRequestRef.current = controller;
+    const isCurrent = () => !controller.signal.aborted && generation === roomGenerationRef.current
+      && roomId === activeRoomIdRef.current;
     historyLoadingRef.current = true;
     setHistoryLoading(true);
     setError("");
     try {
-      const page = await groupApi.messages(roomId, params);
+      const page = await groupApi.messages(roomId, params, controller.signal);
+      if (!isCurrent()) return false;
       if (!page.found) {
         setHistoryNotice("当天无消息");
         return false;
       }
-      applyHistoryPage(page, replace);
+      applyHistoryPage(page, replace, generation);
       setHistoryNotice("");
       return page.messages.length > 0;
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (isCurrent()) setError(reason instanceof Error ? reason.message : String(reason));
       return false;
     } finally {
-      historyLoadingRef.current = false;
-      setHistoryLoading(false);
+      if (historyRequestRef.current === controller) {
+        historyRequestRef.current = null;
+        historyLoadingRef.current = false;
+        setHistoryLoading(false);
+      }
     }
   }, [applyHistoryPage, roomId]);
 
   const loadOlder = useCallback(() => loadHistory({ before: snapshot?.history?.oldestSequence || snapshot?.messages[0]?.sequence }, false), [loadHistory, snapshot?.history?.oldestSequence, snapshot?.messages]);
   const loadNewer = useCallback(() => loadHistory({ after: snapshot?.history?.newestSequence || snapshot?.messages.at(-1)?.sequence }, false), [loadHistory, snapshot?.history?.newestSequence, snapshot?.messages]);
   const jumpToDate = useCallback(async (date: string) => {
+    const generation = roomGenerationRef.current;
     const moved = await loadHistory({ date }, true);
-    if (moved) setHistoryNavigation((current) => ({ version: current.version + 1, align: "top" }));
+    if (moved && generation === roomGenerationRef.current) setHistoryNavigation((current) => ({ version: current.version + 1, align: "top" }));
     return moved;
   }, [loadHistory]);
   const returnToLatest = useCallback(async () => {
+    const generation = roomGenerationRef.current;
     const moved = await loadHistory({}, true);
-    if (moved) setHistoryNavigation((current) => ({ version: current.version + 1, align: "bottom" }));
+    if (moved && generation === roomGenerationRef.current) setHistoryNavigation((current) => ({ version: current.version + 1, align: "bottom" }));
     return moved;
   }, [loadHistory]);
 
   useEffect(() => {
     const controller = new AbortController();
+    const generation = roomGenerationRef.current;
     void refresh(controller.signal).finally(() => {
-      if (!controller.signal.aborted) setInitialSyncReady(true);
+      if (!controller.signal.aborted && generation === roomGenerationRef.current) setInitialSyncReady(true);
     });
     return () => controller.abort();
   }, [refresh]);
+
+  useEffect(() => () => {
+    roomGenerationRef.current += 1;
+    historyRequestRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     if (!snapshot) return;
@@ -134,8 +159,15 @@ export function useGroupRoom() {
 
   const selectRoom = useCallback((nextRoomId: string) => {
     const next = String(nextRoomId || "").trim();
-    if (!next || next === roomId) return;
+    if (!next || next === activeRoomIdRef.current) return;
+    if (snapshot) writeGroupSnapshot(snapshot);
     const cached = readGroupSnapshot(next);
+    roomGenerationRef.current += 1;
+    activeRoomIdRef.current = next;
+    historyRequestRef.current?.abort();
+    historyRequestRef.current = null;
+    historyLoadingRef.current = false;
+    setHistoryLoading(false);
     sendGenerationRef.current += 1;
     sendingRef.current = false;
     pendingMessagesRef.current.clear();
@@ -147,7 +179,7 @@ export function useGroupRoom() {
     setError("");
     setHistoryNotice("");
     setHistoryNavigation((current) => ({ version: current.version + 1, align: "bottom" }));
-  }, [roomId]);
+  }, [snapshot]);
 
   useEffect(() => {
     if (!member) return;

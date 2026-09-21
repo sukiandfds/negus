@@ -69,7 +69,7 @@ export const createEmployeeProjectDirectory = ({
     } catch {}
     if (threadId) {
       try {
-        const nativeSession = await conversations?.findSession?.(threadId, "all", {});
+        const nativeSession = await conversations?.findSession?.(threadId, "all", { limit: 1 });
         timestamps.push(nativeSession?.updatedAt);
       } catch {}
     }
@@ -269,5 +269,17 @@ export const createEmployeeProjectDirectory = ({
     };
   };
 
-  return { list };
+  // Share only ongoing reads. A later refresh must still see current activity.
+  let pendingList = null;
+  return {
+    list: () => {
+      if (pendingList) return pendingList;
+      const request = list();
+      pendingList = request;
+      void request.finally(() => {
+        if (pendingList === request) pendingList = null;
+      }).catch(() => {});
+      return request;
+    },
+  };
 };

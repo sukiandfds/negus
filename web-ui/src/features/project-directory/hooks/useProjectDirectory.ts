@@ -37,6 +37,7 @@ export function useProjectDirectory(currentStatus?: ExecutionStatus) {
   const [loading, setLoading] = useState(!initialProjects.length);
   const [error, setError] = useState("");
   const projectsRef = useRef(projects);
+  const refreshVersion = useRef(0);
   projectsRef.current = projects;
 
   const cacheStatus = useCallback((threadId: string, status?: ProjectRuntimeStatus | null) => {
@@ -47,8 +48,10 @@ export function useProjectDirectory(currentStatus?: ExecutionStatus) {
   }, []);
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
+    const version = ++refreshVersion.current;
     try {
       const next = await projectDirectoryApi.list(signal);
+      if (signal?.aborted || version !== refreshVersion.current) return;
       setProjects((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
       writeLocalCache(projectDirectoryCacheKey, next);
       for (const entry of next) {
@@ -59,10 +62,10 @@ export function useProjectDirectory(currentStatus?: ExecutionStatus) {
       }
       setError("");
     } catch (reason) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || version !== refreshVersion.current) return;
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (!signal?.aborted && version === refreshVersion.current) setLoading(false);
     }
   }, [cacheStatus]);
 

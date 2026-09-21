@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { readModelCatalog, writeModelCatalog } from "../data/modelCatalogCache";
 import { modelApi } from "../data/modelApi";
 import type { CodexModel, ModelUpdateResult } from "../model/types";
@@ -11,8 +11,12 @@ export function useModels(threadId: string, onChanged: (threadId: string, result
   const [changing, setChanging] = useState(false);
   const [error, setError] = useState("");
   const [catalogRevision, setCatalogRevision] = useState(0);
+  const refreshProviderRef = useRef<string | undefined>(undefined);
   useEffect(() => {
-    const refresh = () => setCatalogRevision((value) => value + 1);
+    const refresh = (event: Event) => {
+      refreshProviderRef.current = (event as CustomEvent<{ providerId?: string }>).detail?.providerId;
+      setCatalogRevision((value) => value + 1);
+    };
     window.addEventListener('negus-channels-updated', refresh);
     return () => window.removeEventListener('negus-channels-updated', refresh);
   }, []);
@@ -20,8 +24,11 @@ export function useModels(threadId: string, onChanged: (threadId: string, result
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    void modelApi.list(controller.signal)
+    const refreshProvider = refreshProviderRef.current;
+    refreshProviderRef.current = undefined;
+    void modelApi.list(controller.signal, refreshProvider)
       .then((result) => {
+        if (controller.signal.aborted) return;
         const availableModels = result.filter((entry) => entry.available !== false);
         setModels(availableModels);
         writeModelCatalog(availableModels);

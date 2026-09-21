@@ -4,7 +4,7 @@ import { conversationApi } from "../data/conversationApi";
 import { mergeMessageList, mergeOlderMessages, mergePendingOptimisticMessages, mergeSessionDelta, mergeSessionRefresh } from "../state/conversationMerge";
 import type { ContentSyncState, SessionDelta, SessionDetail, SessionMessage, SessionResponse } from "../model/types";
 
-type LoadOptions = { older?: boolean; quiet?: boolean; retry?: boolean; recovery?: boolean };
+type LoadOptions = { older?: boolean; quiet?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean };
 
 const isSessionDelta = (response: SessionResponse): response is SessionDelta => (
   !Array.isArray((response as SessionDetail).messages)
@@ -40,11 +40,11 @@ export function useConversationSession(initial: InitialConversationState) {
     quiet = false,
     retry = true,
     recovery = false,
+    prefetch = false,
   }: LoadOptions = {}) => {
     const cached = sessionCache.current.get(threadId);
     const isSelected = () => selectedIdRef.current === threadId;
-    if (!older) {
-      requestRef.current?.abort();
+    if (!older && !prefetch && isSelected()) {
       if (cached) {
         setSession(cached);
         setLoadingSession(false);
@@ -54,7 +54,7 @@ export function useConversationSession(initial: InitialConversationState) {
       setSyncing(true);
       setContentSyncState(recovery ? "recovering" : "syncing");
       setSessionError("");
-    } else {
+    } else if (older) {
       if (!cached?.hasMore || (!cached.nextCursor && (cached.nextBefore === null || cached.nextBefore === undefined))) return false;
       if (isSelected()) setLoadingOlder(true);
     }
@@ -73,6 +73,7 @@ export function useConversationSession(initial: InitialConversationState) {
         // never be allowed to turn into an "unchanged" delta.
         ...(recovery ? {} : { contentVersion: cached?.contentVersion }),
       }, controller.signal);
+      if (controller.signal.aborted) return false;
       const latest = sessionCache.current.get(threadId);
       const pendingOptimistic = pendingOptimisticMessagesRef.current.get(threadId) || [];
       const latestWithPending = latest
@@ -142,13 +143,15 @@ export function useConversationSession(initial: InitialConversationState) {
   }, []);
 
   const loadSession = useCallback((threadId: string, options: LoadOptions = {}) => {
+    options = { ...options, recovery: options.recovery || partialSessionIdsRef.current.has(threadId) };
+    if (options.prefetch && sessionCache.current.has(threadId)) return Promise.resolve(true);
     if (options.older) return loadSessionOnce(threadId, options);
     const inFlight = sessionLoadsRef.current.get(threadId);
     if (inFlight) {
       const controller = sessionRequestControllersRef.current.get(threadId);
       if (controller?.signal.aborted) sessionLoadsRef.current.delete(threadId);
       else {
-        pendingSessionSyncRef.current.set(
+        if (!options.prefetch) pendingSessionSyncRef.current.set(
           threadId,
           Boolean(pendingSessionSyncRef.current.get(threadId) || options.recovery),
         );
@@ -179,6 +182,8 @@ export function useConversationSession(initial: InitialConversationState) {
     setSelectedId(threadId);
     const cached = sessionCache.current.get(threadId);
     setSession(cached || null);
+    setLoadingSession(!cached);
+    setSessionError("");
     setLoadingOlder(false);
     setSyncing(Boolean(cached));
     setContentSyncState("syncing");
@@ -200,8 +205,9 @@ export function useConversationSession(initial: InitialConversationState) {
     setSelectedId(threadId);
     const cached = sessionCache.current.get(threadId);
     setSession(cached || null);
-    setLoadingOlder(false);
     setLoadingSession(!cached);
+    setSessionError("");
+    setLoadingOlder(false);
     setSyncing(Boolean(cached));
     setContentSyncState(cached ? "syncing" : "stable");
     return loadSession(threadId, { quiet });
@@ -294,7 +300,7 @@ export function useConversationSession(initial: InitialConversationState) {
   }, [loadSession]);
 
   useEffect(() => () => {
-    requestRef.current?.abort();
+    for (const controller of sessionRequestControllersRef.current.values()) controller.abort();
     window.clearTimeout(retryTimerRef.current);
   }, []);
 

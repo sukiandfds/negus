@@ -80,6 +80,24 @@
 }
 
 .menuHint { padding: 4px 7px 3px; color: var(--color-text-muted); font-size: 11px; }
+.modelPicker { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.modelPicker select { min-width: 0; flex: 1; }
+.refreshButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--control-radius);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.refreshButton:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-text); }
+.refreshButton:disabled { opacity: .45; cursor: default; }
 .menuError { padding: 4px 7px 0; color: var(--color-danger, #e57373); font-size: 11px; line-height: 1.4; }
 
 .settingsActions {

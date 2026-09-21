@@ -272,7 +272,6 @@ export function ConversationView({
   useLayoutEffect(() => {
     if (!active) {
       window.cancelAnimationFrame(followLatestFrameRef.current);
-      positionedThreadIdRef.current = "";
     }
   }, [active]);
 

@@ -55,6 +55,7 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
       const events = new EventSource(groupApi.eventsUrl(), { withCredentials: true });
       sourceRef.current = events;
       events.onopen = () => {
+        if (disposed || sourceRef.current !== events) return;
         const isReconnect = openedOnce;
         openedOnce = true;
         clearReconnectTimer();
@@ -62,6 +63,7 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
         if (isReconnect) void reconcileSnapshot();
       };
       events.onerror = () => {
+        if (disposed || sourceRef.current !== events) return;
         setConnected(false);
         if (reconnectTimerRef.current !== null) return;
         reconnectTimerRef.current = window.setTimeout(() => {
@@ -70,6 +72,7 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
         }, 4000);
       };
       events.onmessage = (message) => {
+      if (disposed || sourceRef.current !== events) return;
       try {
         const event = JSON.parse(message.data) as GroupEvent;
         const eventRoomId = "roomId" in event ? event.roomId : "";
@@ -197,6 +200,7 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
       sourceRef.current?.close();
       sourceRef.current = null;
       if (streamingFrame.current) window.cancelAnimationFrame(streamingFrame.current);
+      streamingFrame.current = 0;
     };
   }, [roomId, setSnapshot]);
 

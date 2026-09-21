@@ -8,7 +8,7 @@ import { readLocalCache } from "../../../shared/state/localCache";
 
 interface ConversationSelection {
   selectedIdRef: MutableRefObject<string>;
-  loadSession: (threadId: string, options?: { older?: boolean; quiet?: boolean; retry?: boolean; recovery?: boolean }) => Promise<boolean>;
+  loadSession: (threadId: string, options?: { older?: boolean; quiet?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean }) => Promise<boolean>;
   adoptSelection: (threadId: string, quiet: boolean) => Promise<boolean>;
   clearSelection: () => void;
   setCreatedSession: (detail: SessionDetail) => void;
@@ -151,6 +151,19 @@ export function useConversationCatalog(
     [refreshSessionsOnce],
   );
   refreshSessionsRef.current = refreshSessions;
+
+  useEffect(() => {
+    if (!initialSyncReady || archivedView || new URLSearchParams(window.location.search).has("agent")) return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      // Warm only a few recent conversations, serially, after the visible one loads.
+      for (const entry of sessions.slice(0, 4)) {
+        if (cancelled || document.hidden || new URLSearchParams(window.location.search).has("agent") || new URLSearchParams(window.location.search).has("conversation")) break;
+        if (entry.threadId !== selection.selectedIdRef.current) await selection.loadSession(entry.threadId, { prefetch: true, quiet: true, retry: false });
+      }
+    }, 800);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [initialSyncReady, archivedView, sessions, selection.loadSession, selection.selectedIdRef]);
 
   const updateArchiveQuery = useCallback((archived: boolean) => {
     const params = new URLSearchParams(window.location.search);
