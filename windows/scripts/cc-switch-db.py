@@ -37,6 +37,22 @@ def main():
                                (request['id'], request['name'], request['config'], request['multiplier'], int(time.time()*1000)))
         connection.commit()
         result = {'saved': True}
+    elif request['action'] == 'delete':
+        connection.execute('BEGIN IMMEDIATE')
+        row = connection.execute("SELECT * FROM providers WHERE app_type='codex' AND id=?",
+                                 (request['id'],)).fetchone()
+        if not row:
+            raise ValueError('Channel not found')
+        if row['is_current']:
+            raise ValueError('Current CC Switch provider cannot be deleted here')
+        backup_dir = os.path.join(os.path.dirname(database), 'backups')
+        os.makedirs(backup_dir, exist_ok=True)
+        backup_path = os.path.join(backup_dir, 'negus-' + str(time.time_ns()) + '.db')
+        with sqlite3.connect(database) as source, sqlite3.connect(backup_path) as target:
+            source.backup(target)
+        connection.execute("DELETE FROM providers WHERE app_type='codex' AND id=?", (request['id'],))
+        connection.commit()
+        result = {'deleted': True}
     else:
         raise ValueError('Invalid action')
     print(json.dumps(result, ensure_ascii=True))

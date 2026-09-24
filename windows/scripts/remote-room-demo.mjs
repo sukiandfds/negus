@@ -199,10 +199,13 @@ const roomIdForProject = (identity) => identity.kind === "personal"
   : `project-room:${identity.projectId}`;
 const projectedGroupText = (message) => {
   const text = String(message?.text || "").trim();
+  const replyName = String(message?.replyTo?.authorName || "").trim();
+  const replyText = String(message?.replyTo?.text || "").trim();
+  const reply = replyName ? `（回复${replyName}${replyText ? `：${replyText}` : ""}）` : "";
   const attachmentNames = (Array.isArray(message?.attachments) ? message.attachments : [])
     .map((file) => String(file?.name || "").trim())
     .filter(Boolean);
-  return [text, attachmentNames.length ? `附件：${attachmentNames.join("、")}` : ""].filter(Boolean).join("\n");
+  return [text, reply, attachmentNames.length ? `附件：${attachmentNames.join("、")}` : ""].filter(Boolean).join("\n");
 };
 const projectedGroupMessage = ({ message, binding, employeeId }) => ({
   id: `group:${binding.roomId}:${message.id}`,
@@ -291,9 +294,12 @@ const employeeConversationStore = await createAgentConversationStore({
   groupRoom,
   roomDirectory: groupRoomDirectory,
 });
-const recordEmployeeGroupContext = async ({ identity, room, agentId, threadId, messages }) => {
+const recordEmployeeGroupContext = async ({ identity, room, agentId, threadId, messages, quotedMessage = null }) => {
   const employee = employeeRegistry.get(agentId);
-  if (!employee || !threadId || !Array.isArray(messages) || !messages.length) return;
+  const delivered = Array.isArray(messages) ? messages.filter(Boolean) : [];
+  if (quotedMessage?.id && !delivered.some((message) => message?.id === quotedMessage.id)) delivered.push(quotedMessage);
+  delivered.sort((left, right) => (Number(left?.sequence) || 0) - (Number(right?.sequence) || 0));
+  if (!employee || !threadId || !delivered.length) return;
   const employeeProject = projectIdentity.getForEmployee(agentId);
   const binding = await employeeConversationStore.openGroupForAgent({
     agentId,
@@ -305,7 +311,7 @@ const recordEmployeeGroupContext = async ({ identity, room, agentId, threadId, m
     title: `${room.snapshot().room.name} · ${employee.name}`,
   });
   if (!binding) return;
-  for (const message of messages) {
+  for (const message of delivered) {
     const projected = projectedGroupMessage({ message, binding, employeeId: agentId });
     if (projected.text) {
       await employeeConversationStore.appendMessage({ conversationId: binding.conversationId, message: projected });

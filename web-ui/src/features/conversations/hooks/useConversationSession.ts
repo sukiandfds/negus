@@ -2,9 +2,45 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { InitialConversationState } from "../state/initialConversation";
 import { conversationApi } from "../data/conversationApi";
 import { mergeMessageList, mergeOlderMessages, mergePendingOptimisticMessages, mergeSessionDelta, mergeSessionRefresh } from "../state/conversationMerge";
+import { isPendingThread } from "../model/pendingThread";
 import type { ContentSyncState, SessionDelta, SessionDetail, SessionMessage, SessionResponse } from "../model/types";
 
 type LoadOptions = { older?: boolean; quiet?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean };
+
+
+const blockSignature = (message: SessionMessage) => (message.blocks || [])
+  .map((block) => `${block.type}:${block.id}:${"text" in block ? block.text.length : ""}:${"source" in block ? block.source : ""}`)
+  .join("|");
+
+const sameVisibleSession = (left: SessionDetail, right: SessionDetail) => {
+  if (left === right) return true;
+  if (
+    left.threadId !== right.threadId
+    || left.title !== right.title
+    || left.updatedAt !== right.updatedAt
+    || left.archived !== right.archived
+    || left.messageCount !== right.messageCount
+    || left.contentVersion !== right.contentVersion
+    || left.hasMore !== right.hasMore
+    || left.nextCursor !== right.nextCursor
+    || left.nextBefore !== right.nextBefore
+    || left.messages.length !== right.messages.length
+  ) return false;
+  return left.messages.every((message, index) => {
+    const other = right.messages[index];
+    return message.id === other.id
+      && message.role === other.role
+      && message.text === other.text
+      && message.createdAt === other.createdAt
+      && message.turnId === other.turnId
+      && message.turnItemIndex === other.turnItemIndex
+      && message.turnStatus === other.turnStatus
+      && message.deliveryState === other.deliveryState
+      && message.superseded === other.superseded
+      && message.submissionId === other.submissionId
+      && blockSignature(message) === blockSignature(other);
+  });
+};
 
 const isSessionDelta = (response: SessionResponse): response is SessionDelta => (
   !Array.isArray((response as SessionDetail).messages)
@@ -22,6 +58,7 @@ export function useConversationSession(initial: InitialConversationState) {
     initial.session ? initial.sessionIsPartial ? "recovering" : "syncing" : "stable",
   );
   const [sessionError, setSessionError] = useState("");
+  const [composerKey, setComposerKey] = useState(initial.selectedId);
   const selectedIdRef = useRef(initial.selectedId);
   const requestRef = useRef<AbortController | null>(null);
   const retryTimerRef = useRef(0);
@@ -101,9 +138,14 @@ export function useConversationSession(initial: InitialConversationState) {
         }
         : !deltaResponse && latestWithPending ? mergeSessionRefresh(latestWithPending, detail) : detail;
       const resolved = mergePendingOptimisticMessages(next, pendingOptimistic);
-      sessionCache.current.set(threadId, resolved);
       partialSessionIdsRef.current.delete(threadId);
       if (pendingOptimistic.length) pendingOptimisticMessagesRef.current.delete(threadId);
+      if (latest && sameVisibleSession(latest, resolved)) {
+        loadSucceeded = true;
+        if (isSelected()) setSessionError("");
+        return true;
+      }
+      sessionCache.current.set(threadId, resolved);
       if (isSelected()) {
         setSession(resolved);
         setSessionError("");
@@ -143,6 +185,7 @@ export function useConversationSession(initial: InitialConversationState) {
   }, []);
 
   const loadSession = useCallback((threadId: string, options: LoadOptions = {}) => {
+    if (isPendingThread(threadId)) return Promise.resolve(false);
     options = { ...options, recovery: options.recovery || partialSessionIdsRef.current.has(threadId) };
     if (options.prefetch && sessionCache.current.has(threadId)) return Promise.resolve(true);
     if (options.older) return loadSessionOnce(threadId, options);
@@ -180,6 +223,7 @@ export function useConversationSession(initial: InitialConversationState) {
     if (threadId === selectedIdRef.current) return;
     selectedIdRef.current = threadId;
     setSelectedId(threadId);
+    setComposerKey(threadId);
     const cached = sessionCache.current.get(threadId);
     setSession(cached || null);
     setLoadingSession(!cached);
@@ -203,6 +247,7 @@ export function useConversationSession(initial: InitialConversationState) {
   const adoptSelection = useCallback(async (threadId: string, quiet: boolean) => {
     selectedIdRef.current = threadId;
     setSelectedId(threadId);
+    setComposerKey(threadId);
     const cached = sessionCache.current.get(threadId);
     setSession(cached || null);
     setLoadingSession(!cached);
@@ -218,6 +263,7 @@ export function useConversationSession(initial: InitialConversationState) {
     requestRef.current = null;
     selectedIdRef.current = "";
     setSelectedId("");
+    setComposerKey("");
     setSession(null);
     setLoadingSession(false);
     setLoadingOlder(false);
@@ -235,17 +281,23 @@ export function useConversationSession(initial: InitialConversationState) {
   }, []);
 
   const setCreatedSession = useCallback((detail: SessionDetail) => {
+    const previousId = selectedIdRef.current;
+    const replacingPending = isPendingThread(previousId) && !isPendingThread(detail.threadId);
+    if (replacingPending) sessionCache.current.delete(previousId);
     pendingOptimisticMessagesRef.current.delete(detail.threadId);
     sessionCache.current.set(detail.threadId, detail);
     selectedIdRef.current = detail.threadId;
     setSelectedId(detail.threadId);
+    if (!replacingPending) setComposerKey(detail.threadId);
     setSession(detail);
+    setSessionError("");
     setLoadingSession(false);
     setLoadingOlder(false);
     setSyncing(false);
     setContentSyncState("stable");
     const params = new URLSearchParams(window.location.search);
-    params.set("thread", detail.threadId);
+    if (isPendingThread(detail.threadId)) params.delete("thread");
+    else params.set("thread", detail.threadId);
     params.delete("agent");
     params.delete("employee");
     params.delete("employeeId");
@@ -305,8 +357,8 @@ export function useConversationSession(initial: InitialConversationState) {
   }, []);
 
   return {
-    selectedId, selectedIdRef, session, loadingSession, loadingOlder, syncing, contentSyncState, sessionError,
-    setSyncing: markSyncing, loadSession, selectSession, adoptSelection, clearSelection, setCreatedSession,
+    selectedId, selectedIdRef, session, loadingSession, loadingOlder, syncing, contentSyncState, sessionError, composerKey,
+    setSyncing: markSyncing, loadSession, selectSession, adoptSelection, clearSelection, setCreatedSession, setSessionError,
     updateCurrentSession, addOptimisticMessage, removeOptimisticMessage, invalidate, loadOlder,
   };
 }

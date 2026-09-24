@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AtSign, ChevronDown, MessagesSquare, Send, Sparkles } from "lucide-react";
+import { AtSign, ChevronDown, MessagesSquare, Send, Sparkles, Square } from "lucide-react";
 import { AttachmentButton, AttachmentPreviews } from "../../attachments/components/AttachmentDraft";
 import { useAttachmentDraft } from "../../attachments/hooks/useAttachmentDraft";
 import { SlashCommandMenu, type SlashCommandOption } from "../../conversations/components/SlashCommandMenu";
 import { goalCapabilityOptions } from "../../goals/model/capability";
 import type { GroupAgent, GroupMember } from "../model/types";
 import { mentionedAgentIds } from "../model/agentMentions";
+import type { MediaFile } from "../../../shared/model/media";
 import { MentionMenu, type MentionOption } from "./MentionMenu";
 import styles from "./GroupComposer.module.css";
 
@@ -28,12 +29,17 @@ const findMention = (text: string, caret: number): MentionState | null => {
   return atIndex >= 0 ? { start: atIndex, end: caret, query: match[1].trim() } : null;
 };
 
-export function GroupComposer({ agents, members, disabled, error, onSend, onInterrupt }: {
+export function GroupComposer({ agents, members: _members, disabled, busy = false, error, notice = "", quote = null, mentionRequest = null, onClearQuote, onSend, onInterrupt }: {
   agents: GroupAgent[];
   members: GroupMember[];
   disabled: boolean;
+  busy?: boolean;
   error: string;
-  onSend: (text: string, attachmentIds?: string[]) => Promise<boolean>;
+  notice?: string;
+  quote?: { id: string; authorName: string; text: string } | null;
+  mentionRequest?: { nonce: number; name: string } | null;
+  onClearQuote?: () => void;
+  onSend: (text: string, attachments?: MediaFile[], replyTo?: { id: string; authorName: string; text: string } | null) => Promise<boolean>;
   onInterrupt: () => Promise<boolean>;
 }) {
   const [text, setText] = useState("");
@@ -41,6 +47,7 @@ export function GroupComposer({ agents, members, disabled, error, onSend, onInte
   const [mention, setMention] = useState<MentionState | null>(null);
   const [personnelOpen, setPersonnelOpen] = useState(false);
   const [capabilityOpen, setCapabilityOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
   const [activeMention, setActiveMention] = useState(0);
   const [activeCapability, setActiveCapability] = useState(0);
   const [collapsedCapabilityGroups, setCollapsedCapabilityGroups] = useState<Record<string, boolean>>({});
@@ -50,13 +57,12 @@ export function GroupComposer({ agents, members, disabled, error, onSend, onInte
   const mentionOptions = useMemo<MentionOption[]>(() => {
     const query = mention?.query.toLocaleLowerCase() || "";
     // Human mentions are reserved for future multi-user notifications; only Agent mentions route work today.
-    const options: MentionOption[] = [
-      ...agents.map((agent) => ({ id: `agent:${agent.id}`, name: agent.name, detail: agent.responsibility, kind: "agent" as const, agentId: agent.id })),
-      ...members.map((member) => ({ id: `member:${member.id}`, name: member.name, detail: "在线成员", kind: "member" as const })),
-    ];
+    // Only employees can be asked to work. Human mentions are not notifications yet.
+    const options: MentionOption[] = agents.map((agent) => ({ id: `agent:${agent.id}`, name: agent.name, detail: agent.responsibility, kind: "agent" as const, agentId: agent.id }));
     return options.filter((option) => !query || option.name.toLocaleLowerCase().includes(query)).slice(0, 8);
-  }, [agents, members, mention?.query]);
+  }, [agents, mention?.query]);
   const selectedAgentIds = useMemo(() => mentionedAgentIds(text, agents), [agents, text]);
+  const selectedNames = selectedAgentIds.map((id) => agents.find((agent) => agent.id === id)?.name || "").filter(Boolean);
   const personnelOptions = useMemo<MentionOption[]>(() => agents
     .filter((agent) => !selectedAgentIds.includes(agent.id))
     .map((agent) => ({
@@ -126,7 +132,7 @@ export function GroupComposer({ agents, members, disabled, error, onSend, onInte
     submittingRef.current = true;
     try {
       const uploaded = await draft.uploadAll();
-      if (await onSend(text, uploaded.map((attachment) => attachment.id))) {
+      if (await onSend(text, uploaded, quote)) {
         setText("");
         setMention(null);
         draft.clear();
@@ -141,20 +147,60 @@ export function GroupComposer({ agents, members, disabled, error, onSend, onInte
     textarea.style.height = `${Math.min(textarea.scrollHeight, 150)}px`;
   }, [text]);
   useEffect(() => {
-    if (!personnelOpen && !capabilityOpen) return;
+    const node = composerRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const publish = () => {
+      const shell = node.closest("main");
+      if (!(shell instanceof HTMLElement)) return;
+      shell.style.setProperty("--group-composer-cover", `${Math.ceil(node.getBoundingClientRect().height)}px`);
+    };
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      const shell = node.closest("main");
+      if (shell instanceof HTMLElement) shell.style.removeProperty("--group-composer-cover");
+    };
+  }, []);
+  useEffect(() => {
+    if (!mentionRequest?.nonce || !mentionRequest.name) return;
+    const mention = `@${mentionRequest.name} `;
+    const textarea = textareaRef.current;
+    const caret = textarea?.selectionStart ?? text.length;
+    const prefix = caret > 0 && !/\s/u.test(text.slice(caret - 1, caret)) ? " " : "";
+    const next = `${text.slice(0, caret)}${prefix}${mention}${text.slice(caret)}`;
+    const nextCaret = caret + prefix.length + mention.length;
+    setText(next);
+    setMention(null);
+    setPersonnelOpen(false);
+    setCapabilityOpen(false);
+    setContextOpen(false);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(nextCaret, nextCaret);
+    });
+  }, [mentionRequest?.nonce]);
+  useEffect(() => {
+    if (!personnelOpen && !capabilityOpen && !contextOpen) return;
     const closeOutside = (event: PointerEvent) => {
       if (!(event.target instanceof Element) || !event.target.closest("[data-capability-menu]")) {
         setCapabilityOpen(false);
       }
+      if (!(event.target instanceof Element) || !event.target.closest("[data-context-note]")) {
+        setContextOpen(false);
+      }
       if (!composerRef.current?.contains(event.target as Node)) {
         setPersonnelOpen(false);
         setCapabilityOpen(false);
+        setContextOpen(false);
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setPersonnelOpen(false);
         setCapabilityOpen(false);
+        setContextOpen(false);
       }
     };
     document.addEventListener("pointerdown", closeOutside);
@@ -163,10 +209,10 @@ export function GroupComposer({ agents, members, disabled, error, onSend, onInte
       document.removeEventListener("pointerdown", closeOutside);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [capabilityOpen, personnelOpen]);
+  }, [capabilityOpen, contextOpen, personnelOpen]);
   return (
     <div className={styles.composerArea} ref={composerRef}>
-      {error ? <div className={styles.errorText} role="alert">{error}</div> : null}
+      {error ? <div className={styles.errorText} role="alert">{error}</div> : notice ? <div className={styles.noticeText} role="status">{notice}</div> : null}
       {mention ? (
         <MentionMenu options={mentionOptions} activeIndex={activeMention} onActiveChange={setActiveMention} onSelect={insertMention} />
       ) : personnelOpen ? (
@@ -174,9 +220,19 @@ export function GroupComposer({ agents, members, disabled, error, onSend, onInte
           {/* Reserved product entry: selected Agents discuss in rounds, then the manager publishes one consolidated result. */}
           <div className={styles.discussionOption}>
             <MessagesSquare aria-hidden="true" />
-            <span><strong>商讨</strong><small>员工相互讨论，最终由项目经理汇总结论</small></span>
+            <span><strong>点名</strong><small>被点到的员工按顺序回复，没被点名的不会插话</small></span>
           </div>
           <MentionMenu options={personnelOptions} activeIndex={activeMention} onActiveChange={setActiveMention} onSelect={insertPersonnel} />
+        </div>
+      ) : contextOpen ? (
+        <div className={styles.personnelMenu} data-context-note role="note">
+          <div className={styles.discussionOption}>
+            <MessagesSquare aria-hidden="true" />
+            <span>
+              <strong>员工看到的上下文</strong>
+              <small>群里的完整记录一直保留。每次点名是单独一件事，先发的先做，后一条等下一轮。点名后的补充跟着这一条；短的续话接着上一条理解。已经点到的同事会自己回复。</small>
+            </span>
+          </div>
         </div>
       ) : capabilityOpen ? (
         <SlashCommandMenu
@@ -208,11 +264,18 @@ export function GroupComposer({ agents, members, disabled, error, onSend, onInte
           onRemove={draft.removeFile}
           onCancelUpload={draft.cancelUpload}
         />
+        {quote ? (
+        <div className={styles.quoteDraft}>
+          <span>回复 {quote.authorName}：{quote.text}</span>
+          <button type="button" aria-label="取消引用" onClick={onClearQuote}>取消</button>
+        </div>
+      ) : null}
+        {selectedNames.length ? <p className={styles.orderHint}>{busy ? `${selectedNames.join("、")}会在当前任务结束后按顺序回复` : selectedNames.length > 1 ? `按顺序回复：${selectedNames.join("、")}` : `将叫 ${selectedNames[0]} 回复`}</p> : null}
         <textarea
           ref={textareaRef}
           value={text}
           rows={2}
-          placeholder="发送到项目群"
+          placeholder="发给项目群。需要员工回答时，用 @ 点名"
           onChange={(event) => {
             setText(event.target.value);
             setPersonnelOpen(false);
@@ -279,7 +342,7 @@ export function GroupComposer({ agents, members, disabled, error, onSend, onInte
               type="button"
               aria-expanded={personnelOpen}
               aria-haspopup="listbox"
-              aria-label="指定参与商讨的员工"
+              aria-label="点名员工"
               onMouseDown={(event) => event.preventDefault()}
               title={selectedAgentIds.length ? `已指定 ${selectedAgentIds.length} 人` : "指定人员"}
               disabled={disabled}
@@ -292,16 +355,45 @@ export function GroupComposer({ agents, members, disabled, error, onSend, onInte
             >
               <AtSign aria-hidden="true" />
             </button>
+            {busy && (text.trim() || draft.attachments.length) ? (
+              <button className={styles.commandButton} type="button" aria-label="停止当前任务" title="停止当前任务" onClick={() => void onInterrupt()}>
+                <Square className={styles.stopIcon} aria-hidden="true" />
+              </button>
+            ) : null}
           </div>
           <span className={styles.composerSpacer} />
           <div className={styles.settingsControls}>
             {/* Reserved for group context management similar to conversation context compaction. */}
-            <button className={styles.settingTrigger} type="button" disabled title="上下文功能暂未启用">
-              <span>上下文 --</span>
+            <button
+              className={styles.settingTrigger}
+              type="button"
+              data-context-note
+              aria-expanded={contextOpen}
+              aria-label="查看员工上下文规则"
+              title="查看员工上下文规则"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                setMention(null);
+                setPersonnelOpen(false);
+                setCapabilityOpen(false);
+                setContextOpen((value) => !value);
+              }}
+            >
+              <span>上下文</span>
               <ChevronDown aria-hidden="true" />
             </button>
           </div>
-          <button className={styles.sendButton} type="button" title="发送" aria-label="发送" disabled={disabled || draft.uploading || (!text.trim() && !draft.attachments.length)} onClick={() => void submit()}><Send aria-hidden="true" /></button>
+          {draft.uploading ? (
+            <button className={styles.sendButton} type="button" aria-label="取消上传" title="取消上传" onClick={draft.cancelUpload}>
+              <Square className={styles.stopIcon} aria-hidden="true" />
+            </button>
+          ) : busy && !text.trim() && !draft.attachments.length ? (
+            <button className={styles.sendButton} type="button" aria-label="停止当前任务" title="停止当前任务" onClick={() => void onInterrupt()}>
+              <Square className={styles.stopIcon} aria-hidden="true" />
+            </button>
+          ) : (
+            <button className={styles.sendButton} type="button" title={busy ? "加入等候" : "发送"} aria-label={busy ? "加入等候" : "发送"} disabled={disabled || (!text.trim() && !draft.attachments.length)} onClick={() => void submit()}><Send aria-hidden="true" /></button>
+          )}
         </div>
       </div>
     </div>

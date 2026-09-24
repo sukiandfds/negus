@@ -20,9 +20,6 @@
 .iconButton { display: grid; place-items: center; width: 32px; height: 32px; flex: 0 0 32px; border: 0; border-radius: 8px; background: transparent; color: var(--color-text-secondary); text-decoration: none; }
 .iconButton svg { width: 16px; height: 16px; stroke-width: 1.8; }
 .iconButton[aria-pressed="true"] { background: var(--color-surface-hover); color: var(--color-text); }
-.mobileOnly { display: none; }
-@media (any-pointer: coarse) { .mobileOnly { display: grid; } }
-
 @media (hover: hover) {
   .iconButton:hover { background: var(--color-surface-hover); color: var(--color-text); }
 }
@@ -30,7 +27,6 @@
 @media (max-width: 760px) {
   .topbar { position: relative; gap: 7px; padding-right: 146px; }
   .statusbar { padding: 0 12px 0 54px; }
-  .mobileOnly { display: grid; }
   .titleIcon { display: none; }
   .meta { display: none; }
   .heading { flex: 1; }

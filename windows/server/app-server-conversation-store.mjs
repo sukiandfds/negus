@@ -3,6 +3,7 @@ import path from "node:path";
 import { previewText } from "./content-blocks.mjs";
 import { createAppServerClient } from "./app-server-client.mjs";
 import { messagesFromTurns, readRecentThreadPage } from "./codex-thread-history.mjs";
+import { loadUserProfilePrompt } from "./user-profile-prompt.mjs";
 
 const sourceFromThread = (thread) => thread.source === "cli" && thread.cliVersion === "0.122.0" ? "happy" : "codex";
 
@@ -31,6 +32,64 @@ const AUTO_TITLE_SCHEMA = {
   properties: { title: { type: "string", minLength: 1, maxLength: 36 } },
   required: ["title"],
   additionalProperties: false,
+};
+
+
+const isAssistantReplyRecord = (item) => {
+  const payload = item?.payload || {};
+  const type = item?.type;
+  const payloadType = payload.type;
+  const role = payload.role;
+  const phase = payload.phase;
+  return (type === "event_msg" && payloadType === "agent_message" && phase === "final_answer")
+    || (type === "response_item" && payloadType === "message" && role === "assistant" && (!phase || phase === "final_answer"));
+};
+
+export const latestAssistantReplyAtFromRollout = async (file) => {
+  if (!file || typeof file !== "string") return "";
+  let handle;
+  try {
+    const stat = await fs.stat(file);
+    const chunkSize = 256 * 1024;
+    const maxBytes = 4 * 1024 * 1024;
+    handle = await fs.open(file, "r");
+    let end = stat.size;
+    let scanned = 0;
+    let carry = "";
+    while (end > 0 && scanned < maxBytes) {
+      const length = Math.min(chunkSize, end);
+      const start = end - length;
+      const buffer = Buffer.alloc(length);
+      await handle.read(buffer, 0, length, start);
+      end = start;
+      scanned += length;
+      const lines = `${buffer.toString("utf8")}${carry}`.split(/\r?\n/u);
+      carry = start > 0 ? (lines.shift() || "") : "";
+      let latestMs = Number.NEGATIVE_INFINITY;
+      let latest = "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let item;
+        try { item = JSON.parse(line); } catch { continue; }
+        if (!isAssistantReplyRecord(item)) continue;
+        const parsed = Date.parse(item.timestamp || "");
+        if (!Number.isFinite(parsed) || parsed < latestMs) continue;
+        latestMs = parsed;
+        latest = new Date(parsed).toISOString();
+      }
+      if (latest) return latest;
+    }
+    return "";
+  } catch {
+    return "";
+  } finally {
+    await handle?.close?.().catch(() => {});
+  }
+};
+
+const sessionTime = (value) => {
+  const parsed = Date.parse(value || "");
+  return Number.isFinite(parsed) ? parsed : 0;
 };
 
 const cleanAutoTitle = (value) => {
@@ -117,6 +176,11 @@ export const createAppServerConversationStore = ({
   const autoTitles = new Map();
   let autoTitlesLoaded = false;
   let autoTitlesLoading = null;
+  let userProfilePrompt;
+  const getUserProfilePrompt = async () => {
+    userProfilePrompt ??= loadUserProfilePrompt(projectRoot);
+    return userProfilePrompt;
+  };
   const monitorIntervalMs = supervision.intervalMs ?? 5000;
   const staleAfterMs = supervision.staleAfterMs ?? 30000;
   const finalizingAfterMs = supervision.finalizingAfterMs ?? 10000;
@@ -298,15 +362,22 @@ export const createAppServerConversationStore = ({
   const listSessions = async (source = "all", archived = false) => {
     await loadAutoTitles();
     const threads = await listThreads({ archived });
-    return threads
+    const summaries = await Promise.all(threads
       .filter((thread) => source === "all" || sourceFromThread(thread) === source)
-      .map((thread) => summaryFromThread(thread, archived));
+      .map(async (thread) => {
+        const summary = summaryFromThread(thread, archived);
+        const assistantAt = await latestAssistantReplyAtFromRollout(thread.path);
+        if (assistantAt) summary.updatedAt = assistantAt;
+        return summary;
+      }));
+    return summaries.sort((left, right) => sessionTime(right.updatedAt) - sessionTime(left.updatedAt));
   };
 
   const createSession = async (model = "", requestedProjectRoot = "") => {
     const cwd = requestedProjectRoot ? path.resolve(requestedProjectRoot) : projectRoot;
     if (!isAllowedProjectRoot(cwd)) throw new Error("This project folder is not registered in Negus.");
-    const params = { cwd };
+    const profilePrompt = await getUserProfilePrompt();
+    const params = { cwd, ...(profilePrompt ? { developerInstructions: profilePrompt } : {}) };
     if (model) params.model = model;
     const result = await client.request("thread/start", params);
     let thread = result.thread;
@@ -577,9 +648,11 @@ export const createAppServerConversationStore = ({
     try {
       await resumeThread(threadId);
       const { runtimeOptions } = await ensureProjectThread(threadId);
+      const developerInstructions = await getUserProfilePrompt();
       const result = await client.request("turn/start", {
         threadId,
         input: await inputFromAttachments(promptFromSlashCommand(text, attachments), attachments, attachmentContent),
+        ...(developerInstructions ? { developerInstructions } : {}),
         ...(submissionId ? { clientUserMessageId: submissionId } : {}),
         ...(runtimeOptions?.turn || {}),
       });
@@ -598,12 +671,16 @@ export const createAppServerConversationStore = ({
     }
   };
 
-  const steerMessage = async (threadId, turnId, text, attachments = [], submissionId = "") => client.request("turn/steer", {
-    threadId,
-    expectedTurnId: turnId,
-    input: await inputFromAttachments(promptFromSlashCommand(text, attachments), attachments, attachmentContent),
-    ...(submissionId ? { clientUserMessageId: submissionId } : {}),
-  });
+  const steerMessage = async (threadId, turnId, text, attachments = [], submissionId = "") => {
+    const developerInstructions = await getUserProfilePrompt();
+    return client.request("turn/steer", {
+      threadId,
+      expectedTurnId: turnId,
+      input: await inputFromAttachments(promptFromSlashCommand(text, attachments), attachments, attachmentContent),
+      ...(developerInstructions ? { developerInstructions } : {}),
+      ...(submissionId ? { clientUserMessageId: submissionId } : {}),
+    });
+  };
 
   const interrupt = async (threadId, turnId) => client.request("turn/interrupt", { threadId, turnId });
 
@@ -664,19 +741,69 @@ export const createAppServerConversationStore = ({
     return getRuntimeContext(threadId);
   };
 
+  const threadNotLoaded = (error) => /thread not loaded/i.test(String(error?.message || ""));
+  const missingPersistedThread = (error) => /thread not loaded|no rollout found|session not found|rollout path missing/i.test(String(error?.message || ""));
+  const persistedThreadError = () => Object.assign(new Error("原会话记录尚未持久化，暂时无法切换渠道"), { statusCode: 409 });
+
+  const loadThreadForResume = async (threadId) => {
+    let known;
+    try {
+      ({ thread: known } = await ensureProjectThread(threadId));
+    } catch (error) {
+      if (!threadNotLoaded(error)) throw error;
+    }
+    if (known?.path && known?.cwd) return known;
+    const readThread = async () => (await client.request("thread/read", { threadId, includeTurns: false })).thread;
+    try {
+      const thread = await readThread();
+      if (thread?.id) threadCache.set(thread.id, thread);
+      if (thread?.path) return thread;
+    } catch (error) {
+      if (!threadNotLoaded(error)) throw error;
+    }
+    let resumed;
+    try {
+      resumed = await client.request("thread/resume", {
+        threadId,
+        excludeTurns: true,
+        persistExtendedHistory: true,
+      });
+    } catch (error) {
+      if (missingPersistedThread(error)) throw persistedThreadError();
+      throw error;
+    }
+    const resumedThread = resumed?.thread;
+    if (resumedThread?.id) threadCache.set(resumedThread.id, resumedThread);
+    if (resumedThread?.path) return resumedThread;
+    const thread = await readThread();
+    if (thread?.id) threadCache.set(thread.id, thread);
+    return thread;
+  };
+
   const getSessionResumeInfo = async (threadId) => {
-    await ensureProjectThread(threadId);
-    const { thread } = await client.request('thread/read', { threadId, includeTurns: false });
-    if (!thread?.path || !isAllowedProjectRoot(thread.cwd)) throw new Error('原会话记录尚未持久化，暂时无法切换渠道');
-    await fs.access(thread.path).catch(() => { throw new Error('原会话记录尚未持久化，暂时无法切换渠道'); });
+    let thread;
+    try {
+      thread = await loadThreadForResume(threadId);
+    } catch (error) {
+      if (error?.statusCode) throw error;
+      if (missingPersistedThread(error)) throw persistedThreadError();
+      throw error;
+    }
+    if (!thread?.path || !isAllowedProjectRoot(thread.cwd)) throw persistedThreadError();
+    await fs.access(thread.path).catch(() => { throw persistedThreadError(); });
     return { path: thread.path, cwd: thread.cwd, model: thread.model, reasoningEffort: thread.reasoningEffort, summary: summaryFromThread(thread) };
   };
 
   const releaseSession = async (threadId) => {
-    await ensureProjectThread(threadId);
-    const status = await getThreadStatus(threadId);
-    if (status?.type === 'active') throw Object.assign(new Error('当前会话正在运行，请完成后再切换渠道'), { statusCode: 409 });
-    await client.request('thread/unsubscribe', { threadId });
+    try {
+      await ensureProjectThread(threadId);
+      const result = await client.request("thread/read", { threadId, includeTurns: false });
+      if (result.thread?.status?.type === "active") throw Object.assign(new Error("当前会话正在运行，请完成后再切换渠道"), { statusCode: 409 });
+      await client.request("thread/unsubscribe", { threadId });
+    } catch (error) {
+      if (error?.statusCode === 409) throw error;
+      if (!threadNotLoaded(error)) throw error;
+    }
     freshThreadRuntime.delete(threadId);
     threadCache.delete(threadId);
   };
@@ -707,6 +834,8 @@ export const createAppServerConversationStore = ({
 
   const getPendingUserInput = async (threadId) => client.getPendingUserInput?.(threadId) || null;
 
+  const isFreshSession = (threadId) => freshThreadRuntime.has(threadId);
+
   const respondToUserInput = async (threadId, requestId, answers) => (
     client.respondToUserInput?.(threadId, requestId, answers)
   );
@@ -725,7 +854,7 @@ export const createAppServerConversationStore = ({
     forkSession, archiveSession, unarchiveSession,
     listModels, updateModel, updateReasoningEffort, getRuntimeContext, getThreadStatus,
     compactContext, reviewSession, getGoal, setGoal, clearGoal,
-    getPendingUserInput, respondToUserInput, close,
+    getPendingUserInput, respondToUserInput, isFreshSession, close,
     getSessionResumeInfo, releaseSession, resumeProviderSession,
   };
 };

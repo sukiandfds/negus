@@ -63,6 +63,7 @@
 - 未经明确许可，不修改基础 UI 样式。
 - 所有展示内容必须来自真实项目数据。
 - 不擅自启动、重启服务或执行远程危险操作。
+- Negus 服务重启必须使用 `windows/scripts/restart-web-demo.ps1`（或等价的 `pnpm restart:demo` 封装），由独立 Worker 等待活动任务收口后再重启；禁止直接停止端口进程、串联 Stop/Start，或在当前助手进程中自杀式重启。
 - 运行项目时只使用 PROJECT.md 标明的入口，不自行使用旧入口。
 - 远程检查默认只读。可能触发浏览器、Node、监听、Firewall 或 UAC 时，先确认无桌面交互。
 - 不输出 Token、密钥或敏感配置。

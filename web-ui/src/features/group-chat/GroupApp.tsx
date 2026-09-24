@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 import { AppShell } from "../../components/AppShell/AppShell";
+import { BottomNav } from "../../components/BottomNav/BottomNav";
 import { SidebarHeader } from "../../components/Sidebar/SidebarHeader";
 import { WindowBar } from "../../components/WindowBar/WindowBar";
 import type { ViewSurface } from "../../components/ViewSwitcher/ViewSwitcher";
@@ -10,7 +11,8 @@ import { MemberDialog } from "./components/MemberDialog";
 import { MemberProfileDrawer } from "./components/MemberProfileDrawer";
 import { MessageTimeline } from "./components/MessageTimeline";
 import { useGroupRoom } from "./hooks/useGroupRoom";
-import type { GroupProfile } from "./model/types";
+import type { GroupMessage, GroupProfile } from "./model/types";
+import type { MediaFile } from "../../shared/model/media";
 import { useDeviceInfo } from "../device/hooks/useDeviceInfo";
 import { useArtifacts } from "../artifacts/hooks/useArtifacts";
 import { projectDirectoryApi } from "../project-directory/data/projectDirectoryApi";
@@ -23,6 +25,11 @@ import styles from "./GroupApp.module.css";
 const projectDirectoryCacheKey = "negus-project-directory-v1";
 const validProjects = (value: unknown): value is DirectoryProject[] => Array.isArray(value)
   && value.every((entry) => Boolean(entry) && typeof entry === "object" && typeof entry.id === "string");
+const quoteExcerpt = (message: GroupMessage) => {
+  const text = message.text.trim();
+  if (text) return text.slice(0, 160);
+  return (message.attachments || []).map((file) => file.name).filter(Boolean).join("、").slice(0, 160);
+};
 
 export function GroupApp({ active = true, onViewChange }: { active?: boolean; onViewChange?: (surface: Exclude<ViewSurface, "progress">) => void }) {
   const group = useGroupRoom();
@@ -33,15 +40,37 @@ export function GroupApp({ active = true, onViewChange }: { active?: boolean; on
   ));
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [localSendVersion, setLocalSendVersion] = useState(0);
+  const [quote, setQuote] = useState<GroupMessage["replyTo"]>(null);
+  const [mentionRequest, setMentionRequest] = useState<{ nonce: number; name: string } | null>(null);
   const snapshot = group.snapshot;
   const artifactIds = useMemo(() => snapshot?.messages.flatMap((message) => message.artifactIds || []) || [], [snapshot?.messages]);
   const artifactState = useArtifacts(artifactIds, group.artifactEvent);
   const join = async (name: string) => {
     await group.join(name);
   };
-  const sendMessage = useCallback(async (text: string, attachmentIds: string[] = []) => {
-    const accepted = await group.send(text, attachmentIds);
-    if (accepted) setLocalSendVersion((version) => version + 1);
+  useEffect(() => {
+    setQuote(null);
+  }, [group.roomId]);
+  useEffect(() => {
+    if (!quote?.id.startsWith("optimistic-")) return;
+    const clientMessageId = quote.id.slice("optimistic-".length);
+    const confirmed = snapshot?.messages.find((message) => message.clientMessageId === clientMessageId
+      && !message.pending
+      && !message.id.startsWith("optimistic-"));
+    if (!confirmed) return;
+    setQuote({
+      id: confirmed.id,
+      authorName: confirmed.authorName,
+      text: confirmed.text.trim().slice(0, 160),
+      sequence: confirmed.sequence,
+    });
+  }, [quote?.id, snapshot]);
+  const sendMessage = useCallback(async (text: string, attachments: MediaFile[] = [], replyTo: GroupMessage["replyTo"] = null) => {
+    const accepted = await group.send(text, attachments, replyTo);
+    if (accepted) {
+      setLocalSendVersion((version) => version + 1);
+      setQuote(null);
+    }
     return accepted;
   }, [group.send]);
 
@@ -141,9 +170,25 @@ export function GroupApp({ active = true, onViewChange }: { active?: boolean; on
             history={snapshot.history}
             historyLoading={group.historyLoading}
             historyNavigation={group.historyNavigation}
+            focusRequest={group.focusRequest}
             onLoadOlder={group.loadOlder}
             onLoadNewer={group.loadNewer}
             onReturnToLatest={group.returnToLatest}
+            onQuote={(message) => setQuote({
+              id: message.id,
+              authorName: message.authorName,
+              text: quoteExcerpt(message),
+              sequence: message.sequence,
+            })}
+            onMentionAgent={(agent) => setMentionRequest((current) => ({ nonce: (current?.nonce || 0) + 1, name: agent.name }))}
+            onRevealReply={(reply) => { void group.revealMessage(reply); }}
+            onRetryAgent={(agentId, replyTo) => {
+              const agent = agents.find((item) => item.id === agentId);
+              if (agent) void group.send(`@${agent.name} 请重试刚才没有完成的任务。`, [], replyTo || null);
+            }}
+            onRetrySend={(message) => { void group.retrySend(message); }}
+            retryDisabled={group.sending}
+            unseenLiveCount={group.unseenLiveCount}
           />
         ) : group.error ? (
           <main className={styles.loading}>
@@ -161,11 +206,17 @@ export function GroupApp({ active = true, onViewChange }: { active?: boolean; on
           agents={agents}
           members={members}
           disabled={!group.member || group.sending}
+          busy={agents.some((agent) => agent.active)}
           error={group.error}
+          notice={group.notice}
+          quote={quote}
+          mentionRequest={mentionRequest}
+          onClearQuote={() => setQuote(null)}
           onSend={sendMessage}
           onInterrupt={group.interrupt}
         />
         ) : <div className={styles.composerPlaceholder} />}
+        dock={<BottomNav current="group" onViewChange={onViewChange} />}
       />
       {/* Do not cover the connection recovery state with a join dialog. If the
           first snapshot failed and there is no cached room, the user needs the

@@ -68,3 +68,104 @@ test("channel switching preserves the thread and sends only the next user messag
     assert.equal(sessions.size, 1);
   } finally { await fs.rm(root, { recursive:true, force:true }); }
 });
+
+test("sorts a switched channel by the latest assistant reply instead of the stale sidebar time", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-sidebar-sort-"));
+  const rollout = path.join(root, "rollout.jsonl");
+  await fs.writeFile(rollout, `${JSON.stringify({
+    timestamp: "2026-09-23T02:45:20.909Z",
+    type: "response_item",
+    payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "done" }] },
+  })}\n`, "utf8");
+  const stale = {
+    threadId: "original",
+    cwd: root,
+    title: "stale",
+    updatedAt: "2026-09-22T16:48:01.000Z",
+    source: "codex",
+    archived: false,
+  };
+  const store = (providerId) => ({
+    findSession: async () => stale,
+    createSession: async () => stale,
+    sendMessage: async () => {},
+    updateModel: async () => ({ model: "gpt-6-astra" }),
+    getSessionResumeInfo: async () => ({ path: rollout, cwd: root, model: "gpt-6-astra", summary: stale }),
+    releaseSession: async () => {},
+    resumeProviderSession: async () => {},
+    getRuntimeContext: async () => ({ model: stale.updatedAt }),
+    listSessions: async () => [],
+    listModels: async () => [],
+    close() {},
+  });
+  const providers = {
+    resolveRoute: ({ model }) => ({ modelProviderId: String(model).startsWith("grok") ? "fusheng-grok" : "current", model }),
+    getClient: async () => ({}),
+    listModels: async (models) => models,
+    isProviderConfigured: async () => true,
+  };
+  const service = createProviderConversationStore({
+    current: store("current"),
+    providers,
+    createStore: () => store("fusheng-grok"),
+    stateFile: path.join(root, "routes.json"),
+  });
+  try {
+    await service.updateModel("original", "grok-4.6", { allowProviderSwitch: true });
+    await service.sendMessage("original", "next");
+    const [session] = await service.listSessions();
+    assert.equal(session.threadId, "original");
+    assert.equal(session.updatedAt, "2026-09-23T02:45:20.909Z");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("archives a local ghost conversation when the provider thread is gone", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-ghost-archive-"));
+  const ghost = {
+    threadId: "ghost",
+    cwd: root,
+    title: "新对话 · ghost",
+    updatedAt: "2026-09-22T09:33:13.000Z",
+    source: "codex",
+    archived: false,
+  };
+  const store = () => ({
+    createSession: async () => ghost,
+    listSessions: async () => [],
+    archiveSession: async () => { throw new Error("thread not loaded: ghost"); },
+    unarchiveSession: async () => { throw new Error("session not found: ghost"); },
+    listModels: async () => [],
+    close() {},
+  });
+  const providers = {
+    resolveRoute: ({ model }) => ({ modelProviderId: String(model).startsWith("grok") ? "fusheng-grok" : "current", model }),
+    getClient: async () => ({}),
+    listModels: async (models) => models,
+    isProviderConfigured: async () => true,
+  };
+  const service = createProviderConversationStore({
+    current: store(),
+    providers,
+    createStore: store,
+    stateFile: path.join(root, "routes.json"),
+  });
+  try {
+    await service.createSession("grok-4.7", root);
+    assert.equal((await service.listSessions()).length, 1);
+    await assert.rejects(service.archiveSession("missing"), /thread not loaded/);
+    const archived = await service.archiveSession("ghost");
+    assert.equal(archived.threadId, "ghost");
+    assert.equal(archived.archived, true);
+    assert.equal((await service.listSessions()).length, 0);
+    const archivedList = await service.listSessions("all", true);
+    assert.equal(archivedList.length, 1);
+    assert.equal(archivedList[0].threadId, "ghost");
+    const restored = await service.unarchiveSession("ghost");
+    assert.equal(restored.archived, false);
+    assert.equal((await service.listSessions()).length, 1);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

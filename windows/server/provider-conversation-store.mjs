@@ -1,3 +1,4 @@
+import { latestAssistantReplyAtFromRollout } from "./app-server-conversation-store.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -69,7 +70,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
     await save();
   };
   for (const method of ["renameSession", "findSession", "sendMessage", "steerMessage", "interrupt",
-    "archiveSession", "unarchiveSession", "updateReasoningEffort", "getRuntimeContext", "getThreadStatus",
+    "updateReasoningEffort", "getRuntimeContext", "getThreadStatus",
     "compactContext", "reviewSession", "getGoal", "setGoal", "clearGoal", "getPendingUserInput",
     "respondToUserInput"]) {
     service[method] = async (id, ...args) => {
@@ -97,12 +98,29 @@ export const createProviderConversationStore = ({ current, providers, createStor
         routes[id] = { ...routes[id], providerId: owner(id), model: result.model };
         await save();
       }
-      if ((method === "archiveSession" || method === "unarchiveSession") && routes[id]?.summary) {
-        routes[id].summary.archived = method === "archiveSession";
-        if (routes[id].resumeInfo) routes[id].resumeInfo = await (await storeFor(owner(id))).getSessionResumeInfo(id);
-        await save();
-      }
       return result?.threadId ? decorate(result) : result;
+    };
+  }
+  const missingPersistedThread = (error) => /thread not loaded|session not found|no rollout found|rollout path missing/i.test(String(error?.message || ""));
+  for (const [method, archived] of [["archiveSession", true], ["unarchiveSession", false]]) {
+    service[method] = async (id) => {
+      await ready;
+      if (switching.has(id)) await switching.get(id);
+      await ensureRestored(id);
+      try {
+        const result = await (await storeFor(owner(id)))[method](id);
+        if (routes[id]?.summary) {
+          routes[id].summary.archived = archived;
+          if (routes[id].resumeInfo) routes[id].resumeInfo = await (await storeFor(owner(id))).getSessionResumeInfo(id);
+          await save();
+        }
+        return result?.threadId ? decorate(result) : result;
+      } catch (error) {
+        if (!missingPersistedThread(error) || !routes[id]?.summary) throw error;
+        routes[id].summary.archived = archived;
+        await save();
+        return decorate(routes[id].summary);
+      }
     };
   }
   service.listSessions = async (...args) => {
@@ -120,6 +138,12 @@ export const createProviderConversationStore = ({ current, providers, createStor
       if (session && !known.has(session.threadId) && Boolean(session.archived) === Boolean(args[1])
         && (!args[0] || args[0] === "all" || session.source === args[0])) result.push(decorate(session));
     }
+    await Promise.all(result.map(async (session) => {
+      const file = routes[session.threadId]?.resumeInfo?.path;
+      if (!file) return;
+      const assistantAt = await latestAssistantReplyAtFromRollout(file);
+      if (assistantAt && Date.parse(assistantAt) > Date.parse(session.updatedAt || "")) session.updatedAt = assistantAt;
+    }));
     return result.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
   };
   service.listModels = async () => providers.listModels(await current.listModels());
@@ -147,17 +171,27 @@ export const createProviderConversationStore = ({ current, providers, createStor
       await providers.refreshShared?.().catch((error) => { if (model.includes('::')) throw error; });
       const target = providers.resolveRoute({ model });
       if (reasoningEffort && !["none", "minimal", "low", "medium", "high", "xhigh"].includes(reasoningEffort)) throw new Error("无效的思考等级");
-      const source = await storeFor(owner(id));
-      if (target.modelProviderId === owner(id)) {
+      const sourceProviderId = owner(id);
+      const source = await storeFor(sourceProviderId);
+      if (target.modelProviderId === sourceProviderId) {
         await ensureRestored(id);
         const result = await source.updateModel(id, target.model || model);
         routes[id] = { ...routes[id], providerId: owner(id), pendingProviderId: undefined, model, runtimeModel: target.model || model, activeModel: target.model || model };
         await save();
         return { ...result, model };
       }
+      if (!await providers.isProviderConfigured(target.modelProviderId)) throw new Error('渠道 Key 尚未配置');
+      if (source.isFreshSession?.(id)) {
+        const targetStore = await storeFor(target.modelProviderId);
+        const created = await targetStore.createSession(target.model || model, routes[id]?.summary?.cwd || "");
+        await source.releaseSession?.(id);
+        delete routes[id];
+        routes[created.threadId] = { providerId: target.modelProviderId, model, summary: created };
+        await save();
+        return { threadId: created.threadId, model, modelProvider: target.modelProviderId, reasoningEffort };
+      }
       await ensureRestored(id);
       const info = await source.getSessionResumeInfo(id);
-      if (!await providers.isProviderConfigured(target.modelProviderId)) throw new Error('渠道 Key 尚未配置');
       routes[id] = { ...routes[id], providerId: owner(id), pendingProviderId: target.modelProviderId,
         activeModel: routes[id]?.activeModel || info.model || routes[id]?.runtimeModel || routes[id]?.model,
         model, runtimeModel: target.model || model, reasoningEffort, summary: info.summary || routes[id]?.summary };

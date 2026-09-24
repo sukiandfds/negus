@@ -1,5 +1,6 @@
-.composerArea { position: absolute; z-index: 5; right: 0; bottom: 0; left: 0; width: 100%; min-width: 0; max-width: 100%; padding: 22px 30px 14px; background: linear-gradient(180deg, transparent 0, var(--color-bg) 30%); pointer-events: none; }
+.composerArea { position: relative; z-index: 5; width: 100%; min-width: 0; max-width: 100%; padding: 22px 30px 14px; background: var(--color-bg); pointer-events: none; }
 .errorText { margin: 0 4px 7px; color: #d58c83; font-size: 11px; }
+.noticeText { width: min(var(--content-width), 100%); margin: 0 auto 7px; color: #9a9a9a; font-size: 11px; pointer-events: none; }
 .composer { width: min(var(--content-width), 100%); min-width: 0; max-width: 100%; min-height: 92px; margin: 0 auto; border: 1px solid var(--color-border-strong); border-radius: 16px; background: var(--color-composer); box-shadow: 0 18px 40px rgb(0 0 0 / 30%); pointer-events: auto; }
 .composer:focus-within { border-color: var(--color-border-focus); }
 .composer textarea { display: block; width: 100%; min-height: 51px; max-height: 160px; overflow-y: auto; resize: none; border: 0; appearance: none; outline: 0; padding: 10px 14px 6px; background: transparent; color: var(--color-text); font-size: 14px; line-height: 1.5; }
@@ -30,11 +31,13 @@
 .sendButton { display: grid; width: var(--control-icon-button-size); height: var(--control-icon-button-size); flex: 0 0 var(--control-icon-button-size); place-items: center; border: 0; border-radius: var(--control-radius); background: var(--color-text); color: var(--color-bg); cursor: pointer; transition: var(--control-transition); }
 .sendButton:disabled { background: #777; color: #292929; cursor: default; opacity: .55; }
 .sendButton svg { width: var(--control-icon-size); height: var(--control-icon-size); stroke-width: 1.9; }
+.sendButton svg.stopIcon { width: 10px; height: 10px; fill: currentColor; }
+.commandButton svg.stopIcon { width: 10px; height: 10px; fill: currentColor; }
 
 @media (max-width: 760px) {
   .composer { box-shadow: 0 4px 16px rgb(0 0 0 / 16%); }
   .composer textarea { padding: 12px 14px 4px; }
-  .composerArea { padding: 10px 12px max(10px, env(safe-area-inset-bottom)); }
+  .composerArea { padding: 10px 12px 10px; }
   .footer { display: grid; grid-template-columns: minmax(0, 1fr) 36px; row-gap: 0; column-gap: 8px; padding: 0 10px 6px; }
   .leadingControls { grid-column: 1; grid-row: 1; overflow: hidden; }
   .leadingControls > .commandButton { width: var(--control-touch-icon-button-size); height: var(--control-touch-icon-button-size); flex-basis: var(--control-touch-icon-button-size); }
@@ -47,13 +50,8 @@
   .personnelMenu { right: 10px; left: 10px; }
 }
 
-@media (any-pointer: coarse) {
-  .composerArea {
-    position: relative;
-    right: auto;
-    bottom: auto;
-    left: auto;
-    width: 100%;
-    background: var(--color-bg);
-  }
-}
+.quoteDraft { display: flex; gap: 8px; align-items: center; margin: 8px 12px 0; color: #bdbdbd; font-size: 11px; }
+.quoteDraft span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quoteDraft button { flex: 0 0 auto; border: 0; background: transparent; color: #9a9a9a; cursor: pointer; font: inherit; }
+
+.orderHint { margin: 8px 12px 0; color: #b7d7a4; font-size: 11px; line-height: 1.4; }

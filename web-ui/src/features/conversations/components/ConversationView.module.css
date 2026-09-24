@@ -1,14 +1,17 @@
 .viewport { position: relative; width: 100%; height: 100%; min-height: 0; }
-.scrollArea { height: 100%; min-height: 0; overflow-y: auto; overflow-anchor: none; overscroll-behavior-y: contain; padding: 30px 30px 154px; scrollbar-color: #3b3d3f transparent; scrollbar-width: thin; }
-.jumpToLatest { position: absolute; z-index: 4; right: 50%; bottom: 126px; transform: translateX(50%); }
+.scrollArea { height: 100%; min-height: 0; overflow-y: auto; overflow-anchor: none; overscroll-behavior-y: contain; scrollbar-gutter: stable; padding: 30px 30px 24px; scrollbar-color: #3b3d3f transparent; scrollbar-width: thin; }
+.jumpToLatest { position: absolute; z-index: 4; right: 50%; bottom: 12px; transform: translateX(50%); }
 .conversation { width: min(var(--content-width), 100%); min-height: 100%; margin: 0 auto; }
 .virtualList { position: relative; width: 100%; }
 .virtualRow { position: absolute; top: 0; left: 0; width: 100%; }
 .message { padding-bottom: 34px; }
 .body { color: var(--color-text); }
+.priorReply { margin: 0 0 6px; color: var(--color-text-muted); font-size: 12px; line-height: 1.4; }
 .deliveryState { display: inline-flex; margin-left: 6px; color: var(--color-text-muted); vertical-align: middle; }
 .deliveryState svg { width: 14px; height: 14px; }
 .user .body { width: fit-content; max-width: min(620px, 82%); margin-left: auto; padding: 10px 14px; border: 1px solid rgba(255,255,255,.04); border-radius: 16px; background: #2b2b2b; }
+.heartbeatLabel { display: flex; align-items: center; justify-content: flex-end; gap: 4px; width: fit-content; max-width: min(620px, 82%); margin: 0 0 4px auto; color: var(--color-text-muted); font-size: 12px; line-height: 1.3; }
+.heartbeatLabel svg { width: 14px; height: 14px; flex: none; }
 .assistant .body {
   width: 100%;
   max-width: 100%;
@@ -35,13 +38,9 @@
   .jumpToLatest { bottom: 12px; }
   .message { padding-bottom: 28px; }
   .user .body { max-width: 92%; }
+  .heartbeatLabel { max-width: 92%; }
 }
 
 @media (any-pointer: coarse) {
-  .scrollArea {
-    padding-bottom: 24px;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .jumpToLatest { bottom: 12px; }
+  .scrollArea { -webkit-overflow-scrolling: touch; }
 }

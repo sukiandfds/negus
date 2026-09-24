@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, RefreshCw } from "lucide-react";
-import { ChannelManager } from './ChannelManager';
+import { ChevronDown, Pencil, RefreshCw } from "lucide-react";
+import { ChannelManager, useChannelCatalog } from "./ChannelManager";
 import type { CodexModel } from "../model/types";
+import { channelProviderId, chooseEffort, useModelDefaults } from "../model/modelDefaults";
 import { formatModelDisplayName } from "../model/modelDisplayName";
 import { formatReasoningEffort } from "../model/reasoningEffortLabels";
 import { ModelSelect } from "./ModelSelect";
@@ -37,10 +38,14 @@ export function ModelSettingsControl({
     ? formatModelDisplayName(currentModel, current?.displayName)
     : loading ? "读取模型" : "选择模型";
   const effortLabel = formatReasoningEffort(currentEffort);
+  const buttonLabel = [modelLabel, effortLabel].filter(Boolean).join(" · ");
   const busy = changing || applying;
   const hasChanges = draftModel !== currentModel || Boolean(draftEffort && draftEffort !== currentEffort);
+  const defaults = useModelDefaults();
+  const { allChannels } = useChannelCatalog(models, currentModel);
   const providerOf = (model: string) => models.find((entry) => entry.model === model)?.modelProviderId || (model.includes('::') ? model.split('::')[0] : /^grok-/i.test(model) ? 'fusheng-grok' : 'current');
-  const selectedProvider = providerOf(currentModel);
+  const selectedProvider = providerOf(draftModel || currentModel);
+  const channelOptions = allChannels.filter((entry) => entry.switchable !== false && !defaults.archivedProviderIds.includes(channelProviderId(entry)));
   const visibleModels = models.filter((entry, index, all) =>
     providerOf(entry.model) === selectedProvider
     && all.findIndex((candidate) => candidate.model === entry.model) === index);
@@ -67,10 +72,7 @@ export function ModelSettingsControl({
     const next = models.find((entry) => entry.model === model);
     const supported = next?.supportedReasoningEfforts.map((entry) => entry.reasoningEffort) || [];
     setDraftModel(model);
-    if (!supported.length) setDraftEffort("");
-    else if (!supported.includes(draftEffort)) {
-      setDraftEffort(supported.includes(currentEffort) ? currentEffort : "");
-    }
+    setDraftEffort(chooseEffort(next, supported.includes(draftEffort) ? draftEffort : ""));
     setApplyError("");
     return true;
   };
@@ -79,6 +81,13 @@ export function ModelSettingsControl({
     setDraftEffort(reasoningEffort);
     setApplyError("");
     return true;
+  };
+
+  const stageChannel = async (providerId: string) => {
+    const entry = channelOptions.find((item) => channelProviderId(item) === providerId);
+    const model = entry?.modelKey || (entry?.model ? `ccswitch_${entry.id}::${entry.model}` : "");
+    if (!model) return false;
+    return stageModel(model);
   };
 
   const applySettings = async () => {
@@ -95,6 +104,8 @@ export function ModelSettingsControl({
         return;
       }
       setOpen(false);
+    } catch (reason) {
+      setApplyError(reason instanceof Error ? reason.message : "模型设置没有生效，请重试");
     } finally {
       setApplying(false);
     }
@@ -123,10 +134,10 @@ export function ModelSettingsControl({
         type="button"
         aria-expanded={open}
         aria-haspopup="dialog"
-        title="模型与推理强度"
+        title={buttonLabel}
         onClick={toggleMenu}
       >
-        <span>{modelLabel}{effortLabel ? ` · ${effortLabel}` : ""}</span>
+        <span>{buttonLabel}</span>
         <ChevronDown aria-hidden="true" />
       </button>
       {open ? (
@@ -169,9 +180,15 @@ export function ModelSettingsControl({
           {applyError || error ? <small className={styles.menuError} role="alert">{error || applyError}</small> : null}
           <div className={styles.settingRow}>
             <span>渠道</span>
-            <button className={styles.cancelButton} type="button" disabled={busy} onClick={() => { setOpen(false); setChannelsOpen(true); }}>
-              {current?.providerDisplayName && current.providerDisplayName !== 'Current Codex provider' ? current.providerDisplayName : selectedProvider === 'fusheng-grok' ? 'Fusheng Grok' : '当前 Codex 渠道'} <ChevronDown size={12} />
-            </button>
+            <div className={styles.modelPicker}>
+              <select className={styles.select} aria-label="渠道" value={channelOptions.some((entry) => channelProviderId(entry) === providerOf(draftModel)) ? providerOf(draftModel) : ""} disabled={disabled || busy || !channelOptions.length} onChange={(event) => void stageChannel(event.target.value)}>
+                {channelOptions.some((entry) => channelProviderId(entry) === providerOf(draftModel)) ? null : <option value="">{current?.providerDisplayName || "选择渠道"}</option>}
+                {channelOptions.map((entry) => <option key={channelProviderId(entry)} value={channelProviderId(entry)}>{entry.name}</option>)}
+              </select>
+              <button className={styles.refreshButton} type="button" title="编辑渠道" aria-label="编辑渠道" disabled={busy} onClick={() => { setOpen(false); setChannelsOpen(true); }}>
+                <Pencil size={14} aria-hidden="true" />
+              </button>
+            </div>
           </div>
           <div className={styles.settingsActions}>
             <button className={styles.cancelButton} type="button" disabled={busy} onClick={closeMenu}>取消</button>

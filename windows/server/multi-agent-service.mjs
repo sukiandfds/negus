@@ -135,6 +135,21 @@ export const createMultiAgentService = ({
       label: status === "failed" ? "执行失败" : status === "interrupted" ? "任务已中断" : "任务已完成",
       detail: errorMessage,
     });
+    if (!run.messageWrite && !String(run.finalText || "").trim() && (status === "failed" || status === "completed")) {
+      const name = room.getAgent(run.agentId)?.name || "员工";
+      const detail = String(errorMessage || "").trim();
+      void room.addMessage({
+        type: "system",
+        authorId: "system",
+        authorName: "系统",
+        agentId: run.agentId,
+        failure: true,
+        replyTo: run.assignmentId ? { id: run.assignmentId } : null,
+        text: status === "failed"
+          ? name + "没有完成" + (detail ? "：" + detail : "。")
+          : name + "没有产生可发布的回复。",
+      }).catch((error) => console.warn("[multi-agent] status message failed: " + error.message));
+    }
     Promise.resolve(run.messageWrite)
       .then((message) => run.resolve({ status, text: run.finalText, message: message || null }))
       .catch(() => run.resolve({ status, text: run.finalText, message: null }));
@@ -319,14 +334,17 @@ export const createMultiAgentService = ({
       ? webOutputs.buildAgentInstructions(outputJob)
       : "";
     const roomSnapshot = room.snapshot();
-    const context = room.getAgentContext(agentId);
-    const contextAttachmentIds = [...new Set(context.messages.flatMap((message) => (
+    const context = room.getAgentContext(agentId, {
+      assignmentId: String(discussion?.sourceMessageId || ""),
+    });
+    const contextSources = context.quotedMessage ? [...context.messages, context.quotedMessage] : context.messages;
+    const contextAttachmentIds = [...new Set(contextSources.flatMap((message) => (
       Array.isArray(message.attachments) ? message.attachments.map((file) => file.id) : []
     )))];
     const contextAttachments = typeof resolveAttachments === "function"
       ? resolveAttachments(contextAttachmentIds)
       : [];
-    const contextArtifactIds = [...new Set(context.messages.flatMap((message) => (
+    const contextArtifactIds = [...new Set(contextSources.flatMap((message) => (
       Array.isArray(message.artifactIds) ? message.artifactIds : []
     )))];
     const contextArtifacts = typeof resolveArtifacts === "function"
@@ -342,9 +360,15 @@ export const createMultiAgentService = ({
       agents: roomSnapshot.agents,
       messages: context.messages,
       omittedMessageCount: context.omittedMessageCount,
+      omittedBeforeCount: context.omittedBeforeCount,
+      heldBackCount: context.heldBackCount,
+      firstParticipation: context.firstParticipation,
       outputInstructions,
       targetProjectRoot: projectRoot,
+      assignment: context.assignment || null,
+      quotedMessage: context.quotedMessage || null,
     });
+    const assignmentId = String(context.assignment?.id || "");
     let resolveRun;
     const completion = new Promise((resolve) => { resolveRun = resolve; });
     const timer = setTimeout(() => {
@@ -352,6 +376,15 @@ export const createMultiAgentService = ({
       room.finishAgentWork?.(currentRun.workId);
       currentRun = null;
       void setStatus(agentId, { phase: "failed", label: "等待回复超时", detail: "", active: false });
+      void room.addMessage({
+        type: "system",
+        authorId: "system",
+        authorName: "系统",
+        agentId,
+        failure: true,
+        replyTo: assignmentId ? { id: assignmentId } : null,
+        text: (room.getAgent(agentId)?.name || "员工") + "等待回复超时，没有新的回复。",
+      }).catch((error) => console.warn("[multi-agent] timeout message failed: " + error.message));
       resolveRun({ status: "failed", text: "" });
     }, 30 * 60 * 1000);
     timer.unref?.();
@@ -370,6 +403,7 @@ export const createMultiAgentService = ({
       turnId: "",
       stopRequested: false,
       interruptSent: false,
+      assignmentId,
     };
 
     try {
@@ -380,16 +414,25 @@ export const createMultiAgentService = ({
         developerInstructions: employeeTurnInstructions(agent.instructions),
       });
       try {
-        await onContextDelivered({ agentId, threadId, messages: context.messages });
+        await onContextDelivered({
+          agentId,
+          threadId,
+          messages: context.messages,
+          quotedMessage: context.quotedMessage || null,
+        });
       } catch (error) {
         console.warn(`[multi-agent] employee context projection failed: ${error.message}`);
+      }
+      try {
+        await room.advanceAgentContext(agentId, context.throughSequence);
+      } catch (error) {
+        console.warn(`[multi-agent] context cursor update failed: ${error.message}`);
       }
       if (currentRun?.threadId === threadId) {
         currentRun.turnId = String(started?.turn?.id || currentRun.turnId || "");
         if (currentRun.stopRequested) await interruptRun(currentRun);
       }
       const result = await completion;
-      if (result.status === "completed") await room.advanceAgentContext(agentId, context.throughSequence);
       return result;
     } catch (error) {
       if (currentRun?.threadId === threadId) {
@@ -402,6 +445,14 @@ export const createMultiAgentService = ({
     }
   };
 
+  const markWaiting = (agentIds, label) => {
+    for (const agentId of agentIds) {
+      const agent = room.getAgent(agentId);
+      if (agent?.active && agent.phase !== "queued") continue;
+      void setStatus(agentId, { phase: "queued", label, detail: "", active: true });
+    }
+  };
+
   const runDiscussion = async ({ agentIds, requestText, attachments, outputJob, discussion }) => {
     const agents = room.snapshot().agents;
     const pendingAgentIds = cleanAgentIds(agentIds, agents);
@@ -409,6 +460,7 @@ export const createMultiAgentService = ({
     for (let index = 0; index < pendingAgentIds.length; index += 1) {
       if (discussion.cancelled) break;
       const agentId = pendingAgentIds[index];
+      markWaiting(pendingAgentIds.slice(index + 1), "等候上一位");
       try {
         const result = await runAgent({ agentId, attachments, outputJob, discussion });
         if (discussion.cancelled || result.status === "interrupted") {
@@ -429,11 +481,21 @@ export const createMultiAgentService = ({
         }
       } catch (error) {
         if (outputJob) webOutputs.abandonJob(outputJob.jobId);
+        let assignmentId = "";
+        try {
+          assignmentId = String(error?.assignmentId || room.getAgentContext?.(agentId, {
+            assignmentId: String(discussion?.sourceMessageId || ""),
+          })?.assignment?.id || "");
+        } catch {
+          assignmentId = "";
+        }
         await room.addMessage({
           type: "system",
           authorId: "system",
           authorName: "系统",
           agentId,
+          failure: true,
+          replyTo: assignmentId ? { id: assignmentId } : null,
           text: `${room.getAgent(agentId)?.name || "Agent"}启动失败：${error instanceof Error ? error.message : String(error)}`,
         });
       }
@@ -458,9 +520,17 @@ export const createMultiAgentService = ({
       ? await webOutputs.createJob({ sourceMessageId, agentId: routing.outputAgentId })
       : null;
     const jobId = outputJob?.jobId || randomUUID();
-    const discussion = { jobId, agentIds: targets, outputJob, cancelled: false };
+    const discussion = {
+      jobId,
+      agentIds: targets,
+      outputJob,
+      cancelled: false,
+      sourceMessageId: String(sourceMessageId || "").trim().slice(0, 80),
+    };
     discussions.set(jobId, discussion);
-    void setStatus(targets[0], { phase: "queued", label: "已加入讨论队列", detail: "", active: true });
+    const queuedBehind = [...discussions.values()].filter((item) => item.jobId !== jobId && !item.cancelled).length;
+    if (queuedBehind > 0) markWaiting(targets, "等候前面的任务");
+    else markWaiting(targets.slice(1), "等候上一位");
     workQueue = workQueue
       .catch(() => {})
       .then(() => discussion.cancelled
@@ -468,7 +538,13 @@ export const createMultiAgentService = ({
         : runDiscussion({ agentIds: targets, requestText, attachments, outputJob, discussion }))
       .catch((error) => console.warn(`[multi-agent] discussion ${jobId} failed: ${error.message}`))
       .finally(() => discussions.delete(jobId));
-    return { jobId, agentIds: targets, status: "queued" };
+    return {
+      jobId,
+      agentIds: targets,
+      agentNames: targets.map((agentId) => room.getAgent(agentId)?.name).filter(Boolean),
+      status: "queued",
+      queuedBehind,
+    };
   };
 
   const interruptDiscussion = async () => {

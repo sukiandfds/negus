@@ -35,6 +35,10 @@ const recoveringStatus = (threadId: string): ExecutionStatus => ({
   label: "正在确认任务状态",
 });
 
+export const seedIdleExecution = (threadId: string) => {
+  rememberStatus(idleStatus(threadId));
+};
+
 const rememberStatus = (status: ExecutionStatus) => {
   if (!status.threadId) return status;
   statusCache.delete(status.threadId);
@@ -248,9 +252,10 @@ export function useCodexExecution(threadId: string) {
     text: string,
     attachmentIds: string[] = [],
     submissionId = "",
+    targetThreadId = threadId,
   ): Promise<SendMessageAttempt | null> => {
     const message = text.trim();
-    if (!threadId || (!message && !attachmentIds.length) || sendingRef.current) return null;
+    if (!targetThreadId || (!message && !attachmentIds.length) || sendingRef.current) return null;
     sendingRef.current = true;
     setSending(true);
     setSendingSlow(false);
@@ -285,7 +290,7 @@ export function useCodexExecution(threadId: string) {
       }));
     }
     try {
-      const accepted = await executionApi.sendMessage(threadId, message, attachmentIds, acceptedSubmissionId, controller.signal);
+      const accepted = await executionApi.sendMessage(targetThreadId, message, attachmentIds, acceptedSubmissionId, controller.signal);
       if (accepted.status === "pending") {
         stateRevisionRef.current += 1;
         setStatus((current) => ({
@@ -298,7 +303,7 @@ export function useCodexExecution(threadId: string) {
         }));
         return { outcome: "uncertain", result: null };
       }
-      if (accepted.threadId !== threadId) return { outcome: "accepted", result: accepted };
+      if (accepted.threadId !== targetThreadId) return { outcome: "accepted", result: accepted };
       if (accepted.turnId) {
         currentTurnIdRef.current = accepted.turnId;
         stateRevisionRef.current += 1;
@@ -320,7 +325,7 @@ export function useCodexExecution(threadId: string) {
       if (acceptedAfterFailure) {
         return {
           outcome: "accepted",
-          result: { threadId, turnId: recovered?.turnId || "", status: recovered?.phase || "inProgress" },
+          result: { threadId: targetThreadId, turnId: recovered?.turnId || "", status: recovered?.phase || "inProgress" },
         };
       }
       const uncertain = controller.signal.aborted;

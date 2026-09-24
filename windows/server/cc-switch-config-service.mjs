@@ -7,7 +7,7 @@ import TOML from '@iarna/toml';
 
 const script = fileURLToPath(new URL('../scripts/cc-switch-db.py', import.meta.url));
 const failure = (message, statusCode = 400) => Object.assign(new Error(message), { statusCode });
-export const createCcSwitchConfigService = ({ database = path.join(os.homedir(), '.cc-switch', 'cc-switch.db'), python = 'python', run } = {}) => {
+export const createCcSwitchConfigService = ({ database = path.join(os.homedir(), '.cc-switch', 'cc-switch.db'), python = 'python', run, cacheMs = 15_000, now = () => Date.now() } = {}) => {
   const invoke = run || ((request) => new Promise((resolve, reject) => {
     const child = spawn(python, [script], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     let output = '';
@@ -23,7 +23,21 @@ export const createCcSwitchConfigService = ({ database = path.join(os.homedir(),
     child.stdin.on('error', () => {});
     child.stdin.end(JSON.stringify({ ...request, database }));
   }));
-  const records = () => invoke({ action: 'list' });
+  let cachedRecords = null;
+  let cachedRecordsAt = 0;
+  let recordsRequest = null;
+  const records = (force = false) => {
+    if (!force && cachedRecords && now() - cachedRecordsAt < cacheMs) return Promise.resolve(cachedRecords);
+    if (recordsRequest) return recordsRequest;
+    recordsRequest = invoke({ action: 'list' })
+      .then((result) => {
+        cachedRecords = Array.isArray(result) ? result : [];
+        cachedRecordsAt = now();
+        return cachedRecords;
+      })
+      .finally(() => { recordsRequest = null; });
+    return recordsRequest;
+  };
   const decode = (row) => {
     const settings = JSON.parse(row.settings_config);
     const config = TOML.parse(settings.config || '');
@@ -33,17 +47,29 @@ export const createCcSwitchConfigService = ({ database = path.join(os.homedir(),
       wireApi: provider.wire_api || 'responses', multiplier: row.cost_multiplier || '1.0', configured: Boolean(key), key,
       editable: Boolean(provider.base_url && key && !provider.auth),
       switchable: Boolean(provider.base_url?.startsWith('https://') && key && config.model && !provider.auth && (!provider.wire_api || provider.wire_api === 'responses')),
+      isCurrent: Boolean(row.is_current),
       settings, config };
   };
   const publicEntry = ({ key, settings, config, ...entry }) => entry;
-  const list = async (lookupRatios) => {
-    const entries = (await records()).map((row) => {
+  let cachedList = null;
+  let cachedListAt = 0;
+  let listRequest = null;
+  const list = async (lookupRatios, { force = false } = {}) => {
+    if (!force && cachedList && now() - cachedListAt < cacheMs) return cachedList;
+    if (listRequest) return listRequest;
+    listRequest = (async () => {
+      const entries = (await records(force)).map((row) => {
       try { return decode(row); } catch { return { id: row.id, name: row.name, configured: false, editable: false, switchable: false, multiplier: row.cost_multiplier }; }
-    });
-    const ratios = lookupRatios ? await lookupRatios(entries).catch(() => ({})) : {};
-    return entries.map((entry) => ({ ...publicEntry(entry), ...(ratios[entry.id] || {}) }));
+      });
+      const ratios = lookupRatios ? await lookupRatios(entries).catch(() => ({})) : {};
+      const result = entries.map((entry) => ({ ...publicEntry(entry), ...(ratios[entry.id] || {}) }));
+      cachedList = result;
+      cachedListAt = now();
+      return result;
+    })().finally(() => { listRequest = null; });
+    return listRequest;
   };
-  const runtimeProviders = async () => (await records()).flatMap((row) => {
+  const runtimeProviders = async ({ force = false } = {}) => (await records(force)).flatMap((row) => {
     try {
       const item = decode(row);
       if (!item.editable || !item.model || item.wireApi !== 'responses') return [];
@@ -52,6 +78,7 @@ export const createCcSwitchConfigService = ({ database = path.join(os.homedir(),
         models: [{ id: `ccswitch_${item.id}::${item.model}`, model: item.model, displayName: item.model }] }];
     } catch { return []; }
   });
+  const currentDisplayName = async ({ force = false } = {}) => (await records(force)).find((row) => row.is_current)?.name || '';
   const save = async (input) => {
     const name = String(input.name || '').trim();
     const model = String(input.model || '').trim();
@@ -61,7 +88,7 @@ export const createCcSwitchConfigService = ({ database = path.join(os.homedir(),
     try { url = new URL(input.baseUrl); } catch { throw failure('请输入有效的 API 地址'); }
     if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw failure('API 地址需为 HTTPS，且不能包含账号或参数');
     if (!name || name.length > 160 || !model || model.length > 120 || !Number.isFinite(Number(multiplier)) || Number(multiplier) <= 0 || key.length > 4096 || /[\r\n]/u.test(key)) throw failure('请检查名称、模型、Key 和倍率');
-    const rows = await records();
+    const rows = await records(true);
     const existing = input.id ? rows.find((row) => row.id === input.id) : null;
     if (input.id && !existing) throw failure('渠道已不存在，请刷新', 409);
     const previous = existing ? decode(existing) : null;
@@ -81,7 +108,23 @@ export const createCcSwitchConfigService = ({ database = path.join(os.homedir(),
     const settings = { ...previous?.settings, auth: { ...previous?.settings.auth, auth_mode: 'apikey', OPENAI_API_KEY: secret }, config: TOML.stringify(config) };
     await invoke({ action: 'save', id: existing?.id || randomUUID(), expectedConfig: existing?.settings_config || null,
       name, config: JSON.stringify(settings), multiplier });
+    cachedRecords = null;
+    cachedList = null;
+    cachedRecordsAt = 0;
+    cachedListAt = 0;
     return { saved: true, notice: '已保存到 CC Switch；若桌面列表未更新，请刷新或重新打开。' };
   };
-  return { list, save, runtimeProviders };
+  const remove = async (id) => {
+    const rows = await records(true);
+    const existing = rows.find((row) => row.id === id);
+    if (!existing) throw failure('渠道已不存在，请刷新', 409);
+    if (existing.is_current) throw failure('请先在 CC Switch 切到其他渠道，再删除此渠道', 409);
+    await invoke({ action: 'delete', id });
+    cachedRecords = null;
+    cachedList = null;
+    cachedRecordsAt = 0;
+    cachedListAt = 0;
+    return { deleted: true, notice: '已从 CC Switch 删除。' };
+  };
+  return { list, save, remove, runtimeProviders, currentDisplayName };
 };

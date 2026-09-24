@@ -1,7 +1,7 @@
 .shell {
   display: grid;
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
-  grid-template-rows: var(--windowbar-height) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -10,14 +10,20 @@
 }
 
 .chrome {
-  grid-column: 1 / -1;
-  min-width: 0;
+  display: none;
 }
 
 .sidebarSlot {
-  grid-row: 2;
+  position: fixed;
+  z-index: 20;
+  top: env(safe-area-inset-top);
+  bottom: env(safe-area-inset-bottom);
+  left: 0;
+  width: min(var(--sidebar-width), calc(100vw - 48px));
   min-width: 0;
   min-height: 0;
+  transform: translateX(-100%);
+  transition: transform 160ms ease;
 }
 
 .sidebarSlot > * {
@@ -25,12 +31,31 @@
   height: 100%;
 }
 
+.sidebarOpen {
+  transform: translateX(0);
+}
+
 .backdrop {
-  display: none;
+  position: fixed;
+  z-index: 19;
+  inset: 0;
+  display: block;
+  border: 0;
+  background: rgba(0, 0, 0, .52);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.backdropOpen {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .workspace {
   display: grid;
+  grid-column: 1;
+  grid-row: 1;
   grid-template-rows: 78px minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
@@ -38,68 +63,11 @@
 
 .main {
   position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto auto;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
-.sidebarHidden { grid-template-columns: minmax(0, 1fr); }
 .sidebarHidden .sidebarSlot { display: none; }
-
-@media (any-pointer: coarse) {
-  .main {
-    display: grid;
-    grid-template-rows: minmax(0, 1fr) auto;
-  }
-}
-
-@media (max-width: 760px) {
-  .shell {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr);
-  }
-
-  .workspace {
-    grid-column: 1;
-    grid-row: 1;
-  }
-}
-
-@media (max-width: 760px), (any-pointer: coarse) {
-  .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
-  .chrome { display: none; }
-  .workspace { grid-column: 1; grid-row: 1; }
-
-  .sidebarSlot {
-    position: fixed;
-    z-index: 20;
-    top: env(safe-area-inset-top);
-    bottom: env(safe-area-inset-bottom);
-    left: 0;
-    grid-row: 1;
-    width: min(var(--sidebar-width), calc(100vw - 48px));
-    transform: translateX(-100%);
-    transition: transform 160ms ease;
-  }
-
-  .sidebarOpen {
-    transform: translateX(0);
-  }
-
-  .backdrop {
-    position: fixed;
-    z-index: 19;
-    inset: 0;
-    display: block;
-    border: 0;
-    background: rgba(0, 0, 0, .52);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 160ms ease;
-  }
-
-  .backdropOpen {
-    opacity: 1;
-    pointer-events: auto;
-  }
-}

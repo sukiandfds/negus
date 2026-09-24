@@ -26,14 +26,18 @@ export const createSystemRoutes = ({ token, project, projectRoot, device, observ
   const progressFile = path.join(projectRoot, "docs", "feature-development", "FEATURE_STATUS_INDEX.md");
   return async (request, response, url) => {
     if (url.pathname === '/api/model-channels' && modelProviders?.sharedConfig) {
-      response.setHeader('Cache-Control', 'no-store');
+      response.setHeader('Cache-Control', 'private, max-age=5, stale-while-revalidate=30');
       if (request.method === 'GET') {
-        sendJson(response, { channels: await modelProviders.sharedConfig.list(fushengUsage?.readChannelRatios) });
+        const force = url.searchParams.get('refresh') === '1';
+        sendJson(response, { channels: await modelProviders.sharedConfig.list(fushengUsage?.readChannelRatios, { force }) });
         return true;
       }
       if (request.method === 'POST') {
-        const result = await modelProviders.sharedConfig.save(await readJson(request, 16384));
-        await modelProviders.refreshShared();
+        const body = await readJson(request, 16384);
+        const result = body.action === 'delete'
+          ? await modelProviders.sharedConfig.remove(String(body.id || ''))
+          : await modelProviders.sharedConfig.save(body);
+        await modelProviders.refreshShared({ force: true });
         sendJson(response, result);
         return true;
       }

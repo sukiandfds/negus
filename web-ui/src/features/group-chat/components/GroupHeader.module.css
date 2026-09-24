@@ -74,8 +74,6 @@
 .dateButton { position: relative; display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; border-radius: 8px; color: var(--color-text-secondary); cursor: pointer; }
 .dateButton svg { width: 16px; height: 16px; stroke-width: 1.8; }
 .dateInput { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-.mobileOnly { display: none; }
-
 @media (hover: hover) {
   .iconButton:hover { background: var(--color-surface-hover); color: var(--color-text); }
   .dateButton:hover { background: var(--color-surface-hover); color: var(--color-text); }
@@ -84,7 +82,6 @@
 @media (max-width: 760px) {
   .topbar { position: relative; gap: 7px; padding-right: 146px; }
   .statusbar { padding: 0 12px 0 54px; }
-  .mobileOnly { display: grid; }
   .titleIcon { display: none; }
   .heading { flex: 1; }
   .meta { display: none; }

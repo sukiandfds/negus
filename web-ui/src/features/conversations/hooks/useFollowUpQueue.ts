@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { MediaFile } from "../../../shared/model/media";
 import type { ProjectEvent } from "../../execution/model/types";
 import { followUpQueueApi } from "../data/followUpQueueApi";
@@ -10,6 +10,8 @@ export function useFollowUpQueue(threadId: string) {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const threadIdRef = useRef(threadId);
+  threadIdRef.current = threadId;
 
   const refresh = useCallback(async () => {
     if (!threadId) {
@@ -50,14 +52,15 @@ export function useFollowUpQueue(threadId: string) {
   }, []);
 
   const enqueue = useCallback(async (text: string, attachments: MediaFile[] = []) => {
-    if (!threadId) return false;
+    const activeThreadId = threadIdRef.current;
+    if (!activeThreadId) return false;
     return run(() => followUpQueueApi.enqueue(
-      threadId,
+      activeThreadId,
       text.trim(),
       attachments.map((attachment) => attachment.id),
       `queue-${createSubmissionId()}`,
     ));
-  }, [run, threadId]);
+  }, [run]);
 
   const edit = useCallback((itemId: string, text: string) => {
     if (!threadId) return Promise.resolve(false);

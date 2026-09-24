@@ -10,9 +10,10 @@ interface AppShellProps {
   header: ReactNode;
   conversation: ReactNode;
   composer: ReactNode;
+  dock?: ReactNode;
 }
 
-export function AppShell({ chrome, sidebar, sidebarVisible = true, sidebarOpen, onCloseSidebar, header, conversation, composer }: AppShellProps) {
+export function AppShell({ chrome, sidebar, sidebarVisible = true, sidebarOpen, onCloseSidebar, header, conversation, composer, dock = null }: AppShellProps) {
   return (
     <div className={`${styles.shell} ${sidebarVisible ? "" : styles.sidebarHidden}`}>
       <div className={styles.chrome}>{chrome}</div>
@@ -30,6 +31,7 @@ export function AppShell({ chrome, sidebar, sidebarVisible = true, sidebarOpen, 
         <main className={styles.main}>
           {conversation}
           {composer}
+          {dock}
         </main>
       </section>
     </div>

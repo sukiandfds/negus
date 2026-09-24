@@ -17,10 +17,16 @@
 .channels { display: grid; margin-top: 12px; }
 .channel { display: flex; gap: 4px; align-items: center; border-bottom: 1px solid var(--color-border); padding: 6px 0; }
 .dialog .switchButton { flex: 1; min-width: 0; justify-content: flex-start; text-align: left; border: 0; padding: 10px 8px; min-height: 64px; background: transparent; }
-.channel[data-active='true'] .switchButton { opacity: 1; background: var(--color-surface-soft); }
+.channel[data-active='true'] { background: var(--color-surface-soft); border-radius: 6px; }
+.dialog .iconButton { flex: 0 0 34px; width: 34px; min-height: 34px; padding: 0; }
+.dialog .danger { color: var(--color-danger, #e57373); }
+.dialog .defaults { display: grid; gap: 4px; margin: 8px 0 12px; }
+.dialog .defaults select { width: 100%; max-width: none; height: 30px; min-height: 30px; border: 0; border-radius: var(--radius-small); padding: 0 6px; background: var(--color-surface-soft); color: var(--color-text); font-size: 12px; }
 .channelInfo { flex: 1; min-width: 0; display: grid; gap: 5px; }
 .channelInfo strong { font-size: 14px; overflow-wrap: anywhere; }
 .channelInfo small, .ratio small { font-size: 11px; color: var(--color-text-muted); overflow-wrap: anywhere; }
 .ratio { flex: 0 0 90px; display: grid; gap: 5px; text-align: right; }
 .ratio strong { font-size: 14px; color: var(--color-text); font-variant-numeric: tabular-nums; }
 .confirm { padding-top: 8px; }
+
+.archived { display: grid; gap: 4px; margin-top: 8px; }

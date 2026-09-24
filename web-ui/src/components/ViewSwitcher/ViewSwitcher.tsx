@@ -5,7 +5,7 @@ import styles from "./ViewSwitcher.module.css";
 
 export type ViewSurface = "desktop" | "conversation" | "group" | "progress";
 
-const surfaceHref = (surface: ViewSurface) => {
+export const surfaceHref = (surface: ViewSurface) => {
   const params = new URLSearchParams(window.location.search);
   params.delete("view");
   if (surface !== "progress") params.set("view", surface);

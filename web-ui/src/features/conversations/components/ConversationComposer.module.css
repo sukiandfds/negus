@@ -1,14 +1,12 @@
 .positioner {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  position: relative;
   width: 100%;
   min-width: 0;
   max-width: 100%;
   padding: 22px 30px 14px;
-  background: linear-gradient(180deg, transparent 0, var(--color-bg) 30%);
+  background: var(--color-bg);
   pointer-events: none;
+  z-index: 5;
 }
 
 .composer {
@@ -144,7 +142,7 @@
 }
 
 @media (max-width: 760px) {
-  .positioner { padding: 10px 12px max(10px, env(safe-area-inset-bottom)); }
+  .positioner { padding: 10px 12px 10px; }
 
   .footer {
     display: grid;
@@ -196,20 +194,6 @@
     height: var(--control-touch-icon-button-size);
     border: 3px solid transparent;
     background-clip: padding-box;
-  }
-
-}
-
-@media (any-pointer: coarse) {
-  .positioner {
-    position: relative;
-    right: auto;
-    bottom: auto;
-    left: auto;
-    width: 100%;
-    min-width: 0;
-    z-index: 5;
-    background: var(--color-bg);
   }
 
 }

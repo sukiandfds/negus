@@ -6,14 +6,21 @@ import { createPendingAgentMessage, removePendingAgentMessages, upsertGroupMessa
 import { reconcileGroupSnapshot } from "../data/groupSnapshot";
 import type { GroupEvent, GroupSnapshot, GroupStreamingMessage } from "../model/types";
 
-export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapshot | null>>, roomId: string) {
+export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapshot | null>>, roomId: string, reviewingHistory = false) {
   const [connected, setConnected] = useState(false);
+  const [unseenLiveCount, setUnseenLiveCount] = useState(0);
   const [streaming, setStreaming] = useState<Record<string, GroupStreamingMessage>>({});
   const [artifactEvent, setArtifactEvent] = useState<ArtifactRealtimeEvent | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const streamingBuffer = useRef<Record<string, GroupStreamingMessage>>({});
   const streamingFrame = useRef(0);
+  const reviewingHistoryRef = useRef(false);
+  reviewingHistoryRef.current = reviewingHistory;
+
+  useEffect(() => {
+    if (!reviewingHistory) setUnseenLiveCount(0);
+  }, [reviewingHistory]);
 
   useEffect(() => {
     let disposed = false;
@@ -22,6 +29,7 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
     streamingBuffer.current = {};
     setStreaming({});
     setArtifactEvent(null);
+    setUnseenLiveCount(0);
 
     const clearReconnectTimer = () => {
       if (reconnectTimerRef.current === null) return;
@@ -78,10 +86,16 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
         const eventRoomId = "roomId" in event ? event.roomId : "";
         if (event.type.startsWith("group_") && eventRoomId && eventRoomId !== roomId) return;
         if (event.type === "group_message_created") {
-          setSnapshot((current) => current && {
-            ...current,
-            messages: upsertGroupMessage(current.messages, event.message),
-            activeWorks: (current.activeWorks || []).filter((work) => work.workId !== event.message.workId),
+          if (reviewingHistoryRef.current) setUnseenLiveCount((count) => count + 1);
+          setSnapshot((current) => {
+            if (!current) return current;
+            const activeWorks = (current.activeWorks || []).filter((work) => work.workId !== event.message.workId);
+            if (reviewingHistoryRef.current) return { ...current, activeWorks };
+            return {
+              ...current,
+              messages: upsertGroupMessage(current.messages, event.message),
+              activeWorks,
+            };
           });
           const nextBuffer = { ...streamingBuffer.current };
           if (event.message.workId) {
@@ -94,9 +108,13 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
           streamingBuffer.current = nextBuffer;
           setStreaming(nextBuffer);
         } else if (event.type === "group_message_updated") {
-          setSnapshot((current) => current && {
-            ...current,
-            messages: upsertGroupMessage(current.messages, event.message),
+          setSnapshot((current) => {
+            if (!current) return current;
+            if (reviewingHistoryRef.current && !current.messages.some((message) => message.id === event.message.id)) return current;
+            return {
+              ...current,
+              messages: upsertGroupMessage(current.messages, event.message),
+            };
           });
         } else if (event.type === "group_agent_updated") {
           setSnapshot((current) => current && ({
@@ -120,7 +138,9 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
         } else if (event.type === "group_agent_started") {
           setSnapshot((current) => current && {
             ...current,
-            messages: upsertGroupMessage(current.messages, createPendingAgentMessage(event)),
+            messages: reviewingHistoryRef.current
+              ? current.messages
+              : upsertGroupMessage(current.messages, createPendingAgentMessage(event)),
             activeWorks: [
               ...(current.activeWorks || []).filter((work) => work.workId !== event.workId),
               {
@@ -156,7 +176,7 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
             [workId]: value,
           };
           setSnapshot((current) => {
-            if (!current || current.messages.some((message) => message.workId === workId)) return current;
+            if (!current || reviewingHistoryRef.current || current.messages.some((message) => message.workId === workId)) return current;
             return {
               ...current,
               messages: upsertGroupMessage(current.messages, createPendingAgentMessage({
@@ -204,5 +224,5 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
     };
   }, [roomId, setSnapshot]);
 
-  return { connected, streaming, artifactEvent };
+  return { connected, streaming, artifactEvent, unseenLiveCount };
 }

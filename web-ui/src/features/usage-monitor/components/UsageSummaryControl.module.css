@@ -3,7 +3,7 @@
 .summaryButton {
   display: inline-flex;
   height: 18px;
-  max-width: 280px;
+  width: 176px; max-width: 42vw;
   min-width: 0;
   align-items: center;
   gap: 5px;
@@ -19,9 +19,9 @@
 .summaryValues,
 .metric { display: inline-flex; min-width: 0; align-items: baseline; gap: 4px; }
 .metricLabel { color: var(--color-text-muted); }
-.metric strong { color: var(--color-text); font-variant-numeric: tabular-nums; font-weight: 600; }
+.metric strong { display: inline-block; min-width: 2.8em; color: var(--color-text); font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
 .divider { width: 1px; height: 12px; flex: 0 0 1px; background: var(--color-border-strong); }
-.loadingText { color: var(--color-text-muted); }
+.loadingText { position: absolute; width: 1px; height: 1px; overflow: hidden; }
 .compactGroupLabel { display: none; }
 
 .popover {

@@ -21,7 +21,8 @@
 
 .trigger {
   display: inline-flex;
-  max-width: 190px;
+  width: auto;
+  max-width: min(220px, 46vw);
   height: var(--control-text-height);
   align-items: center;
   gap: 5px;

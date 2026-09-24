@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { createAppServerConversationStore } from "../server/app-server-conversation-store.mjs";
 
@@ -768,4 +771,175 @@ test("uses the native Codex thread goal protocol", async () => {
     { method: "thread/goal/get", params: { threadId: thread.id } },
     { method: "thread/goal/clear", params: { threadId: thread.id } },
   ]);
+});
+
+test("sorts the sidebar by the latest assistant reply instead of stale thread metadata", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "negus-assistant-time-"));
+  const olderReply = path.join(root, "older.jsonl");
+  const newerReply = path.join(root, "newer.jsonl");
+  const writeRollout = (file, timestamp) => writeFile(file, `${JSON.stringify({
+    timestamp,
+    type: "response_item",
+    payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "done" }] },
+  })}\n`, "utf8");
+  await writeRollout(olderReply, "2026-09-22T05:47:00.000Z");
+  await writeRollout(newerReply, "2026-09-22T09:25:00.000Z");
+  const store = createAppServerConversationStore({
+    projectRoot: "D:\\project",
+    client: {
+      subscribe: () => () => {},
+      close: () => {},
+      request: async (method) => {
+        assert.equal(method, "thread/list");
+        return {
+          data: [
+            { id: "stale-newer-meta", cwd: "D:\\project", name: "元数据较新", updatedAt: 1_800_000_000, path: olderReply },
+            { id: "stale-older-meta", cwd: "D:\\project", name: "元数据较旧", updatedAt: 1_700_000_000, path: newerReply },
+          ],
+          nextCursor: null,
+        };
+      },
+    },
+  });
+  try {
+    const sessions = await store.listSessions();
+    assert.deepEqual(sessions.map((item) => item.title), ["元数据较旧", "元数据较新"]);
+    assert.equal(sessions[0].updatedAt, "2026-09-22T09:25:00.000Z");
+    assert.equal(sessions[1].updatedAt, "2026-09-22T05:47:00.000Z");
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("reads channel resume info from a listed thread without requiring it to be loaded", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "negus-channel-"));
+  const rollout = path.join(root, "rollout.jsonl");
+  await writeFile(rollout, "{}\n");
+  const calls = [];
+  const thread = {
+    id: "thread-1",
+    cwd: root,
+    path: rollout,
+    source: "appServer",
+    model: "gpt-6-astra",
+    updatedAt: 100,
+  };
+  const store = createAppServerConversationStore({
+    projectRoot: root,
+    autoTitleEnabled: false,
+    registerMedia: () => null,
+    client: {
+      subscribe: () => () => {},
+      close: () => {},
+      request: async (method) => {
+        calls.push(method);
+        if (method === "thread/list") return { data: [thread], nextCursor: null };
+        if (method === "thread/read") throw new Error("thread not loaded: thread-1");
+        throw new Error(`Unexpected request: ${method}`);
+      },
+    },
+  });
+  try {
+    await store.listSessions();
+    const info = await store.getSessionResumeInfo("thread-1");
+    assert.equal(info.path, rollout);
+    assert.equal(info.cwd, root);
+    assert.equal(info.model, "gpt-6-astra");
+    assert.equal(calls.includes("thread/read"), false);
+    assert.equal(calls.includes("thread/resume"), false);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("resumes an unloaded thread before collecting channel-switch resume info", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "negus-channel-"));
+  const rollout = path.join(root, "rollout.jsonl");
+  await writeFile(rollout, "{}\n");
+  const calls = [];
+  const thread = {
+    id: "thread-1",
+    cwd: root,
+    path: rollout,
+    source: "appServer",
+    model: "gpt-6-astra",
+    updatedAt: 100,
+  };
+  const store = createAppServerConversationStore({
+    projectRoot: root,
+    autoTitleEnabled: false,
+    registerMedia: () => null,
+    client: {
+      subscribe: () => () => {},
+      close: () => {},
+      request: async (method, params) => {
+        calls.push({ method, params });
+        if (method === "thread/read") throw new Error("thread not loaded: thread-1");
+        if (method === "thread/resume") return { thread };
+        throw new Error(`Unexpected request: ${method}`);
+      },
+    },
+  });
+  try {
+    const info = await store.getSessionResumeInfo("thread-1");
+    assert.equal(info.path, rollout);
+    assert.equal(info.model, "gpt-6-astra");
+    const resume = calls.find((call) => call.method === "thread/resume");
+    assert.equal(resume.params.threadId, "thread-1");
+    assert.equal(resume.params.excludeTurns, true);
+    assert.equal(calls.some((call) => call.method === "thread/read"), true);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("explains when a channel switch has no persisted thread", async () => {
+  const store = createAppServerConversationStore({
+    projectRoot: "D:\\project",
+    autoTitleEnabled: false,
+    registerMedia: () => null,
+    client: {
+      subscribe: () => () => {},
+      close: () => {},
+      request: async (method) => {
+        if (method === "thread/read") throw new Error("thread not loaded: missing");
+        if (method === "thread/resume") throw new Error("no rollout found for thread id");
+        throw new Error(`Unexpected request: ${method}`);
+      },
+    },
+  });
+  try {
+    await assert.rejects(() => store.getSessionResumeInfo("missing"), (error) => (
+      error.statusCode === 409 && /尚未持久化/.test(error.message)
+    ));
+  } finally {
+    store.close();
+  }
+});
+
+test("releases an unloaded thread without unsubscribing", async () => {
+  const calls = [];
+  const store = createAppServerConversationStore({
+    projectRoot: "D:\\project",
+    autoTitleEnabled: false,
+    registerMedia: () => null,
+    client: {
+      subscribe: () => () => {},
+      close: () => {},
+      request: async (method) => {
+        calls.push(method);
+        if (method === "thread/read") throw new Error("thread not loaded: thread-1");
+        throw new Error(`Unexpected request: ${method}`);
+      },
+    },
+  });
+  try {
+    await store.releaseSession("thread-1");
+    assert.equal(calls.includes("thread/unsubscribe"), false);
+  } finally {
+    store.close();
+  }
 });

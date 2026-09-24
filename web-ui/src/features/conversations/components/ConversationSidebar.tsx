@@ -20,7 +20,7 @@ interface ConversationSidebarProps {
   archiveBusyIds: ReadonlySet<string>;
   error: string;
   onSelect: (threadId: string) => void;
-  onCreate: (projectRoot?: string) => Promise<boolean>;
+  onCreate: (projectRoot?: string, model?: string) => Promise<boolean>;
   onRefresh: () => void;
   onArchiveViewChange: (archived: boolean) => Promise<void>;
   onArchive: (threadId: string) => Promise<boolean>;
@@ -62,7 +62,7 @@ export function ConversationSidebar({
       <SidebarHeader
         actions={(
           <>
-          <button className={styles.iconButton} type="button" aria-label="新建对话" title="新建对话" disabled={creating || !activeProjectRoot} onClick={() => void onCreate(activeProjectRoot)}>
+          <button className={styles.iconButton} type="button" aria-label="新建对话" title="新建对话" disabled={creating || !activeProjectRoot} onClick={() => { void onCreate(activeProjectRoot); }}>
             <SquarePen aria-hidden="true" />
           </button>
           <button className={styles.iconButton} type="button" aria-label="刷新会话" title="刷新会话" onClick={onRefresh}>

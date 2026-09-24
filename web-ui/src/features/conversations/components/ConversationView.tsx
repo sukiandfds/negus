@@ -1,35 +1,24 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Clock3, LoaderCircle } from "lucide-react";
+import { CalendarClock, Clock3, LoaderCircle } from "lucide-react";
 import { JumpToLatest } from "../../../components/JumpToLatest/JumpToLatest";
 import { useReturnToBottom } from "../../../components/JumpToLatest/useReturnToBottom";
 import { RefreshNotice } from "../../app-update/components/AppUpdateNotice";
 import type { ContentSyncState, SessionDetail, SessionMessage } from "../model/types";
 import { MessageActions } from "./MessageActions";
-import { ContentRenderer } from "../rendering/ContentRenderer";
+import { CollapsedMarkdown, ContentRenderer } from "../rendering/ContentRenderer";
+import { presentConversationMessage } from "../rendering/heartbeatMessage";
 import { ExecutionTimeline } from "../../execution/components/ExecutionTimeline";
 import type { ExecutionStatus } from "../../execution/model/types";
 import type { ContextStatus } from "../../context-management/model/types";
 import { formatConversationTimestamp } from "../../../shared/format/dateTime";
+import { advanceLiveTranscript, createLiveTranscriptMemory } from "../state/liveTranscript";
 import styles from "./ConversationView.module.css";
-
-const normalizedText = (value: string) => value.replace(/\s+/gu, " ").trim();
 
 const messageListKey = (message: SessionMessage) => (
   message.role === "user" && message.submissionId
     ? `submission:${message.submissionId}`
     : message.itemId || message.id
-);
-
-const finalMessageMatchesStream = (message: SessionMessage, executionStatus: ExecutionStatus, streamingText: string) => (
-  message.role === "assistant"
-  && Boolean(executionStatus.turnId)
-  && message.turnId === executionStatus.turnId
-  && (
-    !executionStatus.streamingItemId
-    || message.itemId === executionStatus.streamingItemId
-    || (Boolean(streamingText.trim()) && normalizedText(message.text) === normalizedText(streamingText))
-  )
 );
 
 function Message({
@@ -50,6 +39,7 @@ function Message({
   executionStatus,
   contextStatus,
   executionPlaceholder = false,
+  showPriorReply = false,
 }: {
   message: SessionMessage;
   streaming?: boolean;
@@ -68,32 +58,44 @@ function Message({
   executionStatus?: ExecutionStatus;
   contextStatus?: ContextStatus;
   executionPlaceholder?: boolean;
+  showPriorReply?: boolean;
 }) {
+  const presentation = presentConversationMessage(message);
+  const shown = presentation.message;
+  const heartbeatUser = presentation.user;
+  const assistantText = presentation.assistantText;
+  const copyText = heartbeatUser?.instructions ?? assistantText ?? message.text;
+  const richBlocks = message.blocks?.some((block) => block.type !== "markdown") ?? false;
   const formattedTime = formatConversationTimestamp(message.createdAt);
   const reserveTimestamp = message.role === "assistant";
+  if (assistantText === "" && !streaming && !executionStatus && !executionPlaceholder && !richBlocks) return null;
   return (
     <article className={`${styles.message} ${message.role === "user" ? styles.user : styles.assistant}`}>
       {message.authorName ? <span className={styles.authorName}>{message.authorName}</span> : null}
-      {executionStatus && contextStatus ? (
-        <ExecutionTimeline status={executionStatus} contextStatus={contextStatus} timestamp={formattedTime} />
-      ) : formattedTime || reserveTimestamp ? (
+      {!executionPlaceholder && (formattedTime || reserveTimestamp) ? (
         <time className={styles.timestamp} dateTime={message.createdAt} aria-hidden={!formattedTime}>
           {formattedTime || "\u00a0"}
         </time>
       ) : null}
+      {heartbeatUser ? (
+        <div className={styles.heartbeatLabel}>
+          <CalendarClock aria-hidden="true" />
+          <span>由已安排任务发送</span>
+        </div>
+      ) : null}
       {!executionPlaceholder ? <div className={styles.body}>
         {message.turnStatus === "interrupted" ? <small>已中断</small> : null}
-        {streaming ? <div className={styles.streamingText}>{message.text}<i className={styles.cursor} /></div> : message.superseded ? <details><summary>追加指令前的回复</summary><ContentRenderer message={message} /></details> : <ContentRenderer message={message} />}
+        {streaming ? <div className={styles.streamingText}>{assistantText ?? message.text}<i className={styles.cursor} /></div> : heartbeatUser ? <CollapsedMarkdown text={heartbeatUser.instructions} /> : <>{showPriorReply ? <div className={styles.priorReply}>追加指令前的回复</div> : null}<ContentRenderer message={shown} /></>}
         {message.deliveryState === "pending" ? (
           <span className={styles.deliveryState} title="正在确认指令是否已送达" aria-label="正在确认指令是否已送达">
             <Clock3 aria-hidden="true" />
           </span>
         ) : null}
       </div> : null}
-      {!executionPlaceholder ? (
+      {!executionPlaceholder && !streaming ? (
         <div className={styles.actionRow}>
           {!streaming ? <MessageActions
-            text={message.text}
+            text={copyText}
             forkable={forkable}
             forkDisabled={forkDisabled}
             forking={forking}
@@ -109,6 +111,9 @@ function Message({
             messageId={message.id}
           /> : null}
         </div>
+      ) : null}
+      {executionStatus && contextStatus ? (
+        <ExecutionTimeline status={executionStatus} contextStatus={contextStatus} />
       ) : null}
     </article>
   );
@@ -135,8 +140,65 @@ interface ConversationViewProps {
   localSendVersion: number;
 }
 
-type ConversationItem =
-  { id: string; message: SessionMessage; streaming: boolean; execution: boolean; executionPlaceholder?: boolean };
+type ConversationItem = {
+  id: string;
+  message: SessionMessage;
+  streaming: boolean;
+  execution: boolean;
+  executionPlaceholder?: boolean;
+  local?: boolean;
+};
+
+const CLOSE_ORDER_WINDOW_MS = 10 * 60 * 1000;
+
+const messageTime = (message: SessionMessage) => {
+  const value = Date.parse(message.createdAt || "");
+  return Number.isFinite(value) ? value : null;
+};
+
+const visibleText = (message: SessionMessage) => message.text.replace(/\s+/gu, " ").trim();
+
+const staysAtEnd = (item: ConversationItem) => (
+  item.streaming || item.executionPlaceholder || item.message.id.startsWith("optimistic-")
+);
+
+const shouldMoveAhead = (previous: ConversationItem, current: ConversationItem) => {
+  if (staysAtEnd(previous) || staysAtEnd(current)) return false;
+  const sameTurn = Boolean(current.message.turnId) && current.message.turnId === previous.message.turnId;
+  if (sameTurn && previous.message.role === "user" && current.message.role === "assistant") return false;
+  if (sameTurn && current.message.role === "user" && previous.message.role === "assistant") {
+    const userTime = messageTime(current.message);
+    const assistantTime = messageTime(previous.message);
+    if (userTime === null || assistantTime === null || userTime <= assistantTime) return true;
+  }
+  const previousTime = messageTime(previous.message);
+  const currentTime = messageTime(current.message);
+  return previousTime !== null
+    && currentTime !== null
+    && previousTime > currentTime
+    && previousTime - currentTime <= CLOSE_ORDER_WINDOW_MS;
+};
+
+const orderVisibleItems = (items: ConversationItem[]) => {
+  const ordered = items.filter((item, index) => !(
+    item.local
+    && visibleText(item.message)
+    && items.slice(0, index).some((current) => (
+      current.message.role === item.message.role && visibleText(current.message) === visibleText(item.message)
+    ))
+  ));
+  let moved = true;
+  while (moved) {
+    moved = false;
+    for (let index = 1; index < ordered.length; index += 1) {
+      if (!shouldMoveAhead(ordered[index - 1], ordered[index])) continue;
+      const [current] = ordered.splice(index, 1);
+      ordered.splice(index - 1, 0, current);
+      moved = true;
+    }
+  }
+  return ordered;
+};
 
 export function ConversationView({
   active = true,
@@ -162,10 +224,16 @@ export function ConversationView({
   const loadingOlderThreadsRef = useRef(new Set<string>());
   const olderLoadTimersRef = useRef(new Map<string, number>());
   const positionedThreadIdRef = useRef("");
+  const visibleCountRef = useRef(0);
   const followLatestFrameRef = useRef(0);
+  const transcriptMemoryRef = useRef(createLiveTranscriptMemory());
   const messages = session?.messages || [];
   const currentSessionRef = useRef(session);
   currentSessionRef.current = session;
+  const contentSyncStateRef = useRef(contentSyncState);
+  contentSyncStateRef.current = contentSyncState;
+  const onLoadOlderRef = useRef(onLoadOlder);
+  onLoadOlderRef.current = onLoadOlder;
   const locationParams = new URLSearchParams(window.location.search);
   const agentScoped = Boolean(locationParams.get("agent"));
   const employeeScoped = Boolean(locationParams.get("employee"));
@@ -174,67 +242,54 @@ export function ConversationView({
   const showExecution = executionMatchesSession
     && Boolean(executionStatus.startedAt)
     && executionStatus.phase !== "idle";
-  const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant");
-  const finalMessageLoaded = executionMatchesSession && (
-    messages.some((message) => finalMessageMatchesStream(message, executionStatus, streamingText))
-    || (completedExecution
-      && Boolean(latestAssistant)
-      && Boolean(executionStatus.turnId)
-      && latestAssistant?.turnId === executionStatus.turnId)
-  );
-  const visibleStreamingText = executionMatchesSession && !finalMessageLoaded ? streamingText : "";
-  const isAnswerStreaming = Boolean(visibleStreamingText) && executionStatus.active && !completedExecution;
-  const displayMessages = messages.map((message) => (
-    !message.createdAt
-      && completedExecution
-      && finalMessageLoaded
-      && message.role === "assistant"
-      && message.id === latestAssistant?.id
-      && message.turnId === executionStatus.turnId
-      ? { ...message, createdAt: executionStatus.updatedAt || executionStatus.startedAt || undefined }
-      : message
-  ));
-  const executionMessage = finalMessageLoaded
-    ? [...displayMessages].reverse().find((message) => message.role === "assistant" && message.turnId === executionStatus.turnId)
-    : undefined;
-  const visibleItems: ConversationItem[] = [
-    ...displayMessages.map((message) => ({
+  const transcript = advanceLiveTranscript(transcriptMemoryRef.current, {
+    threadId: session?.threadId || "",
+    messages,
+    streamingText: executionMatchesSession ? streamingText : "",
+    streamingItemId: executionMatchesSession ? executionStatus.streamingItemId || "" : "",
+    turnId: executionMatchesSession ? executionStatus.turnId || "" : "",
+    active: showExecution && executionStatus.active && !completedExecution,
+    showExecution,
+    now: new Date().toISOString(),
+  });
+  const isAnswerStreaming = transcript.answerStreaming;
+  const executionOn = (message: SessionMessage) => showExecution && message.id === transcript.executionMessageId;
+  const visibleItems = orderVisibleItems([
+    ...transcript.persisted.map((message) => ({
+      id: `message:${messageListKey(message)}`,
+      message,
+      streaming: message.id === transcript.streamingMessageId,
+      execution: executionOn(message),
+    })),
+    ...transcript.preceding.map((message) => ({
+      id: `segment:${message.id}`,
+      message,
+      streaming: false,
+      execution: executionOn(message),
+      local: true,
+    })),
+    ...transcript.optimistic.map((message) => ({
       id: `message:${messageListKey(message)}`,
       message,
       streaming: false,
-      execution: showExecution && message.id === executionMessage?.id,
+      execution: false,
     })),
-    ...(showExecution && executionStatus.active && !finalMessageLoaded && !visibleStreamingText ? [{
+    ...(transcript.live ? [{
+      id: `segment:${transcript.live.message.id}`,
+      message: transcript.live.message,
+      streaming: transcript.live.streaming,
+      execution: executionOn(transcript.live.message),
+      local: true,
+    }] : []),
+    ...(transcript.placeholder ? [{
       id: "message:execution-placeholder",
-      message: {
-        id: "execution-placeholder",
-        role: "assistant" as const,
-        text: "",
-        createdAt: executionStatus.startedAt || undefined,
-        turnId: executionStatus.turnId || undefined,
-      },
+      message: transcript.placeholder,
       streaming: false,
       execution: true,
       executionPlaceholder: true,
+      local: true,
     }] : []),
-    ...(visibleStreamingText ? [{
-      id: `message:${executionStatus.streamingItemId || "streaming-assistant"}`,
-      message: {
-        id: "streaming-assistant",
-        role: "assistant" as const,
-        text: visibleStreamingText,
-        createdAt: completedExecution
-          ? executionStatus.updatedAt || executionStatus.startedAt || undefined
-          : executionStatus.startedAt || undefined,
-        turnId: executionStatus.turnId || undefined,
-        itemId: executionStatus.streamingItemId || undefined,
-      },
-      streaming: executionStatus.active && !completedExecution,
-      execution: showExecution,
-    }] : []),
-  ];
-  const hasVisibleItems = visibleItems.length > 0;
-  const latestFollowIndex = Math.max(0, visibleItems.length - 1);
+  ]);
   const virtualizer = useVirtualizer({
     count: visibleItems.length,
     getScrollElement: () => scrollRef.current,
@@ -244,13 +299,19 @@ export function ConversationView({
     anchorTo: "end",
     scrollEndThreshold: 120,
   });
+  const pinToEnd = () => {
+    const root = scrollRef.current;
+    if (!active || !root || root.clientHeight <= 0) return false;
+    (virtualizer as unknown as { scrollState: unknown }).scrollState = null;
+    root.scrollTop = root.scrollHeight;
+    return root.scrollTop > 0 || root.scrollHeight <= root.clientHeight + 1;
+  };
+  const pinToEndRef = useRef(pinToEnd);
+  pinToEndRef.current = pinToEnd;
   const scheduleFollowLatest = useCallback(() => {
     window.cancelAnimationFrame(followLatestFrameRef.current);
-    followLatestFrameRef.current = window.requestAnimationFrame(() => {
-      if (!active || !visibleItems.length) return;
-      virtualizer.scrollToIndex(latestFollowIndex, { align: "end" });
-    });
-  }, [active, latestFollowIndex, virtualizer, visibleItems.length]);
+    followLatestFrameRef.current = window.requestAnimationFrame(() => pinToEndRef.current());
+  }, []);
 
   const getScrollElement = useCallback(() => scrollRef.current, []);
   const getTrailingContentHeight = useCallback(() => 0, []);
@@ -277,15 +338,24 @@ export function ConversationView({
 
   useLayoutEffect(() => {
     if (!active) return;
-    if (!loading && session && scrollRef.current) {
-      const threadId = session.threadId;
-      if (positionedThreadIdRef.current === threadId) return;
-      positionedThreadIdRef.current = threadId;
-      window.cancelAnimationFrame(followLatestFrameRef.current);
-      resetReturnToBottom(true);
-      virtualizer.scrollToIndex(latestFollowIndex, { align: "end" });
+    const threadId = session?.threadId || "";
+    if (!threadId || loading || !scrollRef.current) {
+      if (!threadId) positionedThreadIdRef.current = "";
+      return;
     }
-  }, [active, latestFollowIndex, loading, resetReturnToBottom, session?.threadId, virtualizer]);
+    if (positionedThreadIdRef.current === threadId) return;
+    window.cancelAnimationFrame(followLatestFrameRef.current);
+    resetReturnToBottom(true);
+    if (pinToEndRef.current()) positionedThreadIdRef.current = threadId;
+  }, [active, loading, resetReturnToBottom, session?.threadId]);
+
+  useLayoutEffect(() => {
+    const previousCount = visibleCountRef.current;
+    const nextCount = visibleItems.length;
+    visibleCountRef.current = nextCount;
+    if (!active || positionedThreadIdRef.current !== (session?.threadId || "")) return;
+    if (nextCount > previousCount && stickToBottomRef.current) pinToEndRef.current();
+  }, [active, session?.threadId, visibleItems.length]);
 
   useEffect(() => {
     if (!active) return undefined;
@@ -336,7 +406,7 @@ export function ConversationView({
         !threadId
         || root.scrollTop > 140
         || !currentSession?.hasMore
-        || contentSyncState === "recovering"
+        || contentSyncStateRef.current === "recovering"
       ) return;
       loadingOlderThreadsRef.current.add(threadId);
       const timer = window.setTimeout(() => {
@@ -346,7 +416,7 @@ export function ConversationView({
           loadingOlderThreadsRef.current.delete(threadId);
           return;
         }
-        void onLoadOlder().finally(() => {
+        void onLoadOlderRef.current().finally(() => {
           loadingOlderThreadsRef.current.delete(threadId);
         });
       }, 140);
@@ -364,7 +434,7 @@ export function ConversationView({
         loadingOlderThreadsRef.current.delete(threadId);
       }
     };
-  }, [active, contentSyncState, onLoadOlder, session, session?.hasMore, updateReturnToBottom]);
+  }, [active, updateReturnToBottom]);
 
   return (
     <div className={styles.viewport}>
@@ -378,7 +448,7 @@ export function ConversationView({
         />
       ) : null}
       <div className={styles.scrollArea} ref={scrollRef}>
-        <section className={styles.conversation} aria-label="真实项目对话" aria-live="polite">
+        <section className={styles.conversation} aria-label="真实项目对话" aria-live="off">
         {loading && !session ? <div className={styles.loading} role="status" aria-label="正在读取对话"><LoaderCircle aria-hidden="true" /></div> : null}
         {!loading && !error && !session && listAvailable ? <div className={styles.state}>当前项目暂无可显示对话</div> : null}
         {session ? (
@@ -400,6 +470,7 @@ export function ConversationView({
                         message={item.message}
                         streaming={item.streaming}
                         forkable={item.message.role === "assistant"
+                          && !item.local
                           && Boolean(item.message.turnId)
                           && !session?.archived}
                         forkDisabled={executionStatus.active}
@@ -425,6 +496,7 @@ export function ConversationView({
                         executionStatus={item.execution ? executionStatus : undefined}
                         contextStatus={item.execution ? contextStatus : undefined}
                         executionPlaceholder={item.executionPlaceholder}
+                        showPriorReply={Boolean(item.message.superseded) && !visibleItems[virtualRow.index - 1]?.message.superseded}
                       />
                 </div>
               );

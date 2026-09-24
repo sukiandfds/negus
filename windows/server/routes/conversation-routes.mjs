@@ -221,7 +221,7 @@ export const createConversationRoutes = ({
         includeAgentProviders = isEmployeeDirectBinding(await agentConversationStore.resolve({ conversationId }));
       } catch {}
     }
-    sendJson(response, includeAgentProviders && modelProviders
+    sendJson(response, modelProviders
       ? await modelProviders.listModels(currentModels)
       : currentModels);
     return true;

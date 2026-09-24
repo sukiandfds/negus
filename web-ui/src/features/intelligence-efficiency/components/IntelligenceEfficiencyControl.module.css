@@ -3,7 +3,7 @@
 .trigger { width: 22px; height: 22px; border-radius: 5px; }
 .trigger svg { width: 15px; height: 15px; stroke-width: 1.8; }
 .trigger[aria-expanded="true"] { background: var(--color-surface-active); color: var(--color-text); }
-.popover { position: fixed; z-index: 70; top: calc(var(--windowbar-height) + var(--topbar-height) + 28px + 10px); right: 24px; width: min(1120px, calc(100vw - 48px)); max-height: min(78dvh, 760px); overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: 8px; background: var(--color-surface); box-shadow: 0 12px 30px rgb(0 0 0 / .35); color: var(--color-text); }
+.popover { position: fixed; z-index: 70; top: calc(var(--topbar-height) + 28px + 10px); right: 24px; width: min(1120px, calc(100vw - 48px)); max-height: min(78dvh, 760px); overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: 8px; background: var(--color-surface); box-shadow: 0 12px 30px rgb(0 0 0 / .35); color: var(--color-text); }
 .header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 14px 10px; }
 .header h2 { margin: 0; font-size: 14px; font-weight: 650; }
 .header p { margin: 3px 0 0; color: var(--color-text-muted); font-size: 11px; }

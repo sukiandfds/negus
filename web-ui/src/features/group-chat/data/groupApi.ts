@@ -32,9 +32,9 @@ export const groupApi = {
     { agentId, modelProviderId, model, reasoningEffort, roomId },
     signal,
   ),
-  send: (member: StoredMember, roomId: string, text: string, clientMessageId: string, attachmentIds: string[] = [], signal?: AbortSignal) => postJson<GroupSendResponse>(
+  send: (member: StoredMember, roomId: string, text: string, clientMessageId: string, attachmentIds: string[] = [], replyTo: { id: string; authorName: string; text: string } | null = null, signal?: AbortSignal) => postJson<GroupSendResponse>(
     "/api/group/message",
-    { memberId: member.id, authorName: member.name, roomId, text, attachmentIds, clientMessageId },
+    { memberId: member.id, authorName: member.name, roomId, text, attachmentIds, clientMessageId, replyTo },
     signal,
   ),
   interrupt: (roomId = "", signal?: AbortSignal) => postJson<GroupInterruptResponse>(

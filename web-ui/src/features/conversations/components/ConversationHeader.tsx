@@ -64,7 +64,7 @@ export function ConversationHeader({ desktop = false, desktopEditing = false, on
       <header className={styles.header}>
         <div className={styles.topbar}>
           {sidebarAvailable ? (
-            <button className={`${styles.iconButton} ${styles.mobileOnly}`} type="button" aria-label="打开侧栏" title="打开侧栏" onClick={onOpenSidebar}>
+            <button className={styles.iconButton} type="button" aria-label="打开侧栏" title="打开侧栏" onClick={onOpenSidebar}>
               <PanelLeft aria-hidden="true" />
             </button>
           ) : null}

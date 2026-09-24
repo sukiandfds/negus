@@ -11,6 +11,7 @@ import { createCcSwitchConfigService } from "./cc-switch-config-service.mjs";
 export const CURRENT_MODEL_PROVIDER_ID = "current";
 export const GROK_MODEL_PROVIDER_ID = "fusheng-grok";
 export const GROK_MODEL_ID = "grok-4.6";
+const SHARED_CONFIG_CACHE_MS = 15_000;
 
 const providerIdPattern = /^[a-z0-9][a-z0-9_-]{0,79}$/u;
 const helperScript = path.resolve(
@@ -55,7 +56,7 @@ export const defaultModelProviders = () => [
   normalizeProvider({
     id: CURRENT_MODEL_PROVIDER_ID,
     mode: "current",
-    displayName: "Current Codex provider",
+    displayName: "当前运行渠道",
   }),
   normalizeProvider({
     id: GROK_MODEL_PROVIDER_ID,
@@ -239,6 +240,7 @@ export const createModelProviderService = ({
   const clientPromises = new Map();
   const ownedClients = new Map();
   let refreshing = null;
+  let sharedConfigRefreshedAt = 0;
   const fingerprints = new Map();
   const catalogFile = path.join(runtimeRoot, 'model-catalog.json');
   let catalogs = {};
@@ -248,10 +250,13 @@ export const createModelProviderService = ({
     if (cached?.baseUrl !== provider.baseUrl || !Array.isArray(cached.models)) return;
     provider.models = [...new Map([...provider.models, ...cached.models].map((model) => [model.model, model])).values()];
   };
-  const refreshShared = () => {
+  const refreshShared = ({ force = false } = {}) => {
+    if (!force && sharedConfigRefreshedAt && Date.now() - sharedConfigRefreshedAt < SHARED_CONFIG_CACHE_MS) return Promise.resolve();
     if (!refreshing) refreshing = (async () => {
       await catalogReady;
-      const entries = await sharedConfig.runtimeProviders();
+      const entries = await sharedConfig.runtimeProviders({ force });
+      const currentDisplayName = await sharedConfig.currentDisplayName?.({ force });
+      if (currentDisplayName) currentProvider.displayName = currentDisplayName;
       for (const entry of entries) {
         // Running clients retain their configuration until the service is safely restarted.
         if (clientPromises.has(entry.id)) continue;
@@ -266,6 +271,7 @@ export const createModelProviderService = ({
         if (id.startsWith('ccswitch_') && !known.has(id) && !clientPromises.has(id)) { providerMap.delete(id); fingerprints.delete(id); }
       }
       for (const provider of providerMap.values()) applyCatalog(provider);
+      sharedConfigRefreshedAt = Date.now();
     })().finally(() => { refreshing = null; });
     return refreshing;
   };
@@ -276,7 +282,7 @@ export const createModelProviderService = ({
     const id = requireProviderId(providerId);
     if (catalogRequests.has(id)) return catalogRequests.get(id);
     const request = (async () => {
-      await refreshShared();
+      await refreshShared({ force: true });
       const provider = providerMap.get(id);
       if (!provider || provider.mode === 'current') return;
       const credential = await credentialStore.read(id);

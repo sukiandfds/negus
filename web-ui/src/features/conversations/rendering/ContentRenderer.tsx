@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { forwardRef, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { Download, FileText, ImageOff, X } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -163,8 +163,37 @@ const markdownComponents: Components = {
   img: ({ src, alt }) => <RenderedImage source={src || ""} alt={alt || ""} />,
 };
 
-export function MarkdownContent({ text, className }: { text: string; className?: string }) {
-  return <div className={className}><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{text}</ReactMarkdown></div>;
+export const MarkdownContent = forwardRef<HTMLDivElement, { text: string; className?: string; style?: CSSProperties }>(function MarkdownContent({ text, className, style }, ref) {
+  return <div ref={ref} className={className} style={style}><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{text}</ReactMarkdown></div>;
+});
+
+export function CollapsedMarkdown({ text, lines = 2 }: { text: string; lines?: number }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  const collapsedStyle = { "--clamp-lines": String(lines) } as CSSProperties;
+
+  useLayoutEffect(() => {
+    const element = contentRef.current;
+    if (!element || expanded) return;
+    setOverflowing(element.scrollHeight > element.clientHeight + 1);
+  }, [expanded, lines, text]);
+
+  return (
+    <div>
+      <MarkdownContent
+        ref={contentRef}
+        text={text}
+        className={expanded ? styles.content : `${styles.content} ${styles.clamp}`}
+        style={expanded ? undefined : collapsedStyle}
+      />
+      {overflowing ? (
+        <button type="button" className={styles.expand} aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
+          {expanded ? "收起" : "显示更多"}
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 function ImageGallery({ blocks }: { blocks: ImageBlock[] }) {

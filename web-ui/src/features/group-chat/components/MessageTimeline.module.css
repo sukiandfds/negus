@@ -1,8 +1,16 @@
-.timelineShell { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; }
-.timeline { width: 100%; height: 100%; overflow-y: auto; overscroll-behavior: contain; padding: 30px max(30px, calc((100% - var(--content-width)) / 2)) 154px; }
+.timelineShell { position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.roster { display: flex; flex: 0 0 auto; gap: 6px; overflow-x: auto; padding: 8px max(16px, calc((100% - var(--content-width)) / 2)) 7px; border-bottom: 1px solid var(--color-border); background: var(--color-bg); }
+.rosterItem { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; max-width: 240px; border: 1px solid #343434; border-radius: 999px; padding: 4px 9px; background: transparent; color: #d7d7d7; cursor: pointer; font: inherit; }
+.rosterItem strong { overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.rosterItem span { overflow: hidden; color: #8d8d8d; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.rosterDot { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: #666; }
+.rosterDotWorking { background: #8fb56f; }
+.rosterDotQueued { background: #d1a15a; }
+@media (hover: hover) { .rosterItem:hover { border-color: #777; color: #fff; } }
+.timeline { width: 100%; height: auto; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 30px max(30px, calc((100% - var(--content-width)) / 2)) 24px; }
 .timeline::-webkit-scrollbar { width: 10px; }
 .timeline::-webkit-scrollbar-thumb { border: 3px solid #101010; border-radius: 8px; background: #3b3b3b; }
-.jumpToLatest { position: absolute; z-index: 7; right: 50%; bottom: 10px; transform: translateX(50%); }
+.jumpToLatest { position: absolute; z-index: 7; right: 50%; bottom: 12px; transform: translateX(50%); }
 .dateDivider { display: flex; align-items: center; gap: 10px; margin: 0 0 22px; color: #707070; font-size: 10px; }
 .historyMarker { margin: 0 0 18px; color: #707070; font-size: 10px; text-align: center; }
 .dateDivider::before, .dateDivider::after { height: 1px; flex: 1; background: #272727; content: ""; }
@@ -45,5 +53,25 @@
 }
 
 @media (any-pointer: coarse) {
-  .timeline { padding-bottom: 24px; -webkit-overflow-scrolling: touch; }
+  .timeline { -webkit-overflow-scrolling: touch; }
 }
+
+.copyButton { display: inline-grid; width: 18px; height: 18px; margin-left: auto; place-items: center; border: 0; border-radius: 4px; padding: 0; background: transparent; color: #8d8d8d; cursor: pointer; }
+.copyButton:hover, .copyButton:focus-visible { background: #2c2c2c; color: #eee; }
+.copyButton svg { width: 12px; height: 12px; }
+.emptyRoom p { max-width: 280px; margin: 0; color: #8a8a8a; font-size: 12px; line-height: 1.55; }
+
+.askedLine { margin: 0 0 6px; color: #8fb56f; font-size: 11px; line-height: 1.4; }
+
+.quoteButton { border: 0; background: transparent; color: #8d8d8d; cursor: pointer; font: inherit; font-size: 10px; }
+.quoteButton:hover, .quoteButton:focus-visible { color: #eee; }
+.replyLine { display: block; width: 100%; margin: 0 0 6px; border: 0; border-left: 2px solid #3a3a3a; padding: 0 0 0 8px; background: transparent; color: #9a9a9a; cursor: pointer; font: inherit; font-size: 11px; line-height: 1.4; text-align: left; }
+.replyLine:hover, .replyLine:focus-visible { color: #d5d5d5; }
+.messageFocused .messageBubble { border-color: #8fb56f; }
+
+.mention { background: transparent; color: #b7d7a4; font-weight: 650; }
+.retryButton { display: inline-flex; margin-top: 8px; border: 1px solid #6d5145; border-radius: 999px; padding: 3px 8px; background: transparent; color: #e0a886; cursor: pointer; font: inherit; font-size: 11px; }
+.retryButton:hover, .retryButton:focus-visible { color: #fff; }
+.retryButton:disabled { cursor: default; opacity: .55; }
+
+.liveStatus { margin: 0 0 18px; color: #8d8d8d; font-size: 12px; line-height: 1.5; text-align: center; }

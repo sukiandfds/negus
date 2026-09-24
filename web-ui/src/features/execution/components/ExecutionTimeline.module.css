@@ -1,4 +1,4 @@
-.timeline { padding: 0 0 8px; color: var(--color-text-secondary); }
+.timeline { padding: 8px 0 0; color: var(--color-text-secondary); }
 .header { display: inline-flex; min-height: 30px; align-items: center; gap: 7px; border: 0; padding: 0; background: transparent; color: var(--color-text-muted); cursor: pointer; font-size: 13px; }
 .header time { color: #686a6b; font-size: 11px; }
 .header > svg:last-child { width: 14px; height: 14px; transition: transform var(--duration-fast) var(--ease-out); }

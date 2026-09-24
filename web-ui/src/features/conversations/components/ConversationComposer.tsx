@@ -12,11 +12,14 @@ import { ModelSettingsControl } from "../../models/components/ModelSettingsContr
 import type { CodexModel } from "../../models/model/types";
 import type { MediaFile } from "../../../shared/model/media";
 import type { SessionMessage } from "../model/types";
+import { heartbeatAssistantText, parseHeartbeatUser } from "../rendering/heartbeatMessage";
 import { GoalControl } from "../../goals/components/GoalControl";
 import type { EditableGoalStatus, ThreadGoal } from "../../goals/model/types";
 import { goalCapabilityOptions } from "../../goals/model/capability";
 import { SlashCommandMenu, type SlashCommandOption } from "./SlashCommandMenu";
 import styles from "./ConversationComposer.module.css";
+
+const visibleMessageText = (message: SessionMessage) => parseHeartbeatUser(message.text)?.instructions ?? heartbeatAssistantText(message.text) ?? message.text;
 
 interface SlashState { start: number; end: number; query: string; replaceDraft?: boolean }
 
@@ -49,6 +52,8 @@ interface ConversationComposerProps {
   status: ExecutionStatusValue;
   commentary: string;
   contextStatus: ContextStatus;
+  shownModel: string;
+  shownEffort: string;
   models: CodexModel[];
   modelsLoading: boolean;
   modelChanging: boolean;
@@ -82,6 +87,7 @@ interface ConversationComposerProps {
 export function ConversationComposer({
   desktopContext,
   connected, selected, archived, sending, sendingSlow, status, commentary, contextStatus,
+  shownModel, shownEffort,
   models, modelsLoading, modelChanging, modelError,
   onSend, onQueue, queueing, queueItems, queueError, onEditQueueItem, onRemoveQueueItem, onMoveQueueItem, onRetryQueueItem,
   onSendQueueItem,
@@ -168,7 +174,7 @@ export function ConversationComposer({
 
   useEffect(() => {
     if (!editingMessage) return;
-    setText(editingMessage.text);
+    setText(visibleMessageText(editingMessage));
     setSlash(null);
     draft.clear();
     requestAnimationFrame(() => textareaRef.current?.focus());
@@ -276,7 +282,7 @@ export function ConversationComposer({
         />
         {editingMessage ? (
           <div className={styles.editingBar}>
-            <span><strong>重新编辑</strong><span className={styles.editingPreview}>{editingMessage.text || "附件指令"}</span></span>
+            <span><strong>重新编辑</strong><span className={styles.editingPreview}>{visibleMessageText(editingMessage) || "附件指令"}</span></span>
             <button type="button" aria-label="取消重新编辑" title="取消重新编辑" onClick={() => { setText(""); draft.clear(); onCancelEdit(); }}>
               <X aria-hidden="true" />
             </button>
@@ -372,8 +378,8 @@ export function ConversationComposer({
               onClear={onClearGoal}
             />
             <ModelSettingsControl
-              currentModel={contextStatus.model}
-              currentEffort={contextStatus.reasoningEffort}
+              currentModel={shownModel}
+              currentEffort={shownEffort}
               models={models}
               loading={modelsLoading}
               changing={modelChanging}

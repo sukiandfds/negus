@@ -35,6 +35,8 @@ export interface GroupMessage {
   authorName: string;
   agentId: string | null;
   targetAgentIds?: string[];
+  replyTo?: { id: string; authorName: string; text: string; sequence?: number } | null;
+  failure?: boolean;
   text: string;
   attachments?: MediaFile[];
   artifactIds?: string[];
@@ -101,8 +103,15 @@ export interface StoredMember {
 
 export interface GroupSendResponse {
   message: GroupMessage;
-  execution: { jobId: string; agentIds: string[]; status: string } | null;
+  execution: {
+    jobId: string;
+    agentIds: string[];
+    agentNames?: string[];
+    status: string;
+    queuedBehind?: number;
+  } | null;
   deduplicated?: boolean;
+  listening?: boolean;
 }
 
 export interface GroupInterruptResponse {

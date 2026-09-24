@@ -20,15 +20,19 @@ export function GroupHeader({ roomName, roomId, projectId, connected, deviceName
   onViewChange?: (surface: Exclude<ViewSurface, "progress">) => void;
 }) {
   const [sharing, setSharing] = useState(false);
-  const activeAgents = agents.filter((agent) => agent.active);
-  const activityText = activeAgents.length === 1
-    ? `${activeAgents[0].name} · ${activeAgents[0].label}`
-    : activeAgents.length > 1 ? `${activeAgents.length} 个 Agent 正在工作` : `${members.length} 名成员在线`;
+  const workingAgents = agents.filter((agent) => agent.active && agent.phase !== "queued");
+  const waitingAgents = agents.filter((agent) => agent.active && agent.phase === "queued");
+  const waitingText = waitingAgents.length ? `${waitingAgents.map((agent) => agent.name).join("、")}等候` : "";
+  const activityText = workingAgents.length === 1
+    ? `${workingAgents[0].name} · ${workingAgents[0].label}${waitingText ? `，${waitingText}` : ""}`
+    : workingAgents.length > 1
+      ? `${workingAgents.length} 个员工正在工作${waitingText ? `，${waitingText}` : ""}`
+      : waitingText || `${members.length} 名成员在线`;
   return (
     <>
       <header className={styles.header}>
       <div className={styles.topbar}>
-        <button className={`${styles.iconButton} ${styles.mobileOnly}`} type="button" aria-label="打开侧栏" title="打开侧栏" onClick={onOpenSidebar}>
+        <button className={styles.iconButton} type="button" aria-label="打开侧栏" title="打开侧栏" onClick={onOpenSidebar}>
           <PanelLeft aria-hidden="true" />
         </button>
         <MessageSquareText className={styles.titleIcon} aria-hidden="true" />

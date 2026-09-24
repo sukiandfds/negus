@@ -5,13 +5,18 @@ import { conversationApi } from "../data/conversationApi";
 import type { ProjectInfo, SessionDetail, SessionSummary } from "../model/types";
 import type { InitialConversationState } from "../state/initialConversation";
 import { readLocalCache } from "../../../shared/state/localCache";
+import { seedIdleExecution } from "../../execution/hooks/useCodexExecution";
+import { readModelCatalog } from "../../models/data/modelCatalogCache";
+import { readModelDefaults, resolveVisibleModel } from "../../models/model/modelDefaults";
 
 interface ConversationSelection {
   selectedIdRef: MutableRefObject<string>;
   loadSession: (threadId: string, options?: { older?: boolean; quiet?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean }) => Promise<boolean>;
   adoptSelection: (threadId: string, quiet: boolean) => Promise<boolean>;
   clearSelection: () => void;
+  selectSession: (threadId: string) => void;
   setCreatedSession: (detail: SessionDetail) => void;
+  setSessionError: (message: string) => void;
 }
 
 interface RemovedSession {
@@ -230,8 +235,11 @@ export function useConversationCatalog(
     };
   }, [initial, refreshSessions, selection.loadSession]);
 
-  const createSession = useCallback(async (projectRoot = "") => {
-    if (creatingRef.current) return false;
+  const createSession = useCallback(async (projectRoot = "", requestedModel = "", pendingId = "") => {
+    if (creatingRef.current) {
+      if (pendingId && selection.selectedIdRef.current === pendingId) selection.setSessionError("新对话创建失败，请重试");
+      return "";
+    }
     creatingRef.current = true;
     setCreating(true);
     setListError("");
@@ -241,26 +249,35 @@ export function useConversationCatalog(
         setArchivedView(false);
         sessionsRef.current = [];
         setSessions([]);
-        selection.clearSelection();
+        if (selection.selectedIdRef.current !== pendingId) selection.clearSelection();
         updateArchiveQuery(false);
       }
       const preferredModel = readLocalCache("negus-preferred-model-v1", (value): value is string => typeof value === "string");
-      const created = await conversationApi.create(preferredModel || currentModel, projectRoot);
+      const defaultModel = requestedModel
+        ? ""
+        : resolveVisibleModel(readModelCatalog(), readModelDefaults(), "", "");
+      const created = await conversationApi.create(requestedModel || defaultModel || preferredModel || currentModel, projectRoot);
       const detail: SessionDetail = { ...created, messages: [] };
       transientSessionsRef.current.set(created.threadId, created);
-      selection.setCreatedSession(detail);
+      const stillCurrent = !pendingId || selection.selectedIdRef.current === pendingId;
+      if (stillCurrent) {
+        seedIdleExecution(created.threadId);
+        selection.setCreatedSession(detail);
+      }
       const nextSessions = [created, ...sessionsRef.current.filter((item) => item.threadId !== created.threadId)];
       sessionsRef.current = nextSessions;
       setSessions(nextSessions);
-      return true;
+      return created.threadId;
     } catch (reason) {
-      setListError(reason instanceof Error ? reason.message : String(reason));
-      return false;
+      const message = reason instanceof Error ? reason.message : String(reason);
+      setListError(message);
+      if (pendingId && selection.selectedIdRef.current === pendingId) selection.setSessionError(message);
+      return "";
     } finally {
       creatingRef.current = false;
       setCreating(false);
     }
-  }, [currentModel, selection.clearSelection, selection.setCreatedSession, updateArchiveQuery]);
+  }, [currentModel, selection.clearSelection, selection.selectedIdRef, selection.setCreatedSession, selection.setSessionError, updateArchiveQuery]);
 
   const forkSession = useCallback(async (threadId: string, lastTurnId: string) => {
     setListError("");
@@ -381,6 +398,20 @@ export function useConversationCatalog(
     listAbortControllerRef.current?.abort();
   }, []);
 
+  const selectLatestSession = useCallback((excludeThreadId = "") => {
+    const pick = (list: SessionSummary[]) => list.find((session) => !session.archived && session.threadId !== excludeThreadId)
+      || list.find((session) => !session.archived);
+    if (archivedViewRef.current) {
+      const latest = pick(viewCacheRef.current.get(false) || []);
+      void setArchiveViewMode(false).then(() => {
+        if (latest) selection.selectSession(latest.threadId);
+      });
+      return;
+    }
+    const latest = pick(sessionsRef.current);
+    if (latest) selection.selectSession(latest.threadId);
+  }, [selection.selectSession, setArchiveViewMode]);
+
   return {
     project,
     sessions,
@@ -396,5 +427,6 @@ export function useConversationCatalog(
     forkSession,
     archiveSession,
     unarchiveSession,
+    selectLatestSession,
   };
 }

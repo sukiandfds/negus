@@ -2,15 +2,52 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { loadEmployeeDefinitions } from "./employee-definitions.mjs";
+import { mentionedAgentIds } from "./multi-agent/agent-routing.mjs";
 import { CURRENT_MODEL_PROVIDER_ID } from "./model-provider-service.mjs";
 
 const cleanText = (value, maxLength) => String(value || "").trim().slice(0, maxLength);
+const replyExcerpt = (message) => {
+  const text = cleanText(message?.text, 160);
+  if (text) return text;
+  const names = (Array.isArray(message?.attachments) ? message.attachments : [])
+    .map((file) => cleanText(file?.name, 80))
+    .filter(Boolean);
+  return cleanText(names.join("、"), 160);
+};
 const safeSequence = (value) => Number.isSafeInteger(value) && value >= 0 ? value : 0;
 const pageSize = (value) => Math.max(1, Math.min(100, Number.parseInt(value, 10) || 50));
 // Keep each Agent turn bounded even when a room has a long-lived public history.
 // The full history remains available through getMessagePage()/the history API.
 const agentContextMessageLimit = 80;
+const initialContextMessageLimit = 12;
 const agentContextCharacterLimit = 48000;
+const messageCharacters = (message) => String(message?.text || "").length
+  + (Array.isArray(message?.attachments)
+    ? message.attachments.reduce((sum, file) => sum + String(file?.name || "").length, 0)
+    : 0);
+const promptTextCap = 6000;
+const countedCharacters = (message) => Math.min(messageCharacters(message), promptTextCap);
+const selectContextMessages = (available, assignment, messageLimit) => {
+  if (!available.length) return [];
+  const newest = available.at(-1);
+  const pinned = [];
+  if (assignment) pinned.push(assignment);
+  if (newest && newest.id !== assignment?.id) pinned.push(newest);
+  const selectedIds = new Set(pinned.map((message) => message.id));
+  let characterCount = pinned.reduce((sum, message) => sum + countedCharacters(message), 0);
+  let added = 0;
+  const room = Math.max(0, messageLimit - pinned.length);
+  for (let index = available.length - 1; index >= 0 && added < room; index -= 1) {
+    const candidate = available[index];
+    if (selectedIds.has(candidate.id)) continue;
+    const chars = countedCharacters(candidate);
+    if (characterCount > 0 && characterCount + chars > agentContextCharacterLimit) break;
+    characterCount += chars;
+    selectedIds.add(candidate.id);
+    added += 1;
+  }
+  return available.filter((message) => selectedIds.has(message.id));
+};
 const dateKey = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
@@ -67,6 +104,7 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
       sequence: Number.isSafeInteger(message.sequence) && message.sequence > 0 ? message.sequence : index + 1,
       artifactIds: [...new Set((Array.isArray(message.artifactIds) ? message.artifactIds : [])
         .map((id) => cleanText(id, 80)).filter(Boolean))],
+      failure: message.failure === true,
     }));
   const members = new Map();
   const activeWorks = new Map();
@@ -108,11 +146,12 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
     activeWorks: [...activeWorks.values()],
   });
 
-  const getMessagePage = ({ beforeSequence = 0, afterSequence = 0, date = "", limit = 50 } = {}) => {
+  const getMessagePage = ({ beforeSequence = 0, afterSequence = 0, aroundSequence = 0, date = "", limit = 50 } = {}) => {
     const size = pageSize(limit);
     const cleanDate = validDate(date) ? String(date) : "";
     const before = safeSequence(beforeSequence);
     const after = safeSequence(afterSequence);
+    const around = safeSequence(aroundSequence);
     let start = Math.max(0, messages.length - size);
     let found = true;
 
@@ -147,6 +186,31 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
     } else if (after) {
       start = messages.findIndex((message) => message.sequence > after);
       if (start < 0) start = messages.length;
+    } else if (around) {
+      const exact = messages.findIndex((message) => message.sequence === around);
+      if (exact < 0) {
+        return {
+          messages: [],
+          date: "",
+          found: false,
+          hasOlder: false,
+          hasNewer: false,
+          oldestSequence: 0,
+          newestSequence: 0,
+        };
+      }
+      const beforeCount = Math.floor((size - 1) / 2);
+      start = Math.max(0, exact - beforeCount);
+      const page = messages.slice(start, Math.min(messages.length, start + size));
+      return {
+        messages: page,
+        date: "",
+        found: true,
+        hasOlder: start > 0,
+        hasNewer: start + page.length < messages.length,
+        oldestSequence: page[0]?.sequence || 0,
+        newestSequence: page.at(-1)?.sequence || 0,
+      };
     }
 
     const page = messages.slice(start, start + size);
@@ -200,6 +264,8 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
     clientMessageId = null,
     workId = null,
     preserveText = false,
+    replyTo = null,
+    failure = false,
   }) => {
     const content = preserveText
       ? String(text || "").slice(0, 12000)
@@ -222,6 +288,15 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
     const targets = [...new Set((Array.isArray(targetAgentIds) ? targetAgentIds : [])
       .map((id) => cleanText(id, 80))
       .filter((id) => agents.has(id)))];
+    const replySource = replyTo && typeof replyTo === "object" ? replyTo : null;
+    const replyId = cleanText(replySource?.id, 80);
+    const replyMessage = replyId ? messages.find((message) => message.id === replyId) : null;
+    const reply = replyMessage ? {
+      id: replyMessage.id,
+      authorName: cleanText(replyMessage.authorName, 40) || "成员",
+      text: replyExcerpt(replyMessage),
+      sequence: replyMessage.sequence,
+    } : null;
     const message = {
       id: randomUUID(),
       clientMessageId: cleanClientMessageId,
@@ -232,9 +307,11 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
       authorName: cleanText(authorName, 40),
       agentId: agentId || targets[0] || null,
       targetAgentIds: targets,
+      replyTo: reply,
       text: content,
       attachments: files,
       artifactIds: [],
+      failure: failure === true,
       createdAt: new Date().toISOString(),
     };
     messages.push(message);
@@ -258,27 +335,69 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
 
   const getAgent = (agentId) => agents.get(agentId) || null;
   const getMessage = (messageId) => messages.find((message) => message.id === messageId) || null;
-  const getAgentContext = (agentId) => {
+  const messageTargetsAgent = (message, agentId) => {
+    if (!message || message.type === "system") return false;
+    if (message.type !== "human" && message.type !== "agent") return false;
+    if (message.type === "agent" && (message.agentId === agentId || message.authorId === agentId)) return false;
+    if (Array.isArray(message.targetAgentIds) && message.targetAgentIds.includes(agentId)) return true;
+    const agent = agents.get(agentId);
+    return Boolean(agent) && mentionedAgentIds(message.text, [agent]).includes(agentId);
+  };
+
+  const getAgentContext = (agentId, { assignmentId = "" } = {}) => {
     const afterSequence = agentContextSequences.get(agentId) || 0;
-    const throughSequence = nextMessageSequence;
-    const available = messages.filter((message) => message.sequence > afterSequence
-      && message.sequence <= throughSequence);
-    let start = available.length;
-    let characterCount = 0;
-    while (start > 0 && available.length - start < agentContextMessageLimit) {
-      const candidate = available[start - 1];
-      const candidateCharacters = String(candidate.text || "").length
-        + (Array.isArray(candidate.attachments) ? candidate.attachments.reduce((sum, file) => sum + String(file?.name || "").length, 0) : 0);
-      if (characterCount > 0 && characterCount + candidateCharacters > agentContextCharacterLimit) break;
-      characterCount += candidateCharacters;
-      start -= 1;
+    const firstParticipation = afterSequence === 0;
+    const messageLimit = firstParticipation ? initialContextMessageLimit : agentContextMessageLimit;
+    const available = messages.filter((message) => message.sequence > afterSequence);
+    const requestedId = cleanText(assignmentId, 80);
+    const explicit = requestedId ? messages.find((message) => message.id === requestedId) : null;
+    const explicitPending = explicit && explicit.sequence > afterSequence ? explicit : null;
+    let assignment = null;
+    if (explicitPending && messageTargetsAgent(explicitPending, agentId)) assignment = explicitPending;
+    else if (explicit) {
+      assignment = available.find((message) => message.sequence > explicit.sequence
+        && message.type === "agent"
+        && messageTargetsAgent(message, agentId)) || null;
+    } else {
+      assignment = [...available].reverse().find((message) => messageTargetsAgent(message, agentId)) || null;
     }
+    const nextUserTask = available.find((message) => message.type === "human"
+      && message.id !== assignment?.id
+      && messageTargetsAgent(message, agentId)
+      && (!assignment || message.sequence > assignment.sequence));
+    const pool = nextUserTask
+      ? available.filter((message) => message.sequence < nextUserTask.sequence)
+      : available;
+    const selected = selectContextMessages(
+      pool,
+      assignment && pool.some((message) => message.id === assignment.id) ? assignment : null,
+      messageLimit,
+    );
+    const quotedId = cleanText(assignment?.replyTo?.id, 80);
+    const quotedInView = quotedId && selected.some((message) => message.id === quotedId);
+    const quotedMessage = quotedId && !quotedInView
+      ? messages.find((message) => message.id === quotedId) || null
+      : null;
+    const throughSequence = pool.reduce((latest, message) => Math.max(latest, safeSequence(message.sequence)), afterSequence);
+    const omittedBeforeCount = selected.length
+      ? pool.filter((message) => message.sequence < selected[0].sequence).length
+      : pool.length;
+    const heldBackCount = nextUserTask
+      ? available.filter((message) => message.sequence >= nextUserTask.sequence
+        && message.type === "human"
+        && messageTargetsAgent(message, agentId)).length
+      : 0;
     return {
       afterSequence,
       throughSequence,
-      messages: available.slice(start),
-      omittedMessageCount: start,
-      totalMessageCount: available.length,
+      firstParticipation,
+      assignment,
+      quotedMessage,
+      messages: selected,
+      omittedMessageCount: Math.max(0, pool.length - selected.length),
+      omittedBeforeCount,
+      heldBackCount,
+      totalMessageCount: pool.length,
     };
   };
 

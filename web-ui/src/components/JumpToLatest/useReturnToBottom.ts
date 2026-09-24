@@ -20,6 +20,7 @@ export function useReturnToBottom({
   getScrollElement,
   getTrailingContentHeight = noTrailingContent,
   scrollToBottom,
+  promptDistance = DEFAULT_PROMPT_DISTANCE,
 }: {
   active?: boolean;
   isStreaming: boolean;
@@ -27,6 +28,7 @@ export function useReturnToBottom({
   getScrollElement: () => HTMLElement | null;
   getTrailingContentHeight?: () => number;
   scrollToBottom: () => void;
+  promptDistance?: number;
 }) {
   const [visible, setVisible] = useState(false);
   const stickToBottomRef = useRef(true);
@@ -45,11 +47,13 @@ export function useReturnToBottom({
     }
 
     stickToBottomRef.current = false;
-    const promptDistance = isStreaming ? root.clientHeight / 2 : DEFAULT_PROMPT_DISTANCE;
-    const beyondPromptDistance = distance > promptDistance;
+    const activePromptDistance = isStreaming && promptDistance === DEFAULT_PROMPT_DISTANCE
+      ? root.clientHeight / 2
+      : promptDistance;
+    const beyondPromptDistance = distance > activePromptDistance;
     if (isStreaming && beyondPromptDistance) streamingPromptLatchedRef.current = true;
     setVisible(streamingPromptLatchedRef.current || beyondPromptDistance);
-  }, [active, getScrollElement, getTrailingContentHeight, isStreaming]);
+  }, [active, getScrollElement, getTrailingContentHeight, isStreaming, promptDistance]);
 
   const schedulePositionUpdate = useCallback(() => {
     window.cancelAnimationFrame(positionFrameRef.current);

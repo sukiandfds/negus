@@ -14,12 +14,16 @@ const sameSubmission = (left: SessionMessage, right: SessionMessage) => (
   && left.submissionId === right.submissionId
 );
 
+const normalizedText = (value: string) => value.replace(/\s+/gu, " ").trim();
+
 const sameInitialTurn = (left: SessionMessage, right: SessionMessage) => (
   left.role === "user"
   && right.role === "user"
   && (isOptimisticMessage(left) || isOptimisticMessage(right))
   && Boolean(left.turnId)
   && left.turnId === right.turnId
+  && (!left.submissionId || !right.submissionId || left.submissionId === right.submissionId)
+  && normalizedText(left.text) === normalizedText(right.text)
 );
 
 const sameUserMessage = (left: SessionMessage, right: SessionMessage) => (
@@ -50,6 +54,12 @@ export const mergeMessageList = (baseMessages: SessionMessage[], incomingMessage
       indexes.delete(current.id);
       merged[replacementIndex] = message;
       indexes.set(message.id, replacementIndex);
+      return;
+    }
+
+    if (isOptimisticMessage(message) && message.turnItemIndex === undefined) {
+      merged.push(message);
+      indexes.set(message.id, merged.length - 1);
       return;
     }
 

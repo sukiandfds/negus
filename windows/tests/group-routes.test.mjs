@@ -139,9 +139,12 @@ test("ordinary file-creation wording does not activate the legacy web-output sho
     body: JSON.stringify({ memberId: "member-1", authorName: "Hans", clientMessageId: "client-default-1", text: "在单人聊天页面点击创建对话", attachmentIds: [] }),
   });
 
+  const result = await response.json();
   assert.equal(response.status, 202);
-  assert.deepEqual(execution.agentIds, ["manager"]);
-  assert.equal("outputRequested" in execution, false);
+  assert.equal(execution, null);
+  assert.equal(result.listening, true);
+  assert.equal(result.execution, null);
+  assert.equal(result.message.targetAgentIds.length, 0);
 });
 
 test("interrupts only the selected group room", async (t) => {

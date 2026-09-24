@@ -57,6 +57,27 @@
 .content th { background: #252728; font-weight: 600; }
 .content hr { margin: 24px 0; border: 0; border-top: 1px solid var(--color-border); }
 
+.clamp {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--clamp-lines, 2);
+}
+.clamp p { margin: 0; }
+.expand {
+  display: block;
+  margin-top: 6px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.expand:hover { color: var(--color-text); }
+
 .options { display: grid; gap: 7px; margin: 14px 0; }
 .options div { padding: 9px 11px; border: 1px solid #3a3d3f; border-radius: 6px; color: var(--color-text-secondary); }
 
@@ -116,7 +137,15 @@
 .imageGallery .galleryImage img {
   object-fit: cover;
 }
+.imageGallery .singleImage {
+  width: 100%;
+  height: auto;
+  aspect-ratio: auto;
+}
 .imageGallery .singleImage img {
+  width: 100%;
+  height: auto;
+  max-height: min(44vh, 320px);
   object-fit: contain;
 }
 .imageError {

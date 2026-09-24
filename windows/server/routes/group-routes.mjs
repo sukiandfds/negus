@@ -21,6 +21,7 @@ export const createGroupRoutes = ({ groupRoom, roomDirectory, media, multiAgent,
     sendJson(response, room.getMessagePage({
       beforeSequence: url.searchParams.get("before"),
       afterSequence: url.searchParams.get("after"),
+      aroundSequence: url.searchParams.get("around"),
       date: url.searchParams.get("date"),
       limit: url.searchParams.get("limit"),
     }));
@@ -79,11 +80,16 @@ export const createGroupRoutes = ({ groupRoom, roomDirectory, media, multiAgent,
     clientMessageId: body.clientMessageId,
     agentId: targetAgentIds[0],
     targetAgentIds,
+    replyTo: body.replyTo,
     text,
     attachments: attachments.map(({ id, name, mimeType, url: attachmentUrl }) => ({ id, name, mimeType, url: attachmentUrl })),
   });
   if (!created) {
     sendJson(response, { message, execution: null, deduplicated: true }, 202);
+    return true;
+  }
+  if (!targetAgentIds.length) {
+    sendJson(response, { message, execution: null, listening: true }, 202);
     return true;
   }
   const execution = await service.enqueueDiscussion({

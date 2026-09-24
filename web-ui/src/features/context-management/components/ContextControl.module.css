@@ -2,6 +2,8 @@
 
 .trigger {
   display: inline-flex;
+  width: 210px;
+  max-width: 46vw;
   height: var(--control-text-height);
   align-items: center;
   gap: 5px;
@@ -19,7 +21,8 @@
 
 .trigger:hover,
 .trigger[aria-expanded="true"] { background: var(--color-control-hover); color: var(--color-text); cursor: pointer; }
-.trigger svg { width: var(--control-icon-size); height: var(--control-icon-size); stroke-width: 1.8; }
+.trigger span { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.trigger svg { width: var(--control-icon-size); height: var(--control-icon-size); flex: none; stroke-width: 1.8; }
 
 .menu {
   position: absolute;

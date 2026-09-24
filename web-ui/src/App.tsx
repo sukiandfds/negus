@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, MessageSquare } from "lucide-react";
 import { AppShell } from "./components/AppShell/AppShell";
+import { BottomNav } from "./components/BottomNav/BottomNav";
 import type { ViewSurface } from "./components/ViewSwitcher/ViewSwitcher";
 import { WindowBar } from "./components/WindowBar/WindowBar";
 import { ConversationComposer } from "./features/conversations/components/ConversationComposer";
@@ -89,11 +90,20 @@ function ConversationApp({ active, desktop, onViewChange }: { active: boolean; d
     onViewChange("conversation");
     setSidebarOpen(false);
   }, [conversations.selectSession, onViewChange]);
-  const createSession = async (root?: string) => {
-    const created = await conversations.createSession(root);
-    if (created) { onViewChange("conversation"); setSidebarOpen(false); }
-    return created;
+  const createSession = (root?: string, model?: string) => {
+    const opened = conversations.openNewSession(root || "", model || "");
+    if (opened) { onViewChange("conversation"); setSidebarOpen(false); }
+    return Promise.resolve(opened);
   };
+  useEffect(() => {
+    const openLatest = () => {
+      conversations.selectLatestSession(personalProject?.root || "");
+      setSidebarOpen(false);
+      setAnswerOpen(false);
+    };
+    window.addEventListener("negus:open-latest-conversation", openLatest);
+    return () => window.removeEventListener("negus:open-latest-conversation", openLatest);
+  }, [conversations.selectLatestSession, personalProject?.root]);
 
   return (
     <>
@@ -114,7 +124,7 @@ function ConversationApp({ active, desktop, onViewChange }: { active: boolean; d
           archiveBusyIds={conversations.archiveBusyIds}
           error={conversations.listError}
           onSelect={selectSession}
-          onCreate={createSession}
+           onCreate={createSession}
           onRefresh={conversations.refresh}
           onArchiveViewChange={async (archived) => { await conversations.setArchiveViewMode(archived); onViewChange("conversation"); }}
           onArchive={conversations.archiveSession}
@@ -158,6 +168,7 @@ function ConversationApp({ active, desktop, onViewChange }: { active: boolean; d
           role={desktop ? "region" : undefined} aria-label={desktop ? "桌面助手回复" : undefined} aria-hidden={desktop && !answerOpen} inert={desktop && !answerOpen}>
         {desktop && <div className={desktopStyles.answerHeader}><strong>{conversations.session?.title || "桌面助手"}</strong><button type="button" aria-label="收起回复" onClick={() => setAnswerOpen(false)}><ChevronDown size={18} /></button></div>}
         <div className={desktopStyles.answerBody}><ConversationView
+          key={conversations.selectedId || "conversation"}
           active={active && (!desktop || answerOpen)}
           session={conversations.session}
           loading={conversations.loadingSession}
@@ -178,10 +189,10 @@ function ConversationApp({ active, desktop, onViewChange }: { active: boolean; d
           localSendVersion={conversations.localSendVersion}
         /></div></div></div>
       }
-      composer={<div ref={composerSlot} style={{ display: "contents" }}>{conversations.session?.readOnly || (desktop && !desktopReady) ? null : (
+      composer={<div ref={composerSlot} style={{ display: "contents" }}>{conversations.session?.readOnly ? null : (
         <ConversationComposer
           desktopContext={desktop && desktopWorkspace.selected ? <div className={desktopStyles.selectionContext}><span>针对「{desktopWorkspace.selected.title}」对话</span><button type="button" onClick={() => desktopWorkspace.setSelectedId(null)}>取消选区</button></div> : undefined}
-          key={conversations.selectedId}
+          key={conversations.composerKey}
           connected={conversations.connected}
           selected={Boolean(conversations.selectedId) && (!desktop || desktopReady)}
           archived={Boolean(conversations.session?.archived)}
@@ -190,6 +201,8 @@ function ConversationApp({ active, desktop, onViewChange }: { active: boolean; d
           status={conversations.executionStatus}
           commentary={conversations.commentaryText}
           contextStatus={conversations.contextStatus}
+          shownModel={conversations.visibleModel}
+          shownEffort={conversations.visibleEffort}
           models={conversations.models}
           modelsLoading={conversations.modelsLoading}
           modelChanging={conversations.modelChanging}
@@ -232,6 +245,7 @@ function ConversationApp({ active, desktop, onViewChange }: { active: boolean; d
           onReasoningEffortChange={conversations.changeReasoningEffort}
         />
       )}</div>}
+      dock={<BottomNav current={desktop ? "desktop" : "conversation"} onViewChange={onViewChange} />}
     />
     {active && (!desktop || desktopReady) ? <UserInputDialog
       request={conversations.userInputRequest}

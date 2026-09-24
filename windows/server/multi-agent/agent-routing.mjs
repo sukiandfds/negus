@@ -30,7 +30,5 @@ export const resolveAgentRouting = ({ text = "", requestedAgentIds = [], explici
   const outputAgentId = cleanAgentIds([agentRoleIds.output], agents)[0] || "";
   let targets = explicit.length ? explicit : cleanAgentIds(requestedAgentIds, agents);
   if (!explicit.length && outputRequested && outputAgentId) targets = [outputAgentId];
-  if (!targets.length) targets = cleanAgentIds([agentRoleIds.default], agents);
-  if (!targets.length && agents[0]?.id) targets = [agents[0].id];
   return { explicitAgentIds: explicit, targetAgentIds: targets, outputAgentId };
 };

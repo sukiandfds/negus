@@ -6,6 +6,8 @@ import { executionApi } from "../../execution/data/executionApi";
 import { useCodexExecution } from "../../execution/hooks/useCodexExecution";
 import type { ProjectEvent, UserInputRequest } from "../../execution/model/types";
 import { useModels } from "../../models/hooks/useModels";
+import { readModelCatalog } from "../../models/data/modelCatalogCache";
+import { readModelDefaults, resolveVisibleEffort, resolveVisibleModel, useModelDefaults } from "../../models/model/modelDefaults";
 import { writeConversationSnapshot } from "../data/conversationSnapshot";
 import { conversationApi } from "../data/conversationApi";
 import { useConversationEvents } from "../realtime/useConversationEvents";
@@ -16,7 +18,9 @@ import { useConversationSession } from "./useConversationSession";
 import { useFollowUpQueue } from "./useFollowUpQueue";
 import { useThreadGoal } from "../../goals/hooks/useThreadGoal";
 import type { SessionMessage } from "../model/types";
+import { createClientId } from "../../../shared/id/clientId";
 import { readLocalCache, writeLocalCache } from "../../../shared/state/localCache";
+import { isPendingThread } from "../model/pendingThread";
 
 const attachmentsFromMessage = (message: SessionMessage): MediaFile[] => {
   const attachments = new Map<string, MediaFile>();
@@ -40,10 +44,11 @@ const conversationLocationKey = () => {
 export function useProjectConversations() {
   const [initial] = useState(readInitialConversationState);
   const selection = useConversationSession(initial);
+  const serverThreadId = isPendingThread(selection.selectedId) ? "" : selection.selectedId;
 
-  const execution = useCodexExecution(selection.selectedId);
-  const followUpQueue = useFollowUpQueue(selection.selectedId);
-  const goal = useThreadGoal(selection.selectedId);
+  const execution = useCodexExecution(serverThreadId);
+  const followUpQueue = useFollowUpQueue(serverThreadId);
+  const goal = useThreadGoal(serverThreadId);
   const [forkingMessageId, setForkingMessageId] = useState("");
   const [editingMessage, setEditingMessage] = useState<SessionMessage | null>(null);
   const editingMessageRef = useRef<SessionMessage | null>(null);
@@ -62,15 +67,17 @@ export function useProjectConversations() {
   const [userInputBusy, setUserInputBusy] = useState(false);
   const [userInputError, setUserInputError] = useState("");
   const reconcilingSubmissionsRef = useRef(new Set<string>());
-  const contextManagement = useContextManagement(selection.selectedId);
+  const contextManagement = useContextManagement(serverThreadId);
   const catalog = useConversationCatalog(initial, {
     selectedIdRef: selection.selectedIdRef,
     loadSession: selection.loadSession,
     adoptSelection: selection.adoptSelection,
     clearSelection: selection.clearSelection,
     setCreatedSession: selection.setCreatedSession,
+    setSessionError: selection.setSessionError,
+    selectSession: selection.selectSession,
   }, contextManagement.status.model);
-  const modelManager = useModels(selection.selectedId, (threadId, result) => {
+  const modelManager = useModels(serverThreadId, (threadId, result) => {
     if (result.threadId && result.threadId !== threadId) {
       contextManagement.applyModelSettings(result.threadId, result);
       if (selection.selectedIdRef.current === threadId) {
@@ -80,7 +87,41 @@ export function useProjectConversations() {
       contextManagement.applyModelSettings(threadId, result);
     }
     void catalog.refreshSessions();
-  });
+  }, contextManagement.status.model);
+  const modelDefaults = useModelDefaults();
+  const recordedModel = contextManagement.status.threadId === selection.selectedId ? contextManagement.status.model : "";
+  const sessionModel = (selection.session?.threadId === selection.selectedId ? selection.session.model || "" : "")
+    || catalog.sessions.find((item) => item.threadId === selection.selectedId)?.model
+    || "";
+  const recordedEffort = contextManagement.status.threadId === selection.selectedId ? contextManagement.status.reasoningEffort : "";
+  const visibleModel = resolveVisibleModel(modelManager.models, modelDefaults, recordedModel, sessionModel);
+  const visibleEffort = resolveVisibleEffort(modelManager.models, modelDefaults, visibleModel, recordedEffort);
+  const modelChoiceRef = useRef({ recordedModel: "", sessionModel: "", recordedEffort: "", contextSettled: false });
+  modelChoiceRef.current = {
+    recordedModel,
+    sessionModel,
+    recordedEffort,
+    contextSettled: contextManagement.status.threadId === selection.selectedId
+      && !selection.loadingSession
+      && (Boolean(contextManagement.status.updatedAt) || contextManagement.status.phase === "failed"),
+  };
+  const catalogModelsRef = useRef(modelManager.models);
+  catalogModelsRef.current = modelManager.models;
+  const stageUnrecordedModel = useCallback(async () => {
+    const choice = modelChoiceRef.current;
+    if (!choice.contextSettled) return false;
+    const defaults = readModelDefaults();
+    const shownModel = resolveVisibleModel(catalogModelsRef.current, defaults, choice.recordedModel, choice.sessionModel);
+    const shownEffort = resolveVisibleEffort(catalogModelsRef.current, defaults, shownModel, choice.recordedEffort);
+    const modelNeedsWrite = Boolean(shownModel && !choice.recordedModel && !choice.sessionModel);
+    const effortNeedsWrite = Boolean(shownEffort && shownEffort !== choice.recordedEffort);
+    if (!modelNeedsWrite && !effortNeedsWrite) return false;
+    const staged = modelNeedsWrite
+      ? await modelManager.change(shownModel, effortNeedsWrite ? shownEffort : undefined)
+      : await modelManager.changeReasoningEffort(shownEffort);
+    if (!staged) throw new Error("模型设置没有生效，请重试");
+    return true;
+  }, [modelManager.change, modelManager.changeReasoningEffort]);
 
   const refreshUserInput = useCallback(async (signal?: AbortSignal) => {
     const threadId = selection.selectedIdRef.current;
@@ -164,7 +205,7 @@ export function useProjectConversations() {
   }, []);
 
   useEffect(() => {
-    if (!selection.selectedId || !selection.session) return;
+    if (!selection.selectedId || !selection.session || isPendingThread(selection.selectedId)) return;
     const timer = window.setTimeout(() => {
       writeConversationSnapshot({
         selectedId: selection.selectedId,
@@ -179,18 +220,37 @@ export function useProjectConversations() {
     editingMessageRef.current = editingMessage;
   }, [editingMessage]);
 
+  const pendingCreatesRef = useRef(new Map<string, Promise<string>>());
+  const openingNewSessionRef = useRef(false);
+  const waitForThread = useCallback(async (threadId: string) => {
+    if (!isPendingThread(threadId)) return threadId;
+    const realId = await (pendingCreatesRef.current.get(threadId) || Promise.resolve(""));
+    if (!realId || selection.selectedIdRef.current !== realId) return "";
+    const started = Date.now();
+    while (Date.now() - started < 8000) {
+      if (selection.selectedIdRef.current !== realId) return "";
+      if (modelChoiceRef.current.contextSettled) return realId;
+      await new Promise((resolve) => window.setTimeout(resolve, 40));
+    }
+    return selection.selectedIdRef.current === realId ? realId : "";
+  }, [selection.selectedIdRef]);
+
   const sendDirectMessage = useCallback(async (text: string, attachments: MediaFile[] = [], existingSubmissionId = "") => {
-    const threadId = selection.selectedIdRef.current;
     const messageText = text.trim();
-    if (!threadId || (!messageText && !attachments.length)) return false;
+    if (!messageText && !attachments.length) return false;
+    const threadId = await waitForThread(selection.selectedIdRef.current);
+    if (!threadId) return false;
 
     const submissionId = existingSubmissionId || createSubmissionId();
+    await stageUnrecordedModel();
+    const modelResult = await modelManager.applyPending();
+    const sendThreadId = modelResult?.threadId || threadId;
     const optimisticMessage = createOptimisticMessage(messageText, attachments, submissionId);
     selection.addOptimisticMessage(threadId, optimisticMessage);
     setLocalSendVersion((version) => version + 1);
     const startsNewTurn = !execution.status.active;
 
-    const attempt = await execution.sendMessage(messageText, attachments.map((attachment) => attachment.id), submissionId);
+    const attempt = await execution.sendMessage(messageText, attachments.map((attachment) => attachment.id), submissionId, sendThreadId);
     if (!attempt || attempt.outcome === "failed") {
       selection.removeOptimisticMessage(threadId, optimisticMessage.id);
       return false;
@@ -233,12 +293,15 @@ export function useProjectConversations() {
   }, [
     catalog.refreshSessions,
     execution.sendMessage,
+    modelManager.applyPending,
+    stageUnrecordedModel,
     selection.addOptimisticMessage,
     selection.loadSession,
     selection.removeOptimisticMessage,
     selection.selectSession,
     selection.selectedIdRef,
     selection.updateCurrentSession,
+    waitForThread,
   ]);
 
   useEffect(() => {
@@ -418,8 +481,38 @@ export function useProjectConversations() {
   const queueMessage = useCallback(async (text: string, attachments: MediaFile[] = []) => {
     const messageText = text.trim();
     if (!messageText && !attachments.length) return false;
+    const threadId = await waitForThread(selection.selectedIdRef.current);
+    if (!threadId) return false;
+    if (await stageUnrecordedModel()) await modelManager.applyPending();
     return followUpQueue.enqueue(messageText, attachments);
-  }, [followUpQueue.enqueue]);
+  }, [followUpQueue.enqueue, modelManager.applyPending, selection.selectedIdRef, stageUnrecordedModel, waitForThread]);
+
+  const openNewSession = useCallback((projectRoot = "", requestedModel = "") => {
+    if (openingNewSessionRef.current) return false;
+    openingNewSessionRef.current = true;
+    const model = requestedModel || resolveVisibleModel(readModelCatalog(), readModelDefaults(), "", "");
+    const pendingId = `pending:${createClientId("new")}`;
+    selection.setCreatedSession({
+      threadId: pendingId,
+      source: "codex",
+      title: "新对话",
+      updatedAt: new Date().toISOString(),
+      messageCount: 0,
+      latestUser: "",
+      latestAssistant: "",
+      archived: false,
+      readOnly: false,
+      cwd: projectRoot,
+      model,
+      messages: [],
+    });
+    const task = catalog.createSession(projectRoot, model, pendingId).then((created) => created || "");
+    pendingCreatesRef.current.set(pendingId, task);
+    void task.finally(() => {
+      openingNewSessionRef.current = false;
+    });
+    return true;
+  }, [catalog.createSession, selection.setCreatedSession]);
 
   const review = useCallback(async () => {
     const threadId = selection.selectedIdRef.current;
@@ -483,11 +576,19 @@ export function useProjectConversations() {
     execution.status.phase === "submitted",
   );
 
+  const selectLatestSession = useCallback((projectRoot = "") => {
+    const desktopThreadId = projectRoot
+      ? readLocalCache("negus:desktop-thread:v1:" + projectRoot, (value): value is string => typeof value === "string") || ""
+      : "";
+    catalog.selectLatestSession(desktopThreadId);
+  }, [catalog.selectLatestSession]);
+
   return {
     project: catalog.project,
     sessions: catalog.sessions,
     archivedView: catalog.archivedView,
     selectedId: selection.selectedId,
+    composerKey: selection.composerKey,
     session: selection.session,
     loadingList: catalog.loadingList,
     initialSyncReady: catalog.initialSyncReady,
@@ -499,7 +600,9 @@ export function useProjectConversations() {
     listError: catalog.listError,
     sessionError: selection.sessionError,
     selectSession: selection.selectSession,
+    selectLatestSession,
     createSession: catalog.createSession,
+    openNewSession,
     creating: catalog.creating,
     setArchiveViewMode: catalog.setArchiveViewMode,
     archiveSession: catalog.archiveSession,
@@ -521,6 +624,8 @@ export function useProjectConversations() {
     streamingText: execution.streamingText,
     commentaryText: execution.commentaryText,
     contextStatus: contextManagement.status,
+    visibleModel,
+    visibleEffort,
     models: modelManager.models,
     modelsLoading: modelManager.loading,
     modelChanging: modelManager.changing,
