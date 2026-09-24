@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { goalApi } from "../data/goalApi";
 import type { ProjectEvent } from "../../execution/model/types";
 import type { GoalStatus, ThreadGoal } from "../model/types";
@@ -7,6 +7,8 @@ export function useThreadGoal(threadId: string) {
   const [goal, setGoal] = useState<ThreadGoal | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const activeThreadRef = useRef(threadId);
+  activeThreadRef.current = threadId;
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     if (!threadId) {
@@ -15,11 +17,12 @@ export function useThreadGoal(threadId: string) {
     }
     try {
       const result = await goalApi.get(threadId, signal);
+      if (activeThreadRef.current !== threadId) return null;
       setGoal(result.goal || null);
       setError("");
       return result.goal || null;
     } catch (reason) {
-      if (!signal?.aborted) setError(reason instanceof Error ? reason.message : String(reason));
+      if (!signal?.aborted && activeThreadRef.current === threadId) setError(reason instanceof Error ? reason.message : String(reason));
       return null;
     }
   }, [threadId]);
@@ -38,6 +41,7 @@ export function useThreadGoal(threadId: string) {
     setError("");
     try {
       const result = await goalApi.set(threadId, patch);
+      if (activeThreadRef.current !== threadId) return null;
       setGoal(result.goal || null);
       return result.goal || null;
     } catch (reason) {
@@ -54,6 +58,7 @@ export function useThreadGoal(threadId: string) {
     setError("");
     try {
       await goalApi.clear(threadId);
+      if (activeThreadRef.current !== threadId) return false;
       setGoal(null);
       return true;
     } catch (reason) {
