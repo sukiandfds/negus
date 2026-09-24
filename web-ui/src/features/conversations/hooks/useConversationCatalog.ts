@@ -119,9 +119,7 @@ export function useConversationCatalog(
       }
       const nextId = nextSessions.some((item) => item.threadId === requestedId)
         ? requestedId
-        : nextSessions.some((item) => item.threadId === currentId)
-          ? currentId
-          : nextSessions[0]?.threadId || "";
+        : currentId || nextSessions[0]?.threadId || "";
       if (!nextId) {
         selection.clearSelection();
         return;

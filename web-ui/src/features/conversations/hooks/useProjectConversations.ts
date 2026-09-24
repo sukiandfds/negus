@@ -243,7 +243,8 @@ export function useProjectConversations() {
   const sendDirectMessage = useCallback(async (text: string, attachments: MediaFile[] = [], existingSubmissionId = "") => {
     const messageText = text.trim();
     if (!messageText && !attachments.length) return false;
-    const threadId = await waitForThread(selection.selectedId);
+    const requestedThreadId = selection.selectedIdRef.current;
+    const threadId = await waitForThread(requestedThreadId);
     if (!threadId || selection.selectedIdRef.current !== threadId) return false;
 
     const submissionId = existingSubmissionId || createSubmissionId();
@@ -441,9 +442,10 @@ export function useProjectConversations() {
 
   const startGoal = useCallback(async (objective: string) => {
     const normalized = objective.trim();
-    if (!normalized || !selection.selectedIdRef.current || selection.session?.archived) return false;
+    const threadId = selection.selectedIdRef.current;
+    if (!normalized || !threadId || selection.session?.archived) return false;
     const created = await goal.update({ objective: normalized, status: "active" });
-    if (!created) return false;
+    if (!created || selection.selectedIdRef.current !== threadId) return false;
     return sendDirectMessage(normalized);
   }, [goal.update, selection.selectedIdRef, selection.session?.archived, sendDirectMessage]);
 
