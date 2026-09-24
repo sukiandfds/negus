@@ -7,7 +7,7 @@ import type { InitialConversationState } from "../state/initialConversation";
 import { readLocalCache } from "../../../shared/state/localCache";
 import { seedIdleExecution } from "../../execution/hooks/useCodexExecution";
 import { readModelCatalog } from "../../models/data/modelCatalogCache";
-import { readModelDefaults, resolveVisibleModel } from "../../models/model/modelDefaults";
+import { providerIdOf, readModelDefaults, resolveVisibleModel } from "../../models/model/modelDefaults";
 
 interface ConversationSelection {
   selectedIdRef: MutableRefObject<string>;
@@ -235,7 +235,7 @@ export function useConversationCatalog(
     };
   }, [initial, refreshSessions, selection.loadSession]);
 
-  const createSession = useCallback(async (projectRoot = "", requestedModel = "", pendingId = "") => {
+  const createSession = useCallback(async (projectRoot = "", requestedModel = "", pendingId = "", requestedProviderId = "") => {
     if (creatingRef.current) {
       if (pendingId && selection.selectedIdRef.current === pendingId) selection.setSessionError("新对话创建失败，请重试");
       return "";
@@ -256,7 +256,10 @@ export function useConversationCatalog(
       const defaultModel = requestedModel
         ? ""
         : resolveVisibleModel(readModelCatalog(), readModelDefaults(), "", "");
-      const created = await conversationApi.create(requestedModel || defaultModel || preferredModel || currentModel, projectRoot);
+      const model = requestedModel || defaultModel || preferredModel || currentModel;
+      const catalogEntry = readModelCatalog().find((entry) => entry.model === model);
+      const providerId = requestedProviderId || (catalogEntry ? providerIdOf(catalogEntry) : readModelDefaults().providerId);
+      const created = await conversationApi.create(model, projectRoot, providerId);
       const detail: SessionDetail = { ...created, messages: [] };
       transientSessionsRef.current.set(created.threadId, created);
       const stillCurrent = !pendingId || selection.selectedIdRef.current === pendingId;

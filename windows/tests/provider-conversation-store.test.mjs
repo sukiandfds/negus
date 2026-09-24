@@ -169,3 +169,80 @@ test("archives a local ghost conversation when the provider thread is gone", asy
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("failed sends keep the current choice but preserve the last completed settings across restart", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-choice-"));
+  const stateFile = path.join(root, "routes.json");
+  let model = "gpt-good", effort = "high", fail = false, sent;
+  const source = {
+    isFreshSession: () => true,
+    getRuntimeContext: async () => ({ model, reasoningEffort: effort }),
+    updateModel: async (_id, next) => ({ model: model = next, reasoningEffort: effort }),
+    updateReasoningEffort: async (_id, next) => ({ model, reasoningEffort: effort = next }),
+    sendMessage: async (_id, _text, _files, _submission, settings) => {
+      sent = settings;
+      if (fail) throw Error("provider unavailable");
+      return { turn: { id: "turn-good" } };
+    },
+  };
+  const options = { current: source, stateFile, providers: {
+    resolveRoute: ({ model }) => ({ modelProviderId: "current", model }),
+  } };
+  try {
+    const service = createProviderConversationStore(options);
+    await service.updateModel("thread", "gpt-good");
+    await service.updateReasoningEffort("thread", "high");
+    assert.equal((await service.getRuntimeContext("thread")).lastSuccessfulSettings, null);
+    await service.sendMessage("thread", "hello");
+    assert.deepEqual(sent, { model: "gpt-good", reasoningEffort: "high" });
+    // An accepted request alone is not a successful provider response.
+    assert.equal((await service.getRuntimeContext("thread")).lastSuccessfulSettings, null);
+    await service.handleProtocolMessage({ method: "turn/completed", params: {
+      threadId: "thread", turn: { id: "turn-good", status: "completed" },
+    } });
+    await service.updateModel("thread", "gpt-bad");
+    await service.updateReasoningEffort("thread", "low");
+    fail = true;
+    await assert.rejects(service.sendMessage("thread", "retry"), /unavailable/);
+    const context = await service.getRuntimeContext("thread");
+    assert.equal(context.model, "gpt-bad");
+    assert.equal(context.reasoningEffort, "low");
+    assert.deepEqual(context.lastSuccessfulSettings, { model: "gpt-good", reasoningEffort: "high" });
+    const restarted = createProviderConversationStore(options);
+    assert.deepEqual((await restarted.getRuntimeContext("thread")).lastSuccessfulSettings, context.lastSuccessfulSettings);
+    fail = false;
+    await restarted.sendMessage("thread", "async failure");
+    await restarted.handleProtocolMessage({ method: "turn/completed", params: {
+      threadId: "thread", turn: { id: "turn-good", status: "failed", error: { message: "401" } },
+    } });
+    assert.deepEqual((await restarted.getRuntimeContext("thread")).lastSuccessfulSettings, context.lastSuccessfulSettings);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("imports the previous successful model from history instead of the latest failed selection", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-choice-history-"));
+  const rollout = path.join(root, "rollout.jsonl");
+  try {
+    await fs.writeFile(rollout, [
+      { type: "turn_context", payload: { model: "good", effort: "high" } },
+      { type: "response_item", payload: { type: "message", role: "assistant", phase: "final_answer" } },
+      { type: "turn_context", payload: { model: "bad", effort: "low" } },
+      { type: "event_msg", payload: { type: "turn_aborted" } },
+    ].map((entry) => JSON.stringify(entry)).join("\n"));
+    const service = createProviderConversationStore({
+      current: {
+        getSessionResumeInfo: async () => ({ path: rollout }),
+        getRuntimeContext: async () => ({ model: "bad", reasoningEffort: "low" }),
+      },
+      providers: {}, stateFile: path.join(root, "routes.json"),
+    });
+    assert.deepEqual((await service.getRuntimeContext("thread")).lastSuccessfulSettings, {
+      model: "good", reasoningEffort: "high",
+    });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

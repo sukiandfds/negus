@@ -78,7 +78,9 @@ const messagesFromItems = (entries, registerMedia) => {
     if (!message) return null;
     const turnId = item?.turnId || entry?.turnId || entry?.turn?.id || "";
     const itemId = item?.id || message.itemId || "";
-    const timestamp = message.role === "user" ? userMessageTimestamp(item, entry?.createdAt || entry?.timestamp) : null;
+    const timestamp = message.role === "user"
+      ? userMessageTimestamp(item, entry?.createdAt || entry?.timestamp)
+      : timestampFromValue(item?.createdAt ?? item?.timestamp ?? item?.created_at ?? entry?.createdAt ?? entry?.timestamp);
     const withTimestamp = timestamp !== null ? { ...message, createdAt: new Date(timestamp).toISOString() } : message;
     return turnId
       ? { ...withTimestamp, id: stableMessageId(turnId, itemId, index, message), turnId, itemId }

@@ -134,6 +134,7 @@ export const createContextManagementService = async ({
     publish(threadId, {
       model,
       reasoningEffort: runtime.reasoningEffort || statusFor(threadId).reasoningEffort,
+      ...(runtime.lastSuccessfulSettings !== undefined ? { lastSuccessfulSettings: runtime.lastSuccessfulSettings } : {}),
       ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null } : {}),
     });
     maybeAutoCompact(threadId);

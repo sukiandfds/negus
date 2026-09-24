@@ -14,7 +14,7 @@ export function useModels(threadId: string, onChanged: (threadId: string, result
   const hasCatalogRef = useRef(initialModels.length > 0);
   const refreshProviderRef = useRef<string | undefined>(undefined);
   const pendingRef = useRef(new Map<string, { model?: string; reasoningEffort?: string; modelChanged: boolean; effortChanged: boolean }>());
-  const applyingRef = useRef<Promise<ModelUpdateResult | null> | null>(null);
+  const applyingRef = useRef(new Map<string, Promise<ModelUpdateResult | null>>());
   const threadIdRef = useRef(threadId);
   threadIdRef.current = threadId;
   useEffect(() => {
@@ -42,7 +42,7 @@ export function useModels(threadId: string, onChanged: (threadId: string, result
       })
       .catch((reason) => {
         if (!controller.signal.aborted) {
-          if (!hasCatalogRef.current) setError(reason instanceof Error ? reason.message : String(reason));
+          if (refreshProvider || !hasCatalogRef.current) setError(reason instanceof Error ? reason.message : String(reason));
         }
       })
       .finally(() => {
@@ -51,8 +51,7 @@ export function useModels(threadId: string, onChanged: (threadId: string, result
     return () => controller.abort();
   }, [threadId, catalogRevision]);
 
-  const change = useCallback(async (model: string, reasoningEffort?: string) => {
-    const activeThreadId = threadIdRef.current;
+  const change = useCallback(async (model: string, reasoningEffort?: string, activeThreadId = threadId) => {
     if (!activeThreadId || !model) return false;
     setError("");
     const entry = models.find((item) => item.model === model);
@@ -69,22 +68,21 @@ export function useModels(threadId: string, onChanged: (threadId: string, result
     onChanged(activeThreadId, { model, modelProvider, reasoningEffort: nextEffort || "" });
     writeLocalCache("negus-preferred-model-v1", model);
     return true;
-  }, [models, onChanged]);
+  }, [models, onChanged, threadId]);
 
-  const changeReasoningEffort = useCallback(async (reasoningEffort: string) => {
-    const activeThreadId = threadIdRef.current;
+  const changeReasoningEffort = useCallback(async (reasoningEffort: string, activeThreadId = threadId) => {
     if (!activeThreadId || !reasoningEffort) return false;
     setError("");
     const pending = pendingRef.current.get(activeThreadId) || { modelChanged: false, effortChanged: false };
     pendingRef.current.set(activeThreadId, { ...pending, reasoningEffort, effortChanged: true });
     onChanged(activeThreadId, { model: pending.model || currentModel, modelProvider: "current", reasoningEffort });
     return true;
-  }, [currentModel, onChanged]);
+  }, [currentModel, onChanged, threadId]);
 
-  const applyPending = useCallback((): Promise<ModelUpdateResult | null> => {
-    if (applyingRef.current) return applyingRef.current;
+  const applyPending = useCallback((activeThreadId = threadId): Promise<ModelUpdateResult | null> => {
+    const existing = applyingRef.current.get(activeThreadId);
+    if (existing) return existing;
     const task = (async (): Promise<ModelUpdateResult | null> => {
-    const activeThreadId = threadIdRef.current;
     if (!activeThreadId) return null;
     const pending = pendingRef.current.get(activeThreadId);
     if (!pending || (!pending.modelChanged && !pending.effortChanged)) return null;
@@ -104,23 +102,25 @@ export function useModels(threadId: string, onChanged: (threadId: string, result
         ...result,
         model: selectedModel || result.model,
         modelProvider: selected?.modelProviderId || result.modelProvider,
-        reasoningEffort: result.reasoningEffort || pending.reasoningEffort || "",
+        reasoningEffort: pending.reasoningEffort || result.reasoningEffort || "",
       };
-      pendingRef.current.delete(activeThreadId);
+      if (pendingRef.current.get(activeThreadId) === pending) pendingRef.current.delete(activeThreadId);
       writeLocalCache("negus-preferred-model-v1", applied.model || "");
-      onChanged(activeThreadId, { ...applied, committed: true });
+      onChanged(activeThreadId, applied);
       return applied;
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : String(reason);
-      setError(message);
+      if (threadIdRef.current === activeThreadId) setError(message);
       throw new Error(message);
-    } finally {
-      setChanging(false);
     }
     })();
-    applyingRef.current = task.finally(() => { applyingRef.current = null; });
-    return applyingRef.current;
-  }, [currentModel, models, onChanged]);
+    const request = task.finally(() => {
+      applyingRef.current.delete(activeThreadId);
+      setChanging(applyingRef.current.size > 0);
+    });
+    applyingRef.current.set(activeThreadId, request);
+    return request;
+  }, [currentModel, models, onChanged, threadId]);
 
   return { models, loading, changing, error, change, changeReasoningEffort, applyPending };
 }

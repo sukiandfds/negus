@@ -13,6 +13,7 @@ import type { ExecutionStatus } from "../../execution/model/types";
 import type { ContextStatus } from "../../context-management/model/types";
 import { formatConversationTimestamp } from "../../../shared/format/dateTime";
 import { advanceLiveTranscript, createLiveTranscriptMemory } from "../state/liveTranscript";
+import { orderMessageList } from "../state/conversationMerge";
 import styles from "./ConversationView.module.css";
 
 const messageListKey = (message: SessionMessage) => (
@@ -149,35 +150,11 @@ type ConversationItem = {
   local?: boolean;
 };
 
-const CLOSE_ORDER_WINDOW_MS = 10 * 60 * 1000;
-
-const messageTime = (message: SessionMessage) => {
-  const value = Date.parse(message.createdAt || "");
-  return Number.isFinite(value) ? value : null;
-};
-
 const visibleText = (message: SessionMessage) => message.text.replace(/\s+/gu, " ").trim();
 
 const staysAtEnd = (item: ConversationItem) => (
   item.streaming || item.executionPlaceholder || item.message.id.startsWith("optimistic-")
 );
-
-const shouldMoveAhead = (previous: ConversationItem, current: ConversationItem) => {
-  if (staysAtEnd(previous) || staysAtEnd(current)) return false;
-  const sameTurn = Boolean(current.message.turnId) && current.message.turnId === previous.message.turnId;
-  if (sameTurn && previous.message.role === "user" && current.message.role === "assistant") return false;
-  if (sameTurn && current.message.role === "user" && previous.message.role === "assistant") {
-    const userTime = messageTime(current.message);
-    const assistantTime = messageTime(previous.message);
-    if (userTime === null || assistantTime === null || userTime <= assistantTime) return true;
-  }
-  const previousTime = messageTime(previous.message);
-  const currentTime = messageTime(current.message);
-  return previousTime !== null
-    && currentTime !== null
-    && previousTime > currentTime
-    && previousTime - currentTime <= CLOSE_ORDER_WINDOW_MS;
-};
 
 const orderVisibleItems = (items: ConversationItem[]) => {
   const ordered = items.filter((item, index) => !(
@@ -187,17 +164,12 @@ const orderVisibleItems = (items: ConversationItem[]) => {
       current.message.role === item.message.role && visibleText(current.message) === visibleText(item.message)
     ))
   ));
-  let moved = true;
-  while (moved) {
-    moved = false;
-    for (let index = 1; index < ordered.length; index += 1) {
-      if (!shouldMoveAhead(ordered[index - 1], ordered[index])) continue;
-      const [current] = ordered.splice(index, 1);
-      ordered.splice(index - 1, 0, current);
-      moved = true;
-    }
-  }
-  return ordered;
+  const byMessage = new Map(ordered.map((item) => [item.message, item]));
+  return [
+    ...orderMessageList(ordered.filter((item) => !staysAtEnd(item)).map((item) => item.message))
+      .map((message) => byMessage.get(message)!),
+    ...ordered.filter(staysAtEnd),
+  ];
 };
 
 export function ConversationView({
@@ -303,14 +275,27 @@ export function ConversationView({
     const root = scrollRef.current;
     if (!active || !root || root.clientHeight <= 0) return false;
     (virtualizer as unknown as { scrollState: unknown }).scrollState = null;
+    if (visibleItems.length) {
+      virtualizer.scrollToIndex(visibleItems.length - 1, { align: "end" });
+    }
     root.scrollTop = root.scrollHeight;
-    return root.scrollTop > 0 || root.scrollHeight <= root.clientHeight + 1;
+    return root.scrollHeight - root.scrollTop - root.clientHeight <= 1;
   };
   const pinToEndRef = useRef(pinToEnd);
   pinToEndRef.current = pinToEnd;
   const scheduleFollowLatest = useCallback(() => {
     window.cancelAnimationFrame(followLatestFrameRef.current);
-    followLatestFrameRef.current = window.requestAnimationFrame(() => pinToEndRef.current());
+    let remaining = 2;
+    const settle = () => {
+      followLatestFrameRef.current = window.requestAnimationFrame(() => {
+        pinToEndRef.current();
+        if (remaining > 0) {
+          remaining -= 1;
+          settle();
+        }
+      });
+    };
+    settle();
   }, []);
 
   const getScrollElement = useCallback(() => scrollRef.current, []);
@@ -362,21 +347,27 @@ export function ConversationView({
     const root = scrollRef.current;
     if (!root || typeof ResizeObserver === "undefined") return undefined;
     let previousHeight = root.clientHeight;
+    const content = root.querySelector<HTMLElement>(`.${styles.virtualList}`);
+    let previousContentHeight = content?.getBoundingClientRect().height || 0;
     let previousViewportHeight = Math.round(window.visualViewport?.height || window.innerHeight);
     let frame = 0;
     const observer = new ResizeObserver(() => {
       const nextHeight = root.clientHeight;
+      const nextContentHeight = content?.getBoundingClientRect().height || 0;
       const nextViewportHeight = Math.round(window.visualViewport?.height || window.innerHeight);
       const viewportChanged = nextViewportHeight !== previousViewportHeight;
+      const contentChanged = nextContentHeight !== previousContentHeight;
       previousViewportHeight = nextViewportHeight;
-      if (nextHeight === previousHeight) return;
+      previousContentHeight = nextContentHeight;
+      if (nextHeight === previousHeight && !contentChanged) return;
       previousHeight = nextHeight;
-      if (!viewportChanged) return;
+      if (!viewportChanged && !contentChanged) return;
       if (!stickToBottomRef.current) return;
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(scheduleFollowLatest);
     });
     observer.observe(root);
+    if (content) observer.observe(content);
     return () => {
       observer.disconnect();
       window.cancelAnimationFrame(frame);

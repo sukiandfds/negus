@@ -45,17 +45,22 @@ const isAssistantReplyRecord = (item) => {
     || (type === "response_item" && payloadType === "message" && role === "assistant" && (!phase || phase === "final_answer"));
 };
 
-export const latestAssistantReplyAtFromRollout = async (file) => {
+const isConversationMessageRecord = (item) => isAssistantReplyRecord(item)
+  || (item?.type === "response_item" && item.payload?.type === "message"
+    && ["user", "assistant"].includes(item.payload?.role));
+
+export const latestAssistantReplyAtFromRollout = async (file, readSettings = false) => {
   if (!file || typeof file !== "string") return "";
   let handle;
   try {
     const stat = await fs.stat(file);
     const chunkSize = 256 * 1024;
-    const maxBytes = 4 * 1024 * 1024;
+    const maxBytes = readSettings ? stat.size : 4 * 1024 * 1024;
     handle = await fs.open(file, "r");
     let end = stat.size;
     let scanned = 0;
     let carry = "";
+    let foundReply = false;
     while (end > 0 && scanned < maxBytes) {
       const length = Math.min(chunkSize, end);
       const start = end - length;
@@ -67,11 +72,18 @@ export const latestAssistantReplyAtFromRollout = async (file) => {
       carry = start > 0 ? (lines.shift() || "") : "";
       let latestMs = Number.NEGATIVE_INFINITY;
       let latest = "";
-      for (const line of lines) {
+      for (const line of readSettings ? lines.reverse() : lines) {
         if (!line.trim()) continue;
         let item;
         try { item = JSON.parse(line); } catch { continue; }
-        if (!isAssistantReplyRecord(item)) continue;
+        if (readSettings) {
+          if (isAssistantReplyRecord(item)) foundReply = true;
+          if (foundReply && item.type === "turn_context" && item.payload?.model) return {
+            model: item.payload.model, reasoningEffort: item.payload.effort || item.payload.reasoning_effort || "",
+          };
+          continue;
+        }
+        if (!isConversationMessageRecord(item)) continue;
         const parsed = Date.parse(item.timestamp || "");
         if (!Number.isFinite(parsed) || parsed < latestMs) continue;
         latestMs = parsed;
@@ -643,7 +655,7 @@ export const createAppServerConversationStore = ({
     return summaryFromThread(result.thread, false);
   };
 
-  const sendMessage = async (threadId, text, attachments = [], submissionId = "") => {
+  const sendMessage = async (threadId, text, attachments = [], submissionId = "", settings = {}) => {
     onSubmitted?.(threadId);
     try {
       await resumeThread(threadId);
@@ -655,6 +667,8 @@ export const createAppServerConversationStore = ({
         ...(developerInstructions ? { developerInstructions } : {}),
         ...(submissionId ? { clientUserMessageId: submissionId } : {}),
         ...(runtimeOptions?.turn || {}),
+        ...(settings.model ? { model: settings.model } : {}),
+        ...(settings.reasoningEffort ? { effort: settings.reasoningEffort } : {}),
       });
       freshThreadRuntime.delete(threadId);
       const cached = threadCache.get(threadId);
@@ -743,7 +757,7 @@ export const createAppServerConversationStore = ({
 
   const threadNotLoaded = (error) => /thread not loaded/i.test(String(error?.message || ""));
   const missingPersistedThread = (error) => /thread not loaded|no rollout found|session not found|rollout path missing/i.test(String(error?.message || ""));
-  const persistedThreadError = () => Object.assign(new Error("原会话记录尚未持久化，暂时无法切换渠道"), { statusCode: 409 });
+  const persistedThreadError = () => Object.assign(new Error("原会话记录尚未持久化，暂时无法切换配置"), { statusCode: 409 });
 
   const loadThreadForResume = async (threadId) => {
     let known;
@@ -798,7 +812,7 @@ export const createAppServerConversationStore = ({
     try {
       await ensureProjectThread(threadId);
       const result = await client.request("thread/read", { threadId, includeTurns: false });
-      if (result.thread?.status?.type === "active") throw Object.assign(new Error("当前会话正在运行，请完成后再切换渠道"), { statusCode: 409 });
+      if (result.thread?.status?.type === "active") throw Object.assign(new Error("当前会话正在运行，请完成后再切换配置"), { statusCode: 409 });
       await client.request("thread/unsubscribe", { threadId });
     } catch (error) {
       if (error?.statusCode === 409) throw error;

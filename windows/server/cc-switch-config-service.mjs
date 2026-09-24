@@ -90,11 +90,11 @@ export const createCcSwitchConfigService = ({ database = path.join(os.homedir(),
     if (!name || name.length > 160 || !model || model.length > 120 || !Number.isFinite(Number(multiplier)) || Number(multiplier) <= 0 || key.length > 4096 || /[\r\n]/u.test(key)) throw failure('请检查名称、模型、Key 和倍率');
     const rows = await records(true);
     const existing = input.id ? rows.find((row) => row.id === input.id) : null;
-    if (input.id && !existing) throw failure('渠道已不存在，请刷新', 409);
+    if (input.id && !existing) throw failure('配置已不存在，请刷新', 409);
     const previous = existing ? decode(existing) : null;
     if (previous && !previous.editable) throw failure('此认证方式暂不支持在 Negus 编辑');
     // Active CC Switch entries also project into Codex live files. Do not bypass that lifecycle.
-    if (existing?.is_current) throw failure('请先在 CC Switch 切到其他渠道，再编辑此渠道', 409);
+    if (existing?.is_current) throw failure('请先在 CC Switch 切到其他配置，再编辑此配置', 409);
     const secret = key || previous?.key;
     if (!secret) throw failure('请输入 API Key');
     const config = previous?.config || {};
@@ -117,8 +117,8 @@ export const createCcSwitchConfigService = ({ database = path.join(os.homedir(),
   const remove = async (id) => {
     const rows = await records(true);
     const existing = rows.find((row) => row.id === id);
-    if (!existing) throw failure('渠道已不存在，请刷新', 409);
-    if (existing.is_current) throw failure('请先在 CC Switch 切到其他渠道，再删除此渠道', 409);
+    if (!existing) throw failure('配置已不存在，请刷新', 409);
+    if (existing.is_current) throw failure('请先在 CC Switch 切到其他配置，再删除此配置', 409);
     await invoke({ action: 'delete', id });
     cachedRecords = null;
     cachedList = null;

@@ -29,7 +29,17 @@ export const createSystemRoutes = ({ token, project, projectRoot, device, observ
       response.setHeader('Cache-Control', 'private, max-age=5, stale-while-revalidate=30');
       if (request.method === 'GET') {
         const force = url.searchParams.get('refresh') === '1';
-        sendJson(response, { channels: await modelProviders.sharedConfig.list(fushengUsage?.readChannelRatios, { force }) });
+        sendJson(response, { channels: await modelProviders.sharedConfig.list(async (entries) => {
+          // Include built-in API providers in the same cached supplier lookup.
+          const builtIns = (modelProviders.providers?.() || []).filter((entry) => entry.mode === 'isolated' && !entry.id.startsWith('ccswitch_'));
+          await Promise.all(builtIns.map(async (provider) => {
+            const key = await modelProviders.credentials.read(provider.id).catch(() => '');
+            entries.push({ id: provider.id, name: provider.displayName, baseUrl: provider.baseUrl,
+              model: provider.defaultModel, modelKey: provider.defaultModel, key, editable: false,
+              switchable: Boolean(key) });
+          }));
+          return fushengUsage ? fushengUsage.readChannelRatios(entries) : {};
+        }, { force }) });
         return true;
       }
       if (request.method === 'POST') {

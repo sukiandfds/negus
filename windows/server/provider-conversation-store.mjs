@@ -32,6 +32,30 @@ export const createProviderConversationStore = ({ current, providers, createStor
     modelProviderId: routes[session.threadId]?.pendingProviderId || owner(session.threadId),
   });
   const service = {};
+  const rememberPreviousSettings = async (id, source) => {
+    if (Object.hasOwn(routes[id] || {}, "lastSuccessfulSettings")) return;
+    const info = source.isFreshSession?.(id) ? null : await source.getSessionResumeInfo(id);
+    const previous = info?.path ? await latestAssistantReplyAtFromRollout(info.path, true) : null;
+    routes[id] = { ...routes[id], providerId: owner(id), lastSuccessfulSettings: previous ? {
+      ...previous, model: owner(id).startsWith("ccswitch_") ? owner(id) + "::" + previous.model : previous.model,
+    } : null };
+  };
+  service.handleProtocolMessage = async ({ method, params = {} } = {}) => {
+    if (method !== "turn/started" && method !== "turn/completed") return;
+    await ready;
+    const route = routes[params.threadId];
+    if (!route?.attemptSettings) return;
+    if (method === "turn/started") {
+      route.attemptSettings.turnId = params.turn?.id || params.turnId;
+    } else if (params.turn?.id === route.attemptSettings.turnId) {
+      if (params.turn.status === "completed" && !params.turn.error) {
+        const { turnId, ...settings } = route.attemptSettings;
+        route.lastSuccessfulSettings = settings;
+      }
+      delete route.attemptSettings;
+      await save();
+    }
+  };
   const restored = new Set();
   const restoring = new Map();
   const activating = new Map();
@@ -77,6 +101,19 @@ export const createProviderConversationStore = ({ current, providers, createStor
       await ready;
       if (switching.has(id)) await switching.get(id);
       await ensureRestored(id);
+      if (method === 'sendMessage') {
+        const source = await storeFor(owner(id));
+        await rememberPreviousSettings(id, source);
+        const runtime = await source.getRuntimeContext(id);
+        const route = routes[id];
+        route.attemptSettings = {
+          model: route.model || runtime.model,
+          reasoningEffort: route.reasoningEffort ?? runtime.reasoningEffort ?? "",
+        };
+        const resolved = providers.resolveRoute({ model: route.attemptSettings.model });
+        args[3] = { ...route.attemptSettings, model: resolved.model || route.attemptSettings.model };
+        await save();
+      }
       if (method === 'sendMessage' && routes[id]?.pendingProviderId) {
         if (!activating.has(id)) {
           const task = activatePending(id).finally(() => activating.delete(id));
@@ -86,15 +123,31 @@ export const createProviderConversationStore = ({ current, providers, createStor
       }
       if (method === 'getRuntimeContext' && routes[id]?.pendingProviderId) return {
         model: routes[id].model, modelProvider: routes[id].pendingProviderId, reasoningEffort: routes[id].reasoningEffort || '',
+        lastSuccessfulSettings: routes[id].lastSuccessfulSettings,
       };
       if (method === 'updateReasoningEffort' && routes[id]?.pendingProviderId) {
         routes[id].reasoningEffort = args[0];
         await save();
         return { model: routes[id].model, modelProvider: routes[id].pendingProviderId, reasoningEffort: args[0] };
       }
-      const result = await (await storeFor(owner(id)))[method](id, ...args);
-      if (method === 'getRuntimeContext' && result && routes[id]?.model?.includes('::')) result.model = routes[id].model;
-      if (method === "getRuntimeContext" && result?.model && !routes[id]?.model?.includes('::') && routes[id]?.model !== result.model) {
+      const source = await storeFor(owner(id));
+      if (method === "updateReasoningEffort" || method === "getRuntimeContext") {
+        await rememberPreviousSettings(id, source);
+      }
+      const result = await source[method](id, ...args);
+      if (method === "sendMessage" && routes[id]?.attemptSettings && result?.turn?.id) {
+        routes[id].attemptSettings.turnId = result.turn.id;
+      }
+      if (method === "updateReasoningEffort") {
+        routes[id].reasoningEffort = args[0];
+        await save();
+      }
+      if (method === "getRuntimeContext" && result) result.lastSuccessfulSettings = routes[id]?.lastSuccessfulSettings;
+      if (method === "getRuntimeContext" && result && routes[id]?.model) {
+        result.model = routes[id].model;
+        result.reasoningEffort = routes[id].reasoningEffort ?? result.reasoningEffort;
+      }
+      if (method === "getRuntimeContext" && result?.model && !routes[id]?.model) {
         routes[id] = { ...routes[id], providerId: owner(id), model: result.model };
         await save();
       }
@@ -147,12 +200,12 @@ export const createProviderConversationStore = ({ current, providers, createStor
     return result.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
   };
   service.listModels = async () => providers.listModels(await current.listModels());
-  service.createSession = async (model = "", cwd = "") => {
+  service.createSession = async (model = "", cwd = "", modelProviderId = "") => {
     await ready;
     await providers.refreshShared?.().catch((error) => { if (model.includes('::')) throw error; });
-    const route = providers.resolveRoute({ model });
+    const route = providers.resolveRoute({ model, modelProviderId });
     const session = await (await storeFor(route.modelProviderId)).createSession(route.model || model, cwd);
-    routes[session.threadId] = { providerId: route.modelProviderId, model, summary: session };
+    routes[session.threadId] = { providerId: route.modelProviderId, model, summary: session, lastSuccessfulSettings: null };
     await save();
     return decorate(session);
   };
@@ -173,6 +226,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
       if (reasoningEffort && !["none", "minimal", "low", "medium", "high", "xhigh"].includes(reasoningEffort)) throw new Error("无效的思考等级");
       const sourceProviderId = owner(id);
       const source = await storeFor(sourceProviderId);
+      await rememberPreviousSettings(id, source);
       if (target.modelProviderId === sourceProviderId) {
         await ensureRestored(id);
         const result = await source.updateModel(id, target.model || model);
@@ -180,13 +234,13 @@ export const createProviderConversationStore = ({ current, providers, createStor
         await save();
         return { ...result, model };
       }
-      if (!await providers.isProviderConfigured(target.modelProviderId)) throw new Error('渠道 Key 尚未配置');
+      if (!await providers.isProviderConfigured(target.modelProviderId)) throw new Error('配置 Key 尚未配置');
       if (source.isFreshSession?.(id)) {
         const targetStore = await storeFor(target.modelProviderId);
         const created = await targetStore.createSession(target.model || model, routes[id]?.summary?.cwd || "");
         await source.releaseSession?.(id);
         delete routes[id];
-        routes[created.threadId] = { providerId: target.modelProviderId, model, summary: created };
+        routes[created.threadId] = { providerId: target.modelProviderId, model, summary: created, lastSuccessfulSettings: null };
         await save();
         return { threadId: created.threadId, model, modelProvider: target.modelProviderId, reasoningEffort };
       }

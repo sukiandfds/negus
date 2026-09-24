@@ -102,6 +102,9 @@ const conversationStoreOptions = {
   registerMedia: media.register,
   onProtocolMessage: (message) => {
     execution.handleProtocolMessage(message);
+    void appServerConversations.handleProtocolMessage(message).catch((error) => {
+      console.error("[model-settings] Could not save successful selection:", error.message);
+    });
     contextManagement?.handleProtocolMessage(message);
     void agentConversationStore?.recordRuntimeEvent?.(message);
     if (message?.method === "thread/name/updated" && message.params?.threadId) {

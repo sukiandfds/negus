@@ -20,7 +20,7 @@ interface ConversationSidebarProps {
   archiveBusyIds: ReadonlySet<string>;
   error: string;
   onSelect: (threadId: string) => void;
-  onCreate: (projectRoot?: string, model?: string) => Promise<boolean>;
+  onCreate: (projectRoot?: string, model?: string, providerId?: string) => Promise<boolean>;
   onRefresh: () => void;
   onArchiveViewChange: (archived: boolean) => Promise<void>;
   onArchive: (threadId: string) => Promise<boolean>;

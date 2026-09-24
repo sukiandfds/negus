@@ -155,8 +155,8 @@ export function ModelSettingsControl({
               onChange={stageModel}
             />
             <button className={styles.refreshButton} type="button"
-              title={loading ? "正在刷新模型" : "刷新渠道模型"}
-              aria-label="刷新渠道模型" aria-busy={loading}
+              title={loading ? "正在刷新模型" : "刷新配置模型"}
+              aria-label="刷新配置模型" aria-busy={loading}
               disabled={loading || busy}
               onClick={() => window.dispatchEvent(new CustomEvent('negus-channels-updated', { detail: { providerId: selectedProvider } }))}>
               <RefreshCw size={14} aria-hidden="true" />
@@ -176,16 +176,16 @@ export function ModelSettingsControl({
             />
           </label>
           {disabled ? <small className={styles.menuHint}>任务运行时暂时不能修改</small> : null}
-          {crossProvider ? <div className={styles.menuHint} role="status">下次发送使用新渠道，会话保持不变。</div> : null}
+          {crossProvider ? <div className={styles.menuHint} role="status">下次发送使用新配置，会话保持不变。</div> : null}
           {applyError || error ? <small className={styles.menuError} role="alert">{error || applyError}</small> : null}
           <div className={styles.settingRow}>
-            <span>渠道</span>
+            <span>配置</span>
             <div className={styles.modelPicker}>
-              <select className={styles.select} aria-label="渠道" value={channelOptions.some((entry) => channelProviderId(entry) === providerOf(draftModel)) ? providerOf(draftModel) : ""} disabled={disabled || busy || !channelOptions.length} onChange={(event) => void stageChannel(event.target.value)}>
-                {channelOptions.some((entry) => channelProviderId(entry) === providerOf(draftModel)) ? null : <option value="">{current?.providerDisplayName || "选择渠道"}</option>}
+              <select className={styles.select} aria-label="配置" value={channelOptions.some((entry) => channelProviderId(entry) === providerOf(draftModel)) ? providerOf(draftModel) : ""} disabled={disabled || busy || !channelOptions.length} onChange={(event) => void stageChannel(event.target.value)}>
+                {channelOptions.some((entry) => channelProviderId(entry) === providerOf(draftModel)) ? null : <option value="">{current?.providerDisplayName || "选择配置"}</option>}
                 {channelOptions.map((entry) => <option key={channelProviderId(entry)} value={channelProviderId(entry)}>{entry.name}</option>)}
               </select>
-              <button className={styles.refreshButton} type="button" title="编辑渠道" aria-label="编辑渠道" disabled={busy} onClick={() => { setOpen(false); setChannelsOpen(true); }}>
+              <button className={styles.refreshButton} type="button" title="编辑配置" aria-label="编辑配置" disabled={busy} onClick={() => { setOpen(false); setChannelsOpen(true); }}>
                 <Pencil size={14} aria-hidden="true" />
               </button>
             </div>
@@ -198,7 +198,7 @@ export function ModelSettingsControl({
           </div>
         </div>
       ) : null}
-      {channelsOpen ? <ChannelManager currentModel={currentModel} models={models} disabled={disabled} onSwitch={(model) => onModelChange(model, currentEffort)} onClose={() => setChannelsOpen(false)} /> : null}
+      {channelsOpen ? <ChannelManager currentModel={currentModel} models={models} disabled={disabled} onSwitch={(model) => onModelChange(model, chooseEffort(models.find((entry) => entry.model === model), currentEffort))} onClose={() => setChannelsOpen(false)} /> : null}
     </div>
   );
 }

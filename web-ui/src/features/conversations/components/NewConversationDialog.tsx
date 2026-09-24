@@ -13,12 +13,12 @@ interface NewConversationDialogProps {
   modelsLoading: boolean;
   creating: boolean;
   error: string;
-  onCreate: (projectRoot: string, model: string) => Promise<boolean>;
+  onCreate: (projectRoot: string, model: string, providerId: string) => Promise<boolean>;
   onClose: () => void;
 }
 
 const providerOf = (entry: CodexModel) => entry.modelProviderId || (entry.model.includes("::") ? entry.model.split("::")[0] : "current");
-const providerLabel = (entry: CodexModel) => entry.providerDisplayName || (providerOf(entry) === "current" ? "当前运行渠道" : providerOf(entry));
+const providerLabel = (entry: CodexModel) => entry.providerDisplayName || (providerOf(entry) === "current" ? "当前运行配置" : providerOf(entry));
 
 export function NewConversationDialog({
   projectRoot, currentModel, models, modelsLoading, creating, error, onCreate, onClose,
@@ -51,7 +51,7 @@ export function NewConversationDialog({
     if (!canCreate) return;
     setLocalError("");
     try {
-      if (await onCreate(projectRoot, selectedModel || currentModel)) onClose();
+      if (await onCreate(projectRoot, selectedModel || currentModel, selectedProvider)) onClose();
     } catch (reason) {
       setLocalError(reason instanceof Error ? reason.message : "新对话创建失败，请重试");
     }
@@ -66,14 +66,14 @@ export function NewConversationDialog({
         </header>
         <div className={styles.body}>
           <label>
-            <span>渠道 / 分组</span>
-            <select aria-label="新对话渠道" value={selectedProvider} disabled={creating || modelsLoading && !providers.length} onChange={(event) => {
+            <span>配置</span>
+            <select aria-label="新对话配置" value={selectedProvider} disabled={creating || modelsLoading && !providers.length} onChange={(event) => {
               const provider = event.target.value;
               const nextModels = availableModels.filter((entry) => providerOf(entry) === provider);
               setSelectedProvider(provider);
               setSelectedModel(nextModels.find((entry) => entry.isDefault)?.model || nextModels[0]?.model || "");
             }}>
-              {!providers.length ? <option value="">{modelsLoading ? "正在读取渠道" : "暂无可用渠道"}</option> : null}
+              {!providers.length ? <option value="">{modelsLoading ? "正在读取配置" : "暂无可用配置"}</option> : null}
               {providers.map((entry) => <option key={providerOf(entry)} value={providerOf(entry)}>{providerLabel(entry)}</option>)}
             </select>
           </label>

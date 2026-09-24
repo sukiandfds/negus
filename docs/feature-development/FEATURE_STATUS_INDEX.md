@@ -1,4 +1,6 @@
 ---
+
+2026-09-25 02:27 +08:00 BUG-20260925-01: 会话隔离与排序修复，handoff_pending。定向回归与构建通过，未重启，实机待验收。详见 FEAT-001。
 document_type: feature_status_index
 schema_version: 1
 last_updated: "2026-08-17 11:10 +08:00"
@@ -145,3 +147,5 @@ AI 助手根据任务定位功能编号，再读取对应功能文件。不要�
 | `paused` | 主动暂缓，当前不投入开发 |
 | `blocked` | 存在明确外部阻塞，无法继续 |
 | `retired` | 已被其他功能或方案替代 |
+
+2026-09-25 01:47 +08:00 FEAT-022: model defaults, explicit send settings and successful-selection recovery updated; 10 targeted tests and UI build passed. No restart or real browser/provider acceptance; handoff_pending. See features/FEAT-022-cc-switch-channels.md.

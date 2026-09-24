@@ -243,7 +243,7 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
       title: header.title?.trim()
         || previewText(state.messages.find((item) => item.role === "user" && item.text?.trim())?.text || "", 36)
         || `新对话 · ${state.threadId.slice(-6)}`,
-      updatedAt: state.messages.findLast((item) => item.role === "assistant" && item.createdAt)?.createdAt || stat.mtime.toISOString(),
+      updatedAt: state.messages.findLast((item) => (item.role === "user" || item.role === "assistant") && item.createdAt)?.createdAt || stat.mtime.toISOString(),
       messageCount: state.messages.length,
       latestUser: previewText(latestUser, 260),
       latestAssistant: previewText(latestAssistant, 260),

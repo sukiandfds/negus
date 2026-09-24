@@ -52,15 +52,25 @@ const rememberStatus = (status: ExecutionStatus) => {
 };
 
 export function useCodexExecution(threadId: string) {
+  const scopeRef = useRef({ threadId, generation: 0 });
+  if (scopeRef.current.threadId !== threadId) {
+    scopeRef.current = { threadId, generation: scopeRef.current.generation + 1 };
+  }
+  const generation = scopeRef.current.generation;
+  const isCurrent = useCallback(() => scopeRef.current.generation === generation, [generation]);
   const [storedStatus, setStoredStatus] = useState<ExecutionStatus>(() => statusCache.get(threadId) ?? idleStatus(threadId));
   const status = storedStatus.threadId === threadId
     ? storedStatus
     : statusCache.get(threadId) ?? recoveringStatus(threadId);
   const setStatus = useCallback((value: ExecutionStatus | ((current: ExecutionStatus) => ExecutionStatus)) => {
-    setStoredStatus((current) => rememberStatus(typeof value === "function" ? value(current) : value));
-  }, []);
-  const [streamingText, setStreamingText] = useState("");
-  const [commentaryText, setCommentaryText] = useState("");
+    if (!isCurrent()) return;
+    setStoredStatus((current) => {
+      if (!isCurrent()) return current;
+      const base = current.threadId === threadId ? current : statusCache.get(threadId) ?? idleStatus(threadId);
+      const next = typeof value === "function" ? value(base) : value;
+      return next.threadId === threadId ? rememberStatus(next) : current;
+    });
+  }, [isCurrent, threadId]);
   const streamingItemId = useRef("");
   const streamingBuffer = useRef("");
   const streamingTimer = useRef(0);
@@ -84,8 +94,8 @@ export function useCodexExecution(threadId: string) {
     streamingTimer.current = 0;
     streamingBuffer.current = "";
     streamingItemId.current = "";
-    setStreamingText("");
-  }, []);
+    setStatus((current) => ({ ...current, streamingText: "", streamingItemId: "", commentary: "" }));
+  }, [setStatus]);
 
   const retireTurn = useCallback((turnId: string) => {
     if (!turnId) return;
@@ -98,13 +108,13 @@ export function useCodexExecution(threadId: string) {
   }, []);
 
   const applyStatus = useCallback((next: ExecutionStatus, revision = stateRevisionRef.current) => {
-    if (revision !== stateRevisionRef.current) return false;
+    if (!isCurrent() || next.threadId !== threadId || revision !== stateRevisionRef.current) return false;
     if (next.turnId && retiredTurnIdsRef.current.has(next.turnId)) return false;
     const previousTurnId = currentTurnIdRef.current;
     if (next.turnId && previousTurnId && next.turnId !== previousTurnId) {
       retireTurn(previousTurnId);
       clearStreaming();
-      setCommentaryText("");
+
     }
     if (next.turnId) currentTurnIdRef.current = next.turnId;
     stateRevisionRef.current += 1;
@@ -117,20 +127,19 @@ export function useCodexExecution(threadId: string) {
       turnId: next.turnId || "",
       activities: next.activities || [],
       streamingItemId: preserveTerminalStream ? streamingItemId.current : next.streamingItemId || "",
+      streamingText: preserveTerminalStream ? streamingBuffer.current : next.streamingText || "",
     });
-    setCommentaryText(next.commentary || "");
     if (next.streamingText !== undefined && !preserveTerminalStream) {
       window.clearTimeout(streamingTimer.current);
       streamingTimer.current = 0;
       streamingItemId.current = next.streamingItemId || "";
       streamingBuffer.current = next.streamingText;
-      setStreamingText(next.streamingText);
     }
     return true;
-  }, [clearStreaming, retireTurn]);
+  }, [clearStreaming, retireTurn, isCurrent, setStatus, threadId]);
 
   const refreshStatus = useCallback(async (signal?: AbortSignal, reconcile = false) => {
-    if (!threadId) return null;
+    if (!threadId || !isCurrent()) return null;
     const inFlight = statusInFlightRef.current;
     if (inFlight?.threadId === threadId) {
       if (reconcile) pendingReconcileRef.current = true;
@@ -158,7 +167,7 @@ export function useCodexExecution(threadId: string) {
       }
     }).catch(() => {});
     return request;
-  }, [applyStatus, threadId]);
+  }, [applyStatus, isCurrent, threadId]);
   refreshStatusRef.current = refreshStatus;
 
   const acceptEventSequence = useCallback((event: ProjectEvent) => {
@@ -197,7 +206,6 @@ export function useCodexExecution(threadId: string) {
     knownEventEpochsRef.current.clear();
     lastEventSeqRef.current = 0;
     clearStreaming();
-    setCommentaryText("");
     setStatus(statusCache.get(threadId) ?? (threadId ? recoveringStatus(threadId) : idleStatus(threadId)));
     if (!threadId) {
       return;
@@ -213,20 +221,19 @@ export function useCodexExecution(threadId: string) {
   }, []);
 
   const handleEvent = useCallback((event: ProjectEvent) => {
-    if (!("threadId" in event) || event.threadId !== threadId) return;
+    if (!isCurrent() || !("threadId" in event) || event.threadId !== threadId) return;
     if (!acceptEventSequence(event)) return;
     if (event.type === "execution_status") {
       if (!applyStatus(event)) return;
       if (["failed", "interrupted", "systemError"].includes(event.phase)) {
         clearStreaming();
-        setCommentaryText("");
       }
       return;
     }
     if (event.type === "assistant_commentary") {
       if (!event.turnId || event.turnId !== currentTurnIdRef.current || retiredTurnIdsRef.current.has(event.turnId)) return;
       stateRevisionRef.current += 1;
-      setCommentaryText(event.text);
+      setStatus((current) => ({ ...current, commentary: event.text }));
       return;
     }
     if (event.type === "assistant_delta") {
@@ -241,12 +248,12 @@ export function useCodexExecution(threadId: string) {
       if (!streamingTimer.current) {
         streamingTimer.current = window.setTimeout(() => {
           streamingTimer.current = 0;
-          setStreamingText(streamingBuffer.current);
+          setStatus((current) => ({ ...current, streamingText: streamingBuffer.current }));
         }, 100);
       }
       return;
     }
-  }, [acceptEventSequence, applyStatus, clearStreaming, threadId]);
+  }, [acceptEventSequence, applyStatus, clearStreaming, isCurrent, setStatus, threadId]);
 
   const sendMessage = useCallback(async (
     text: string,
@@ -265,12 +272,11 @@ export function useCodexExecution(threadId: string) {
     const previousTurnId = status.turnId;
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), SEND_CONFIRM_TIMEOUT_MS);
-    if (!steering) {
+    if (!steering && isCurrent()) {
       retireTurn(currentTurnIdRef.current || previousTurnId);
       currentTurnIdRef.current = "";
       stateRevisionRef.current += 1;
       clearStreaming();
-      setCommentaryText("");
       const submittedAt = new Date().toISOString();
       setStatus({
         ...idleStatus(threadId),
@@ -280,7 +286,7 @@ export function useCodexExecution(threadId: string) {
         startedAt: submittedAt,
         updatedAt: submittedAt,
       });
-    } else {
+    } else if (isCurrent()) {
       stateRevisionRef.current += 1;
       setStatus((current) => ({
         ...current,
@@ -291,6 +297,9 @@ export function useCodexExecution(threadId: string) {
     }
     try {
       const accepted = await executionApi.sendMessage(targetThreadId, message, attachmentIds, acceptedSubmissionId, controller.signal);
+      if (!isCurrent()) return accepted.status === "pending"
+        ? { outcome: "uncertain", result: null }
+        : { outcome: "accepted", result: accepted };
       if (accepted.status === "pending") {
         stateRevisionRef.current += 1;
         setStatus((current) => ({
@@ -317,7 +326,8 @@ export function useCodexExecution(threadId: string) {
       }
       return { outcome: "accepted", result: accepted };
     } catch (reason) {
-      const recovered = await refreshStatus(undefined, true);
+      const recovered = isCurrent() ? await refreshStatus(undefined, true) : null;
+      if (!isCurrent()) return { outcome: "uncertain", result: null };
       const acceptedAfterFailure = !steering
         && Boolean(recovered?.turnId)
         && recovered?.turnId !== previousTurnId
@@ -354,7 +364,7 @@ export function useCodexExecution(threadId: string) {
       sendingRef.current = false;
       setSending(false);
     }
-  }, [clearStreaming, refreshStatus, retireTurn, status.active, threadId]);
+  }, [clearStreaming, refreshStatus, retireTurn, status.active, status.turnId, isCurrent, setStatus, threadId]);
 
   const reconcileSubmission = useCallback(async (submissionId: string, signal?: AbortSignal): Promise<SubmissionStatusResult | null> => {
     if (!threadId || !submissionId) return null;
@@ -381,7 +391,7 @@ export function useCodexExecution(threadId: string) {
       return true;
     } catch (reason) {
       const recovered = await refreshStatus(undefined, true);
-      if (!recovered) {
+      if (!recovered && isCurrent()) {
         setStatus((current) => ({
           ...current,
           phase: "unknown",
@@ -395,7 +405,7 @@ export function useCodexExecution(threadId: string) {
       sendingRef.current = false;
       setSending(false);
     }
-  }, [refreshStatus, status.active, threadId]);
+  }, [refreshStatus, status.active, isCurrent, setStatus, threadId]);
 
-  return { status, streamingText, commentaryText, sending, sendingSlow, handleEvent, sendMessage, reconcileSubmission, interrupt, clearStreaming, refreshStatus };
+  return { status, streamingText: status.streamingText || "", commentaryText: status.commentary || "", sending, sendingSlow, handleEvent, sendMessage, reconcileSubmission, interrupt, clearStreaming, refreshStatus };
 }

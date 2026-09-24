@@ -14,6 +14,14 @@ last_updated: 2026-09-18 18:49 +08:00
 
 ## 用户可见变化
 
+2026-09-25 01:57 +08:00 FEAT-022: 配置列表与编辑页复用同一份倍率；当前运行配置保留 CC Switch 对应条目的倍率，Grok 使用实际 Key 加入现有供应商查询和缓存，刷新时重读，无新增配置项。修改前实际只读查询确认 Grok 0.10×、当前 GPT 分组 0.15×；这是查询时的供应商值，不写死在页面。未重启服务，页面显示待真实验收。
+
+2026-09-25 01:47 +08:00 FEAT-022：模型配置行为对齐（handoff_pending）。之前新对话可能沿用运行环境思考强度，发送失败后无上次成功选择可恢复。现在新对话使用本浏览器默认配置、模型和思考强度，电脑与手机不同步默认值。手动选择先在当前页保留，下次发送才应用；不支持原强度时复用现有支持列表自动选择。发送前应用显示选择，真正 turn/start 显式传入模型和强度；失败保留当前选择并报错。复用现有会话路由记录保存成功完成轮次的选择，刷新后恢复，无成功记录则用本浏览器默认值。历史会话复用原生 rollout 读取上次回复的模型和强度，不新建恢复文件或系统。手动刷新模型失败保留列表并显示错误。配置切换仍使用该配置已有默认模型，不扩展 CC Switch 管理。未重启服务，真实浏览器和供应商发送未验收。
+
+Baseline: da6ad7b3d42a83d739a0a4eb9a56fae6503bf45b; branch: codex/publish-current-panel. Existing uncommitted changes retained. Validation: 10 focused backend tests passed and UI build passed; no service restart or real provider/browser acceptance. No new source/config files. Existing docs/records/README.md whitespace errors are outside this change.
+
+2026-09-24：配置相关界面文案由「渠道 / 默认分组」改为「配置 / 默认配置」。用量价格分组不改。未改选择和发送逻辑，未做浏览器验收。
+
 2026-09-22 02:08 +08:00：修正手动刷新只读静态配置的问题。按钮携带当前providerId，服务端使用已有DPAPI凭据请求对应HTTPS /models，禁止重定向、10秒超时、在途合并；Grok专属渠道只收录grok-模型。新目录加入实际路由并持久化到runtime/model-providers/model-catalog.json，失败保留旧目录并返回错误，不静默伪装刷新成功。新模型不猜测推理强度能力。真实渠道只读查询已返回grok-4.7且available=true，无生成请求、无Key回显。6项提供商测试、前端构建通过；后端修复待授权安全重启，当前运行服务尚未加载。尚未验证手机选择及真实生成，不得宣称已经上线完成。
 
 2026-09-22 02:03 +08:00：按用户要求，在模型设置的模型选择框右侧增加14px刷新图标、30px点击区域。点击复用现有渠道目录更新事件重新读取模型；读取中禁用重复点击，保留当前选择及错误反馈，不自动切换或发送消息。TypeScript/Vite构建通过，手机视觉未复验；未重启、提交或推送。

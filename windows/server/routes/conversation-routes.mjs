@@ -694,6 +694,7 @@ export const createConversationRoutes = ({
     sendJson(response, await conversations.createSession(
       String(body.model || "").trim(),
       String(body.projectRoot || "").trim(),
+      String(body.modelProviderId || "").trim(),
     ), 201);
     return true;
   }

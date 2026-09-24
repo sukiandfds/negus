@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { readLocalCache, writeLocalCache } from "../../../shared/state/localCache";
 import { contextApi } from "../data/contextApi";
 import type { ContextStatus } from "../model/types";
+import { readModelCatalog } from "../../models/data/modelCatalogCache";
+import { readModelDefaults, resolveVisibleModel, resolveVisibleEffort } from "../../models/model/modelDefaults";
 
 const MAX_CACHED_STATUSES = 100;
 const contextStatusCacheKey = "negus-context-status-v1";
@@ -84,10 +86,23 @@ export function useContextManagement(threadId: string) {
     if (!threadId) return null;
     const version = ++refreshVersion.current;
     try {
-      const next = await contextApi.status(threadId, signal);
+      let next = await contextApi.status(threadId, signal);
       if (signal?.aborted || version !== refreshVersion.current || activeThread.current !== threadId) return null;
-      if (!uncommittedChoice.has(threadId)) serverModelReady.add(threadId);
-      setStatus(next);
+      if (!serverModelReady.has(threadId) && !uncommittedChoice.has(threadId) && next.lastSuccessfulSettings !== undefined) {
+        const models = readModelCatalog();
+        const defaults = readModelDefaults();
+        const saved = next.lastSuccessfulSettings;
+        const model = resolveVisibleModel(models, defaults, saved?.model || "", "");
+        const reasoningEffort = resolveVisibleEffort(models, defaults, model, saved?.reasoningEffort || "");
+        next = { ...next, model, reasoningEffort };
+        // Restoring the selection is local; the next send applies it to the runtime.
+        uncommittedChoice.set(threadId, { model, reasoningEffort });
+        rememberStatus(next);
+        setStoredStatus(next);
+      } else {
+        setStatus(next);
+      }
+      serverModelReady.add(threadId);
       return next;
     } catch (reason) {
       if (!signal?.aborted && version === refreshVersion.current && activeThread.current === threadId) {
@@ -119,7 +134,6 @@ export function useContextManagement(threadId: string) {
         const model = canKeepQualifiedModel && current.model.includes("::") && event.model && !event.model.includes("::")
           ? current.model
           : event.model;
-        if (!uncommittedChoice.has(event.threadId)) serverModelReady.add(event.threadId);
         return model === event.model ? event : { ...event, model };
       });
     }

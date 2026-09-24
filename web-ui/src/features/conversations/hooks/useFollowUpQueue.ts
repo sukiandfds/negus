@@ -6,92 +6,87 @@ import type { FollowUpQueueItem } from "../model/followUpQueue";
 import { createSubmissionId } from "../state/optimisticMessage";
 
 export function useFollowUpQueue(threadId: string) {
-  const [items, setItems] = useState<FollowUpQueueItem[]>([]);
+  const [snapshot, setSnapshot] = useState({ threadId, items: [] as FollowUpQueueItem[] });
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const threadIdRef = useRef(threadId);
-  threadIdRef.current = threadId;
+  const requestRef = useRef(0);
+  if (threadIdRef.current !== threadId) {
+    threadIdRef.current = threadId;
+    requestRef.current += 1;
+  }
 
-  const refresh = useCallback(async () => {
-    if (!threadId) {
-      setItems([]);
-      return;
-    }
-    setLoading(true);
-    try {
-      const response = await followUpQueueApi.list(threadId);
-      setItems(response.items || []);
-      setError("");
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setLoading(false);
-    }
-  }, [threadId]);
-
-  useEffect(() => {
-    setItems([]);
-    setError("");
-    void refresh();
-  }, [refresh]);
-
-  const run = useCallback(async (request: () => Promise<{ items: FollowUpQueueItem[] }>) => {
-    setBusy(true);
+  const run = useCallback(async (targetThreadId: string, request: () => Promise<{ items: FollowUpQueueItem[] }>, reading = false) => {
+    if (!targetThreadId || targetThreadId !== threadIdRef.current) return false;
+    const requestId = ++requestRef.current;
+    const isCurrent = () => threadIdRef.current === targetThreadId && requestRef.current === requestId;
+    const setPending = reading ? setLoading : setBusy;
+    setPending(true);
     try {
       const response = await request();
-      setItems(response.items || []);
-      setError("");
+      if (isCurrent()) {
+        setSnapshot({ threadId: targetThreadId, items: response.items || [] });
+        setError("");
+      }
       return true;
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (isCurrent()) setError(reason instanceof Error ? reason.message : String(reason));
       return false;
     } finally {
-      setBusy(false);
+      if (threadIdRef.current === targetThreadId) setPending(false);
     }
   }, []);
 
-  const enqueue = useCallback(async (text: string, attachments: MediaFile[] = []) => {
-    const activeThreadId = threadIdRef.current;
-    if (!activeThreadId) return false;
-    return run(() => followUpQueueApi.enqueue(
-      activeThreadId,
+  const refresh = useCallback(() => run(threadId, () => followUpQueueApi.list(threadId), true), [run, threadId]);
+
+  useEffect(() => {
+    setError("");
+    setLoading(false);
+    setBusy(false);
+    void refresh();
+  }, [refresh]);
+
+  const enqueue = useCallback(async (text: string, attachments: MediaFile[] = [], targetThreadId = threadId) => {
+    return run(targetThreadId, () => followUpQueueApi.enqueue(
+      targetThreadId,
       text.trim(),
       attachments.map((attachment) => attachment.id),
       `queue-${createSubmissionId()}`,
     ));
-  }, [run]);
+  }, [run, threadId]);
 
   const edit = useCallback((itemId: string, text: string) => {
     if (!threadId) return Promise.resolve(false);
-    return run(() => followUpQueueApi.action(threadId, "edit", itemId, { text: text.trim() }));
+    return run(threadId, () => followUpQueueApi.action(threadId, "edit", itemId, { text: text.trim() }));
   }, [run, threadId]);
 
   const remove = useCallback((itemId: string) => {
     if (!threadId) return Promise.resolve(false);
-    return run(() => followUpQueueApi.action(threadId, "remove", itemId));
+    return run(threadId, () => followUpQueueApi.action(threadId, "remove", itemId));
   }, [run, threadId]);
 
   const move = useCallback((itemId: string, direction: "up" | "down") => {
     if (!threadId) return Promise.resolve(false);
-    return run(() => followUpQueueApi.action(threadId, "move", itemId, { direction }));
+    return run(threadId, () => followUpQueueApi.action(threadId, "move", itemId, { direction }));
   }, [run, threadId]);
 
   const retry = useCallback((itemId: string) => {
     if (!threadId) return Promise.resolve(false);
-    return run(() => followUpQueueApi.action(threadId, "retry", itemId));
+    return run(threadId, () => followUpQueueApi.action(threadId, "retry", itemId));
   }, [run, threadId]);
 
   const sendNow = useCallback((itemId: string) => {
     if (!threadId) return Promise.resolve(false);
-    return run(() => followUpQueueApi.action(threadId, "sendNow", itemId));
+    return run(threadId, () => followUpQueueApi.action(threadId, "sendNow", itemId));
   }, [run, threadId]);
 
   const handleEvent = useCallback((event: ProjectEvent) => {
-    if (event.type !== "queue_changed" || event.threadId !== threadId) return;
-    setItems(event.items || []);
+    if (event.type !== "queue_changed" || event.threadId !== threadIdRef.current) return;
+    requestRef.current += 1;
+    setSnapshot({ threadId: event.threadId, items: event.items || [] });
     setError("");
   }, [threadId]);
 
-  return { items, loading, busy, error, enqueue, edit, remove, move, retry, sendNow, refresh, handleEvent };
+  return { items: snapshot.threadId === threadId ? snapshot.items : [], loading, busy, error, enqueue, edit, remove, move, retry, sendNow, refresh, handleEvent };
 }

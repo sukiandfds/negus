@@ -12,6 +12,7 @@ import { ReasoningEffortSelect } from './ReasoningEffortSelect';
 import modelStyles from './ModelSelect.module.css';
 
 export type Channel = { id: string; name: string; baseUrl?: string; model?: string; multiplier?: string; editable: boolean; switchable?: boolean; priceRatio?: number; priceGroup?: string; modelKey?: string; isCurrent?: boolean };
+const formatChannelRatio = (entry: Channel) => entry.priceRatio !== undefined ? `${entry.priceRatio.toFixed(2)}×` : entry.multiplier ? `${Number(entry.multiplier).toFixed(2)}×` : "--";
 const channelCacheKey = 'negus-model-channels-v1';
 const validChannels = (value: unknown): value is Channel[] => Array.isArray(value)
   && value.every((entry) => Boolean(entry) && typeof entry === 'object'
@@ -38,18 +39,19 @@ export const readChannels = (force = false) => {
   }
   return refreshChannels(force);
 };
-export const buildBuiltInChannels = (models: CodexModel[], currentModel: string): Channel[] => [...new Set(models.map((entry) => entry.modelProviderId || 'current'))]
+export const buildBuiltInChannels = (models: CodexModel[], currentModel: string, channels: Channel[] = []): Channel[] => [...new Set(models.map((entry) => entry.modelProviderId || 'current'))]
   .filter((id) => !id.startsWith('ccswitch_'))
   .flatMap((id) => {
     const available = models.filter((entry) => (entry.modelProviderId || 'current') === id && entry.available !== false);
     const model = available.find((entry) => entry.model === currentModel) || available.find((entry) => entry.isDefault) || available[0];
-    return model ? [{ id, name: model.providerDisplayName || (id === 'current' ? '当前运行渠道' : id),
+    const pricing = channels.find((entry) => id === 'current' ? entry.isCurrent : entry.id === id);
+    return model ? [{ priceRatio: pricing?.priceRatio, priceGroup: pricing?.priceGroup, multiplier: pricing?.multiplier, id, name: model.providerDisplayName || (id === 'current' ? '当前运行配置' : id),
       model: model.model, modelKey: model.model, editable: false, switchable: true }] : [];
   });
 
 export function useChannelCatalog(models: CodexModel[], currentModel: string) {
   const [channels, setChannels] = useState<Channel[]>(cachedChannels);
-  const builtInChannels = buildBuiltInChannels(models, currentModel);
+  const builtInChannels = buildBuiltInChannels(models, currentModel, channels);
   const load = async (force = false) => {
     const next = await readChannels(force);
     setChannels(next);
@@ -62,7 +64,7 @@ export function useChannelCatalog(models: CodexModel[], currentModel: string) {
     window.addEventListener('negus-channels-updated', refresh);
     return () => { cancelled = true; window.removeEventListener('negus-channels-updated', refresh); };
   }, []);
-  return { channels, allChannels: [...builtInChannels, ...channels.filter((entry) => !entry.isCurrent)], load };
+  return { channels, allChannels: [...builtInChannels, ...channels.filter((entry) => !entry.isCurrent && !entry.modelKey)], load };
 }
 
 export function ChannelManager({ onClose, currentModel, models, disabled, onSwitch }: { onClose: () => void; currentModel: string; models: CodexModel[]; disabled: boolean; onSwitch: (model: string) => Promise<boolean> }) {
@@ -70,10 +72,10 @@ export function ChannelManager({ onClose, currentModel, models, disabled, onSwit
   const defaults = useModelDefaults();
   const [showArchived, setShowArchived] = useState(false);
   const [channels, setChannels] = useState<Channel[]>(cachedChannels);
-  const [builtInChannels] = useState(() => buildBuiltInChannels(models, currentModel));
+  const builtInChannels = buildBuiltInChannels(models, currentModel, channels);
   const [loading, setLoading] = useState(false);
   const mounted = useRef(true);
-  const allChannels = [...builtInChannels, ...channels.filter((entry) => !entry.isCurrent)];
+  const allChannels = [...builtInChannels, ...channels.filter((entry) => !entry.isCurrent && !entry.modelKey)];
   const visibleChannels = allChannels.filter((entry) => !defaults.archivedProviderIds.includes(channelProviderId(entry)));
   const archivedChannels = allChannels.filter((entry) => defaults.archivedProviderIds.includes(channelProviderId(entry)));
   const groupIds = [...new Set([...models.filter((entry) => entry.available !== false).map(providerIdOf), ...allChannels.map(channelProviderId)])];
@@ -161,7 +163,7 @@ export function ChannelManager({ onClose, currentModel, models, disabled, onSwit
   const saveDefaults = () => {
     applyChoice(draftProviderId, draftDefaultModel, draftDefaultEffort);
     setDefaultsTouched(false);
-    setNotice("默认分组已保存");
+    setNotice("默认配置已保存");
   };
   const save = async () => {
     setBusy(true); setError(''); setNotice('');
@@ -180,7 +182,7 @@ export function ChannelManager({ onClose, currentModel, models, disabled, onSwit
     setBusy(true); setError('');
     try {
       if (await onSwitch(entry.modelKey || `ccswitch_${entry.id}::${entry.model}`)) onClose();
-      else setError('渠道未切换成功，请重试');
+      else setError('配置未切换成功，请重试');
     } catch (reason) { setError(reason instanceof Error ? reason.message : '切换失败'); }
     finally { setBusy(false); }
   };
@@ -213,13 +215,17 @@ export function ChannelManager({ onClose, currentModel, models, disabled, onSwit
     finally { setBusy(false); }
   };
   return createPortal(<dialog ref={dialog} className={styles.dialog} onCancel={(event) => { if (busy) event.preventDefault(); else onClose(); }}>
-    <header>{editing ? <button type="button" title="返回" aria-label="返回" disabled={busy} onClick={closeEditor}><ArrowLeft size={18} /></button> : null}<h2>{editing ? selected ? "编辑渠道" : editingEntry ? "编辑渠道" : "添加渠道" : "渠道"}</h2><button type="button" title="关闭" aria-label="关闭" disabled={busy} onClick={onClose}><X size={18} /></button></header>
+    <header>{editing ? <button type="button" title="返回" aria-label="返回" disabled={busy} onClick={closeEditor}><ArrowLeft size={18} /></button> : null}<h2>{editing ? selected ? "编辑配置" : editingEntry ? "编辑配置" : "添加配置" : "配置"}</h2><button type="button" title="关闭" aria-label="关闭" disabled={busy} onClick={onClose}><X size={18} /></button></header>
+    {editing && editingEntry ? <div className={styles.channelInfo}>
+      <span>{editingEntry.priceRatio !== undefined ? editingEntry.priceGroup : "配置倍率"}</span>
+      <strong>{formatChannelRatio(editingEntry)}</strong>
+    </div> : null}
     {!editing ? <>
-      <div className={styles.toolbar}><span>{!visibleChannels.length && loading ? "读取中…" : `${visibleChannels.length} 个渠道`}</span><button type="button" title="添加渠道" aria-label="添加渠道" disabled={busy} onClick={() => choose("")}><Plus size={18} /></button><button type="button" title="刷新渠道" aria-label="刷新渠道" disabled={busy || loading} onClick={() => void load(true)}><RefreshCw size={18} /></button><button type="button" title="保存默认分组" aria-label="保存默认分组" disabled={busy || !defaultsDirty} onClick={saveDefaults}><Save size={18} /></button></div>
+      <div className={styles.toolbar}><span>{!visibleChannels.length && loading ? "读取中…" : `${visibleChannels.length} 个配置`}</span><button type="button" title="添加配置" aria-label="添加配置" disabled={busy} onClick={() => choose("")}><Plus size={18} /></button><button type="button" title="刷新配置" aria-label="刷新配置" disabled={busy || loading} onClick={() => void load(true)}><RefreshCw size={18} /></button><button type="button" title="保存默认配置" aria-label="保存默认配置" disabled={busy || !defaultsDirty} onClick={saveDefaults}><Save size={18} /></button></div>
       <div className={styles.defaults}>
         <div className={modelStyles.settingRow}>
-          <span>默认分组</span>
-          <select className={modelStyles.select} aria-label="默认分组" value={draftProviderId} disabled={busy || !activeGroupIds.length} onChange={(event) => stageDefaultGroup(event.target.value)}>
+          <span>默认配置</span>
+          <select className={modelStyles.select} aria-label="默认配置" value={draftProviderId} disabled={busy || !activeGroupIds.length} onChange={(event) => stageDefaultGroup(event.target.value)}>
             {activeGroupIds.map((id) => <option key={id} value={id}>{groupName(id)}</option>)}
           </select>
         </div>
@@ -236,7 +242,7 @@ export function ChannelManager({ onClose, currentModel, models, disabled, onSwit
         const active = currentModel === (entry.modelKey || `ccswitch_${entry.id}::${entry.model}`);
         return <div key={entry.id} className={styles.channel} data-active={active}>
           <span className={styles.channelInfo}><strong>{entry.name}</strong><small>{entry.model || "认证暂不支持"}</small></span>
-          <span className={styles.ratio}><strong>{entry.priceRatio !== undefined ? `${entry.priceRatio.toFixed(2)}×` : entry.multiplier ? `${Number(entry.multiplier).toFixed(2)}×` : "--"}</strong><small>{entry.priceRatio !== undefined ? entry.priceGroup : "配置倍率"}</small></span>
+          <span className={styles.ratio}><strong>{formatChannelRatio(entry)}</strong><small>{entry.priceRatio !== undefined ? entry.priceGroup : "配置倍率"}</small></span>
           <button className={styles.iconButton} type="button" title={`编辑 ${entry.name}`} aria-label={`编辑 ${entry.name}`} disabled={busy} onClick={() => openEditor(entry)}><Pencil size={15} /></button>
         </div>;
       })}</div>
@@ -244,15 +250,15 @@ export function ChannelManager({ onClose, currentModel, models, disabled, onSwit
         <button type="button" onClick={() => setShowArchived((value) => !value)}>{showArchived ? "收起已归档" : `已归档 ${archivedChannels.length}`}</button>
         {showArchived ? archivedChannels.map((entry) => <div key={`archived-${entry.id}`} className={styles.channel}><span className={styles.channelInfo}><strong>{entry.name}</strong></span><button type="button" title={`恢复 ${entry.name}`} aria-label={`恢复 ${entry.name}`} disabled={busy} onClick={() => restoreProvider(channelProviderId(entry))}><ArchiveRestore size={15} /></button></div>) : null}
       </div> : null}
-      {disabled ? <p>任务结束后可切换渠道。</p> : null}
-      {!loading && !visibleChannels.length && !error ? <p>暂无渠道</p> : null}
+      {disabled ? <p>任务结束后可切换配置。</p> : null}
+      {!loading && !visibleChannels.length && !error ? <p>暂无配置</p> : null}
       {error ? <p role="alert" className={styles.error}>{error}</p> : null}{notice ? <p role="status">{notice}</p> : null}
     </> : editingEntry?.modelKey ? <>
       <div className={styles.channelInfo}><strong>{editingEntry.name}</strong><small>{editingEntry.model || "认证暂不支持"}</small></div>
       {error ? <p role="alert" className={styles.error}>{error}</p> : null}
       <footer>
         <button type="button" disabled={busy} onClick={archiveEditing}><Archive size={16} />归档</button>
-        <button className={styles.danger} type="button" disabled title="这个分组不能删除">删除</button>
+        <button className={styles.danger} type="button" disabled title="这个配置不能删除">删除</button>
       </footer>
     </> : <>
     <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
@@ -263,7 +269,7 @@ export function ChannelManager({ onClose, currentModel, models, disabled, onSwit
         <label>API Key<input type="password" autoComplete="new-password" autoCapitalize="none" spellCheck={false} required={!selected} value={draft.apiKey} placeholder={selected ? "留空保留原 Key" : ""} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} /></label>
         <label>配置倍率<input required type="number" min="0.001" step="any" value={draft.multiplier} onChange={(event) => setDraft({ ...draft, multiplier: event.target.value })} /></label>
       </fieldset>
-      {unsupported ? <p>此渠道使用的认证方式暂不支持编辑。</p> : null}
+      {unsupported ? <p>此配置使用的认证方式暂不支持编辑。</p> : null}
       {error ? <p role="alert" className={styles.error}>{error}</p> : null}
       {notice ? <p role="status">{notice}</p> : null}
       <footer>

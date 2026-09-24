@@ -90,8 +90,8 @@ function ConversationApp({ active, desktop, onViewChange }: { active: boolean; d
     onViewChange("conversation");
     setSidebarOpen(false);
   }, [conversations.selectSession, onViewChange]);
-  const createSession = (root?: string, model?: string) => {
-    const opened = conversations.openNewSession(root || "", model || "");
+  const createSession = (root?: string, model?: string, providerId?: string) => {
+    const opened = conversations.openNewSession(root || "", model || "", providerId || "");
     if (opened) { onViewChange("conversation"); setSidebarOpen(false); }
     return Promise.resolve(opened);
   };

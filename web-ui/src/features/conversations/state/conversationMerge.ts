@@ -7,6 +7,27 @@ const timestampOf = (message: SessionMessage) => {
   return Number.isFinite(timestamp) ? timestamp : null;
 };
 
+// Preserve native item order within a turn; timestamps only supplement it.
+export const orderMessageList = (messages: SessionMessage[]) => {
+  const ordered: SessionMessage[] = [];
+  for (const message of messages) {
+    const timestamp = timestampOf(message);
+    const insertAt = ordered.findIndex((current) => {
+      if (message.turnId && message.turnId === current.turnId) {
+        if (message.turnItemIndex !== undefined && current.turnItemIndex !== undefined) {
+          return current.turnItemIndex > message.turnItemIndex;
+        }
+        const local = (item: SessionMessage) => item.id.startsWith("stream-") || isOptimisticMessage(item);
+        if (!local(message) && !local(current)) return false;
+      }
+      const currentTimestamp = timestampOf(current);
+      return timestamp !== null && currentTimestamp !== null && currentTimestamp > timestamp;
+    });
+    ordered.splice(insertAt < 0 ? ordered.length : insertAt, 0, message);
+  }
+  return ordered;
+};
+
 const sameSubmission = (left: SessionMessage, right: SessionMessage) => (
   left.role === "user"
   && right.role === "user"
@@ -57,32 +78,13 @@ export const mergeMessageList = (baseMessages: SessionMessage[], incomingMessage
       return;
     }
 
-    if (isOptimisticMessage(message) && message.turnItemIndex === undefined) {
-      merged.push(message);
-      indexes.set(message.id, merged.length - 1);
-      return;
-    }
-
-    const timestamp = timestampOf(message);
-    const insertAt = merged.findIndex((current) => {
-        if (message.turnId && message.turnId === current.turnId
-          && message.turnItemIndex !== undefined && current.turnItemIndex !== undefined) {
-          return current.turnItemIndex > message.turnItemIndex;
-        }
-        if (timestamp === null) return false;
-        const currentTimestamp = timestampOf(current);
-        return currentTimestamp !== null && currentTimestamp > timestamp;
-      });
-    const index = insertAt >= 0 ? insertAt : merged.length;
-    merged.splice(index, 0, message);
-    for (let currentIndex = index; currentIndex < merged.length; currentIndex += 1) {
-      indexes.set(merged[currentIndex].id, currentIndex);
-    }
+    indexes.set(message.id, merged.length);
+    merged.push(message);
   };
 
   for (const message of baseMessages) addOrReplace(message);
   for (const message of incomingMessages) addOrReplace(message);
-  return merged;
+  return orderMessageList(merged);
 };
 
 const unresolvedOptimisticMessages = (incoming: SessionDetail, current: SessionDetail) => {

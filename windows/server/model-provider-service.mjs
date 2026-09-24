@@ -56,7 +56,7 @@ export const defaultModelProviders = () => [
   normalizeProvider({
     id: CURRENT_MODEL_PROVIDER_ID,
     mode: "current",
-    displayName: "当前运行渠道",
+    displayName: "当前运行配置",
   }),
   normalizeProvider({
     id: GROK_MODEL_PROVIDER_ID,
@@ -156,7 +156,7 @@ export const createModelProviderCredentialStore = ({
         "-File", credentialHelper, "-Mode", "read", "-CredentialFile", credentialPath(providerId)],
       { windowsHide: true, timeout: 5000, maxBuffer: 16384 });
       return stdout.trim();
-    } catch { throw statusError("无法读取渠道凭据", 503); }
+    } catch { throw statusError("无法读取配置凭据", 503); }
   };
   return { credentialPath, isConfigured, save, read };
 };
@@ -294,11 +294,11 @@ export const createModelProviderService = ({
         if (!response.ok) throw new Error('upstream failed');
         payload = await response.json();
         if (!Array.isArray(payload.data)) throw new Error('invalid models');
-      } catch { throw statusError('渠道模型目录读取失败，请稍后重试', 502); }
+      } catch { throw statusError('配置模型目录读取失败，请稍后重试', 502); }
       const ids = [...new Set(payload.data.map((entry) => entry?.id).filter((model) => typeof model === 'string'
         && model.length > 0 && model.length <= 120 && !model.includes('::')
         && (id !== GROK_MODEL_PROVIDER_ID || /^grok-/i.test(model))))];
-      if (!ids.length) throw statusError('渠道未返回可用模型', 502);
+      if (!ids.length) throw statusError('配置未返回可用模型', 502);
       const models = ids.map((model) => provider.models.find((entry) => entry.model === model) || {
         id: model, model, displayName: model, description: provider.displayName, isDefault: false,
         supportedReasoningEfforts: [], experimental: false,
