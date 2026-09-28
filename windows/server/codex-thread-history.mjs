@@ -61,6 +61,7 @@ const messagesFromTurn = (turn, registerMedia) => dedupeAssistantMediaMessages((
         itemId,
         turnItemIndex: index,
         turnStatus: turn.status || "",
+        turnStartedAtMs: timestampFromValue(turn.startedAt),
         superseded: message.role === "assistant" && turn.items.slice(index + 1).some((entry) => entry.type === "userMessage"),
       }
       : { ...message, id: stableMessageId("unknown", itemId, index, message), itemId };

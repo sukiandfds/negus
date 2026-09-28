@@ -168,6 +168,7 @@ function ConversationApp({ active, desktop, onViewChange }: { active: boolean; d
           role={desktop ? "region" : undefined} aria-label={desktop ? "桌面助手回复" : undefined} aria-hidden={desktop && !answerOpen} inert={desktop && !answerOpen}>
         {desktop && <div className={desktopStyles.answerHeader}><strong>{conversations.session?.title || "桌面助手"}</strong><button type="button" aria-label="收起回复" onClick={() => setAnswerOpen(false)}><ChevronDown size={18} /></button></div>}
         <div className={desktopStyles.answerBody}><ConversationView
+          completedGoal={conversations.goal?.status === "complete" ? conversations.goal : null}
           key={conversations.selectedId || "conversation"}
           active={active && (!desktop || answerOpen)}
           session={conversations.session}
@@ -236,9 +237,12 @@ function ConversationApp({ active, desktop, onViewChange }: { active: boolean; d
           goal={conversations.goal}
           goalBusy={conversations.goalBusy}
           goalError={conversations.goalError}
-          onStartGoal={(objective) => { if (desktop) setAnswerOpen(true); return conversations.startGoal(objective); }}
+          goalResumePrompt={conversations.goalResumePrompt}
+          onDismissGoalResumePrompt={conversations.dismissGoalResumePrompt}
           onChangeGoalStatus={conversations.changeGoalStatus}
           onClearGoal={conversations.clearGoal}
+          onSetGoal={conversations.setGoal}
+          onEditGoal={conversations.editGoal}
           onCompactContext={conversations.compactContext}
           onAutoCompactThresholdChange={conversations.setAutoCompactThreshold}
           onModelChange={conversations.changeModel}

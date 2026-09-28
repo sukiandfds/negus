@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { readModelCatalog, writeModelCatalog } from "../data/modelCatalogCache";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { modelCatalogFor, readModelCatalog } from "../data/modelCatalogCache";
 import { modelApi } from "../data/modelApi";
-import type { CodexModel, ModelUpdateResult } from "../model/types";
+import { currentConversationId } from "../../../shared/api/conversationScope";
+import type { ModelUpdateResult } from "../model/types";
 import { writeLocalCache } from "../../../shared/state/localCache";
 
 export function useModels(threadId: string, onChanged: (threadId: string, result: ModelUpdateResult & { committed?: boolean }) => void, currentModel = "") {
-  const [initialModels] = useState(readModelCatalog);
-  const [models, setModels] = useState<CodexModel[]>(initialModels);
-  const [loading, setLoading] = useState(initialModels.length === 0);
+  const conversationId = currentConversationId();
+  const catalog = modelCatalogFor(conversationId);
+  const cached = useSyncExternalStore(catalog.subscribe, catalog.getSnapshot);
+  const models = cached.data ?? readModelCatalog();
+  const loading = cached.data === null && !cached.error;
   const [changing, setChanging] = useState(false);
   const [error, setError] = useState("");
   const [catalogRevision, setCatalogRevision] = useState(0);
-  const hasCatalogRef = useRef(initialModels.length > 0);
   const refreshProviderRef = useRef<string | undefined>(undefined);
   const pendingRef = useRef(new Map<string, { model?: string; reasoningEffort?: string; modelChanged: boolean; effortChanged: boolean }>());
   const applyingRef = useRef(new Map<string, Promise<ModelUpdateResult | null>>());
@@ -27,29 +29,13 @@ export function useModels(threadId: string, onChanged: (threadId: string, result
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
-    setLoading(!hasCatalogRef.current);
     const refreshProvider = refreshProviderRef.current;
     refreshProviderRef.current = undefined;
-    void modelApi.list(controller.signal, refreshProvider)
-      .then((result) => {
-        if (controller.signal.aborted) return;
-        const availableModels = result.filter((entry) => entry.available !== false);
-        setModels(availableModels);
-        hasCatalogRef.current = true;
-        writeModelCatalog(availableModels);
-        setError("");
-      })
-      .catch((reason) => {
-        if (!controller.signal.aborted) {
-          if (refreshProvider || !hasCatalogRef.current) setError(reason instanceof Error ? reason.message : String(reason));
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [threadId, catalogRevision]);
+    void catalog.refresh(async () => {
+      const result = await modelApi.list(AbortSignal.timeout(15000), refreshProvider, conversationId);
+      return result.filter((entry) => entry.available !== false);
+    }, catalogRevision > 0).catch(() => {});
+  }, [catalog, conversationId, catalogRevision]);
 
   const change = useCallback(async (model: string, reasoningEffort?: string, activeThreadId = threadId) => {
     if (!activeThreadId || !model) return false;
@@ -122,5 +108,5 @@ export function useModels(threadId: string, onChanged: (threadId: string, result
     return request;
   }, [currentModel, models, onChanged, threadId]);
 
-  return { models, loading, changing, error, change, changeReasoningEffort, applyPending };
+  return { models, loading, changing, error: error || cached.error, change, changeReasoningEffort, applyPending };
 }

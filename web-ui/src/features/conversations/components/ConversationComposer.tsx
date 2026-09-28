@@ -13,6 +13,7 @@ import type { CodexModel } from "../../models/model/types";
 import type { MediaFile } from "../../../shared/model/media";
 import type { SessionMessage } from "../model/types";
 import { heartbeatAssistantText, parseHeartbeatUser } from "../rendering/heartbeatMessage";
+import { GoalConfirmation } from "../../goals/components/GoalConfirmation";
 import { GoalControl } from "../../goals/components/GoalControl";
 import type { EditableGoalStatus, ThreadGoal } from "../../goals/model/types";
 import { goalCapabilityOptions } from "../../goals/model/capability";
@@ -75,9 +76,12 @@ interface ConversationComposerProps {
   goal: ThreadGoal | null;
   goalBusy: boolean;
   goalError: string;
-  onStartGoal: (objective: string) => Promise<boolean>;
+  goalResumePrompt: boolean;
+  onDismissGoalResumePrompt: () => void;
   onChangeGoalStatus: (status: EditableGoalStatus) => Promise<boolean>;
   onClearGoal: () => Promise<boolean>;
+  onSetGoal: (objective: string, attachments?: MediaFile[]) => Promise<boolean>;
+  onEditGoal: (objective: string) => Promise<boolean>;
   onCompactContext: () => Promise<boolean>;
   onAutoCompactThresholdChange: (threshold: number | null) => Promise<boolean>;
   onModelChange: (model: string, reasoningEffort?: string) => Promise<boolean>;
@@ -92,11 +96,12 @@ export function ConversationComposer({
   onSend, onQueue, queueing, queueItems, queueError, onEditQueueItem, onRemoveQueueItem, onMoveQueueItem, onRetryQueueItem,
   onSendQueueItem,
   editingMessage, onCancelEdit,
-  onInterrupt, onReview, goal, goalBusy, goalError, onStartGoal, onChangeGoalStatus, onClearGoal,
+  onInterrupt, onReview, goal, goalBusy, goalError, goalResumePrompt, onDismissGoalResumePrompt, onChangeGoalStatus, onClearGoal, onSetGoal, onEditGoal,
   onCompactContext, onAutoCompactThresholdChange, onModelChange,
   onReasoningEffortChange,
 }: ConversationComposerProps) {
   const [text, setText] = useState("");
+  const [goalConfirmation, setGoalConfirmation] = useState<"replace" | "resume" | null>(null);
   const [slash, setSlash] = useState<SlashState | null>(null);
   const [activeSlash, setActiveSlash] = useState(0);
   const [collapsedSlashGroups, setCollapsedSlashGroups] = useState<Record<string, boolean>>({});
@@ -104,7 +109,7 @@ export function ConversationComposer({
   const submittingRef = useRef(false);
   const draft = useAttachmentDraft();
   const inputDisabled = !selected || archived || sending || queueing || draft.uploading
-    || status.phase === "recovering" || status.phase === "unknown";
+    || goalBusy || status.phase === "recovering" || status.phase === "unknown";
   const editing = Boolean(editingMessage);
   const inheritedAttachments = editingMessage?.blocks?.flatMap((block) => (
     "file" in block && block.file ? [block.file] : []
@@ -184,33 +189,21 @@ export function ConversationComposer({
     if (activeSlash >= visibleSlashOptions.length) setActiveSlash(0);
   }, [activeSlash, visibleSlashOptions.length]);
 
-  const submit = async () => {
+  const submit = async (confirmedGoal = false) => {
     const disabled = inputDisabled || !hasContent;
     if (disabled || submittingRef.current) return;
+    const goalMatch = !editing ? text.trim().match(/^\/goal(?:\s+([\s\S]*))?$/iu) : null;
+    if (goalMatch && !confirmedGoal && goal && goal.status !== "complete") {
+      setGoalConfirmation(goalMatch[1]?.trim() ? "replace" : "resume");
+      return;
+    }
+    if (goalMatch && !goalMatch[1]?.trim() && !draft.attachments.length && !goal) return;
     submittingRef.current = true;
     const submittedText = text;
     setText("");
     setSlash(null);
     if (!editing && !draft.attachments.length && !inheritedAttachments.length) {
       const command = submittedText.trim().toLocaleLowerCase();
-      const goalMatch = /^\/goal(?:\s+([\s\S]*))?$/iu.exec(submittedText.trim());
-      if (goalMatch) {
-        const objective = String(goalMatch[1] || "").trim();
-        if (!objective) {
-          setText(submittedText);
-          submittingRef.current = false;
-          return;
-        }
-        try {
-          const accepted = await onStartGoal(objective);
-          if (!accepted) setText(submittedText);
-        } catch {
-          setText(submittedText);
-        } finally {
-          submittingRef.current = false;
-        }
-        return;
-      }
       if (command === "/compact" || command === "/stop" || command === "/review") {
         try {
           const accepted = command === "/compact"
@@ -230,7 +223,11 @@ export function ConversationComposer({
       const submittedAttachments = editing
         ? [...inheritedAttachments, ...uploaded.filter((attachment) => !inheritedAttachments.some((item) => item.id === attachment.id))]
         : uploaded;
-      const accepted = editing || !status.active
+      const accepted = goalMatch
+        ? (goalMatch[1]?.trim() || submittedAttachments.length
+          ? await onSetGoal(goalMatch[1]?.trim() || "", submittedAttachments)
+          : await onChangeGoalStatus("active"))
+        : editing || !status.active
         ? await onSend(submittedText, submittedAttachments)
         : await onQueue(submittedText, submittedAttachments);
       if (accepted) draft.clear();
@@ -252,6 +249,17 @@ export function ConversationComposer({
   return (
       <div className={styles.positioner}>
         {desktopContext}
+        <GoalControl goal={goal} busy={goalBusy} error={goalError}
+          disabled={!connected || !selected || archived}
+          onStatusChange={onChangeGoalStatus} onClear={onClearGoal} onEdit={onEditGoal} />
+        {goalResumePrompt && goal ? <GoalConfirmation kind="resume" paused={goal.status === "paused"}
+          busy={goalBusy} error={goalError} objective={goal.displayObjective || goal.objective}
+          onCancel={onDismissGoalResumePrompt}
+          onConfirm={() => { void onChangeGoalStatus("active").then((ok) => { if (ok) onDismissGoalResumePrompt(); }); }} /> : null}
+        {goalConfirmation ? <GoalConfirmation
+          kind={goalConfirmation} objective={goalConfirmation === "replace" ? text.replace(/^\s*\/goal\s*/iu, "") : goal?.displayObjective || goal?.objective || ""}
+          onCancel={() => setGoalConfirmation(null)}
+          onConfirm={() => { setGoalConfirmation(null); void submit(true); }} /> : null}
       <FollowUpQueue
         items={queueItems}
         busy={queueing}
@@ -369,14 +377,6 @@ export function ConversationComposer({
           </div>
           <span className={styles.spacer} />
           <div className={styles.settingsControls}>
-            <GoalControl
-              goal={goal}
-              busy={goalBusy}
-              error={goalError}
-              disabled={!connected || !selected || archived}
-              onStatusChange={onChangeGoalStatus}
-              onClear={onClearGoal}
-            />
             <ModelSettingsControl
               currentModel={shownModel}
               currentEffort={shownEffort}
@@ -405,7 +405,7 @@ export function ConversationComposer({
             >
               <Square className={styles.stopIcon} aria-hidden="true" />
             </button>
-          ) : status.active && !hasContent ? (
+          ) : (status.active || goal?.status === "active") && !hasContent ? (
             <button
               className={styles.sendButton}
               type="button"

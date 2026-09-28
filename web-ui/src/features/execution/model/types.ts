@@ -102,6 +102,7 @@ export interface QueueChangedEvent {
 export interface GoalStatusEvent {
   type: "goal_status";
   threadId: string;
+  conversationId?: string;
   goal: ThreadGoal | null;
 }
 

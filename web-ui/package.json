@@ -10,6 +10,9 @@
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.7",
+    "@tiptap/markdown": "^3.31.3",
+    "@tiptap/react": "^3.31.3",
+    "@tiptap/starter-kit": "^3.31.3",
     "lucide-react": "^0.468.0",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",

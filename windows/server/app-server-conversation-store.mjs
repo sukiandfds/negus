@@ -1,5 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
+import { materializeGoalObjective, expandGoalObjective } from "./thread-goal-objective.mjs";
 import { previewText } from "./content-blocks.mjs";
 import { createAppServerClient } from "./app-server-client.mjs";
 import { messagesFromTurns, readRecentThreadPage } from "./codex-thread-history.mjs";
@@ -165,6 +167,7 @@ const promptFromSlashCommand = (text, attachments = []) => {
 
 export const createAppServerConversationStore = ({
   projectRoot, projectRoots = [projectRoot], registerMedia, onProtocolMessage, onSubmitted, onFailed, onHealthState,
+  goalAttachmentRoot = path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "attachments"),
   autoTitleStateFile = "", onAutoTitleChanged,
   autoTitleEnabled = true,
   historyFallback,
@@ -727,18 +730,23 @@ export const createAppServerConversationStore = ({
     return client.request("review/start", { threadId });
   };
 
-  const getGoal = async (threadId) => {
+  const getGoal = async (threadId, options) => {
     await ensureProjectThread(threadId);
-    return client.request("thread/goal/get", { threadId });
+    const result = await client.request("thread/goal/get", { threadId }, options);
+    return { ...result, goal: await expandGoalObjective(result.goal, goalAttachmentRoot) };
   };
 
-  const setGoal = async (threadId, patch = {}) => {
-    await ensureProjectThread(threadId);
+  const setGoal = async (threadId, patch = {}, options) => {
+    if (patch.objective !== undefined || patch.status === "active") await resumeThread(threadId);
+    else await ensureProjectThread(threadId);
     const params = { threadId };
-    if (patch.objective !== undefined) params.objective = patch.objective;
+    const materialized = patch.objective !== undefined ? await materializeGoalObjective(patch.objective, goalAttachmentRoot) : null;
+    if (materialized) params.objective = materialized.objective;
     if (patch.status !== undefined) params.status = patch.status;
     if (patch.tokenBudget !== undefined) params.tokenBudget = patch.tokenBudget;
-    return client.request("thread/goal/set", params);
+    // Retain the objective file on transport failure: the native goal may already reference it.
+    const result = await client.request("thread/goal/set", params, options);
+    return { ...result, goal: await expandGoalObjective(result.goal, goalAttachmentRoot) };
   };
 
   const clearGoal = async (threadId) => {

@@ -1,15 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { hasAccessToken, withAccessToken } from "../../../shared/api/http";
-import { readLocalCache, writeLocalCache } from "../../../shared/state/localCache";
 import type { ExecutionStatus } from "../../execution/model/types";
 import type { ThreadGoal } from "../../goals/model/types";
-import { projectDirectoryApi } from "../data/projectDirectoryApi";
+import { projectDirectoryApi, projectDirectoryResource } from "../data/projectDirectoryApi";
 import type { DirectoryProject, ProjectRuntimeStatus } from "../model/types";
 
 type StatusByThread = Record<string, ProjectRuntimeStatus>;
-const projectDirectoryCacheKey = "negus-project-directory-v1";
-const validProjects = (value: unknown): value is DirectoryProject[] => Array.isArray(value)
-  && value.every((entry) => Boolean(entry) && typeof entry === "object" && typeof entry.id === "string");
+const emptyProjects: DirectoryProject[] = [];
 type DirectoryEvent = {
   type?: string;
   employeeId?: string;
@@ -30,12 +27,13 @@ const sameStatus = (left?: ProjectRuntimeStatus, right?: ProjectRuntimeStatus) =
 );
 
 export function useProjectDirectory(currentStatus?: ExecutionStatus) {
-  const [initialProjects] = useState(() => readLocalCache(projectDirectoryCacheKey, validProjects) || []);
-  const [projects, setProjects] = useState<DirectoryProject[]>(initialProjects);
+  const cached = useSyncExternalStore(projectDirectoryResource.subscribe, projectDirectoryResource.getSnapshot);
+  const projects = cached.data ?? emptyProjects;
   const [statusByThread, setStatusByThread] = useState<StatusByThread>({});
   const [goalByThread, setGoalByThread] = useState<Record<string, ThreadGoal | null>>({});
-  const [loading, setLoading] = useState(!initialProjects.length);
-  const [error, setError] = useState("");
+  const [goalRecovery, setGoalRecovery] = useState(0);
+  const loading = cached.data === null && !cached.error;
+  const error = cached.error;
   const projectsRef = useRef(projects);
   const refreshVersion = useRef(0);
   projectsRef.current = projects;
@@ -43,34 +41,27 @@ export function useProjectDirectory(currentStatus?: ExecutionStatus) {
   const cacheStatus = useCallback((threadId: string, status?: ProjectRuntimeStatus | null) => {
     if (!threadId || !status) return;
     setStatusByThread((current) => sameStatus(current[threadId], status)
+      || (Date.parse(current[threadId]?.updatedAt || "") > Date.parse(status.updatedAt || ""))
       ? current
       : { ...current, [threadId]: status });
   }, []);
 
-  const refresh = useCallback(async (signal?: AbortSignal) => {
+  const refresh = useCallback(async (signal?: AbortSignal, invalidate = false) => {
     const version = ++refreshVersion.current;
     try {
-      const next = await projectDirectoryApi.list(signal);
+      const next = await projectDirectoryApi.list(signal, invalidate);
       if (signal?.aborted || version !== refreshVersion.current) return;
-      setProjects((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
-      writeLocalCache(projectDirectoryCacheKey, next);
       for (const entry of next) {
         if (entry.mainThreadId) cacheStatus(entry.mainThreadId, entry.status);
         for (const conversation of entry.conversations || []) {
           cacheStatus(conversation.threadId || conversation.id, conversation.status);
         }
       }
-      setError("");
-    } catch (reason) {
-      if (signal?.aborted || version !== refreshVersion.current) return;
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      if (!signal?.aborted && version === refreshVersion.current) setLoading(false);
-    }
+    } catch { /* Shared resource retains the last good directory and error. */ }
   }, [cacheStatus]);
 
   useEffect(() => {
-    if (!currentStatus?.threadId) return;
+    if (!currentStatus?.threadId || !currentStatus.updatedAt) return;
     cacheStatus(currentStatus.threadId, currentStatus);
   }, [cacheStatus, currentStatus]);
 
@@ -82,7 +73,7 @@ export function useProjectDirectory(currentStatus?: ExecutionStatus) {
     let refreshTimer = 0;
     const scheduleActivityRefresh = () => {
       window.clearTimeout(refreshTimer);
-      refreshTimer = window.setTimeout(() => void refresh(), 180);
+      refreshTimer = window.setTimeout(() => void refresh(controller.signal, true), 180);
     };
     source.onmessage = (event) => {
       try {
@@ -104,9 +95,9 @@ export function useProjectDirectory(currentStatus?: ExecutionStatus) {
       } catch { /* Existing conversation SSE remains the source of truth. */ }
     };
     let opened = false;
-    source.onopen = () => { if (opened) void refresh(controller.signal); opened = true; };
+    source.onopen = () => { if (opened) { setGoalRecovery((value) => value + 1); void refresh(controller.signal); } opened = true; };
     const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void refresh();
+      if (document.visibilityState === "visible") { setGoalRecovery((value) => value + 1); void refresh(); }
     };
     window.addEventListener("pageshow", refreshWhenVisible);
     document.addEventListener("visibilitychange", refreshWhenVisible);
@@ -119,5 +110,5 @@ export function useProjectDirectory(currentStatus?: ExecutionStatus) {
     };
   }, [cacheStatus, refresh]);
 
-  return { projects, statusByThread, goalByThread, loading, error, refresh };
+  return { projects, statusByThread, goalByThread, goalRecovery, loading, error, refresh };
 }

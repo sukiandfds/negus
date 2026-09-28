@@ -114,7 +114,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
         args[3] = { ...route.attemptSettings, model: resolved.model || route.attemptSettings.model };
         await save();
       }
-      if (method === 'sendMessage' && routes[id]?.pendingProviderId) {
+      if ((method === 'sendMessage' || (method === 'setGoal' && (args[0]?.objective !== undefined || args[0]?.status === 'active'))) && routes[id]?.pendingProviderId) {
         if (!activating.has(id)) {
           const task = activatePending(id).finally(() => activating.delete(id));
           activating.set(id, task);

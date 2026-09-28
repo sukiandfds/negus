@@ -464,12 +464,28 @@ export const createConversationRoutes = ({
     const conversationId = String(body.conversationId || "").trim();
     const binding = await authorizeAgentThread({ threadId, conversationId });
     const status = execution.getStatus(threadId);
-    if (!threadId || !status.active || !status.turnId) {
-      sendJson(response, { error: "当前没有可停止的任务" }, 409);
+    if (!threadId) {
+      sendJson(response, { error: "threadId is required" }, 400);
+      return true;
+    }
+    const goalSource = isEmployeeDirectBinding(binding) ? employeeRuntime : conversations;
+    let pausedGoal = false;
+    let pauseError = null;
+    try {
+      const { goal } = await goalSource.getGoal(threadId, { timeoutMs: 500 });
+      if (goal?.status === "active") {
+        await goalSource.setGoal(threadId, { status: "paused" }, { timeoutMs: 500 });
+        pausedGoal = true;
+      }
+    } catch (error) { pauseError = error; }
+    if (!status.active || !status.turnId) {
+      if (pauseError) throw pauseError;
+      sendJson(response, pausedGoal ? { threadId, status: "paused" } : { error: "当前没有可停止的任务" }, pausedGoal ? 202 : 409);
       return true;
     }
     if (isEmployeeDirectBinding(binding)) await employeeRuntime.interrupt(binding.agentId, status.turnId);
     else await conversations.interrupt(threadId, status.turnId);
+    if (pauseError) throw pauseError;
     sendJson(response, { threadId, turnId: status.turnId, status: "interrupting" }, 202);
     return true;
   }
@@ -498,8 +514,9 @@ export const createConversationRoutes = ({
       sendJson(response, { error: "threadId is required" }, 400);
       return true;
     }
-    await authorizeAgentThread({ threadId, conversationId });
-    sendJson(response, await conversations.getGoal(threadId));
+    const binding = await authorizeAgentThread({ threadId, conversationId });
+    const source = isEmployeeDirectBinding(binding) ? employeeRuntime : conversations;
+    sendJson(response, await source.getGoal(threadId));
     return true;
   }
   if (url.pathname === "/api/session/goal" && request.method === "POST") {
@@ -510,14 +527,26 @@ export const createConversationRoutes = ({
       sendJson(response, { error: "threadId is required" }, 400);
       return true;
     }
-    await authorizeAgentThread({ threadId, conversationId });
-    const objective = body.objective === undefined ? undefined : String(body.objective || "").trim();
+    const binding = await authorizeAgentThread({ threadId, conversationId });
+    const source = isEmployeeDirectBinding(binding) ? employeeRuntime : conversations;
+    const goalAttachments = media.resolveMany(body.attachmentIds);
+    if (Array.isArray(body.attachmentIds) && goalAttachments.length !== new Set(body.attachmentIds).size) {
+      sendJson(response, { error: "目标附件已失效，请重新上传" }, 400);
+      return true;
+    }
+    const objectiveText = String(body.objective || "").trim();
+    const objective = body.objective === undefined ? undefined : [
+      objectiveText,
+      ...goalAttachments.map((file) => file.mimeType?.startsWith("image/")
+        ? "Referenced image files:\n- " + file.name + ": " + file.path
+        : "Referenced pasted text files:\n- pasted text file: " + file.path + ". Read this file before continuing."),
+    ].filter(Boolean).join("\n\n");
     const status = body.status === undefined ? undefined : String(body.status || "").trim();
     const tokenBudget = body.tokenBudget === undefined || body.tokenBudget === null
       ? undefined
       : Number(body.tokenBudget);
-    if (objective !== undefined && (!objective || objective.length > 32000)) {
-      sendJson(response, { error: "objective must contain 1 to 32000 characters" }, 400);
+    if (objective !== undefined && (!objective || objective.length > 1000000)) {
+      sendJson(response, { error: "objective must contain 1 to 1000000 characters" }, 400);
       return true;
     }
     if (status !== undefined && !["active", "paused", "complete"].includes(status)) {
@@ -528,7 +557,7 @@ export const createConversationRoutes = ({
       sendJson(response, { error: "tokenBudget must be a positive integer" }, 400);
       return true;
     }
-    sendJson(response, await conversations.setGoal(threadId, { objective, status, tokenBudget }));
+    sendJson(response, await source.setGoal(threadId, { objective, status, tokenBudget }));
     return true;
   }
   if (url.pathname === "/api/session/goal" && request.method === "DELETE") {
@@ -539,8 +568,9 @@ export const createConversationRoutes = ({
       sendJson(response, { error: "threadId is required" }, 400);
       return true;
     }
-    await authorizeAgentThread({ threadId, conversationId });
-    await conversations.clearGoal(threadId);
+    const binding = await authorizeAgentThread({ threadId, conversationId });
+    const source = isEmployeeDirectBinding(binding) ? employeeRuntime : conversations;
+    await source.clearGoal(threadId);
     sendJson(response, { threadId, goal: null });
     return true;
   }

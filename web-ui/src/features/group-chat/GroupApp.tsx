@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { LoaderCircle } from "lucide-react";
 import { AppShell } from "../../components/AppShell/AppShell";
 import { BottomNav } from "../../components/BottomNav/BottomNav";
@@ -15,16 +15,13 @@ import type { GroupMessage, GroupProfile } from "./model/types";
 import type { MediaFile } from "../../shared/model/media";
 import { useDeviceInfo } from "../device/hooks/useDeviceInfo";
 import { useArtifacts } from "../artifacts/hooks/useArtifacts";
-import { projectDirectoryApi } from "../project-directory/data/projectDirectoryApi";
+import { projectDirectoryApi, projectDirectoryResource } from "../project-directory/data/projectDirectoryApi";
 import type { DirectoryProject } from "../project-directory/model/types";
 import { ProjectNavigationDirectory } from "../project-directory/components/ProjectDirectory";
-import { readLocalCache, writeLocalCache } from "../../shared/state/localCache";
 import { RefreshNotice } from "../app-update/components/AppUpdateNotice";
 import styles from "./GroupApp.module.css";
 
-const projectDirectoryCacheKey = "negus-project-directory-v1";
-const validProjects = (value: unknown): value is DirectoryProject[] => Array.isArray(value)
-  && value.every((entry) => Boolean(entry) && typeof entry === "object" && typeof entry.id === "string");
+const emptyProjects: DirectoryProject[] = [];
 const quoteExcerpt = (message: GroupMessage) => {
   const text = message.text.trim();
   if (text) return text.slice(0, 160);
@@ -35,9 +32,8 @@ export function GroupApp({ active = true, onViewChange }: { active?: boolean; on
   const group = useGroupRoom();
   const device = useDeviceInfo(group.connected);
   const [profile, setProfile] = useState<GroupProfile | null>(null);
-  const [projects, setProjects] = useState<DirectoryProject[]>(() => (
-    readLocalCache(projectDirectoryCacheKey, validProjects) || []
-  ));
+  const directory = useSyncExternalStore(projectDirectoryResource.subscribe, projectDirectoryResource.getSnapshot);
+  const projects = directory.data ?? emptyProjects;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [localSendVersion, setLocalSendVersion] = useState(0);
   const [quote, setQuote] = useState<GroupMessage["replyTo"]>(null);
@@ -96,16 +92,7 @@ export function GroupApp({ active = true, onViewChange }: { active?: boolean; on
     || "Negus";
 
   useEffect(() => {
-    const controller = new AbortController();
-    void projectDirectoryApi.list(controller.signal)
-      .then((next) => {
-        if (!controller.signal.aborted) {
-          setProjects(next);
-          writeLocalCache(projectDirectoryCacheKey, next);
-        }
-      })
-      .catch(() => {});
-    return () => controller.abort();
+    void projectDirectoryApi.list().catch(() => {});
   }, []);
 
   return (

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { CalendarClock, Clock3, LoaderCircle } from "lucide-react";
+import { CalendarClock, Clock3, LoaderCircle, Target } from "lucide-react";
 import { JumpToLatest } from "../../../components/JumpToLatest/JumpToLatest";
 import { useReturnToBottom } from "../../../components/JumpToLatest/useReturnToBottom";
 import { RefreshNotice } from "../../app-update/components/AppUpdateNotice";
@@ -15,6 +15,8 @@ import { formatConversationTimestamp } from "../../../shared/format/dateTime";
 import { advanceLiveTranscript, createLiveTranscriptMemory } from "../state/liveTranscript";
 import { orderMessageList } from "../state/conversationMerge";
 import styles from "./ConversationView.module.css";
+import type { ThreadGoal } from "../../goals/model/types";
+import { completedGoalMessageId } from "../../goals/model/completedGoal";
 
 const messageListKey = (message: SessionMessage) => (
   message.role === "user" && message.submissionId
@@ -41,6 +43,7 @@ function Message({
   contextStatus,
   executionPlaceholder = false,
   showPriorReply = false,
+  completedGoal,
 }: {
   message: SessionMessage;
   streaming?: boolean;
@@ -60,6 +63,7 @@ function Message({
   contextStatus?: ContextStatus;
   executionPlaceholder?: boolean;
   showPriorReply?: boolean;
+  completedGoal?: ThreadGoal | null;
 }) {
   const presentation = presentConversationMessage(message);
   const shown = presentation.message;
@@ -111,8 +115,10 @@ function Message({
             threadId={threadId}
             messageId={message.id}
           /> : null}
+          {completedGoal ? <span className={styles.goalAchieved} aria-label="目标达成结果"><Target aria-hidden="true" />已在 {Math.floor(completedGoal.timeUsedSeconds)} 秒内达成目标</span> : null}
         </div>
       ) : null}
+      {executionPlaceholder && completedGoal ? <span className={styles.goalAchieved} aria-label="目标达成结果"><Target aria-hidden="true" />已在 {Math.floor(completedGoal.timeUsedSeconds)} 秒内达成目标</span> : null}
       {executionStatus && contextStatus ? (
         <ExecutionTimeline status={executionStatus} contextStatus={contextStatus} />
       ) : null}
@@ -121,6 +127,7 @@ function Message({
 }
 
 interface ConversationViewProps {
+  completedGoal?: ThreadGoal | null;
   active?: boolean;
   session: SessionDetail | null;
   loading: boolean;
@@ -152,8 +159,17 @@ type ConversationItem = {
 
 const visibleText = (message: SessionMessage) => message.text.replace(/\s+/gu, " ").trim();
 
+const sameRenderedMessage = (left: SessionMessage, right: SessionMessage) => (
+  left.role === right.role
+  && Boolean(left.turnId && right.turnId && left.turnId === right.turnId)
+  && (
+    (Boolean(left.itemId && right.itemId) && left.itemId === right.itemId)
+    || (Boolean(left.submissionId && right.submissionId) && left.submissionId === right.submissionId)
+  )
+);
+
 const staysAtEnd = (item: ConversationItem) => (
-  item.streaming || item.executionPlaceholder || item.message.id.startsWith("optimistic-")
+  item.streaming || item.executionPlaceholder || (item.message.id.startsWith("optimistic-") && item.message.source !== "native-goal")
 );
 
 const orderVisibleItems = (items: ConversationItem[]) => {
@@ -161,7 +177,8 @@ const orderVisibleItems = (items: ConversationItem[]) => {
     item.local
     && visibleText(item.message)
     && items.slice(0, index).some((current) => (
-      current.message.role === item.message.role && visibleText(current.message) === visibleText(item.message)
+      sameRenderedMessage(current.message, item.message)
+      && visibleText(current.message) === visibleText(item.message)
     ))
   ));
   const byMessage = new Map(ordered.map((item) => [item.message, item]));
@@ -173,6 +190,7 @@ const orderVisibleItems = (items: ConversationItem[]) => {
 };
 
 export function ConversationView({
+  completedGoal,
   active = true,
   session,
   loading,
@@ -210,10 +228,19 @@ export function ConversationView({
   const agentScoped = Boolean(locationParams.get("agent"));
   const employeeScoped = Boolean(locationParams.get("employee"));
   const executionMatchesSession = executionStatus.threadId === session?.threadId;
+  const observedExecution = useRef({ threadId: "", turnId: "" });
+  if (observedExecution.current.threadId !== session?.threadId) {
+    observedExecution.current = { threadId: session?.threadId || "", turnId: "" };
+  }
+  if (executionMatchesSession && executionStatus.active && executionStatus.turnId) {
+    observedExecution.current.turnId = executionStatus.turnId;
+  }
   const completedExecution = ["completed", "failed", "interrupted", "systemError"].includes(executionStatus.phase);
   const showExecution = executionMatchesSession
     && Boolean(executionStatus.startedAt)
-    && executionStatus.phase !== "idle";
+    && executionStatus.phase !== "idle"
+    && (executionStatus.phase !== "completed"
+      || Boolean(executionStatus.turnId && observedExecution.current.turnId === executionStatus.turnId));
   const transcript = advanceLiveTranscript(transcriptMemoryRef.current, {
     threadId: session?.threadId || "",
     messages,
@@ -262,6 +289,12 @@ export function ConversationView({
       local: true,
     }] : []),
   ]);
+  const goalMessageId = completedGoalMessageId(visibleItems.map(item => {
+    const message = item.message;
+    return message.turnId === executionStatus.turnId && executionStatus.phase === "completed"
+      ? { ...message, turnStatus: "completed", turnStartedAtMs: message.turnStartedAtMs ?? Date.parse(executionStatus.startedAt || "") }
+      : message;
+  }), completedGoal);
   const virtualizer = useVirtualizer({
     count: visibleItems.length,
     getScrollElement: () => scrollRef.current,
@@ -459,6 +492,7 @@ export function ConversationView({
                 >
                   <Message
                         message={item.message}
+                        completedGoal={item.message.id === goalMessageId ? completedGoal : null}
                         streaming={item.streaming}
                         forkable={item.message.role === "assistant"
                           && !item.local
@@ -494,6 +528,7 @@ export function ConversationView({
             })}
           </div>
         ) : null}
+        {completedGoal && !executionStatus.active && !goalMessageId && !visibleItems.some(item => item.message.turnId) ? <div className={styles.actionRow}><span className={styles.goalAchieved} aria-label="目标达成结果"><Target aria-hidden="true" />已在 {Math.floor(completedGoal.timeUsedSeconds)} 秒内达成目标</span></div> : null}
         </section>
       </div>
       {loadingOlder ? <div className={styles.older} role="status" aria-label="正在加载更早消息"><LoaderCircle aria-hidden="true" /></div> : null}

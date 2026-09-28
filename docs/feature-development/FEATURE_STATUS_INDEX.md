@@ -61,7 +61,7 @@ AI 助手根据任务定位功能编号，再读取对应功能文件。不要�
 | `FEAT-015` | 自然语言生图与自动化工作台 | `in_progress` | `v0.5.0` | 2026-08-06 | 对话生图核心已经完成并进入真实 Thread/Turn：自然语言触发、2.35:1 4K、连续改图、普通后续对话、旧会话迁移和结果去重已有实现；仍在开发的是专门工作台、Artifact、批量模板、队列和定时任务 | [`FEAT-015-image-generation-and-automation-workbench.md`](./features/FEAT-015-image-generation-and-automation-workbench.md) |
 | `FEAT-016` | 项目统一更名为 negus | `implemented_pending_review` | `v1.0.0` | 2026-08-05 09:28 +08:00 | 界面、PWA、包名和 GitHub 仓库已统一为 negus，浏览器旧数据保留兼容；本地目录将在当前活动 Turn 收口后由独立 Worker 迁移并恢复同一端口 | [`FEAT-016-project-identity-negus.md`](./features/FEAT-016-project-identity-negus.md) |
 | `FEAT-017` | 多业务项目与 Codex 会话归类 | `implemented_pending_review` | `v0.1.0` | 2026-08-17 11:10 +08:00 | 已确认所有者项目、目标工作项目和文件访问路径必须分离；员工 Thread 不得进入工作项目普通会话列表。现有实现仍需按该定义检查和修复 | [`FEAT-017-multiple-business-projects.md`](./features/FEAT-017-multiple-business-projects.md) |
-| `FEAT-018` | Codex 原生 Goal 目标模式入口 | `implemented_pending_review` | `v0.2.0` | 2026-08-14 | 已删除 Negus 自建 Goal 生命周期，只保留单聊和群聊能力菜单入口并走现有 Codex 消息通道；UI 构建及 Windows 146 项测试通过，等待安全重启后的原生 Goal 运行验收 | [`FEAT-018-system-goal-orchestration.md`](./features/FEAT-018-system-goal-orchestration.md) |
+| `FEAT-018` | Codex 原生 Goal 调用与展示对齐 | `handoff_pending` | `v0.3.0` | 2026-09-26 | 56 项回归、富文本浏览器及正式服务真实 HTTP/SSE 验收通过；未验证边界见档案 | [`FEAT-018-system-goal-orchestration.md`](./features/FEAT-018-system-goal-orchestration.md) |
 | `FEAT-019` | 项目面板单项目经理 AI 入口 | `implemented_uncommitted` | `v0.1.0` | 2026-09-14 | 项目管理页可打开长期 manager 单聊，并在对话标题显示当前项目上下文；仍待真实员工 Runtime、点击和移动端验收 | [`FEAT-019-project-manager-entry.md`](./features/FEAT-019-project-manager-entry.md) |
 | `FEAT-020` | 内测访问入口与共享链接 | `retired` | `v0.1.1` | 2026-09-16 23:15 +08:00 | 删除重复的内测按钮和弹窗，统一使用原有分享入口；保留共享链接及 Cookie 授权，待手机刷新确认 | [`FEAT-020-beta-access-entry.md`](./features/FEAT-020-beta-access-entry.md) |
 | `FEAT-021` | 项目记忆入口与可解释上下文边界 | `implemented_uncommitted` | `v0.1.0` | 2026-09-15 00:15 +08:00 | 项目管理页读取最近更新、关键决策和公共群聊完整历史，并公开说明 Agent 上下文边界；不引入隐式长期记忆 | [`FEAT-021-project-memory-entry.md`](./features/FEAT-021-project-memory-entry.md) |
@@ -149,3 +149,7 @@ AI 助手根据任务定位功能编号，再读取对应功能文件。不要�
 | `retired` | 已被其他功能或方案替代 |
 
 2026-09-25 01:47 +08:00 FEAT-022: model defaults, explicit send settings and successful-selection recovery updated; 10 targeted tests and UI build passed. No restart or real browser/provider acceptance; handoff_pending. See features/FEAT-022-cc-switch-channels.md.
+
+2026-09-26 22:34 +08:00：BUG-20260926-01 共享缓存接入目录、自动化、模型（FEAT-017/023/022，群聊共享目录涉及 FEAT-002）；handoff_pending。10项定向测试、构建与两尺寸隔离浏览器检查通过，真实手机/公网/供应商未验收。[证据](../records/SHARED_CACHE_2026-09-26.md)。
+
+2026-09-27 10:12 +08:00，BUG-20260927-01（handoff_pending）：历史已完成任务不再在打开对话后补出工作过程行；本次观察到运行的 Turn 完成时仍保留过程。桌面目录忽略本地初始化占位状态、拒绝更旧的状态覆盖，摘要复用目录 Turn ID，避免初始化导致任务移除和重复读取。构建及两尺寸隔离 Edge 测试通过；真实设备/网络未验收，未重启或提交。详细证据见 docs/records/SHARED_CACHE_2026-09-26.md。

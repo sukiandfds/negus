@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Maximize2, RefreshCw, X, Clock3 } from "lucide-react";
 import { fetchJson } from "../../shared/api/http";
-import { readLocalCache, writeLocalCache } from "../../shared/state/localCache";
+import { createCachedResource } from "../../shared/state/localCache";
 import styles from "./AutomationsWidget.module.css";
 
 type Run = { threadId: string; status: string; createdAt: number; updatedAt: number };
@@ -9,6 +9,9 @@ type Automation = { id: string; name: string; status: string; schedule: string; 
 type Snapshot = { items: Automation[]; checkedAt: number; warnings: string[]; coverage: string };
 const key = "negus:desktop-automations:v1";
 const valid = (value: unknown): value is Snapshot => Boolean(value && typeof value === "object" && Array.isArray((value as Snapshot).items) && typeof (value as Snapshot).checkedAt === "number" && Array.isArray((value as Snapshot).warnings));
+const automations = createCachedResource(key, valid, (result, previous) => result.warnings.length && previous
+  ? { ...result, checkedAt: previous.checkedAt, items: [...new Map([...previous.items, ...result.items].map((item) => [item.id, item])).values()] }
+  : result);
 const time = (value: number | null) => value ? new Date(value).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }) : "未提供";
 const statusName = (value: string) => ({ ACTIVE: "已启用", PAUSED: "已暂停", DISABLED: "已停用", DELETED: "已删除", ARCHIVED: "已归档", IN_PROGRESS: "执行中", RUNNING: "执行中", COMPLETED: "已完成", SUCCESS: "成功", FAILED: "失败", ERROR: "异常", PENDING_REVIEW: "待查看" }[value] || value || "未知");
 export function scheduleLabel(rule: string) {
@@ -23,39 +26,20 @@ export function scheduleLabel(rule: string) {
   return rule || "未提供周期";
 }
 export function AutomationsWidget({ active }: { active: boolean }) {
-  const [data, setData] = useState<Snapshot | null>(() => readLocalCache(key, valid));
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const { data, error, refreshing: loading } = useSyncExternalStore(automations.subscribe, automations.getSnapshot);
   const [revision, setRevision] = useState(0);
   const [filter, setFilter] = useState("all");
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     if (!active) { dialog.current?.close(); return; }
-    const controller = new AbortController();
-    let busy = false;
-    const refresh = async () => {
-      if (busy || document.hidden) return;
-      busy = true; setLoading(true);
-      try {
-        const result = await fetchJson<Snapshot>("/api/desktop/automations", AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]));
-        if (!valid(result)) throw new Error("自动化数据格式异常");
-        if (!controller.signal.aborted) {
-          setData((previous) => {
-            const next = result.warnings.length && previous
-              ? { ...result, checkedAt: previous.checkedAt, items: [...new Map([...previous.items, ...result.items].map((item) => [item.id, item])).values()] }
-              : result;
-            writeLocalCache(key, next);
-            return next;
-          });
-          setError("");
-        }
-      } catch { if (!controller.signal.aborted) setError("自动化任务同步失败"); }
-      finally { busy = false; if (!controller.signal.aborted) setLoading(false); }
+    const refresh = () => {
+      if (document.hidden) return;
+      void automations.refresh(() => fetchJson<Snapshot>("/api/desktop/automations", AbortSignal.timeout(8000))).catch(() => {});
     };
     void refresh();
     const timer = window.setInterval(() => void refresh(), 15000);
     document.addEventListener("visibilitychange", refresh);
-    return () => { controller.abort(); clearInterval(timer); document.removeEventListener("visibilitychange", refresh); };
+    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", refresh); };
   }, [active, revision]);
   const items = data?.items || [];
   const warning = error || data?.warnings[0];

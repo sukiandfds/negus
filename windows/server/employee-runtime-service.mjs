@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
+import os from "node:os";
+import { materializeGoalObjective, expandGoalObjective } from "./thread-goal-objective.mjs";
 import { createAppServerClient } from "./app-server-client.mjs";
 import { messagesFromTurns } from "./codex-thread-history.mjs";
 import { employeeTurnInstructions } from "./employee-definitions.mjs";
@@ -331,6 +334,10 @@ export const createEmployeeRuntimeService = ({
     if (!employeeId) return;
     const params = message.params || {};
     const method = message.method || "";
+    if (method === "thread/goal/updated" || method === "thread/goal/cleared") {
+      execution?.publishThreadEvent?.(threadId, { type: "goal_status", threadId, conversationId: registry.require(employeeId).conversationId, goal: params.goal || null });
+      return;
+    }
 
     if (method === "turn/started") {
       publishStatus(employeeId, {
@@ -654,6 +661,23 @@ export const createEmployeeRuntimeService = ({
     return { employeeId: employee.id, threadId, turnId: current.turnId, status: "interrupted" };
   };
 
+  const goalRequest = async (threadId, method, patch = {}, options = {}) => {
+    const employeeId = threadEmployees.get(threadId);
+    if (!employeeId) throw statusError("员工 Thread 不存在", 404);
+    const employee = registry.require(employeeId);
+    const runtimeClient = await clientForThread(threadId, employee);
+    const providerId = routeForEmployee(employee).modelProviderId;
+    const attachmentRoot = providerId && providerId !== CURRENT_MODEL_PROVIDER_ID
+      ? path.join(projectRoot, "runtime", "model-providers", providerId, "codex-home", "attachments")
+      : path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "attachments");
+    if (patch.objective !== undefined || patch.status === "active") await resumeThread(threadId, employee);
+    const materialized = patch.objective !== undefined ? await materializeGoalObjective(patch.objective, attachmentRoot) : null;
+    const result = await runtimeClient.request(method, {
+      threadId, ...patch, ...(materialized ? { objective: materialized.objective } : {}),
+    }, options);
+    return Object.hasOwn(result, "goal") ? { ...result, goal: await expandGoalObjective(result.goal, attachmentRoot) } : result;
+  };
+
   const pendingUserInput = async (threadId) => {
     const cleanThreadId = clean(threadId, 120);
     const employeeId = threadEmployees.get(cleanThreadId);
@@ -688,6 +712,9 @@ export const createEmployeeRuntimeService = ({
     getThreadStatus: threadStatus,
     compactContext,
     interrupt,
+    getGoal: (threadId, options) => goalRequest(threadId, "thread/goal/get", {}, options),
+    setGoal: (threadId, patch, options) => goalRequest(threadId, "thread/goal/set", patch, options),
+    clearGoal: (threadId) => goalRequest(threadId, "thread/goal/clear"),
     getPendingUserInput: pendingUserInput,
     respondToUserInput,
     supportsEmployee: (employeeId) => Boolean(registry.get(employeeId)),

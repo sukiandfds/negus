@@ -219,3 +219,15 @@ test("a new direct employee Thread uses the selected provider without migrating 
   await runtime.sendMessage({ employeeId: "researcher", text: "identify your model" });
   assert.equal(grokCalls.some((call) => call.method === "turn/start"), true);
 });
+
+test("employee native goal notifications and controls share the owned client", async t => {
+ const events=[];
+ const f=await fixture(t,{execution:{publishThreadEvent:(...args)=>events.push(args)}});
+ await f.runtime.open("developer");
+ const goal={status:"blocked",objective:"owned goal"};
+ f.listener({method:"thread/goal/updated",params:{threadId:"employee-thread",goal}});
+ assert.deepEqual(events.at(-1),["employee-thread",{type:"goal_status",threadId:"employee-thread",conversationId:(await f.runtime.getStatus("developer")).conversationId,goal}]);
+ await f.runtime.setGoal("employee-thread",{status:"paused"});
+ assert.deepEqual(f.calls.at(-1),{method:"thread/goal/set",params:{threadId:"employee-thread",status:"paused"}});
+ await assert.rejects(f.runtime.getGoal("unowned"),/Thread/);
+});

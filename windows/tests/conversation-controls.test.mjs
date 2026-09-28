@@ -740,7 +740,7 @@ test("uses the native Codex thread goal protocol", async () => {
     close: () => {},
     request: async (method, params) => {
       calls.push({ method, params });
-      if (method === "thread/read") return { thread };
+      if (method === "thread/read" || method === "thread/resume") return { thread };
       if (method === "thread/goal/set") return { goal };
       if (method === "thread/goal/get") return { goal };
       if (method === "thread/goal/clear") return {};
@@ -764,6 +764,7 @@ test("uses the native Codex thread goal protocol", async () => {
 
   assert.deepEqual(calls, [
     { method: "thread/read", params: { threadId: thread.id, includeTurns: false } },
+    { method: "thread/resume", params: { threadId: thread.id, persistExtendedHistory: true } },
     {
       method: "thread/goal/set",
       params: { threadId: thread.id, objective: goal.objective, status: "active", tokenBudget: 1000 },

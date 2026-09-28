@@ -29,6 +29,7 @@ export interface SessionMessage {
   turnId?: string;
   turnItemIndex?: number;
   turnStatus?: string;
+  turnStartedAtMs?: number | null;
   superseded?: boolean;
   itemId?: string;
   authorId?: string;

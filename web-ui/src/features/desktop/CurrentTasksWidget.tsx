@@ -39,7 +39,7 @@ export function CurrentTasksWidget({ directory, active, connected, onSelect }: {
     return () => window.clearTimeout(timer);
   }, [previews]);
   const previewRequests = JSON.stringify((view === "list" ? tasks.filter((task) => task.category === filter) : items)
-    .map((task) => ({ id: task.id, conversationId: task.conversation.conversationId, signature: `${task.conversation.updatedAt || task.conversation.lastActivityAt || ""}:${directory.statusByThread[task.id]?.turnId || ""}` })));
+    .map((task) => ({ id: task.id, conversationId: task.conversation.conversationId, signature: `${task.conversation.updatedAt || task.conversation.lastActivityAt || ""}:${directory.statusByThread[task.id]?.turnId || task.conversation.status?.turnId || ""}` })));
   useEffect(() => {
     if (!active) return;
     const controller = new AbortController();

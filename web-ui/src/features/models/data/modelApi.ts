@@ -3,8 +3,7 @@ import { currentConversationId, withConversation } from "../../../shared/api/con
 import type { CodexModel, ModelUpdateResult } from "../model/types";
 
 export const modelApi = {
-  list: (signal?: AbortSignal, refreshProvider?: string) => {
-    const conversationId = currentConversationId();
+  list: (signal?: AbortSignal, refreshProvider?: string, conversationId = currentConversationId()) => {
     const query = new URLSearchParams();
     if (conversationId) query.set('conversationId', conversationId);
     if (refreshProvider) query.set('refreshProvider', refreshProvider);

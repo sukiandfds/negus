@@ -1,95 +1,86 @@
-import { Check, ChevronDown, LoaderCircle, Pause, Play, Target, Trash2 } from "lucide-react";
+import { LoaderCircle, Pause, Pencil, Play, Target, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { EditableGoalStatus, GoalStatus, ThreadGoal } from "../model/types";
+import { createPortal } from "react-dom";
+import { goalElapsedSeconds, goalStatusLabels, nextGoalStatus, type EditableGoalStatus, type ThreadGoal } from "../model/types";
 import styles from "./GoalControl.module.css";
+import { GoalObjectiveEditor } from "./GoalObjectiveEditor";
 
-const statusLabels: Record<GoalStatus, string> = {
-  active: "进行中",
-  paused: "已暂停",
-  budgetLimited: "达到预算",
-  complete: "已完成",
-};
-
-export function GoalControl({ goal, busy, error, disabled, onStatusChange, onClear }: {
+export function GoalControl({ goal, busy, error, disabled, onStatusChange, onClear, onEdit }: {
   goal: ThreadGoal | null;
   busy: boolean;
   error: string;
   disabled: boolean;
   onStatusChange: (status: EditableGoalStatus) => Promise<boolean>;
   onClear: () => Promise<boolean>;
+  onEdit: (objective: string) => Promise<boolean>;
 }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
+  const [now, setNow] = useState(Date.now);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [savedAt, setSavedAt] = useState(Date.now);
+  const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    if (!open) return;
-    const closeOutside = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOutside);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
+    setEditing(false);
+  }, [goal?.threadId]);
+  useEffect(() => {
+    if (goal?.status !== "active" && !editing) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [goal?.status, goal?.updatedAt, editing]);
+  useEffect(() => {
+    if (editing) dialog.current?.show();
+  }, [editing]);
+  if (!goal) return error ? <p className={styles.error} role="alert">{error}</p> : null;
 
-  if (!goal) return null;
-
-  const status = statusLabels[goal.status];
-  const duration = `${Math.max(0, Math.round(goal.timeUsedSeconds))} 秒`;
-  const tokens = goal.tokensUsed.toLocaleString();
-  const changeStatus = async (next: EditableGoalStatus) => {
-    if (await onStatusChange(next)) setOpen(false);
+  const objective = goal.displayObjective ?? goal.objective;
+  const next = nextGoalStatus(goal.status);
+  const seconds = Math.floor(goalElapsedSeconds(goal, now));
+  const duration = seconds < 60 ? seconds + " 秒" : seconds < 3600
+    ? Math.floor(seconds / 60) + " 分 " + seconds % 60 + " 秒"
+    : Math.floor(seconds / 3600) + " 小时 " + Math.floor(seconds % 3600 / 60) + " 分";
+  const format = (value: number) => new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+  const progress = goal.tokenBudget != null && ["active", "budgetLimited"].includes(goal.status)
+    ? format(goal.tokensUsed) + " / " + format(goal.tokenBudget) : duration;
+  const edit = () => { setDraft(objective); setSavedAt(goal.updatedAt * 1000); setEditing(true); };
+  const save = async () => {
+    const nextDraft = draft.trim();
+    if (!busy && nextDraft && nextDraft !== objective && await onEdit(nextDraft)) {
+      setDraft(nextDraft);
+      setSavedAt(Date.now());
+      setNow(Date.now());
+    }
   };
+  const savedMinutes = Math.max(0, Math.floor((now - savedAt) / 60000));
+  const finished = goal.status === "complete";
 
   return (
-    <div className={styles.root} ref={rootRef}>
-      <button
-        className={styles.trigger}
-        type="button"
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        title={goal.objective}
-        onClick={() => setOpen((value) => !value)}
-      >
+    <div className={styles.root} aria-label="目标状态">
+      <div className={styles.row}>
         <Target aria-hidden="true" />
-        <span>目标 · {status}</span>
-        <ChevronDown aria-hidden="true" />
-      </button>
-      {open ? (
-        <div className={styles.menu} role="dialog" aria-label="目标状态">
-          <div className={styles.heading}><Target aria-hidden="true" /><strong>当前目标</strong></div>
-          <p className={styles.objective}>{goal.objective}</p>
-          <div className={styles.stats}>
-            <span>状态<strong>{status}</strong></span>
-            <span>用时<strong>{duration}</strong></span>
-            <span>Token<strong>{tokens}</strong></span>
-          </div>
-          {error ? <p className={styles.error} role="alert">{error}</p> : null}
-          <div className={styles.actions}>
-            {goal.status === "active" ? (
-              <button type="button" disabled={disabled || busy} onClick={() => void changeStatus("paused")}>
-                {busy ? <LoaderCircle aria-hidden="true" /> : <Pause aria-hidden="true" />}暂停
-              </button>
-            ) : goal.status === "paused" ? (
-              <button type="button" disabled={disabled || busy} onClick={() => void changeStatus("active")}>
-                {busy ? <LoaderCircle aria-hidden="true" /> : <Play aria-hidden="true" />}继续
-              </button>
-            ) : null}
-            {goal.status !== "complete" ? (
-              <button type="button" disabled={disabled || busy} onClick={() => void changeStatus("complete")}>
-                {busy ? <LoaderCircle aria-hidden="true" /> : <Check aria-hidden="true" />}完成
-              </button>
-            ) : null}
-            <button className={styles.clear} type="button" disabled={disabled || busy} title="清除目标" aria-label="清除目标" onClick={() => void onClear().then((cleared) => { if (cleared) setOpen(false); })}>
-              <Trash2 aria-hidden="true" />
-            </button>
-          </div>
-        </div>
+        <button type="button" className={styles.summary} disabled={busy || disabled || finished} onClick={edit} title={objective}>
+          <strong>{goalStatusLabels[goal.status] || "目标状态待确认"}</strong>
+          <span className={styles.objective}>{objective}</span>
+          <span className={styles.progress}>{progress}</span>
+        </button>
+        {!finished ? <div className={styles.actions}>
+          <button type="button" disabled={disabled || busy} title="清除目标" aria-label="清除目标" onClick={() => void onClear()}><X /></button>
+          {next ? <button type="button" disabled={disabled || busy} title={next === "paused" ? "暂停目标" : "恢复目标"} aria-label={next === "paused" ? "暂停目标" : "恢复目标"} onClick={() => void onStatusChange(next)}>
+            {busy ? <LoaderCircle className={styles.spinner} /> : next === "paused" ? <Pause /> : <Play />}
+          </button> : null}
+          <button type="button" disabled={disabled || busy} title="编辑目标" aria-label="编辑目标" onClick={edit}><Pencil /></button>
+        </div> : null}
+      </div>
+      {error ? <p className={styles.error} role="alert">{error}</p> : null}
+      {editing ? createPortal(
+        <dialog ref={dialog} className={styles.editor} aria-label="编辑目标" onCancel={(event) => { if (busy) event.preventDefault(); else setEditing(false); }} onClose={() => setEditing(false)}>
+          <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
+            <header><strong>编辑目标</strong><button type="button" aria-label="关闭目标编辑" disabled={busy} onClick={() => setEditing(false)}><X /></button></header>
+            <GoalObjectiveEditor value={draft} disabled={busy} onChange={setDraft} onSave={() => void save()} />
+            {error ? <p className={styles.error} role="alert">{error}</p> : null}
+            <footer><span className={styles.updated} role="status">{savedMinutes === 0 ? "刚刚更新" : savedMinutes + " 分钟前更新"}</span><button type="button" disabled={busy || draft === objective} onClick={() => setDraft(objective)}>还原</button><button type="submit" disabled={disabled || busy || !draft.trim() || draft.trim() === objective}>保存</button></footer>
+          </form>
+        </dialog>, document.body,
       ) : null}
     </div>
   );

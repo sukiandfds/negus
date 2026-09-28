@@ -148,6 +148,7 @@ const appServerConversations = createProviderConversationStore({
     });
     const store = createAppServerConversationStore({
     ...conversationStoreOptions, client,
+    goalAttachmentRoot: path.join(projectRoot, "runtime", "model-providers", providerId, "codex-home", "attachments"),
     historyFallback: (...args) => history.findSession(...args),
     autoTitleStateFile: path.join(projectRoot, "runtime", `conversation-titles-${providerId}.json`),
     autoTitleEnabled: false,
@@ -343,6 +344,7 @@ const employeeGrowth = createEmployeeGrowthService({
   broadcast: realtime.broadcast,
 });
 employeeRuntime = createEmployeeRuntimeService({
+  execution,
   registry: employeeRegistry,
   conversationStore: employeeConversationStore,
   projectRoot,

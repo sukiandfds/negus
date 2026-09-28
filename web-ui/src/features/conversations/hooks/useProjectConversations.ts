@@ -240,6 +240,31 @@ export function useProjectConversations() {
     return selection.selectedIdRef.current === realId ? realId : "";
   }, [selection.selectedIdRef]);
 
+  const setGoal = useCallback(async (objective: string, attachments: MediaFile[] = [], appendTranscript = true) => {
+    const requestedId = selection.selectedIdRef.current;
+    const threadId = await waitForThread(requestedId);
+    if (!threadId || selection.selectedIdRef.current !== threadId) return false;
+    try {
+      if (!execution.status.active) {
+        await stageUnrecordedModel(threadId, true);
+        await modelManager.applyPending(threadId);
+      }
+      if (selection.selectedIdRef.current !== threadId) return false;
+      const result = await goal.update({ objective, status: "active", attachmentIds: attachments.map((file) => file.id) }, threadId);
+      if (!result) return false;
+      if (appendTranscript) {
+        const message = { ...createOptimisticMessage("/goal " + objective, attachments, createSubmissionId()), source: "native-goal" };
+        selection.addOptimisticMessage(threadId, message);
+        setLocalSendVersion((value) => value + 1);
+      }
+      void catalog.refreshSessions(false, threadId, false);
+      return true;
+    } catch (error) {
+      if (selection.selectedIdRef.current === threadId) selection.setSessionError(error instanceof Error ? error.message : String(error));
+      return false;
+    }
+  }, [waitForThread, selection.selectedIdRef, selection.addOptimisticMessage, selection.setSessionError, execution.status.active, stageUnrecordedModel, modelManager.applyPending, goal.update, catalog.refreshSessions]);
+
   const sendDirectMessage = useCallback(async (text: string, attachments: MediaFile[] = [], existingSubmissionId = "") => {
     const messageText = text.trim();
     if (!messageText && !attachments.length) return false;
@@ -439,15 +464,6 @@ export function useProjectConversations() {
     void task.finally(() => { desktopPreparingRef.current = null; });
     return task;
   }, [catalog.createSession, catalog.sessions, selection.selectSession, selection.selectedIdRef]);
-
-  const startGoal = useCallback(async (objective: string) => {
-    const normalized = objective.trim();
-    const threadId = selection.selectedIdRef.current;
-    if (!normalized || !threadId || selection.session?.archived) return false;
-    const created = await goal.update({ objective: normalized, status: "active" });
-    if (!created || selection.selectedIdRef.current !== threadId) return false;
-    return sendDirectMessage(normalized);
-  }, [goal.update, selection.selectedIdRef, selection.session?.archived, sendDirectMessage]);
 
   const beginEditMessage = useCallback((message: SessionMessage) => {
     if (message.role !== "user" || !message.turnId || selection.session?.archived) return;
@@ -676,7 +692,9 @@ export function useProjectConversations() {
     moveQueueItem: followUpQueue.move,
     retryQueueItem: followUpQueue.retry,
     sendQueueItem: followUpQueue.sendNow,
-    interrupt: execution.interrupt,
+    interrupt: () => !execution.status.active && goal.goal?.status === "active"
+      ? goal.update({ status: "paused" }).then(Boolean)
+      : execution.interrupt(),
     userInputRequest,
     userInputBusy,
     userInputError,
@@ -689,9 +707,27 @@ export function useProjectConversations() {
     goal: goal.goal,
     goalBusy: goal.busy,
     goalError: goal.error,
-    startGoal,
-    changeGoalStatus: async (status: "active" | "paused" | "complete") => Boolean(await goal.update({ status })),
-    clearGoal: goal.clear,
+    goalResumePrompt: goal.resumePrompt,
+    dismissGoalResumePrompt: goal.dismissResumePrompt,
+    setGoal,
+    editGoal: (objective: string) => setGoal(objective, [], false),
+    changeGoalStatus: async (status: "active" | "paused") => {
+      const threadId = selection.selectedIdRef.current;
+      if (status === "active") {
+        try {
+          if (!execution.status.active) {
+            await stageUnrecordedModel(threadId, true);
+            await modelManager.applyPending(threadId);
+          }
+          if (selection.selectedIdRef.current !== threadId) return false;
+        } catch (error) {
+          if (selection.selectedIdRef.current === threadId) selection.setSessionError(error instanceof Error ? error.message : String(error));
+          return false;
+        }
+      }
+      return Boolean(await goal.update({ status }, threadId));
+    },
+    clearGoal: () => goal.clear(),
     refresh: () => catalog.refreshSessions(),
   };
 }

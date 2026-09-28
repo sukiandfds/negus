@@ -30,6 +30,7 @@ export interface LiveTranscriptMemory {
   starts: Map<string, string>;
   frozen: StreamSegment[];
   liveItemId: string;
+  liveTurnId: string;
   liveText: string;
   liveStartedAt: string;
   serverText: string;
@@ -70,6 +71,7 @@ export const createLiveTranscriptMemory = (): LiveTranscriptMemory => ({
   starts: new Map(),
   frozen: [],
   liveItemId: "",
+  liveTurnId: "",
   liveText: "",
   liveStartedAt: "",
   serverText: "",
@@ -103,7 +105,6 @@ const coveredByHistory = (messages: SessionMessage[], itemId: string, text: stri
   return messages.some((message) => {
     if (message.role !== "assistant" || isOptimistic(message)) return false;
     const got = normalized(message.text);
-    if (got === wanted) return true;
     return Boolean(itemId) && message.itemId === itemId && got.includes(wanted);
   });
 };
@@ -111,7 +112,7 @@ const coveredByHistory = (messages: SessionMessage[], itemId: string, text: stri
 const freezeDisplayed = (memory: LiveTranscriptMemory, turnId: string, now: string) => {
   if (!normalized(memory.liveText)) return;
   const itemId = memory.liveItemId || `local-${memory.frozen.length}`;
-  const duplicate = memory.frozen.some((segment) => normalized(segment.text) === normalized(memory.liveText));
+  const duplicate = memory.frozen.some((segment) => segment.itemId === itemId && segment.turnId === memory.liveTurnId && normalized(segment.text) === normalized(memory.liveText));
   if (duplicate) return;
   const createdAt = memory.liveStartedAt || rememberStart(memory, itemId, now);
   memory.frozen.push({
@@ -119,7 +120,7 @@ const freezeDisplayed = (memory: LiveTranscriptMemory, turnId: string, now: stri
     itemId,
     text: memory.liveText,
     createdAt,
-    turnId,
+    turnId: memory.liveTurnId || turnId,
   });
 };
 
@@ -168,6 +169,15 @@ export const advanceLiveTranscript = (memory: LiveTranscriptMemory, input: LiveT
 
   const text = input.streamingText || "";
   const itemId = input.streamingItemId || "";
+  if (memory.liveTurnId !== input.turnId) {
+    freezeDisplayed(memory, memory.liveTurnId, input.now);
+    memory.liveText = "";
+    memory.liveItemId = "";
+    memory.liveStartedAt = "";
+    memory.serverText = "";
+    memory.cut = null;
+    memory.liveTurnId = input.turnId;
+  }
   const removed = memory.optimisticIds.filter((id) => !optimisticIds.includes(id));
   if (removed.length && optimisticIds.length === 0 && memory.cut && text === memory.cut.prefix) {
     const prefix = normalized(memory.cut.prefix);

@@ -37,6 +37,8 @@ export function collectCurrentTasks(projects: DirectoryProject[], statuses: Reco
     else if (terminal.has(phase)) { category = "other"; }
     else if (goal?.status === "active") { category = "running"; label = "Goal 持续进行中"; }
     else if (goal?.status === "paused") label = "Goal 已暂停";
+    else if (goal?.status === "blocked") label = "目标已停滞";
+    else if (goal?.status === "usageLimited") label = "目标使用受限";
     else if (goal?.status === "budgetLimited") label = "Goal 额度已用完";
     else if (goal?.status === "complete" || phase === "completed") { category = "completed"; label = goal?.status === "complete" ? "Goal 已完成" : "已完成"; }
     else continue; // Idle is not proof of completion.

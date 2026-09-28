@@ -42,6 +42,8 @@ export function useCurrentTasks(directory: ReturnType<typeof useProjectDirectory
 
   useEffect(() => {
     if (!active) return;
+    // Directory refresh alone has no native goal snapshot.
+    if (directory.goalRecovery) checked.current.clear();
     const controller = new AbortController();
     let busy = false;
     const load = async () => {
@@ -95,7 +97,7 @@ export function useCurrentTasks(directory: ReturnType<typeof useProjectDirectory
     const visible = () => { if (document.visibilityState === "visible") void load(); };
     document.addEventListener("visibilitychange", visible);
     return () => { controller.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", visible); };
-  }, [active, directory.projects.length, revision]);
+  }, [active, directory.projects.length, directory.goalRecovery, revision]);
   const tasks = useMemo(() => collectCurrentTasks(directory.projects, directory.statusByThread, goals), [directory.projects, directory.statusByThread, goals]);
   const retry = () => {
     for (const [id, value] of checked.current) if (value.failed) checked.current.delete(id);

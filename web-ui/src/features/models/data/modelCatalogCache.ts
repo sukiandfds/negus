@@ -1,12 +1,22 @@
-import { readLocalCache, writeLocalCache } from "../../../shared/state/localCache";
+import { createCachedResource } from "../../../shared/state/localCache";
+import { currentConversationId } from "../../../shared/api/conversationScope";
 import type { CodexModel } from "../model/types";
 
-const modelsCacheKey = "negus-models-v1";
 const validModels = (value: unknown): value is CodexModel[] => Array.isArray(value)
   && value.every((entry) => Boolean(entry)
     && typeof entry === "object"
     && typeof entry.model === "string"
     && Array.isArray(entry.supportedReasoningEfforts));
 
-export const readModelCatalog = () => readLocalCache(modelsCacheKey, validModels) || [];
-export const writeModelCatalog = (models: CodexModel[]) => writeLocalCache(modelsCacheKey, models);
+const catalogs = new Map<string, ReturnType<typeof createCachedResource<CodexModel[]>>>();
+const emptyModels: CodexModel[] = [];
+export const modelCatalogFor = (conversationId = currentConversationId()) => {
+  let resource = catalogs.get(conversationId);
+  if (!resource) {
+    // v2 avoids trusting the old global catalog, which could belong to an employee.
+    resource = createCachedResource("negus-models-v2:" + encodeURIComponent(conversationId), validModels);
+    catalogs.set(conversationId, resource);
+  }
+  return resource;
+};
+export const readModelCatalog = () => modelCatalogFor().getSnapshot().data ?? emptyModels;

@@ -1,0 +1,20 @@
+import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import path from "node:path";
+import os from "node:os";
+import test from "node:test";
+import { materializeGoalObjective, expandGoalObjective, goalFilePrefix } from "../server/thread-goal-objective.mjs";
+test("Codex long-objective reference round-trips without exposing arbitrary files", async t => {
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),"negus-goal-objective-"));
+ t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const short="a".repeat(4000);
+ assert.deepEqual(await materializeGoalObjective(short,root),{objective:short,directory:null});
+ const long="goal\n".repeat(1000);
+ const value=await materializeGoalObjective(long,root);
+ assert.ok(value.objective.startsWith(goalFilePrefix));
+ assert.ok(Array.from(value.objective).length<=4000);
+ const native={objective:value.objective,status:"active"};
+ assert.equal((await expandGoalObjective(native,root)).displayObjective,long);
+ const outside={objective:goalFilePrefix+path.join(root,"../secrets.txt")+" before continuing."};
+ assert.equal(await expandGoalObjective(outside,root),outside);
+});
