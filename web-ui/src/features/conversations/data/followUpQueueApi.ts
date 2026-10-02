@@ -12,9 +12,9 @@ export const followUpQueueApi = {
     `/api/session/queue?threadId=${encodeURIComponent(threadId)}`,
     signal,
   ),
-  enqueue: (threadId: string, text: string, attachmentIds: string[], submissionId: string) => postJson<FollowUpQueueResponse>(
+  enqueue: (threadId: string, text: string, attachmentIds: string[], submissionId: string, modelSettings?: { model: string; reasoningEffort: string }) => postJson<FollowUpQueueResponse>(
     "/api/session/queue",
-    { threadId, text, attachmentIds, submissionId },
+    { threadId, text, attachmentIds, submissionId, modelSettings },
   ),
   action: (threadId: string, action: string, itemId: string, extra: Record<string, unknown> = {}) => postJson<FollowUpQueueResponse>(
     "/api/session/queue",

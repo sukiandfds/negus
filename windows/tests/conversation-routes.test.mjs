@@ -490,3 +490,17 @@ test("keeps an older direct binding on the generic conversation path", async () 
   assert.equal(employeeCalls, 0);
   assert.equal(JSON.parse(call.response.body).turnId, "legacy-turn");
 });
+
+test("copy latest delegates to the same native fork and retains explicit message branching", async () => {
+ let active=false;const calls=[];
+ const route=createConversationRoutes({conversations:{
+  findSession:async()=>({messages:[{turnId:"last-turn"}]}),
+  forkSession:async(...args)=>{calls.push(args);return {threadId:"branch"};}
+ },execution:{getStatus:()=>({active})}});
+ for(const body of [{threadId:"source",latest:true},{threadId:"source",lastTurnId:"older-turn"}]){
+  const run=invokePost(route,"/api/session/fork",body);await run.promise;assert.equal(run.response.status,201);
+ }
+ assert.deepEqual(calls,[["source","last-turn"],["source","older-turn"]]);
+ active=true;const run=invokePost(route,"/api/session/fork",{threadId:"source",latest:true});
+ await run.promise;assert.equal(run.response.status,409);assert.equal(calls.length,2);
+});

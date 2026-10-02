@@ -1,3 +1,5 @@
+import { imageInstructions } from "./image-generation/image-runtime.mjs";
+import { maintenanceInstructions } from "./maintenance-instructions.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +17,8 @@ export const employeeTurnInstructions = (instructions, extra = "") => [
   clean(instructions, 8000),
   employeeExecutionPace,
   clean(extra, 8000),
+  maintenanceInstructions(),
+  imageInstructions(),
 ].filter(Boolean).join("\n");
 
 const normalize = (value, workRoot) => {

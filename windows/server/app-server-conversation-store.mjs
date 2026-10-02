@@ -392,7 +392,7 @@ export const createAppServerConversationStore = ({
     const cwd = requestedProjectRoot ? path.resolve(requestedProjectRoot) : projectRoot;
     if (!isAllowedProjectRoot(cwd)) throw new Error("This project folder is not registered in Negus.");
     const profilePrompt = await getUserProfilePrompt();
-    const params = { cwd, ...(profilePrompt ? { developerInstructions: profilePrompt } : {}) };
+    const params = { cwd, sandbox: "danger-full-access", approvalPolicy: "never", ...(profilePrompt ? { developerInstructions: profilePrompt } : {}) };
     if (model) params.model = model;
     const result = await client.request("thread/start", params);
     let thread = result.thread;
@@ -611,7 +611,7 @@ export const createAppServerConversationStore = ({
       let permissions = {};
       try { permissions = JSON.parse(await fs.readFile(path.join(projectRoot, "runtime", "thread-permissions.json"), "utf8")); }
       catch (error) { if (error.code !== "ENOENT") throw error; }
-      if (permissions[threadId] === "full-access") runtimeOptions = {
+      if (!permissions[threadId] || permissions[threadId] === "full-access") runtimeOptions = {
         resume: { sandbox: "danger-full-access", approvalPolicy: "never" },
         turn: { sandboxPolicy: { type: "dangerFullAccess" }, approvalPolicy: "never" },
       };
@@ -623,17 +623,20 @@ export const createAppServerConversationStore = ({
   const resumeThread = async (threadId) => {
     const { runtimeOptions } = await ensureProjectThread(threadId);
     const freshRuntime = freshThreadRuntime.get(threadId);
-    if (freshRuntime && !runtimeOptions?.resume) return freshRuntime;
+    // New project threads already start with the requested full-access policy;
+    // empty threads cannot be resumed before their first persisted turn.
+    if (freshRuntime && (!runtimeOptions?.resume || runtimeOptions.resume.sandbox === "danger-full-access")) return freshRuntime;
     return client.request("thread/resume", { threadId, persistExtendedHistory: true, ...(runtimeOptions?.resume || {}) });
   };
 
   const forkSession = async (threadId, lastTurnId) => {
-    const { thread } = await ensureProjectThread(threadId);
+    const { thread, runtimeOptions } = await ensureProjectThread(threadId);
     if (!lastTurnId) throw new Error("请选择一个已完成的对话位置再继续");
     const result = await client.request("thread/fork", {
       threadId,
       lastTurnId,
       cwd: thread.cwd || projectRoot,
+      ...(runtimeOptions?.resume || {}),
     });
     if (!result?.thread) throw new Error("Codex 未返回新的分支会话");
     threadCache.set(result.thread.id, result.thread);

@@ -1,58 +1,25 @@
-# negus Repository Guide
+# Negus
 
-Documentation updated: 2026-09-14 01:03 +08:00.
+**A customizable workspace with a personal assistant as the main conversation entry.**
 
-**Negus: tell it what you need your workspace to do.**
+The desktop shows the information users care about. A general assistant handles quick requests and can involve specialist agents for traceable background work. Features should share real data and reusable capabilities. This is the product direction, not a claim that every workflow is implemented.
 
-The product direction is a personal or company workspace that users can continually customize through natural language: access a deployed, authorized workspace in a browser, request new or revised feature pages, and place them where the work happens. News pages, project dashboards, inventory entry points, expense uploads, meeting booking, and communication between employees' AI assistants are target use cases. See the [product definition](./PRODUCT_DEFINITION.md#产品定位与核心卖点) for current capabilities and planned behavior; these are not all shipped features.
+## Start here
 
-This repository contains two independent product areas:
+- [Product definition](PRODUCT_DEFINITION.md): current direction, behavior and open decisions.
+- [Project guide](PROJECT.md): existing capabilities, code and runtime entry points.
+- [Documentation and project memory](docs/README.md): decisions, sources, open questions and reading paths.
+- [Feature index](docs/feature-development/FEATURE_STATUS_INDEX.md): all 23 feature records.
+- [Assistant rules](AI_ASSISTANT_WORK_RULES.md) and [user profile](USER_PROFILE.md).
 
-1. **negus Web workspace**: currently provides real Codex conversations and control, project group chat, agents, and artifacts, with a direction toward a complete workflow for customizing and publishing feature pages.
-2. **Codex Dream Skin**: apply an external theme to the Codex desktop app through local CDP.
+The React/TypeScript frontend lives in `web-ui/`; Node.js services live in `windows/server/`. Cross-platform commands are provided by `scripts/negus.mjs`. `runtime/` contains local operational data.
 
-They share one repository, but their code, documentation, and runtime instructions are separate.
+Real Codex conversations, group collaboration, desktop components, provider configuration, attachments and deliverables have implementation foundations. Arbitrary business-component generation and publishing, the complete assistant organization, and seamless Desktop/Web continuity remain subject to design and acceptance.
 
-## negus Web collaboration workspace
+On macOS, normal deployment with `pnpm negus:build` and `pnpm negus:start` automatically installs service recovery checks every three hours. See the [deployment and maintenance guide](docs/operations/NEGUS_SERVICE_CONTROL.md) for prerequisites and platform limits.
 
-- Project facts, runtime commands, and module map: [`PROJECT.md`](./PROJECT.md)
-- Product definition and capability boundaries: [`PRODUCT_DEFINITION.md`](./PRODUCT_DEFINITION.md)
-- Messaging and demo guidance: [`docs/promo-copy.md`](./docs/promo-copy.md)
-- Assistant work rules: [`AI_ASSISTANT_WORK_RULES.md`](./AI_ASSISTANT_WORK_RULES.md)
-- Feature status: [`docs/feature-development/FEATURE_STATUS_INDEX.md`](./docs/feature-development/FEATURE_STATUS_INDEX.md)
-- Feature development guide: [`docs/feature-development/README.md`](./docs/feature-development/README.md)
-- Architecture guide: [`docs/architecture/README.md`](./docs/architecture/README.md)
+## Legacy theme tool
 
-Main code:
+Codex Dream Skin is a historical starting point and is planned for gradual retirement. Its code is still present; shared scripts, assets and CI dependencies must be checked before removal. Historical guides: [macOS](macos/README.md), [Windows](windows/README.md).
 
-| Directory | Contents |
-| --- | --- |
-| `web-ui/` | React, TypeScript, and Vite frontend |
-| `windows/server/` | Web service, API, SSE, and business modules |
-| `runtime/` | Conversation, execution, artifact, employee, and media data |
-
-Development commands:
-
-```powershell
-pnpm build:ui
-pnpm start:demo
-```
-
-## Codex Dream Skin
-
-Platform guides live beside the corresponding code:
-
-| Platform | User guide | Maintainer and assistant rules | Code |
-| --- | --- | --- | --- |
-| macOS | [`macos/README.md`](./macos/README.md) | [`macos/SKILL.md`](./macos/SKILL.md) | [`macos/`](./macos/) |
-| Windows | [`windows/README.md`](./windows/README.md) | [`windows/SKILL.md`](./windows/SKILL.md) | [`windows/`](./windows/) |
-
-The skin uses local loopback CDP and does not modify the official `.app`, `app.asar`, WindowsApps, or code signature.
-
-## Other documentation
-
-- Skin project notes: [`docs/CODEX_DREAM_SKIN_PROJECT_NOTES.md`](./docs/CODEX_DREAM_SKIN_PROJECT_NOTES.md)
-- Architecture, research, and runtime records: [`docs/`](./docs/)
-- Historical development records: [`docs/records/`](./docs/records/)
-
-This is not an official OpenAI product. Follow the relevant product directory and current source for exact behavior and safety boundaries.
+[中文](README.md). Not an official OpenAI product. Documentation updated: 2026-09-29 18:31 +08:00, PM-003.

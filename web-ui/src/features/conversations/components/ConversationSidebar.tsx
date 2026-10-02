@@ -27,6 +27,7 @@ interface ConversationSidebarProps {
   onUnarchive: (threadId: string) => Promise<boolean>;
   currentStatus?: ExecutionStatus;
   onCloseSidebar?: () => void;
+  onOpenSettings?: () => void;
 }
 
 export function ConversationSidebar({
@@ -48,6 +49,7 @@ export function ConversationSidebar({
   onUnarchive,
   currentStatus,
   onCloseSidebar,
+  onOpenSettings,
 }: ConversationSidebarProps) {
   const defaultProjectRoot = directory.projects.find((entry) => entry.kind === "personal")?.root || project?.root || "";
   const [activeProjectRoot, setActiveProjectRoot] = useState(defaultProjectRoot);
@@ -101,7 +103,7 @@ export function ConversationSidebar({
         onOpened={onCloseSidebar}
         onActiveProjectChange={(entry) => setActiveProjectRoot(entry.root || "")}
       />
-      <ConnectionStatus connected={connected} />
+      <ConnectionStatus connected={connected} onOpenSettings={onOpenSettings} />
     </aside>
   );
 }

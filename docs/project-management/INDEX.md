@@ -2,12 +2,12 @@
 document_type: project_management_index
 schema_version: 1
 project_id: negus
-last_updated: 2026-09-14 01:03 +08:00
+last_updated: "2026-09-29 18:31 +08:00"
 ---
 
 # 项目管理目录
 
-本文件只负责定位条目文件，不承载条目的完整内容。
+本文件只负责定位条目文件，不承载条目的完整内容。以下计划与进行中列表沿用历史登记，尚未按 2026-09-29 产品方向重新排期，不视为新的开发授权。
 
 ## 当前计划
 
@@ -53,7 +53,7 @@ last_updated: 2026-09-14 01:03 +08:00
 | `FEAT-011` | feature | development | `items/FEAT-011/` | 14 |
 | `FEAT-015` | feature | development | `items/FEAT-015/` | 15 |
 | `FEAT-016` | feature | maintenance | `items/FEAT-016/` | 16 |
-| `PM-002` | maintenance | maintenance | `items/PM-002/` | 17 |
+| `PM-003` | maintenance | maintenance | `items/PM-003/` | 18 |
 
 条目的摘要、级别、状态和更新时间均从对应 `item.md` 读取；不要在本表重复维护。
 

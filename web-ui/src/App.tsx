@@ -1,3 +1,4 @@
+import { SettingsPage } from "./features/settings/SettingsPage";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, MessageSquare } from "lucide-react";
 import { AppShell } from "./components/AppShell/AppShell";
@@ -21,18 +22,22 @@ import { useProjectDirectory } from "./features/project-directory/hooks/useProje
 import { useDesktopWorkspace } from "./features/desktop/useDesktopWorkspace";
 
 type InteractiveSurface = Exclude<ViewSurface, "progress">;
+type AppSurface = InteractiveSurface | "settings";
 const surfaceStorageKey = "negus:last-surface";
 
-const readSurface = (): InteractiveSurface => {
+const readSurface = (): AppSurface => {
   const params = new URLSearchParams(window.location.search);
+  if (params.get("view") === "settings") return "settings";
   if (params.get("view") === "desktop") return "desktop";
   if (window.location.pathname === "/group.html" || params.get("view") === "group") return "group";
   if (params.has("thread") || params.has("archived") || params.get("view") === "conversation") return "conversation";
   return "desktop";
 };
 
-function ConversationApp({ active, desktop, onViewChange }: { active: boolean; desktop: boolean; onViewChange: (surface: InteractiveSurface) => void }) {
+function ConversationApp({ active, desktop, onViewChange, onOpenSettings }: { active: boolean; desktop: boolean; onViewChange: (surface: InteractiveSurface) => void; onOpenSettings: () => void }) {
   const conversations = useProjectConversations();
+  const conversationsRef = useRef(conversations);
+  conversationsRef.current = conversations;
   const desktopWorkspace = useDesktopWorkspace(conversations.session, conversations.executionStatus);
   const directory = useProjectDirectory(conversations.executionStatus);
   const device = useDeviceInfo(conversations.connected);
@@ -113,6 +118,7 @@ function ConversationApp({ active, desktop, onViewChange }: { active: boolean; d
       onCloseSidebar={() => setSidebarOpen(false)}
       sidebar={
         <ConversationSidebar
+          onOpenSettings={() => { setSidebarOpen(false); onOpenSettings(); }}
           directory={directory}
           project={conversations.project}
           sessions={conversations.sessions}
@@ -148,7 +154,8 @@ function ConversationApp({ active, desktop, onViewChange }: { active: boolean; d
           usage={
             <>
               <UsageSummaryControl
-                currentModel={conversations.contextStatus.model}
+                currentModel={conversations.usageModel}
+                models={conversations.models}
                 snapshot={usage.snapshot}
                 loading={usage.loading}
                 error={usage.error}
@@ -210,16 +217,16 @@ function ConversationApp({ active, desktop, onViewChange }: { active: boolean; d
           modelError={conversations.modelError}
           onSend={async (text, attachments) => {
             if (desktop && !attachments?.length && desktopWorkspace.executeLocal(text)) return true;
-            const request = desktop ? desktopWorkspace.prepareRequest(text) : { text, rollback: () => {} };
+            const request = desktop ? desktopWorkspace.prepareRequest(text) : { text, rollback: () => {}, commit: (_threadId: string) => {} };
             if (desktop) setAnswerOpen(true);
-            try { const accepted = await conversations.sendMessage(request.text, attachments); if (!accepted) request.rollback(); return accepted; }
+            try { const accepted = await conversations.sendMessage(request.text, attachments); if (!accepted) request.rollback(); else request.commit(conversationsRef.current.selectedId); return accepted; }
             catch (error) { request.rollback(); throw error; }
           }}
           onQueue={async (text, attachments) => {
             if (desktop && !attachments?.length && desktopWorkspace.executeLocal(text)) return true;
-            const request = desktop ? desktopWorkspace.prepareRequest(text) : { text, rollback: () => {} };
+            const request = desktop ? desktopWorkspace.prepareRequest(text) : { text, rollback: () => {}, commit: (_threadId: string) => {} };
             if (desktop) setAnswerOpen(true);
-            try { const accepted = await conversations.queueMessage(request.text, attachments); if (!accepted) request.rollback(); return accepted; }
+            try { const accepted = await conversations.queueMessage(request.text, attachments); if (!accepted) request.rollback(); else request.commit(conversationsRef.current.selectedId); return accepted; }
             catch (error) { request.rollback(); throw error; }
           }}
           queueing={conversations.queueBusy}
@@ -262,13 +269,15 @@ function ConversationApp({ active, desktop, onViewChange }: { active: boolean; d
 }
 
 export function App() {
-  const [surface, setSurface] = useState<InteractiveSurface>(readSurface);
+  const [surface, setSurface] = useState<AppSurface>(readSurface);
+  const previousSurface = useRef<InteractiveSurface>(new URLSearchParams(window.location.search).has("thread") ? "conversation" : "desktop");
   const [groupMounted, setGroupMounted] = useState(() => readSurface() === "group");
 
-  const showSurface = useCallback((next: InteractiveSurface, pushHistory = true) => {
+  const showSurface = useCallback((next: AppSurface, pushHistory = true) => {
     if (next === surface) return;
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     if (next === "group") setGroupMounted(true);
+    if (surface !== "settings") previousSurface.current = surface;
     setSurface(next);
     try { window.localStorage.setItem(surfaceStorageKey, next); } catch {}
     if (!pushHistory) return;
@@ -303,19 +312,21 @@ export function App() {
   return (
     <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}>
       <div
-        aria-hidden={surface === "group"}
+        aria-hidden={surface === "group" || surface === "settings"}
+        inert={surface === "group" || surface === "settings"}
         style={{
           position: "absolute",
           inset: 0,
           width: "100%",
           height: "100%",
-          visibility: surface !== "group" ? "visible" : "hidden",
-          pointerEvents: surface !== "group" ? "auto" : "none",
-          zIndex: surface !== "group" ? 1 : 0,
+          visibility: surface !== "group" && surface !== "settings" ? "visible" : "hidden",
+          pointerEvents: surface !== "group" && surface !== "settings" ? "auto" : "none",
+          zIndex: surface !== "group" && surface !== "settings" ? 1 : 0,
         }}
       >
-        <ConversationApp active={surface !== "group"} desktop={surface === "desktop"} onViewChange={showSurface} />
+        <ConversationApp active={surface !== "group" && surface !== "settings"} desktop={(surface === "settings" ? previousSurface.current : surface) === "desktop"} onViewChange={showSurface} onOpenSettings={() => showSurface("settings")} />
       </div>
+      {surface === "settings" ? <div style={{ position: "absolute", inset: 0, zIndex: 2 }}><SettingsPage onClose={() => showSurface(previousSurface.current)} /></div> : null}
       {groupMounted ? (
         <div
           aria-hidden={surface !== "group"}

@@ -30,3 +30,13 @@
 .confirm { padding-top: 8px; }
 
 .archived { display: grid; gap: 4px; margin-top: 8px; }
+
+.nameRow { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.badge { font-size:10px; font-weight:400; color:var(--color-text-secondary); border:1px solid var(--color-border); border-radius:4px; padding:2px 4px; white-space:nowrap; }
+.actions { position:relative; flex-shrink:0; }
+.actionMenu { position:fixed; z-index:100; width:144px; box-sizing:border-box; max-height:calc(100dvh - 16px); overflow:auto; box-shadow:0 8px 24px #0006; padding:4px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:6px; }
+.dialog .actionMenu button { display:flex; width:100%; border:0; justify-content:flex-start; background:transparent; }
+.dialog .actionMenu button:hover { background:var(--color-surface-soft); }
+.ratio { flex:0 0 auto; min-width:48px; margin:0 8px; font-size:12px; color:var(--color-text-secondary); }
+.keyRow { display:flex; align-items:center; gap:8px; }
+.keyRow span { flex:1; }

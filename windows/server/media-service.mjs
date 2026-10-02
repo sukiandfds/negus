@@ -224,7 +224,7 @@ export const createMediaService = ({ uploadRoot, attachmentContent } = {}) => {
     })
     .filter(Boolean);
 
-  const serve = async (request, response, id, { download = false, preview = false } = {}) => {
+  const serve = async (request, response, id, { download = false, preview = false, text = false } = {}) => {
     const entry = entries.get(id);
     if (!entry) {
       response.writeHead(404);
@@ -256,10 +256,12 @@ export const createMediaService = ({ uploadRoot, attachmentContent } = {}) => {
       return;
     }
 
-    const disposition = download || (!inlineTypes.test(servedType) && servedType !== "application/pdf") ? "attachment" : "inline";
+    const plainText = text && /\.(?:md|txt|csv|json|jsonl|yaml|yml|toml|xml|html?|css|scss|[cm]?[jt]sx?|py|sh|ps1|bat|rs|go|java|c|h|cpp|sql|log)$/iu.test(entry.path);
+    if (plainText) servedType = "text/plain; charset=utf-8";
+    const disposition = download || (!plainText && !inlineTypes.test(servedType) && servedType !== "application/pdf") ? "attachment" : "inline";
     const headers = {
       "Accept-Ranges": "bytes",
-      "Cache-Control": "private, max-age=3600",
+      "Cache-Control": text ? "private, no-store" : "private, max-age=3600",
       "Content-Type": servedType,
       "Content-Disposition": `${disposition}; filename*=UTF-8''${encodeURIComponent(entry.name)}`,
       "X-Content-Type-Options": "nosniff",

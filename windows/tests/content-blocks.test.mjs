@@ -1,8 +1,64 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { blocksFromContent, messageFromThreadItem } from "../server/content-blocks.mjs";
+import { blocksFromContent, messageFromItem, messageFromThreadItem } from "../server/content-blocks.mjs";
+import { inputFromAttachments } from "../server/app-server-conversation-store.mjs";
+import { visibleConversationMessages } from "../server/conversation-summary-service.mjs";
 
 const registerMedia = () => null;
+
+test("attachment content stays available to the model but out of user prose and summaries", async () => {
+  const document = "文档正文\n<options><option>不应显示</option></options>\n![不应登记](/private/document.png)\n[附件正文：notes.md]\n嵌套标记\n[附件正文结束]";
+  const content = await inputFromAttachments("请阅读附件", [{ name: "notes.md", path: "/uploads/notes.md", mimeType: "text/markdown" }], {
+    inspect: async () => ({ status: "ready", content: document }),
+  });
+  assert.ok(content[2].text.includes(document));
+  const registered = [];
+  const register = (source) => { registered.push(source); return { url: "/api/media/notes", name: "notes.md" }; };
+  for (const message of [
+    messageFromThreadItem({ id: "user", type: "userMessage", content }, register),
+    messageFromItem({ type: "response_item", payload: { role: "user", type: "message", content } }, register),
+  ]) {
+    assert.equal(message.text, "请阅读附件");
+    assert.deepEqual(message.blocks.map((block) => block.type), ["markdown", "file"]);
+    assert.equal(visibleConversationMessages([message])[0].text, "请阅读附件");
+    assert.deepEqual(visibleConversationMessages([message])[0].attachments, ["notes.md"]);
+  }
+  assert.ok(registered.every((source) => source === "/uploads/notes.md"));
+});
+
+test("restores file cards from native flattened history, including attachment-only messages", () => {
+  for (const request of ["检查一下", ""]) {
+    const content = `# Files mentioned by the user:\n\n## notes.md: /uploads/notes.md\n\n## My request for Codex:\n\n${request}\n\n[附件正文：notes.md]\n完整文档\n[附件正文结束]`;
+    const register = () => ({ url: "/api/media/notes", name: "notes.md" });
+    const message = messageFromItem({ type: "event_msg", payload: { type: "user_message", message: content } }, register);
+    assert.equal(message.text, request);
+    assert.equal(message.blocks.filter((block) => block.type === "file").length, 1);
+  }
+});
+
+test("preserves ordinary marker examples, incomplete envelopes, and assistant text", () => {
+  const text = "[附件正文：notes.md]\n正文示例\n[附件正文结束]";
+  assert.equal(messageFromThreadItem({ type: "userMessage", content: text }, registerMedia).text, text);
+  assert.equal(messageFromThreadItem({ type: "agentMessage", text }, registerMedia).text, text);
+  const incomplete = "[附件正文：notes.md]\n没有结束标记";
+  const message = messageFromThreadItem({ type: "userMessage", content: [
+    { type: "mention", name: "notes.md", path: "/uploads/notes.md" }, { type: "text", text: incomplete },
+  ] }, () => ({ url: "/api/media/notes" }));
+  assert.equal(message.text, incomplete);
+  const missing = messageFromThreadItem({ type: "userMessage", content: [
+    { type: "mention", name: "notes.md", path: "/missing/notes.md" }, { type: "text", text },
+  ] }, registerMedia);
+  assert.equal(missing.text, text, "do not hide the only remaining content when the original file is unavailable");
+});
+
+test("multiple attachments keep separate cards without leaking either document", async () => {
+  const content = await inputFromAttachments("两个文档", ["one.md", "two.txt"].map((name) => ({ name, path: `/uploads/${name}`, mimeType: "text/plain" })), {
+    inspect: async () => ({ status: "ready", content: "正文" }),
+  });
+  const message = messageFromThreadItem({ type: "userMessage", content }, (source) => ({ url: `/api/media/${source.split("/").pop()}` }));
+  assert.equal(message.text, "两个文档");
+  assert.deepEqual(message.blocks.filter((block) => block.type === "file").map((block) => block.name), ["one.md", "two.txt"]);
+});
 
 test("normalizes slash-prefixed Windows drive paths in markdown images", () => {
   const registered = [];

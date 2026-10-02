@@ -20,7 +20,19 @@
     "negus:tunnel:start": "node scripts/negus-tunnel.mjs start",
     "negus:tunnel:stop": "node scripts/negus-tunnel.mjs stop",
     "negus:tunnel:status": "node scripts/negus-tunnel.mjs status",
-    "negus:tunnel:restart": "node scripts/negus-tunnel.mjs restart"
+    "negus:tunnel:restart": "node scripts/negus-tunnel.mjs restart",
+    "negus:backend:check": "node scripts/negus-backend.mjs check",
+    "negus:backend:restart": "node scripts/negus-supervisor.mjs restart",
+    "negus:frontend:restart": "node scripts/negus-frontend.mjs restart",
+    "negus:frontend:rollback": "node scripts/negus-frontend.mjs rollback",
+    "negus:health": "node scripts/negus-watchdog.mjs check",
+    "negus:recover": "node scripts/negus-watchdog.mjs recover",
+    "negus:watchdog:install": "node scripts/negus-watchdog-macos.mjs install",
+    "negus:watchdog:status": "node scripts/negus-watchdog-macos.mjs status",
+    "negus:watchdog:uninstall": "node scripts/negus-watchdog-macos.mjs uninstall",
+    "negus:rebuild": "node scripts/negus.mjs rebuild",
+    "negus:release:prepare": "node scripts/negus-supervisor.mjs prepare",
+    "negus:restart:status": "node scripts/negus-supervisor.mjs status"
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",

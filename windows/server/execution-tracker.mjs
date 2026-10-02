@@ -6,6 +6,7 @@ import { activityFromItem, detailFromItem, stateFromItem, terminalPhases } from 
 
 export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTerminal = () => {} }) => {
   const statuses = new Map();
+  const activeGoals = new Set();
   const messagePhases = new Map();
   const itemTurns = new Map();
   const retiredTurns = new Map();
@@ -235,6 +236,11 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
     const { method, params = {} } = message || {};
     const threadId = params.threadId;
     if (!threadId) return;
+    if (method === "thread/goal/updated") {
+      if (params.goal?.status === "active") activeGoals.add(threadId);
+      else activeGoals.delete(threadId);
+    }
+    if (method === "thread/goal/cleared") activeGoals.delete(threadId);
 
     if (method === "turn/started") {
       const turnId = String(params.turn?.id || "");
@@ -517,6 +523,7 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
   };
 
   return {
+    hasPendingWork: () => activeGoals.size > 0 || [...statuses.values()].some((status) => status.active),
     markSubmitted,
     markFailed,
     publishStatus: (threadId, next) => publish(threadId, next),

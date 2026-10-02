@@ -1,3 +1,5 @@
+import { imageMcpArguments } from "./image-generation/image-runtime.mjs";
+import { computerMcpArguments, nativeComputerMcpArguments } from "./computer-control/runtime.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -67,11 +69,12 @@ const desktopCandidates = () => {
 
 const macOSAppCandidates = () => {
   if (process.platform !== "darwin") return [];
-  const resourcePath = ["Contents", "Resources", "codex"];
-  return ["/Applications", path.join(os.homedir(), "Applications")].flatMap((applicationsRoot) => [
-    path.join(applicationsRoot, "ChatGPT.app", ...resourcePath),
-    path.join(applicationsRoot, "Codex.app", ...resourcePath),
-  ]);
+  const resourcePaths = [
+    ["Contents", "Resources", "codex"],
+    ["Contents", "Resources", "codex-cli", "CodexCLI.app", "Contents", "MacOS", "codex"],
+  ];
+  return ["/Applications", path.join(os.homedir(), "Applications")].flatMap((applicationsRoot) =>
+    ["ChatGPT.app", "Codex.app"].flatMap((app) => resourcePaths.map((parts) => path.join(applicationsRoot, app, ...parts))));
 };
 
 const commandOnPath = () => {
@@ -197,7 +200,7 @@ export const createAppServerClient = ({
     const selected = resolveCodexCommand();
     const logPrefix = label ? `[app-server-client:${label}]` : "[app-server-client]";
     console.log(`${logPrefix} using ${selected.entrypoint} (${selected.version})`);
-    const spawned = spawn(selected.command, [...selected.prefixArgs, "app-server"], {
+    const spawned = spawn(selected.command, [...selected.prefixArgs, "app-server", ...imageMcpArguments(), ...computerMcpArguments(), ...nativeComputerMcpArguments()], {
       cwd: workingDirectory,
       env: buildAppServerEnvironment({
         environment,

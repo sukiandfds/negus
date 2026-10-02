@@ -58,3 +58,18 @@ test("rejects malformed or out-of-range image sizes", () => {
   assert.throws(() => normalizeProviderImageSize("2.35", "4K"), /Unsupported image size/u);
   assert.throws(() => normalizeProviderImageSize("8192x1024", "4K"), /between 64 and 4096/u);
 });
+
+
+test("Sunburst preserves resolution on standard ratios and validates explicit dimensions", () => {
+  const args = { model: "gpt-image-2.5-sunburst", resolution: "4K" };
+  assert.equal(providerImageRequestFromArgs({ ...args, size: "16:9" }).size, "4K:16:9");
+  assert.equal(providerImageRequestFromArgs({ ...args, size: "1.90:1" }).size, "3840x2016");
+  const size = providerImageRequestFromArgs({ ...args, size: "1.43:1" }).size;
+  const [w, h] = size.split("x").map(Number);
+  assert.ok(w * h <= 8294400);
+  assert.ok(Math.abs(w / h - 1.43) < .01);
+  assert.equal(w % 16, 0);
+  assert.throws(() => providerImageRequestFromArgs({ ...args, size: "3840x2688" }), /GPT Image 2.5/);
+  assert.equal(providerImageRequestFromArgs({ ...args, quality: "max" }).quality, "max");
+  assert.throws(() => providerImageRequestFromArgs({ model: "gpt-image-2", quality: "max" }), /质量档位/);
+});

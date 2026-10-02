@@ -34,6 +34,11 @@ export const createFollowUpQueueService = ({
   };
 
   const dispatchClaimed = async (threadId, item, status) => {
+    // Persist the claim before sending: a crash must not replay a delivered forward.
+    try { await store.flush(); } catch (error) {
+      const failed = store.markFailed(threadId, item.id, "队列保存失败，未发送");
+      broadcastQueue(threadId, "failed"); return failed;
+    }
     broadcastQueue(threadId, "dispatching");
     const attachments = media.resolveMany(item.attachmentIds);
     if (attachments.length !== item.attachmentIds.length) {
@@ -54,8 +59,19 @@ export const createFollowUpQueueService = ({
     });
     try {
       if (status.active) await conversations.steerMessage(threadId, status.turnId, item.text, attachments, submissionId);
-      else await conversations.sendMessage(threadId, item.text, attachments, submissionId);
+      else {
+        if (item.modelSettings?.model) {
+          const settings = item.modelSettings;
+          const result = await conversations.updateModel(threadId, settings.model, {
+            allowProviderSwitch: true, reasoningEffort: settings.reasoningEffort,
+          });
+          if (result?.threadId && result.threadId !== threadId) throw new Error("排队任务的会话发生变化，消息未发送");
+          if (settings.reasoningEffort) await conversations.updateReasoningEffort(threadId, settings.reasoningEffort);
+        }
+        await conversations.sendMessage(threadId, item.text, attachments, submissionId);
+      }
       store.complete(threadId, item.id);
+      await store.flush();
       broadcastQueue(threadId, "completed");
       return item;
     } catch (error) {
@@ -75,8 +91,9 @@ export const createFollowUpQueueService = ({
     return dispatchClaimed(threadId, item, status);
   });
 
-  const enqueue = async ({ threadId, text, attachmentIds = [], attachments = [], submissionId = "" }) => {
-    const item = store.enqueue({ threadId, text, attachmentIds, attachments, submissionId });
+  const enqueue = async ({ threadId, text, attachmentIds = [], attachments = [], submissionId = "", modelSettings }) => {
+    const item = store.enqueue({ threadId, text, attachmentIds, attachments, submissionId, modelSettings });
+    await store.flush();
     broadcastQueue(threadId, "queued");
     const status = execution.getStatus(threadId);
     if (!status.active) void dispatchNext(threadId);
@@ -141,6 +158,8 @@ export const createFollowUpQueueService = ({
   };
 
   return {
+    hasPendingWork: () => locks.size > 0 || store.threadIds().some((id) =>
+      store.list(id).some((item) => item.state === "pending" || item.state === "dispatching")),
     list: (threadId) => store.list(threadId).map(publicItem),
     enqueue,
     edit,

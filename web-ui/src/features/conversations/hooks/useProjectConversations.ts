@@ -1,3 +1,4 @@
+import { HttpError } from "../../../shared/api/http";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MediaFile } from "../../../shared/model/media";
 import type { RealtimeRecoveryReason } from "../../../shared/model/realtime";
@@ -77,6 +78,7 @@ export function useProjectConversations() {
     setSessionError: selection.setSessionError,
     selectSession: selection.selectSession,
   }, contextManagement.status.model);
+  const runningModelRef = useRef(new Map<string, { turnId: string; model: string }>());
   const modelManager = useModels(serverThreadId, (threadId, result) => {
     if (result.threadId && result.threadId !== threadId) {
       contextManagement.applyModelSettings(result.threadId, result);
@@ -95,7 +97,13 @@ export function useProjectConversations() {
     || "";
   const recordedEffort = contextManagement.status.threadId === selection.selectedId ? contextManagement.status.reasoningEffort : "";
   const visibleModel = resolveVisibleModel(modelManager.models, modelDefaults, recordedModel, sessionModel);
-  const visibleEffort = resolveVisibleEffort(modelManager.models, modelDefaults, visibleModel, recordedEffort);
+  if (execution.status.active && execution.status.threadId === selection.selectedId) {
+    const previous = runningModelRef.current.get(selection.selectedId);
+    if (!previous || !previous.model || previous.turnId !== execution.status.turnId) runningModelRef.current.set(selection.selectedId, { turnId: execution.status.turnId, model: recordedModel || sessionModel });
+  } else runningModelRef.current.delete(selection.selectedId);
+  const usageModel = execution.status.active ? runningModelRef.current.get(selection.selectedId)?.model || '' : visibleModel;
+  const draftSettingsRef = useRef(new Map<string, { model: string; reasoningEffort: string }>());
+  const visibleEffort = draftSettingsRef.current.get(selection.selectedId)?.reasoningEffort ?? resolveVisibleEffort(modelManager.models, modelDefaults, visibleModel, recordedEffort);
   const modelChoiceRef = useRef({ threadId: "", recordedModel: "", sessionModel: "", recordedEffort: "", contextSettled: false });
   modelChoiceRef.current = {
     threadId: selection.selectedId,
@@ -226,15 +234,25 @@ export function useProjectConversations() {
   }, [editingMessage]);
 
   const pendingCreatesRef = useRef(new Map<string, Promise<string>>());
+  const deferredCreatesRef = useRef(new Map<string, () => Promise<string>>());
   const openingNewSessionRef = useRef(false);
   const waitForThread = useCallback(async (threadId: string) => {
     if (!isPendingThread(threadId)) return threadId;
+    const deferred = deferredCreatesRef.current.get(threadId);
+    if (deferred && !pendingCreatesRef.current.has(threadId)) {
+      const task = deferred();
+      pendingCreatesRef.current.set(threadId, task);
+      void task.then(id => {
+        if (id) deferredCreatesRef.current.delete(threadId);
+        else pendingCreatesRef.current.delete(threadId);
+      });
+    }
     const realId = await (pendingCreatesRef.current.get(threadId) || Promise.resolve(""));
     if (!realId || selection.selectedIdRef.current !== realId) return "";
     const started = Date.now();
     while (Date.now() - started < 8000) {
       if (selection.selectedIdRef.current !== realId) return "";
-      if (modelChoiceRef.current.contextSettled) return realId;
+      if (modelChoiceRef.current.threadId === realId && modelChoiceRef.current.contextSettled) return realId;
       await new Promise((resolve) => window.setTimeout(resolve, 40));
     }
     return selection.selectedIdRef.current === realId ? realId : "";
@@ -280,8 +298,8 @@ export function useProjectConversations() {
 
     let sendThreadId = threadId;
     try {
-      await stageUnrecordedModel(threadId, startsNewTurn);
-      const modelResult = await modelManager.applyPending(threadId);
+      if (startsNewTurn) await stageUnrecordedModel(threadId, true);
+      const modelResult = startsNewTurn ? await modelManager.applyPending(threadId) : null;
       sendThreadId = modelResult?.threadId || threadId;
     } catch (error) {
       selection.removeOptimisticMessage(threadId, optimisticMessage.id);
@@ -424,8 +442,8 @@ export function useProjectConversations() {
     setForkingMessageId(target.id);
     try {
       const created = previousTurnId
-        ? await catalog.forkSession(sourceThreadId, previousTurnId)
-        : await catalog.createSession(selection.session?.cwd || "");
+        ? await catalog.forkSession(sourceThreadId, previousTurnId, true)
+        : await catalog.createSession(selection.session?.cwd || "", "", "", "", true);
       if (!created) return false;
       setEditingMessage(null);
       editingMessageRef.current = null;
@@ -442,28 +460,6 @@ export function useProjectConversations() {
       setForkingMessageId("");
     }
   }, [catalog.createSession, catalog.forkSession, execution.status.active, selection.selectedIdRef, selection.session, sendDirectMessage]);
-
-  const prepareDesktopConversation = useCallback((projectRoot: string) => {
-    if (desktopPreparingRef.current) return desktopPreparingRef.current;
-    const task = (async () => {
-      if (!projectRoot) return false;
-      const key = `negus:desktop-thread:v1:${projectRoot}`;
-      const saved = readLocalCache(key, (value): value is string => typeof value === "string");
-      const existing = saved && catalog.sessions.find((session) => session.threadId === saved && session.cwd?.replace(/\\/g, "/").toLowerCase() === projectRoot.replace(/\\/g, "/").toLowerCase() && !session.archived && !session.readOnly);
-      if (existing) {
-        selection.selectSession(existing.threadId);
-      } else {
-        if (!await catalog.createSession(projectRoot)) return false;
-        writeLocalCache(key, selection.selectedIdRef.current);
-      }
-      setEditingMessage(null);
-      editingMessageRef.current = null;
-      return true;
-    })();
-    desktopPreparingRef.current = task;
-    void task.finally(() => { desktopPreparingRef.current = null; });
-    return task;
-  }, [catalog.createSession, catalog.sessions, selection.selectSession, selection.selectedIdRef]);
 
   const beginEditMessage = useCallback((message: SessionMessage) => {
     if (message.role !== "user" || !message.turnId || selection.session?.archived) return;
@@ -519,14 +515,15 @@ export function useProjectConversations() {
     if (!messageText && !attachments.length) return false;
     const threadId = await waitForThread(selection.selectedId);
     if (!threadId || selection.selectedIdRef.current !== threadId) return false;
-    const staged = await stageUnrecordedModel(threadId);
-    const result = staged ? await modelManager.applyPending(threadId) : null;
-    const targetThreadId = result?.threadId || threadId;
-    if (selection.selectedIdRef.current !== targetThreadId) return false;
-    return followUpQueue.enqueue(messageText, attachments, targetThreadId);
-  }, [followUpQueue.enqueue, modelManager.applyPending, selection.selectedId, selection.selectedIdRef, stageUnrecordedModel, waitForThread]);
+    const choice = modelChoiceRef.current;
+    if (choice.threadId !== threadId || !choice.contextSettled) throw new Error("模型设置还在读取中，请稍后再发送");
+    const defaults = readModelDefaults();
+    const model = resolveVisibleModel(catalogModelsRef.current, defaults, choice.recordedModel, choice.sessionModel);
+    const reasoningEffort = resolveVisibleEffort(catalogModelsRef.current, defaults, model, choice.recordedEffort);
+    return followUpQueue.enqueue(messageText, attachments, threadId, { model, reasoningEffort });
+  }, [followUpQueue.enqueue, selection.selectedId, selection.selectedIdRef, waitForThread]);
 
-  const openNewSession = useCallback((projectRoot = "", requestedModel = "", requestedProviderId = "") => {
+  const openNewSession = useCallback((projectRoot = "", requestedModel = "", requestedProviderId = "", options: { deferred?: boolean; onCreated?: (threadId: string) => void } = {}) => {
     if (openingNewSessionRef.current) return false;
     openingNewSessionRef.current = true;
     const defaults = readModelDefaults();
@@ -549,18 +546,62 @@ export function useProjectConversations() {
       model,
       messages: [],
     });
-    const task = catalog.createSession(projectRoot, model, pendingId, providerId).then((created) => {
+    const create = () => {
+      const draft = draftSettingsRef.current.get(pendingId);
+      const chosenModel = draft?.model || model;
+      const chosenEntry = readModelCatalog().find(entry => entry.model === chosenModel);
+      const chosenProvider = draft && chosenEntry ? providerIdOf(chosenEntry) : providerId;
+      return catalog.createSession(projectRoot, chosenModel, pendingId, chosenProvider).then((created) => {
       if (created) contextManagement.applyModelSettings(created, {
-        model, reasoningEffort: resolveVisibleEffort(models, defaults, model, ""),
+        model: chosenModel, reasoningEffort: draft?.reasoningEffort ?? resolveVisibleEffort(models, defaults, chosenModel, ""),
       });
+      if (created) options.onCreated?.(created);
       return created || "";
     });
+    };
+    if (options.deferred) {
+      deferredCreatesRef.current.set(pendingId, create);
+      openingNewSessionRef.current = false;
+      return true;
+    }
+    const task = create();
     pendingCreatesRef.current.set(pendingId, task);
     void task.finally(() => {
       openingNewSessionRef.current = false;
     });
     return true;
   }, [catalog.createSession, selection.setCreatedSession]);
+
+  const prepareDesktopConversation = useCallback((projectRoot: string) => {
+    if (desktopPreparingRef.current) return desktopPreparingRef.current;
+    const task = (async () => {
+      if (!projectRoot) return false;
+      const key = `negus:desktop-thread:v1:${projectRoot}`;
+      const saved = readLocalCache(key, (value): value is string => typeof value === "string");
+      if (saved) {
+        // A partial/stale list must not create a replacement conversation.
+        const existing = await conversationApi.session(saved).catch((error: unknown) => {
+          if (error instanceof HttpError && error.status === 404) return null;
+          throw error;
+        });
+        if (existing && !("messages" in existing)) return false;
+        if (existing && existing.cwd?.replace(/\\/g, "/") !== projectRoot.replace(/\\/g, "/")) return false;
+        if (existing && !existing.archived && !existing.readOnly) {
+          selection.selectSession(existing.threadId);
+          return true;
+        }
+      }
+      setEditingMessage(null);
+      editingMessageRef.current = null;
+      return openNewSession(projectRoot, "", "", {
+        deferred: true,
+        onCreated: id => writeLocalCache(key, id),
+      });
+    })().catch(() => false);
+    desktopPreparingRef.current = task;
+    void task.finally(() => { desktopPreparingRef.current = null; });
+    return task;
+  }, [openNewSession, selection.selectSession]);
 
   const review = useCallback(async () => {
     const threadId = selection.selectedIdRef.current;
@@ -673,6 +714,7 @@ export function useProjectConversations() {
     commentaryText: execution.commentaryText,
     contextStatus: contextManagement.status,
     visibleModel,
+    usageModel,
     visibleEffort,
     models: modelManager.models,
     modelsLoading: modelManager.loading,
@@ -702,8 +744,20 @@ export function useProjectConversations() {
     review,
     compactContext: contextManagement.compact,
     setAutoCompactThreshold: contextManagement.setThreshold,
-    changeModel: modelManager.change,
-    changeReasoningEffort: modelManager.changeReasoningEffort,
+    changeModel: async (model: string, reasoningEffort?: string) => {
+      const id = selection.selectedIdRef.current;
+      if (!isPendingThread(id)) return modelManager.change(model, reasoningEffort);
+      draftSettingsRef.current.set(id, { model, reasoningEffort: reasoningEffort ?? visibleEffort });
+      selection.updateCurrentSession(id, current => ({ ...current, model }));
+      return true;
+    },
+    changeReasoningEffort: async (reasoningEffort: string) => {
+      const id = selection.selectedIdRef.current;
+      if (!isPendingThread(id)) return modelManager.changeReasoningEffort(reasoningEffort);
+      draftSettingsRef.current.set(id, { model: visibleModel, reasoningEffort });
+      selection.updateCurrentSession(id, current => ({ ...current }));
+      return true;
+    },
     goal: goal.goal,
     goalBusy: goal.busy,
     goalError: goal.error,

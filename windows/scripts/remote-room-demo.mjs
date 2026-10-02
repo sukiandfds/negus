@@ -12,6 +12,8 @@ import { createMediaService } from "../server/media-service.mjs";
 import { createRealtimeHub } from "../server/realtime-hub.mjs";
 import { createExecutionTracker } from "../server/execution-tracker.mjs";
 import { createSubmissionStore } from "../server/submission-store.mjs";
+import { createConversationSummaryService } from "../server/conversation-summary-service.mjs";
+import { createConversationForwardService } from "../server/conversation-forward-service.mjs";
 import { createFollowUpQueueService } from "../server/follow-up-queue-service.mjs";
 import { createContextManagementService } from "../server/context-management-service.mjs";
 import { createRequestHandler } from "../server/request-handler.mjs";
@@ -168,11 +170,23 @@ const conversations = createConversationService({
 followUpQueue = createFollowUpQueueService({
   stateFile: path.join(projectRoot, "runtime", "follow-up-queues.json"),
   execution,
-  conversations,
+  conversations: { ...conversations, steerMessage: async (...args) => {
+    if (employeeRuntime?.ownsThread(args[0])) throw new Error("员工转发消息需等待当前任务完成");
+    return conversations.steerMessage(...args);
+  }, sendMessage: async (threadId, text, attachments, requestId) => {
+    const employee = employeeRegistry?.list().find(e => e.mainThreadId === threadId);
+    if (employee) {
+      if (attachments?.length) throw new Error("员工队列暂不支持附件");
+      return employeeRuntime.sendMessage({ employeeId: employee.id, text, requestId });
+    }
+    const session = await conversations.findSession(threadId, "all", { limit: 1 });
+    if (!session || session.archived) throw new Error("目标对话已归档或不可用");
+    return conversations.sendMessage(threadId, text, attachments, requestId);
+  } },
   media,
   publishThreadEvent: execution.publishThreadEvent,
 });
-void followUpQueue.start();
+
 contextManagement = await createContextManagementService({
   stateFile: path.join(projectRoot, "runtime", "context-settings.json"),
   broadcast: realtime.broadcast,
@@ -349,6 +363,7 @@ employeeRuntime = createEmployeeRuntimeService({
   conversationStore: employeeConversationStore,
   projectRoot,
   broadcast: realtime.broadcast,
+  onTurnCompleted: event => followUpQueue.handleTurnTerminal(event),
   growthService: employeeGrowth,
   contextProvider: employeeGrowth.getContext,
   client: appServerClient,
@@ -425,7 +440,8 @@ const agentPublicationService = createAgentPublicationService({
 });
 const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
 const fushengUsage = createFushengUsageService({
-  credentialsFile: path.join(localAppData, "FushengUsageMonitor", "credentials.json"),
+  credentialsFile: path.join(os.homedir(), ".negus", "fusheng-credentials.json"),
+  legacyCredentialsFile: path.join(localAppData, "FushengUsageMonitor", "credentials.json"),
 });
 const projectActivityIndex = createProjectActivityIndex({
   projectDirectory: projectIdentity,
@@ -438,7 +454,15 @@ const projectStatus = createProjectStatusService({ activityIndex: projectActivit
 
 const serveStatic = createStaticFileServer(webRoot);
 const readWebVersion = createWebVersionReader(webRoot);
+const conversationSummary = createConversationSummaryService({ cacheRoot: path.join(projectRoot, "runtime", "conversation-summaries") });
+const conversationForward = createConversationForwardService({
+  directory: employeeProjectDirectory, conversations, employeeRuntime, summaryService: conversationSummary, media,
+  uploadRoot: path.join(projectRoot, "runtime", "uploads"),
+  stateRoot: path.join(projectRoot, "runtime", "conversation-forwards"), queue: followUpQueue,
+});
+void followUpQueue.start();
 const requestHandler = createRequestHandler({
+  conversationForward,
   token, project, projectRoot, device, observerPort, conversations, execution, media, realtime, submissions,
   followUpQueue, contextManagement, groupRoom, roomDirectory: groupRoomDirectory, multiAgent, multiAgentDirectory, artifacts, webOutputs, fushengUsage, readWebVersion, serveStatic,
   agentConversationStore, agentPublicationService, employeeRuntime,
@@ -447,26 +471,26 @@ const requestHandler = createRequestHandler({
 });
 const server = http.createServer(requestHandler);
 
-const close = () => {
+let closing = false;
+const close = async () => {
+  if (closing) return;
+  closing = true;
+  server.close();
   realtime.close();
-  void followUpQueue.close();
-  void execution.close();
-  void submissions.close();
   conversations.close();
-  void imageGenerationRuns.close();
-  void contextManagement.close();
   for (const service of new Set(multiAgentDirectory.values())) service.close();
   webOutputs.close();
-  void artifacts.close();
-  for (const { room } of groupRoomEntries) void room.close();
   employeeRuntime.close();
   modelProviders.close();
-  void employeeGrowthStore.close();
-  void employeeConversationStore.close();
-  void projectIdentity.close();
-  void employeeRegistry.close();
-  void publicationStore.close();
-  server.close();
+  const results = await Promise.allSettled([
+    followUpQueue.close(), execution.close(), submissions.close(),
+    imageGenerationRuns.close(), contextManagement.close(), artifacts.close(),
+    ...groupRoomEntries.map(({ room }) => room.close()),
+    employeeGrowthStore.close(), employeeConversationStore.close(), projectIdentity.close(),
+    employeeRegistry.close(), publicationStore.close(),
+  ]);
+  if (results.some((result) => result.status === "rejected")) console.warn("[shutdown] Some stores failed to flush; inspect persistence.");
+  server.closeIdleConnections?.();
 };
 process.once("SIGINT", close);
 process.once("SIGTERM", close);

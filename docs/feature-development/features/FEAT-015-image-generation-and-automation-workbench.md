@@ -2,8 +2,8 @@
 feature_id: FEAT-015
 title: 自然语言生图与自动化工作台
 status: in_progress
-current_version: v0.5.0
-last_updated: 2026-08-05 01:04 +08:00
+current_version: v0.6.0
+last_updated: 2026-09-30
 owners: [capability_runtime, app_server, image_generation, artifacts, web_ui]
 key_paths:
   - .codex/config.toml
@@ -24,6 +24,28 @@ key_paths:
 ---
 
 # FEAT-015：自然语言生图与自动化工作台
+
+## 2026-09-30：统一对话生图接入（待发布）
+
+- 共用 app-server 启动器以进程级 MCP 配置覆盖注册 `negus_image`，使用绝对 Node/脚本路径和安装目录，不改用户全局 Codex 配置；普通对话、隔离供应商运行时、员工和群聊复用。
+- 普通对话和员工/群聊提示词共用简短图片规则：先发现 Negus 工具、使用设置中的配置、不因缺少内置 image_gen 要求 OPENAI_API_KEY、不经 shell 绕过工具、不重复付费提交。
+- 保留原 MCP structuredContent → Media → 图片块及去重链路，不新增展示组件；明确不把本机文件路径作为网页下载链接。
+- Sunburst/Flare 标准比例携带分辨率前缀，自定义尺寸遵守官方 16 倍数、像素及比例边界；编辑参考图保持比例；新增独立 quality 工具参数并校验模型支持。IMAX 未明确档位时由助手确认。
+- 验证：真实独立 app-server 从 `/tmp` 成功发现两个工具，toolsError 为 null；38 项首轮定向测试通过。未调用付费供应商，未验证模型自然语言自主选工具与真实浏览器展示，未重启。
+- 依据：供应商公开文档 https://api.happyevering.xyz/docs/ （2026-09-30），本机 Codex CLI app-server 配置帮助及真实 MCP 列表响应。
+
+## 2026-09-30：正式设置页面（待发布及验收）
+
+- 基线 `c8c7b66`，分支 `codex/publish-current-panel`；本轮未提交，不重启现有服务。
+- 侧边栏连接状态右侧齿轮打开 `?view=settings` 完整页面，采用分类导航和分组设置行。原对话组件保持挂载。
+- 图片生成支持配置添加、编辑、复制、删除和默认选择。字段包括名称、官网、API 地址、用户 ID、用户 Key、分组 Key、模型，均可留空保存。
+- 共用 `SettingsSection`、`SettingRow`、`ProviderFields`、`SecretField`；图片生成与模型设置共用表单，模型设置仅前端预览，禁用实际保存、查询和测试，不接入 CC Switch 或聊天模型接口。
+- 图片配置保存在安装目录 `runtime/image-settings.json`，原子写入、文件权限 0600、版本冲突检查。Key 不返回前端、不写浏览器缓存；复制从服务端保留 Key，主动清空会真实清除。
+- 用户 ID、用户 Key、官网本阶段仅保存元数据，尚未接入供应商账户/余额查询。模型查询和生图只使用 API 地址及分组 Key。
+- 查询调用 `/models`，允许手动填写模型；测试明确生成一张图片并提示费用，不作为保存前提。当前生成/编辑采用 OpenAI Images 兼容接口，不承诺支持所有供应商协议。
+- MCP 每次执行读取默认配置，保存后下一次调用生效；没有设置文件时兼容原环境配置。保留 GPT Image 显式分辨率切换，其他已配置模型不再被默认模型覆盖。
+- 当前源码遇到 HTTP 202 会报错，不再轮询；下方 2026-08 历史快照的轮询描述不代表当前实现。
+- 验证：20 项本地模拟测试通过，TypeScript 与独立生产构建通过。构建目录 `runtime/settings-preview-build`，未覆盖在线页面。浏览器工具认证不可用，真实浏览器及供应商出图未验收。
 
 ## 当前快照
 

@@ -1,3 +1,10 @@
+export class HttpError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "HttpError";
+  }
+}
+
 const token = new URLSearchParams(window.location.search).get("token") || "";
 
 // The token is only needed for the first same-origin request. The server then
@@ -32,8 +39,11 @@ export const fetchJson = async <T,>(pathname: string, signal?: AbortSignal): Pro
   const response = await fetch(withAccessToken(pathname), { cache: "no-store", signal });
   if (!response.ok) {
     if (response.status === 401) throw new Error("访问令牌无效，请使用启动命令输出的完整链接");
-    if (response.status === 404) throw new Error("请求的项目会话不存在");
-    throw new Error(`项目数据服务暂不可用（${response.status}）`);
+    if (response.status === 404) throw new HttpError("请求的项目会话不存在", response.status);
+    const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+    throw new Error(typeof payload?.error === "string" && payload.error.trim()
+      ? payload.error.slice(0, 400)
+      : `项目数据服务暂不可用（${response.status}）`);
   }
   const contentType = response.headers.get("content-type") || "";
   if (!contentType.toLowerCase().includes("application/json")) {

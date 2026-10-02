@@ -35,5 +35,9 @@
 
 @media (max-width: 760px) {
   .root > svg { display: none; }
-  .name { max-width: 108px; }
+  .root { flex: 0 1 auto; overflow: hidden; }
+  .name { max-width: 100px; }
+  .state { width: auto; flex: 0 0 auto; font-size: 0; }
+  .state::after { content: "已同步"; font-size: 11px; }
+  .offline + .state::after { content: "重连中"; }
 }

@@ -57,3 +57,25 @@ test("aggregates Fusheng usage without exposing credentials and caches duplicate
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("credentials save privately, survive reload and supersede legacy credentials", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-credentials-'));
+  try {
+    const credentialsFile = path.join(root, 'new', 'credentials.json');
+    const legacyCredentialsFile = path.join(root, 'legacy.json');
+    await fs.writeFile(legacyCredentialsFile, JSON.stringify({ base_url: 'https://fushengyunsuan.cn', user_id: 12, access_token: 'old-secret' }));
+    const service = createFushengUsageService({ credentialsFile, legacyCredentialsFile });
+    assert.deepEqual(await service.credentialStatus(), { configured: true, userId: 12 });
+    await assert.rejects(service.saveCredentials({ userId: 0, accessToken: 'new-secret' }), { statusCode: 400 });
+    assert.deepEqual(await service.saveCredentials({ userId: '34', accessToken: 'new-secret' }), { configured: true, userId: 34 });
+    const reloaded = createFushengUsageService({ credentialsFile, legacyCredentialsFile });
+    assert.deepEqual(await reloaded.credentialStatus(), { configured: true, userId: 34 });
+    assert.equal(JSON.stringify(await reloaded.credentialStatus()).includes('secret'), false);
+    assert.equal(JSON.parse(await fs.readFile(credentialsFile)).access_token, 'new-secret');
+    if (process.platform !== 'win32') assert.equal((await fs.stat(credentialsFile)).mode & 0o777, 0o600);
+    assert.equal(JSON.parse(await fs.readFile(legacyCredentialsFile)).access_token, 'old-secret');
+    await assert.rejects(service.saveCredentials({ userId: 34, accessToken: '' }), { statusCode: 400 });
+    assert.equal(JSON.parse(await fs.readFile(credentialsFile)).access_token, 'new-secret');
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});

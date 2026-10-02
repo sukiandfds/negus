@@ -68,12 +68,33 @@ export const normalizeProviderImageSize = (value, resolution = "1K") => {
   return `${width}x${height}`;
 };
 
+// Sunburst/Flare use one model ID across resolutions; ratio alone defaults to 1K upstream.
+export const normalizeImageModelSize = (value, resolution, model) => {
+  if (!/^gpt-image-2\.5-(sunburst|flare)$/u.test(model || "")) return normalizeProviderImageSize(value, resolution);
+  const normalized = normalizeProviderImageSize(value, resolution);
+  if (!normalized) return resolution ? `${resolution}:1:1` : undefined;
+  if (normalized.includes(":")) return `${resolution || "1K"}:${normalized}`;
+  let [width, height] = normalized.split("x").map(Number);
+  const explicitPixels = /^\d+[xX×＊*]\d+$/u.test(String(value || "").replace(/\s+/gu, ""));
+  if (!explicitPixels && width * height > 8294400) {
+    const scale = Math.sqrt(8294400 / (width * height));
+    width = Math.floor(width * scale / 16) * 16;
+    height = Math.floor(height * scale / 16) * 16;
+  }
+  const pixels = width * height;
+  if (width % 16 || height % 16 || Math.max(width, height) > 3840 || Math.max(width / height, height / width) > 3 || pixels < 655360 || pixels > 8294400)
+    throw new Error("GPT Image 2.5 尺寸须为 16 的倍数、单边不超过 3840、比例不超过 3:1、总像素在 655360–8294400 之间");
+  return `${width}x${height}`;
+};
+
 export const providerImageRequestFromArgs = (args = {}) => {
   const resolution = resolutionForArgs(args);
+  const model = args.model || modelForImageResolution(resolution);
+  if (args.quality && !["auto", "low", "medium", "high", ...(/^gpt-image-2\.5-/u.test(model) ? ["xhigh", "max"] : [])].includes(args.quality)) throw new Error("当前图片模型不支持该质量档位");
   return {
     prompt: args.prompt,
-    model: args.model || modelForImageResolution(resolution),
-    size: normalizeProviderImageSize(args.size, resolution),
+    model,
+    size: args.size || args.resolution ? normalizeImageModelSize(args.size, resolution, model) : undefined,
     n: args.n,
     quality: args.quality,
     targetSize: args.target_size || args.targetSize,

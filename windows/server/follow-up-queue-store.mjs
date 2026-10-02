@@ -15,6 +15,7 @@ const normalizeItem = (threadId, item, index = 0) => {
     threadId,
     submissionId: String(item?.submissionId || randomUUID()),
     text: String(item?.text || "").trim(),
+    ...(item?.modelSettings?.model ? { modelSettings: { model: String(item.modelSettings.model), reasoningEffort: String(item.modelSettings.reasoningEffort || "") } } : {}),
     attachmentIds: [...new Set(Array.isArray(item?.attachmentIds) ? item.attachmentIds.map(String) : [])].slice(0, 6),
     attachments: Array.isArray(item?.attachments) ? item.attachments : [],
     state: dispatching ? "failed" : state,
@@ -62,14 +63,14 @@ export const createFollowUpQueueStore = ({ stateFile = "" } = {}) => {
       const temporary = `${stateFile}.${process.pid}.tmp`;
       await fsp.writeFile(temporary, payload, "utf8");
       await fsp.rename(temporary, stateFile);
-    }).catch((error) => console.warn(`[follow-up-queue] state persistence failed: ${error.message}`));
+    }).catch((error) => { console.warn(`[follow-up-queue] state persistence failed: ${error.message}`); throw error; });
     return persistChain;
   };
 
   const schedulePersist = () => {
     if (!stateFile) return;
     clearTimeout(persistTimer);
-    persistTimer = setTimeout(() => void persist(), 100);
+    persistTimer = setTimeout(() => void persist().catch(() => {}), 100);
     persistTimer.unref?.();
   };
 
@@ -86,9 +87,10 @@ export const createFollowUpQueueStore = ({ stateFile = "" } = {}) => {
   const find = (threadId, itemId) => itemsFor(threadId).find((item) => item.id === itemId) || null;
   const findBySubmissionId = (threadId, submissionId) => itemsFor(threadId).find((item) => item.submissionId === submissionId) || null;
 
-  const enqueue = ({ threadId, text, attachmentIds = [], attachments = [], submissionId = "" }) => {
+  const enqueue = ({ threadId, text, attachmentIds = [], attachments = [], submissionId = "", modelSettings }) => {
     const existing = submissionId ? findBySubmissionId(threadId, submissionId) : null;
     if (existing) return { ...existing };
+    if (itemsFor(threadId).length >= maxItemsPerThread) throw Object.assign(new Error("排队消息已满，请先处理已有消息"), { statusCode: 409 });
     const now = new Date().toISOString();
     const item = normalizeItem(threadId, {
       id: `queued-${randomUUID()}`,
@@ -96,6 +98,7 @@ export const createFollowUpQueueStore = ({ stateFile = "" } = {}) => {
       text,
       attachmentIds,
       attachments,
+      modelSettings,
       state: "pending",
       createdAt: now,
       updatedAt: now,
@@ -206,6 +209,7 @@ export const createFollowUpQueueStore = ({ stateFile = "" } = {}) => {
   };
 
   return {
+    flush: persist,
     list,
     find,
     findBySubmissionId,

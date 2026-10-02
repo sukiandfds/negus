@@ -1,3 +1,4 @@
+import { isReasoningEffort } from './reasoning-efforts.mjs';
 import { latestAssistantReplyAtFromRollout } from "./app-server-conversation-store.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -223,7 +224,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
     const task = (async () => {
       await providers.refreshShared?.().catch((error) => { if (model.includes('::')) throw error; });
       const target = providers.resolveRoute({ model });
-      if (reasoningEffort && !["none", "minimal", "low", "medium", "high", "xhigh"].includes(reasoningEffort)) throw new Error("无效的思考等级");
+      if (!isReasoningEffort(reasoningEffort)) throw new Error("无效的思考等级");
       const sourceProviderId = owner(id);
       const source = await storeFor(sourceProviderId);
       await rememberPreviousSettings(id, source);

@@ -4,3 +4,6 @@
 .name { min-width: 0; flex: 1; overflow: hidden; color: var(--color-text-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .info { display: grid; width: 30px; height: 30px; place-items: center; color: var(--color-text-muted); }
 .info svg { width: 15px; height: 15px; }
+
+button.info { border:0; border-radius:6px; background:transparent; cursor:pointer; }
+button.info:hover { color:var(--color-text); background:var(--color-surface-hover); }

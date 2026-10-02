@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore } from "lucide-react";
+import { ConversationActions } from "./ConversationActions";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { SessionSummary } from "../model/types";
 import type { ExecutionStatus } from "../../execution/model/types";
@@ -175,16 +175,11 @@ export function SessionList({
               </span>
             </button>
             {session.archivable !== false ? (
-            <button
+            <ConversationActions session={session} archived={archivedView}
               className={`${styles.itemAction} ${pressedActionId === session.threadId ? styles.itemActionPressed : ""}`}
-              type="button"
-              aria-label={archivedView ? `恢复 ${session.title}` : `归档 ${session.title}`}
-              title={archivedView ? "恢复对话" : "归档对话"}
               disabled={archiveBusyIds.has(session.threadId)}
-              onClick={() => void runArchiveAction(session.threadId)}
-            >
-              {archivedView ? <ArchiveRestore aria-hidden="true" /> : <Archive aria-hidden="true" />}
-            </button>
+              onArchive={() => void runArchiveAction(session.threadId)} />
+
             ) : null}
           </div>
         );

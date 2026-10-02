@@ -702,6 +702,7 @@ export const createEmployeeRuntimeService = ({
   };
 
   return {
+    hasPendingWork: () => openPromises.size > 0 || sendLocks.size > 0 || [...statuses.values()].some((status) => status.active),
     open: sessionFor,
     readSession,
     sendMessage,

@@ -15,7 +15,7 @@ interface ConversationSelection {
   adoptSelection: (threadId: string, quiet: boolean) => Promise<boolean>;
   clearSelection: () => void;
   selectSession: (threadId: string) => void;
-  setCreatedSession: (detail: SessionDetail) => void;
+  setCreatedSession: (detail: SessionDetail, preserveComposer?: boolean) => void;
   setSessionError: (message: string) => void;
 }
 
@@ -233,7 +233,7 @@ export function useConversationCatalog(
     };
   }, [initial, refreshSessions, selection.loadSession]);
 
-  const createSession = useCallback(async (projectRoot = "", requestedModel = "", pendingId = "", requestedProviderId = "") => {
+  const createSession = useCallback(async (projectRoot = "", requestedModel = "", pendingId = "", requestedProviderId = "", preserveComposer = false) => {
     if (creatingRef.current) {
       if (pendingId && selection.selectedIdRef.current === pendingId) selection.setSessionError("新对话创建失败，请重试");
       return "";
@@ -263,7 +263,7 @@ export function useConversationCatalog(
       const stillCurrent = !pendingId || selection.selectedIdRef.current === pendingId;
       if (stillCurrent) {
         seedIdleExecution(created.threadId);
-        selection.setCreatedSession(detail);
+        selection.setCreatedSession(detail, preserveComposer);
       }
       const nextSessions = [created, ...sessionsRef.current.filter((item) => item.threadId !== created.threadId)];
       sessionsRef.current = nextSessions;
@@ -280,7 +280,7 @@ export function useConversationCatalog(
     }
   }, [currentModel, selection.clearSelection, selection.selectedIdRef, selection.setCreatedSession, selection.setSessionError, updateArchiveQuery]);
 
-  const forkSession = useCallback(async (threadId: string, lastTurnId: string) => {
+  const forkSession = useCallback(async (threadId: string, lastTurnId: string, preserveComposer = false) => {
     setListError("");
     try {
       const result = await conversationApi.fork(threadId, lastTurnId);
@@ -293,7 +293,7 @@ export function useConversationCatalog(
       const nextSessions = [created, ...sessionsRef.current.filter((item) => item.threadId !== created.threadId)];
       sessionsRef.current = nextSessions;
       setSessions(nextSessions);
-      selection.setCreatedSession(detail);
+      selection.setCreatedSession(detail, preserveComposer);
       await selection.loadSession(created.threadId, { quiet: false });
       return true;
     } catch (reason) {

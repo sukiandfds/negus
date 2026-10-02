@@ -1,9 +1,9 @@
-.root { position: relative; min-width: 0; flex: 0 1 auto; }
+.root { position: relative; min-width: 0; flex: 0 0 auto; }
 
 .summaryButton {
   display: inline-flex;
   height: 18px;
-  width: 176px; max-width: 42vw;
+  width: auto; max-width: none;
   min-width: 0;
   align-items: center;
   gap: 5px;
@@ -19,7 +19,7 @@
 .summaryValues,
 .metric { display: inline-flex; min-width: 0; align-items: baseline; gap: 4px; }
 .metricLabel { color: var(--color-text-muted); }
-.metric strong { display: inline-block; min-width: 2.8em; color: var(--color-text); font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+.metric strong { display: inline-block; min-width: 0; color: var(--color-text); font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
 .divider { width: 1px; height: 12px; flex: 0 0 1px; background: var(--color-border-strong); }
 .loadingText { position: absolute; width: 1px; height: 1px; overflow: hidden; }
 .compactGroupLabel { display: none; }
@@ -84,7 +84,7 @@
 }
 
 @media (max-width: 760px) {
-  .summaryButton { max-width: 142px; }
+  .summaryButton { max-width: none; }
   .loadingText { display: none; }
   .summaryValues { gap: 5px; overflow: hidden; }
   .metric { flex: 0 0 auto; }
@@ -99,13 +99,24 @@
 }
 
 @media (max-width: 420px) {
-  .summaryButton { max-width: 134px; }
+  .summaryButton { max-width: none; }
   .metrics { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 360px) {
-  .summaryButton { max-width: 116px; }
+  .summaryButton { max-width: none; }
   .compactGroupLabel { display: none; }
 }
 
 @keyframes usage-spin { to { transform: rotate(360deg); } }
+
+.credentials { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--color-border); font-size: 12px; }
+.credentials summary { cursor: pointer; color: var(--color-text-secondary); }
+.credentials form { display: grid; gap: 10px; margin-top: 12px; }
+.credentials label { display: grid; gap: 5px; }
+.credentials input { box-sizing: border-box; width: 100%; min-width: 0; padding: 8px; border: 1px solid var(--color-border-strong); border-radius: 6px; background: var(--color-bg); color: var(--color-text); font-size: 16px; }
+.credentials button { justify-self: start; padding: 7px 12px; border: 1px solid var(--color-border-strong); border-radius: 6px; background: var(--color-surface-hover); color: var(--color-text); }
+.credentials p { color: var(--color-text-secondary); overflow-wrap: anywhere; }
+
+.channelName { max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-text-muted); }
+@media (max-width:760px) { .channelName { max-width:64px; } }

@@ -253,6 +253,7 @@ test("stdio MCP advertises the image tools and completes a mocked tool call", as
     cwd: projectRoot,
     env: {
       ...process.env,
+      NEGUS_INSTALL_ROOT: outputDirectory,
       NEGUS_IMAGE_API_KEY: "test-key",
       NEGUS_IMAGE_BASE_URL: baseUrl,
       NEGUS_IMAGE_OUTPUT_DIR: outputDirectory,

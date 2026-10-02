@@ -1,155 +1,61 @@
 ---
-
-2026-09-25 02:27 +08:00 BUG-20260925-01: 会话隔离与排序修复，handoff_pending。定向回归与构建通过，未重启，实机待验收。详见 FEAT-001。
 document_type: feature_status_index
 schema_version: 1
-last_updated: "2026-08-17 11:10 +08:00"
+last_updated: "2026-09-29 18:31 +08:00"
 ---
 
 # 功能状态索引
 
-AI 助手根据任务定位功能编号，再读取对应功能文件。不要默认读取所有功能历史。
+本文件只做导航与简短摘要。状态、版本沿用既有记录，不代表本轮重新验收；字段冲突明确标注，不通过文档整理擅自判定完成。
+
+当前产品方向见 [产品定义](../../PRODUCT_DEFINITION.md)，旧需求如何重新评估见 [文档导航](../README.md)。具体工作状态读取项目管理 item.md；功能行为和验证证据读取对应档案，两者不同范围不能混作一种完成状态。
 
 ## 当前功能
 
-2026-09-22 17:40 +08:00：侧边栏时间改为会话记录里最新一条助手回复的时间，并按这个时间排序；线程元数据时间过旧时不再把已回复的对话留在下面。定向测试通过。服务未重启，当前页面还是旧排序。
+| 编号 | 功能 | 既有记录状态 | 记录版本 | 边界与结论 | 详细来源 |
+| --- | --- | --- | --- | --- | --- |
+| `FEAT-001` | 单人 Codex Web 对话与控制 | `implemented_pending_review` | `v0.10.12` | 已有会话与执行能力；后续隔离、缓存及滚动修复有独立记录，真实体验仍分项验收。 | [`FEAT-001-single-codex-web.md`](./features/FEAT-001-single-codex-web.md) |
+| `FEAT-002` | 项目群聊与多 Agent 讨论 | `in_progress` | `v0.4.4` | 索引原为 in_progress，档案为 code_ready_pending_user_review；状态冲突待核对，不能认定已验收。 | [`FEAT-002-group-multi-agent.md`](./features/FEAT-002-group-multi-agent.md) |
+| `FEAT-003` | 附件与对话内容渲染 | `implemented_pending_review` | `v0.3.0` | 支持上传、图片/音频/视频/文件展示和 Markdown 本地图片登记；仍是 Demo 级上传协议 | [`FEAT-003-attachments-content-rendering.md`](./features/FEAT-003-attachments-content-rendering.md) |
+| `FEAT-004` | PWA、设备身份与移动/平板入口 | `implemented_pending_review` | `v0.2.0` | 新构建会提示用户刷新且不会自动打断任务；连接状态不再误报电脑离线，真实 PWA 更新流程待原开发电脑验证 | [`FEAT-004-pwa-device-identity.md`](./features/FEAT-004-pwa-device-identity.md) |
+| `FEAT-005` | Desktop/Web 连续性与同任务提示 | `discovery` | `v0.4.1` | Desktop 与 Web 共享持久化 Thread 但不共享实时事件；双端同时操作曾导致 Web app-server 失联，需先做同任务提示、最小控制权和受控恢复 | [`FEAT-005-desktop-web-continuity.md`](./features/FEAT-005-desktop-web-continuity.md) |
+| `FEAT-006` | 固定公网入口与正式访问控制 | `in_progress` | `v0.2.2` | 固定域名可用，但公网图片上传实测约 10-16 秒，本机仅约 0.1 秒；VPN 不稳定，需评估稳定线路或大陆中转方案 | [`FEAT-006-stable-remote-access.md`](./features/FEAT-006-stable-remote-access.md) |
+| `FEAT-007` | Agent 交付物生成、预览与版本管理 | `implemented_pending_review` | `v0.2.1` | M1 代码已提交：交付物发布、预览、版本和审核均已有实现；剩余是整体真实使用验收，不是未提交开发 | [`FEAT-007-agent-artifacts.md`](./features/FEAT-007-agent-artifacts.md) |
+| `FEAT-008` | HTML 网页生成与 PDF 双文件交付 | `implemented_pending_review` | `v0.2.0` | 静态 HTML、Edge 转 PDF、安全打开和群聊双文件发布代码已提交；剩余是体验验收，不继续扩展网页编辑器或 Office 能力 | [`FEAT-008-html-page-pdf-generation.md`](./features/FEAT-008-html-page-pdf-generation.md) |
+| `FEAT-009` | Mac 检查、前后端更新与恢复 | `handoff_pending` | `v0.5.0` | Mac 正常部署自带独立脚本及 3 小时定时检查；隔离验证通过，正式后端首次加载与重启体验待验证。 | [档案](features/FEAT-009-remote-development-host.md) |
+| `FEAT-010` | Orca 群聊执行运行时适配技术试验（非路线 2） | `paused_experiment` | `v0.1.0` | 仅完成可选 Orca CLI 执行器及离线测试，没有迁移产品功能；因范围偏离用户目标而冻结，不计入路线 2 进度 | [`FEAT-010-orca-group-runtime-adapter.md`](./features/FEAT-010-orca-group-runtime-adapter.md) |
+| `FEAT-011` | 浮生云算用量监控 | `implemented_pending_review` | `v0.1.1` | 用量摘要、详情、按 Turn 去重、缓存和失败保留旧数据已提交；供应商查询和多端布局已有真实体验记录，不再列为未提交 | [`FEAT-011-fusheng-usage-monitor.md`](./features/FEAT-011-fusheng-usage-monitor.md) |
+| `FEAT-012` | 消息内容快捷复制 | `implemented_pending_review` | `v0.1.0` | 复制和浏览器回退已提交；重新编辑入口也已接入会话流程，剩余只需确认不同浏览器权限下的体验 | [`FEAT-012-conversation-copy.md`](./features/FEAT-012-conversation-copy.md) |
+| `FEAT-013` | 从当前消息分叉继续 | `implemented_pending_review` | `v0.1.0` | 官方 `thread/fork` 路由、Turn 边界、按钮和自动切换已提交；若当前运行时不支持，需保留明确不可用提示 | [`FEAT-013-conversation-fork.md`](./features/FEAT-013-conversation-fork.md) |
+| `FEAT-014` | 项目对话归档与恢复 | `implemented_pending_review` | `v0.1.0` | 活动/归档列表、恢复、失败提示和 JSONL fallback 隔离已提交；剩余是本机运行时与移动端体验确认 | [`FEAT-014-conversation-archive.md`](./features/FEAT-014-conversation-archive.md) |
+| `FEAT-015` | 自然语言生图与自动化工作台 | `in_progress` | `v0.5.0` | 对话生图核心已经完成并进入真实 Thread/Turn：自然语言触发、2.35:1 4K、连续改图、普通后续对话、旧会话迁移和结果去重已有实现；仍在开发的是专门工作台、Artifact、批量模板、队列和定时任务 | [`FEAT-015-image-generation-and-automation-workbench.md`](./features/FEAT-015-image-generation-and-automation-workbench.md) |
+| `FEAT-016` | 项目统一更名为 negus | `implemented_pending_review` | `v1.0.0` | 界面、PWA、包名和 GitHub 仓库已统一为 negus，浏览器旧数据保留兼容；本地目录将在当前活动 Turn 收口后由独立 Worker 迁移并恢复同一端口 | [`FEAT-016-project-identity-negus.md`](./features/FEAT-016-project-identity-negus.md) |
+| `FEAT-017` | 多业务项目与 Codex 会话归类 | `implemented_pending_review` | `v0.1.0` | 已确认所有者项目、目标工作项目和文件访问路径必须分离；员工 Thread 不得进入工作项目普通会话列表。现有实现仍需按该定义检查和修复 | [`FEAT-017-multiple-business-projects.md`](./features/FEAT-017-multiple-business-projects.md) |
+| `FEAT-018` | Codex 原生 Goal 调用与展示对齐 | `handoff_pending` | `v0.3.0` | 56 项回归、富文本浏览器及正式服务真实 HTTP/SSE 验收通过；未验证边界见档案 | [`FEAT-018-system-goal-orchestration.md`](./features/FEAT-018-system-goal-orchestration.md) |
+| `FEAT-019` | 项目面板单项目经理 AI 入口 | `implemented_uncommitted` | `v0.1.0` | 项目管理页可打开长期 manager 单聊，并在对话标题显示当前项目上下文；仍待真实员工 Runtime、点击和移动端验收 | [`FEAT-019-project-manager-entry.md`](./features/FEAT-019-project-manager-entry.md) |
+| `FEAT-020` | 内测访问入口与共享链接 | `retired` | `v0.1.1` | 删除重复的内测按钮和弹窗，统一使用原有分享入口；保留共享链接及 Cookie 授权，待手机刷新确认 | [`FEAT-020-beta-access-entry.md`](./features/FEAT-020-beta-access-entry.md) |
+| `FEAT-021` | 项目记忆入口与可解释上下文边界 | `implemented_uncommitted` | `v0.1.0` | 项目管理页读取最近更新、关键决策和公共群聊完整历史，并公开说明 Agent 上下文边界；不引入隐式长期记忆 | [`FEAT-021-project-memory-entry.md`](./features/FEAT-021-project-memory-entry.md) |
+| `FEAT-022` | 模型配置与 CC Switch 共享 | `handoff_pending` | `v0.2.0`（页首） | 后续有 9 月 25/26 日记录；恢复逻辑与撤回原话冲突，不能据此认定需求已重新确认。 | [档案](features/FEAT-022-cc-switch-channels.md) |
+| `FEAT-023` | 自定义桌面 | `handoff_pending` | 页首 v0.3.0 / 后续 v0.4.0 | 定制模式与真实任务组件已有记录；任意业务组件生成发布未接通，版本头待整理。 | [档案](features/FEAT-023-desktop.md) |
 
-2026-09-22 14:06 +08:00：桌面浏览器去掉模拟窗口栏，左侧对话栏改为可隐藏抽屉，与平板横屏共用 AppShell。前端待构建验收，无服务重启。
+| `FEAT-024` | 对话转发与公共摘要 | `handoff_pending` | v0.2.0 | 原文转发、原生分支复制、成功自动关闭；归档不变，真实使用待验收。 | [档案](features/FEAT-024-conversation-forwarding.md) |
 
-2026-09-22 03:12 +08:00：FEAT-002 员工上下文围绕点名和引用原文，排队时不覆盖正在工作的状态，并在输入区说明会按顺序继续。定向测试 30 项、前端类型检查通过。服务未重启，手机和真实回复未验收。
+## 状态与证据
 
-2026-09-22：FEAT-002 普通发言不再默认叫醒项目经理，只有 @ 才分配工作；消息可复制，发送、回复、失败和超时状态写明。定向路由测试 17 项通过，前端类型检查通过。手机视觉和真实员工回复未验收。
+- discovery / planned：调研或计划，不表示已实现。
+- in_progress：进行中。
+- implemented_uncommitted：记录时已实现但未提交；必须核对后续 Git，不能永久沿用“未提交”。
+- implemented_pending_review / code_ready_pending_user_review / handoff_pending：仍有体验、验证或交接未完成，保留原文含义，不自动互换。
+- accepted：有用户确认；completed：须说明完成的是研究、文档还是功能。
+- paused / paused_experiment / retired：暂停、冻结实验或已替代，不自动重新列为开发任务。
 
-2026-09-22 02:08 +08:00：FEAT-022手动刷新接入真实渠道/models与持久目录及路由，真实查询确认Grok 4.7；6项测试、构建通过。后端尚未重启加载，手机选择和生成未验收，handoff_pending。
+代码完成、构建通过、测试通过、服务加载、真实浏览器/供应商验证、用户验收分别记录。历史测试数量和记录时部署状态不代表今天的运行状态。
 
-2026-09-22 02:03 +08:00：FEAT-022模型选择框增加手动刷新图标，复用目录更新，不改变当前模型；构建通过，手机视觉未复验。无服务重启。
+## 历史记录与后续工作
 
-2026-09-22 01:59 +08:00：FEAT-022修复Grok渠道入口遗漏及反复打开加载：加入已配置内置渠道、60秒页内缓存、在途合并、后台加载不锁住选项。真实模型目录包含Grok 4.5/4.6，构建通过；未发送模型请求、未手机验收、未重启。记录见FEAT-022。
+旧索引中的逐次补丁、完整需求表和优先级已退出日常索引。原文可在 Git 基线 [c8c7b66 的索引](https://github.com/sukiandfds/negus/blob/c8c7b66d686fb3a896c4c939fe6dec9bb2d8d8d4/docs/feature-development/FEATURE_STATUS_INDEX.md) 追溯，功能原始档案未删除。
 
-2026-09-22 01:51 +08:00：加载修复继续，项目状态面板请求限流及群聊RAF清理/旧事件隔离已实现；10项加载测试、前端构建通过。本机单次目录读取1244ms，完整会话活动时间读取路径待检查；整体仍handoff_pending，未视觉验收或重启。完整记录见FEAT-023及FEAT-002。
-
-2026-09-22 01:48 +08:00：FEAT-002群聊加载修复加入本轮闪屏排查，旧快照/历史请求按切换代际隔离，离开前保存最新缓存。4项新增回归测试通过（累计9项加载测试），前端构建通过；浏览器工具与Windows验收工具均因kernel assets路径缺失初始化失败，实际视觉未验证，保持handoff_pending。项目状态面板慢请求重叠及群聊SSE仍待后续检查。
-
-2026-09-22 01:43 +08:00：FEAT-023 / FEAT-001 全面加载闪屏修复进行中，handoff_pending。已实现缓存优先、有限预读、旧响应隔离、后台任务稳定展示及检查时间持久化；5项加载测试和前端构建通过。浏览器工具仍报kernel assets路径缺失，真实视觉、读取速度、群聊与其他功能切换未验收。详情统一见FEAT-023本轮记录，未重启或推送。
-
-2026-09-22 00:12 +08:00：FEAT-023 v0.4.0，handoff_pending。定制/完成单入口、取消撤销控件，已有组件拖动/缩放/固定，空白画线自动规整为圆形或长方形；画完仅保存选中，不涉及内容开发。13项测试、构建、12类隔离浏览器检查通过，手机和宽屏截图已查看；真实笔硬件及帧率未验收。PRD已同步本次确认边界，无服务重启。
-
-2026-09-21 01:34 +08:00：FEAT-023 v0.3.1 首页状态修复，已构建待体验。正常展示业务结果，失败显示明确故障、历史快照与重试；来源说明折叠，加载/失败不再断言无运行任务。仅前端更新，无需重启。
-
-2026-09-21 02:02 +08:00：[`FEAT-023 直接框选与组件调整`](./features/FEAT-023-desktop.md)，v0.3.2，handoff_pending。手机一键框选、电脑空白直接拖选；长按/角部按钮直接调整单个组件，最低2列/2行，原输入框关联需求与真实轮次状态。9项定向测试及构建通过；本轮触屏浏览器和真实模型生成未验收，任意业务功能生成挂载未接通。保留原布局，无重启、提交或推送。
-
-2026-09-20 14:46 +08:00：[`FEAT-023 桌面编辑与选区对话`](./features/FEAT-023-desktop.md)，v0.2.0，handoff_pending。长按编辑、逻辑网格拖动/尺寸/移除/撤销、框选关联原输入框、真实回复预览保留和本地恢复。12 项定向测试、构建及 9 项隔离浏览器交互检查通过（手机/宽屏截图已查看）；真实模型选区请求、手机帧率与跨设备未验收，不含任意新业务组件自动部署。未新增依赖、未重启服务。
-
-2026-09-20 13:49 +08:00：[`FEAT-023 桌面初版`](./features/FEAT-023-desktop.md)，v0.1.3，handoff_pending。当前任务双列半宽卡片，默认 3 条固定两行标题/短状态/单行最新指令；移除项目名和底部大按钮，放大与列表保留。Goal 和预览缓存先展示、后台更新，移除重复目录查询和流式详情重查。构建及 6 项状态测试通过；浏览器工具不可用，手机效果与真实刷新耗时未实测。无服务端变更或重启。
-
-| 功能编号 | 功能 | 当前状态 | 当前版本 | 最近更新 | 当前结论 | 记录 |
-| --- | --- | --- | --- | --- | --- | --- |
-| `FEAT-001` | 单人 Codex Web 对话与控制 | `implemented_pending_review` | `v0.10.12` | 2026-09-18 11:14 +08:00 | 已接入 Codex `request_user_input` 弹窗、刷新恢复和定向回传；普通、外部渠道和员工直属单聊代码完成，等待服务更新后的手机真实验收。审批及 MCP 通用表单仍未实现 | [`FEAT-001-single-codex-web.md`](./features/FEAT-001-single-codex-web.md) |
-| `FEAT-002` | 项目群聊与多 Agent 讨论 | `in_progress` | `v0.4.4` | 2026-08-17 11:10 +08:00 | 产品定义已确认：一个员工在一个项目群聊中使用员工项目下的一个长期会话；工作项目只保存公共群聊记录和目标文件，员工结果只生成一次并发布回群聊。当前代码归属缺口仍待修复，压缩、复盘和中止过程发布属于后续能力 | [`FEAT-002-group-multi-agent.md`](./features/FEAT-002-group-multi-agent.md) |
-| `FEAT-003` | 附件与对话内容渲染 | `implemented_pending_review` | `v0.3.0` | 2026-07-25 22:49 +08:00 | 支持上传、图片/音频/视频/文件展示和 Markdown 本地图片登记；仍是 Demo 级上传协议 | [`FEAT-003-attachments-content-rendering.md`](./features/FEAT-003-attachments-content-rendering.md) |
-| `FEAT-004` | PWA、设备身份与移动/平板入口 | `implemented_pending_review` | `v0.2.0` | 2026-07-28 17:43 +08:00 | 新构建会提示用户刷新且不会自动打断任务；连接状态不再误报电脑离线，真实 PWA 更新流程待原开发电脑验证 | [`FEAT-004-pwa-device-identity.md`](./features/FEAT-004-pwa-device-identity.md) |
-| `FEAT-005` | Desktop/Web 连续性与同任务提示 | `discovery` | `v0.4.1` | 2026-07-28 22:20 +08:00 | Desktop 与 Web 共享持久化 Thread 但不共享实时事件；双端同时操作曾导致 Web app-server 失联，需先做同任务提示、最小控制权和受控恢复 | [`FEAT-005-desktop-web-continuity.md`](./features/FEAT-005-desktop-web-continuity.md) |
-| `FEAT-006` | 固定公网入口与正式访问控制 | `in_progress` | `v0.2.2` | 2026-08-06 23:35 +08:00 | 固定域名可用，但公网图片上传实测约 10-16 秒，本机仅约 0.1 秒；VPN 不稳定，需评估稳定线路或大陆中转方案 | [`FEAT-006-stable-remote-access.md`](./features/FEAT-006-stable-remote-access.md) |
-| `FEAT-007` | Agent 交付物生成、预览与版本管理 | `implemented_pending_review` | `v0.2.1` | 2026-08-06 | M1 代码已提交：交付物发布、预览、版本和审核均已有实现；剩余是整体真实使用验收，不是未提交开发 | [`FEAT-007-agent-artifacts.md`](./features/FEAT-007-agent-artifacts.md) |
-| `FEAT-008` | HTML 网页生成与 PDF 双文件交付 | `implemented_pending_review` | `v0.2.0` | 2026-08-06 | 静态 HTML、Edge 转 PDF、安全打开和群聊双文件发布代码已提交；剩余是体验验收，不继续扩展网页编辑器或 Office 能力 | [`FEAT-008-html-page-pdf-generation.md`](./features/FEAT-008-html-page-pdf-generation.md) |
-| `FEAT-009` | 原开发电脑远程运行、开发与应急恢复 | `in_progress` | `v0.4.0` | 2026-07-28 17:43 +08:00 | 已完成无 UAC 的只读环境检查器；原电脑真实开发链路和独立紧急启动入口仍待验证/确认，向日葵继续作为兜底 | [`FEAT-009-remote-development-host.md`](./features/FEAT-009-remote-development-host.md) |
-| `FEAT-010` | Orca 群聊执行运行时适配技术试验（非路线 2） | `paused_experiment` | `v0.1.0` | 2026-07-29 18:34 +08:00 | 仅完成可选 Orca CLI 执行器及离线测试，没有迁移产品功能；因范围偏离用户目标而冻结，不计入路线 2 进度 | [`FEAT-010-orca-group-runtime-adapter.md`](./features/FEAT-010-orca-group-runtime-adapter.md) |
-| `FEAT-011` | 浮生云算用量监控 | `implemented_pending_review` | `v0.1.1` | 2026-08-06 | 用量摘要、详情、按 Turn 去重、缓存和失败保留旧数据已提交；供应商查询和多端布局已有真实体验记录，不再列为未提交 | [`FEAT-011-fusheng-usage-monitor.md`](./features/FEAT-011-fusheng-usage-monitor.md) |
-| `FEAT-012` | 消息内容快捷复制 | `implemented_pending_review` | `v0.1.0` | 2026-08-06 | 复制和浏览器回退已提交；重新编辑入口也已接入会话流程，剩余只需确认不同浏览器权限下的体验 | [`FEAT-012-conversation-copy.md`](./features/FEAT-012-conversation-copy.md) |
-| `FEAT-013` | 从当前消息分叉继续 | `implemented_pending_review` | `v0.1.0` | 2026-08-06 | 官方 `thread/fork` 路由、Turn 边界、按钮和自动切换已提交；若当前运行时不支持，需保留明确不可用提示 | [`FEAT-013-conversation-fork.md`](./features/FEAT-013-conversation-fork.md) |
-| `FEAT-014` | 项目对话归档与恢复 | `implemented_pending_review` | `v0.1.0` | 2026-08-06 | 活动/归档列表、恢复、失败提示和 JSONL fallback 隔离已提交；剩余是本机运行时与移动端体验确认 | [`FEAT-014-conversation-archive.md`](./features/FEAT-014-conversation-archive.md) |
-| `FEAT-015` | 自然语言生图与自动化工作台 | `in_progress` | `v0.5.0` | 2026-08-06 | 对话生图核心已经完成并进入真实 Thread/Turn：自然语言触发、2.35:1 4K、连续改图、普通后续对话、旧会话迁移和结果去重已有实现；仍在开发的是专门工作台、Artifact、批量模板、队列和定时任务 | [`FEAT-015-image-generation-and-automation-workbench.md`](./features/FEAT-015-image-generation-and-automation-workbench.md) |
-| `FEAT-016` | 项目统一更名为 negus | `implemented_pending_review` | `v1.0.0` | 2026-08-05 09:28 +08:00 | 界面、PWA、包名和 GitHub 仓库已统一为 negus，浏览器旧数据保留兼容；本地目录将在当前活动 Turn 收口后由独立 Worker 迁移并恢复同一端口 | [`FEAT-016-project-identity-negus.md`](./features/FEAT-016-project-identity-negus.md) |
-| `FEAT-017` | 多业务项目与 Codex 会话归类 | `implemented_pending_review` | `v0.1.0` | 2026-08-17 11:10 +08:00 | 已确认所有者项目、目标工作项目和文件访问路径必须分离；员工 Thread 不得进入工作项目普通会话列表。现有实现仍需按该定义检查和修复 | [`FEAT-017-multiple-business-projects.md`](./features/FEAT-017-multiple-business-projects.md) |
-| `FEAT-018` | Codex 原生 Goal 调用与展示对齐 | `handoff_pending` | `v0.3.0` | 2026-09-26 | 56 项回归、富文本浏览器及正式服务真实 HTTP/SSE 验收通过；未验证边界见档案 | [`FEAT-018-system-goal-orchestration.md`](./features/FEAT-018-system-goal-orchestration.md) |
-| `FEAT-019` | 项目面板单项目经理 AI 入口 | `implemented_uncommitted` | `v0.1.0` | 2026-09-14 | 项目管理页可打开长期 manager 单聊，并在对话标题显示当前项目上下文；仍待真实员工 Runtime、点击和移动端验收 | [`FEAT-019-project-manager-entry.md`](./features/FEAT-019-project-manager-entry.md) |
-| `FEAT-020` | 内测访问入口与共享链接 | `retired` | `v0.1.1` | 2026-09-16 23:15 +08:00 | 删除重复的内测按钮和弹窗，统一使用原有分享入口；保留共享链接及 Cookie 授权，待手机刷新确认 | [`FEAT-020-beta-access-entry.md`](./features/FEAT-020-beta-access-entry.md) |
-| `FEAT-021` | 项目记忆入口与可解释上下文边界 | `implemented_uncommitted` | `v0.1.0` | 2026-09-15 00:15 +08:00 | 项目管理页读取最近更新、关键决策和公共群聊完整历史，并公开说明 Agent 上下文边界；不引入隐式长期记忆 | [`FEAT-021-project-memory-entry.md`](./features/FEAT-021-project-memory-entry.md) |
-
-`FEAT-010` 曾用于已暂停的 Orca 路线实验，本轮不复用该编号。
-
-2026-09-18 18:49 +08:00：`FEAT-022 v0.1.3` 模型菜单仅显示当前渠道模型并去重，统一模型名称，渠道独立一行。前端展示修复，未扩充渠道模型目录；手机效果待验收。
-
-2026-09-18 18:12 +08:00：`FEAT-022` v0.1.2，`handoff_pending`。一级渠道切换保持原会话，下次发送通过完整原生记录与同一个 Thread ID 续接，不新建、不自动发送历史。二级编辑、供应商倍率与选择保护保持。23 项定向测试、构建及本机原生同编号恢复验证通过；按用户授权排队安全重启，旧 PID 5776，新 PID 未确认。完全空白未落盘会话暂不切换，手机实际发送待验收。详见 [FEAT-022](./features/FEAT-022-cc-switch-channels.md)。
-
-## 完整需求表（按实际使用链路合并）
-
-本表覆盖当前正式功能 `FEAT-001` 至 `FEAT-009`、`FEAT-011` 至 `FEAT-016`，并保留已冻结的 `FEAT-010` 技术试验记录。相互影响的功能放在同一行；当前状态和目标体验严格分开。
-
-| 编号 | 合并后的需求 | 对应功能与状态 | 当前实际使用体验 | 预计开发后体验 |
-| --- | --- | --- | --- | --- |
-| 1 | 单人 Codex Web 基础能力与持续过程同步 | `FEAT-001 v0.10.12` 已完成代码修复，等待最新构建体验确认 | 网页已有真实对话、发送、追加、停止、队列、补充提问、重新编辑、复制、归档、分叉和过程展示；消息幂等、最终回复交接、快照恢复、加载门和历史滚动锚点已经接通 | Web 按 Codex 的真实执行事件持续显示过程与最终回复；需要用户补充信息时显示可恢复的原生互动弹窗。刷新、重开、断线恢复和加载历史时先稳定再展示 |
-| 2 | Desktop 与 Web 配合使用，并避免同一任务互相干扰 | `FEAT-005` 调研中；关联 `FEAT-001-I03` | 用户在原电脑前正常使用 Codex Desktop，离开电脑后用 Web 补充。Web 写入的内容在 Desktop 重开任务后能看到，但已打开的 Desktop 页面不热刷新；Web 当前也不知道 Desktop 是否正在同一任务内执行 | Desktop 保持正常使用。Web 打开同一任务时，如果检测到 Desktop 正在执行，明确提示“桌面端正在此任务工作”，默认以查看为主，避免重复发起任务；暂不要求 Desktop 反向提示 Web 正在执行 |
-| 3 | 项目群聊与多 Agent，基础体验先与单人 Codex 看齐 | `FEAT-002 v0.4.2` 开发中；关联 `FEAT-001`、`FEAT-005` | 群聊已有成员、四个真实 Agent、讨论/开发模式、`@`、附件和增量回复；侧栏、顶部、输入区、加载反馈和移动端布局已向单人页统一。消息呈现、富文本、消息操作、历史加载、流式回复、等候队列、模型与上下文尚未对齐 | 群聊先具备与单人 Codex 一致的基础能力和界面语言，同时保留成员、Agent、`@`、成果审核等群聊能力；再单独定义项目经理分工、多个 Agent 讨论、审查和任务队列 |
-| 4 | 附件与真实对话内容展示 | `FEAT-003` 已实现待体验 | 可以上传和展示图片、音频、视频及普通文件，也能登记 Markdown 中的本地图片；目前仍是 Demo 级上传链路，真实大文件、失败恢复和多端草稿保持未完整验收 | 单人和群聊使用同一套附件体验；上传、预览、下载、失败提示和重试可理解，网络或页面切换不会无提示丢失草稿和附件 |
-| 5 | Agent 交付物、HTML/PDF、版本与验收 | `FEAT-007`、`FEAT-008` 已实现并已提交，等待整体体验验收 | Agent 已能发布 Artifact，并生成、预览、下载 HTML/PDF，用户可批准或打回；当前缺的是整体真实使用验收，不是基础代码开发 | 用户在消息中直接看到成果、版本、文件和验证结果，可以预览、下载、要求修改或通过成果；成果验收与命令执行审批使用不同文案和入口 |
-| 6 | 手机/PWA、设备身份和稳定远程入口 | `FEAT-004` 已实现待体验；`FEAT-006` 进行中 | 手机、iPad 和电脑浏览器已有适配；当前使用固定域名，香港线路仍依赖电脑保持 VPN，切换线路会中断活动任务 | 用户保存一个受保护的网址，在手机或其他电脑打开即可继续使用；长期线路不依赖人工 VPN，并准确区分电脑、网页服务和 Codex 任务状态 |
-| 7 | 原开发电脑继续运行项目，项目进程退出时可应急恢复 | `FEAT-009` 计划中；关联 `FEAT-001-I12`、`FEAT-006` | 项目仍需在原电脑手动启动 `9360`。一般不考虑电脑频繁重启，但项目进程可能被关闭；进程停止后现有网页也无法继续操作，只能回原电脑处理 | 优先提供一个最小“启动项目”应急入口或其他远程恢复方式；它只负责查看状态和拉起项目，不扩展成复杂发布系统。如果网页应急入口做不到或自身也离线，向日葵等远程桌面作为可接受兜底 |
-| 8 | 像 OpenClaw 一样尽量无感完成远程开发，不让 UAC 成为日常负担 | `FEAT-009` 已开始实施；关联 `FEAT-001-I11` | 已有只读检查器可核对用户目录、工具链、端口和常见 UAC 风险；当前电脑结果为 0 blocked，原开发电脑与真实修改/构建/Git 链路尚未验证 | 正常开发优先使用用户目录、项目依赖和无需提权的工具链。只有驱动、系统服务等真正系统级操作才报告为一次本机维护；日常网页开发不要求用户处理 UAC |
-| 9 | 在 Codex 标题栏查看浮生云算用量和倍率 | `FEAT-011 v0.1.1` 已实现并已提交，等待持续体验确认 | 页面加载不查询；回复完成会更新今日金额、固定 GPT 倍率和时间，点击可查看账户与全部分组详情；同一 Turn 按身份去重并保留旧数据 | 用户无需离开 Codex 页面即可判断今日消耗；多设备观察同一 Turn 不会重复请求，查询失败也不影响对话 |
-| 10 | 自然语言生图与专门的生图自动化工作台 | `FEAT-015 v0.5.0` 开发中 | 网页与原生 Codex 共用真实 MCP Turn；4K 小数画幅、同会话改图、继续聊天和图片去重已通过 | 批量、模板、队列、历史和定时任务进入专门工作台，并与对话共用同一运行、媒体、交付物和审计链路 |
-| 11 | 项目品牌与仓库身份统一为 negus | `FEAT-016 v1.0.0` 已实现待体验 | 主对话、PWA、群聊、图标和 GitHub 仓库已统一；本地目录迁移将在当前 Turn 收口后自动执行 | 用户在电脑、手机、安装后的 PWA 和 GitHub 中看到一致的 negus；升级不丢失旧会话快照或设备身份 |
-
-## 当前待办开发顺序
-
-以下顺序按当前沟通记录整理；未到对应阶段时不提前扩展：
-
-| 顺序 | 功能项目 | 当前要做什么 | 前置条件或边界 |
-| --- | --- | --- | --- |
-| `P1` | `FEAT-001-I08` / `I15` / `I21` 持续过程与完成恢复 | 在手机和电脑浏览器验收 v0.10.11 的加载门、权威状态校正与会话补拉 | 使用 5 分钟以上真实任务、断网重连、后台切回和完成事件遗漏；确认最终回复无需关闭重开，不用高频整页轮询掩盖问题 |
-| `P2` | `FEAT-001-I16` / `I17` 会话与 Turn 隔离 | 实机复核新对话是否稳定保留、上一 Turn 过程是否还会串入新消息 | 不修改基础 UI，不顺带处理 Desktop 或群聊 |
-| `P2.5` | `FEAT-001-I18` / `I19` 模型与上下文设置体验 | 已实现模型/思考程度合并入口和上下文二级菜单，等待手机体验 | 不新增第三行，不把低频设置重新暴露到输入框 |
-| `P2.5` | `FEAT-011` 浮生云算用量监控 | 服务重启后体验标题栏摘要、完成触发、详情和手机布局 | 页面打开不查询；不扩展趋势图、告警或多供应商账单 |
-| `P3` | `FEAT-005` 同任务运行提示 | 先确认能否识别 Desktop 正在执行同一 Thread，并在 Web 给出明确提示 | 先满足 Web 单向提示，不要求修改 Codex Desktop |
-| `P4` | `FEAT-002` 群聊基础能力与多模型方向 | 继续处理消息样式、富文本、消息操作、历史加载、流式回复、等候队列、模型与上下文；随后评估按角色接入不同模型 | 已完成基础外观统一；后续不改坏单聊，不强行共用不同的运行状态模型，也不一次接入全部模型 |
-| `P4.5` | `FEAT-015` 自然语言生图与自动化工作台 | 用户在手机和电脑网页验收真实对话生图与连续改图；后续再建设 Artifact、批量模板、队列和定时任务 | 前端不拥有密钥和供应商协议；工作台继续复用现有 Provider、原生 Turn 和媒体链路 |
-| `P5` | `FEAT-009` / `FEAT-001-I12` / `I14` 远程开发与受控恢复 | 验证普通权限开发链路，再确定最小应急启动和防卡死方案 | 不先做双 Worker、自动回滚或大型 Supervisor |
-| `P6` | `FEAT-003` / `FEAT-007` / `FEAT-008` 真实内容和成果验收 | 使用真实附件、HTML、PDF 和多版本成果完成整体体验验收 | 只修真实问题，不扩展为通用文件或文档平台 |
-| `deferred` | `FEAT-006` 公网入口长期稳定化 | 后续研究无需 VPN 的稳定线路、正式鉴权和开机恢复 | 固定域名已可用；当前不继续扩大基础设施改动 |
-| `later` | `FEAT-001-I11` Codex 内部审批 | 补充提问已完成代码；后续根据真实阻塞决定是否接入命令、文件和权限审批 | 不把 Codex 内部审批和 Windows UAC 混为一类；公网审批必须先明确安全边界 |
-
-## 当前优先阅读的普适问题
-
-开发前至少检查 [`DEVELOPMENT_COMMON_MISTAKES.md`](./DEVELOPMENT_COMMON_MISTAKES.md) 中这些条目：
-
-- `PROC-001`：没有先确认架构和功能所有权就修改。
-- `PROC-002`：Windows 端口与进程检查使用了不适配本机的方法。
-- `PROC-003`：SSE 页面使用错误的加载完成条件。
-- `PROC-004`：服务端改动后误以为启动脚本会自动重启。
-- `PROC-005`：浏览器和视觉检查超过任务需要，或验证工具自身造成误判。
-- `PROC-006`：扫描、补丁和命令范围过大，局部失败放大成整轮阻塞。
-- `PROC-007`：工具被策略拦截后重复尝试同类命令。
-
-## 历史原始日志映射
-
-| 原始日志 | 主要关联功能 |
-| --- | --- |
-| `../records/DEVELOPMENT_LOG_2026-07-22.md` | `FEAT-001`、`FEAT-003`、`FEAT-005` |
-| `../records/DEVELOPMENT_LOG_2026-07-24.md` | `FEAT-002`、`FEAT-005` |
-| `../records/DEVELOPMENT_LOG_2026-07-25.md` | `FEAT-001`、`FEAT-002`、`FEAT-003` |
-| `../records/DEVELOPMENT_LOG_2026-07-26.md` | `FEAT-004`、AI 功能开发记录体系 |
-| `../records/DEVELOPMENT_BUG_LOG_2026-07-24_DESKTOP_WEB_SYNC.md` | `FEAT-005` |
-| `../records/DEVELOPMENT_BUG_LOG_2026-07-25.md` | `FEAT-001`、`FEAT-003`、`FEAT-005` |
-| `../records/DEVELOPMENT_PROCESS_BLOCKERS_2026-07-25.md` | `DEVELOPMENT_COMMON_MISTAKES.md` |
-
-## 状态含义
-
-2026-09-22 00:24 +08:00，FEAT-023：形状弹窗移除，画完直接纠正；任务卡保留数据并后台重试，部分自动化读取不清空已有任务。构建与14项定向测试通过；handoff_pending，未提交、未重启。详情见 FEAT-023。
-
-| 状态 | 含义 |
-| --- | --- |
-| `discovery` | 正在理解问题和技术路径，尚未承诺实现 |
-| `planned` | 目标和边界已确认，尚未开始编码 |
-| `in_progress` | 正在开发 |
-| `implemented_uncommitted` | 已实现并完成基本检查，但尚未提交 |
-| `implemented_pending_review` | 已实现，等待用户体验或验收结论 |
-| `accepted` | 用户已确认当前结果可接受 |
-| `paused` | 主动暂缓，当前不投入开发 |
-| `blocked` | 存在明确外部阻塞，无法继续 |
-| `retired` | 已被其他功能或方案替代 |
-
-2026-09-25 01:47 +08:00 FEAT-022: model defaults, explicit send settings and successful-selection recovery updated; 10 targeted tests and UI build passed. No restart or real browser/provider acceptance; handoff_pending. See features/FEAT-022-cc-switch-channels.md.
-
-2026-09-26 22:34 +08:00：BUG-20260926-01 共享缓存接入目录、自动化、模型（FEAT-017/023/022，群聊共享目录涉及 FEAT-002）；handoff_pending。10项定向测试、构建与两尺寸隔离浏览器检查通过，真实手机/公网/供应商未验收。[证据](../records/SHARED_CACHE_2026-09-26.md)。
-
-2026-09-27 10:12 +08:00，BUG-20260927-01（handoff_pending）：历史已完成任务不再在打开对话后补出工作过程行；本次观察到运行的 Turn 完成时仍保留过程。桌面目录忽略本地初始化占位状态、拒绝更旧的状态覆盖，摘要复用目录 Turn ID，避免初始化导致任务移除和重复读取。构建及两尺寸隔离 Edge 测试通过；真实设备/网络未验收，未重启或提交。详细证据见 docs/records/SHARED_CACHE_2026-09-26.md。
+- 缓存和任务闪动证据：[9 月 26/27 日记录](../records/SHARED_CACHE_2026-09-26.md)。
+- 配置恢复争议：[用户原话](../records/NEGUS_MODEL_CONFIG_DISCUSSION_2026-09-25.md)。
+- 普适经验：[常见错误](DEVELOPMENT_COMMON_MISTAKES.md)，按任务选择相关条目。
+- 新开发顺序依据当前产品方向逐项确认，不照抄旧索引的 P1–P6 排序。

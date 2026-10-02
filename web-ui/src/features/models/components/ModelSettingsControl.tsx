@@ -95,7 +95,7 @@ export function ModelSettingsControl({
     setApplying(true);
     setApplyError("");
     try {
-      if (draftModel !== currentModel && !await onModelChange(draftModel, crossProvider ? draftEffort : undefined)) {
+      if (draftModel !== currentModel && !await onModelChange(draftModel, draftEffort)) {
         setApplyError("模型设置没有生效，请重试");
         return;
       }
@@ -175,8 +175,8 @@ export function ModelSettingsControl({
               onChange={stageEffort}
             />
           </label>
-          {disabled ? <small className={styles.menuHint}>任务运行时暂时不能修改</small> : null}
-          {crossProvider ? <div className={styles.menuHint} role="status">下次发送使用新配置，会话保持不变。</div> : null}
+          {disabled ? <small className={styles.menuHint}>当前连接或会话状态不支持修改</small> : null}
+          <div className={styles.menuHint} role="status">下一轮发送时生效，不影响正在运行的任务。</div>
           {applyError || error ? <small className={styles.menuError} role="alert">{error || applyError}</small> : null}
           <div className={styles.settingRow}>
             <span>配置</span>
@@ -198,7 +198,7 @@ export function ModelSettingsControl({
           </div>
         </div>
       ) : null}
-      {channelsOpen ? <ChannelManager currentModel={currentModel} models={models} disabled={disabled} onSwitch={(model) => onModelChange(model, chooseEffort(models.find((entry) => entry.model === model), currentEffort))} onClose={() => setChannelsOpen(false)} /> : null}
+      {channelsOpen ? <ChannelManager currentModel={currentModel} models={models} onClose={() => setChannelsOpen(false)} /> : null}
     </div>
   );
 }

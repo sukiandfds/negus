@@ -39,6 +39,8 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/") || url.pathname === "/events") return;
 
   if (request.mode === "navigate") {
+    // Only application pages may fall back to the cached application shell.
+    if (!["/", "/index.html", "/group.html", "/progress", "/progress/", "/project-management", "/project-management/", "/project-management.html"].includes(url.pathname)) return;
     const canonicalPath = url.pathname === "/"
       ? "/index.html"
       : url.pathname === "/group.html"

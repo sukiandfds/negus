@@ -1,3 +1,4 @@
+import { fetchJson, postJson } from "../../../shared/api/http";
 import { useEffect, useState } from "react";
 import { readLocalCache, writeLocalCache } from "../../../shared/state/localCache";
 import type { CodexModel } from "./types";
@@ -9,7 +10,7 @@ export interface ModelDefaults {
   archivedProviderIds: string[];
 }
 
-const defaultsKey = "negus-model-defaults-v1";
+const defaultsKey = "negus-model-defaults-shared-v1";
 const listeners = new Set<() => void>();
 
 const emptyDefaults = (): ModelDefaults => ({
@@ -31,17 +32,31 @@ const validDefaults = (value: unknown): value is ModelDefaults => {
 
 export const readModelDefaults = (): ModelDefaults => readLocalCache(defaultsKey, validDefaults) || emptyDefaults();
 
-export const writeModelDefaults = (next: ModelDefaults) => {
-  writeLocalCache(defaultsKey, next);
-  listeners.forEach((listener) => listener());
+const applyDefaults = (value: ModelDefaults) => {
+  writeLocalCache(defaultsKey, value);
+  listeners.forEach(listener => listener());
+  return value;
 };
-
+let reading: Promise<ModelDefaults> | null = null;
+export const refreshModelDefaults = () => {
+  if (!reading) reading = fetchJson<ModelDefaults>('/api/model-defaults', AbortSignal.timeout(10000))
+    .then(applyDefaults).finally(() => { reading = null; });
+  return reading;
+};
+export const writeModelDefaults = async (next: ModelDefaults) => {
+  const value = await postJson<ModelDefaults>('/api/model-defaults', next);
+  return applyDefaults(value);
+};
 export function useModelDefaults(): ModelDefaults {
   const [value, setValue] = useState(readModelDefaults);
   useEffect(() => {
     const listener = () => setValue(readModelDefaults());
+    const refresh = () => { void refreshModelDefaults().catch(() => {}); };
     listeners.add(listener);
-    return () => { listeners.delete(listener); };
+    refresh();
+    window.addEventListener('focus', refresh);
+    const timer = window.setInterval(refresh, 30000);
+    return () => { listeners.delete(listener); window.removeEventListener('focus', refresh); clearInterval(timer); };
   }, []);
   return value;
 }
@@ -82,9 +97,10 @@ export const resolveVisibleModel = (
   if (recordedModel) return recordedModel;
   if (sessionModel) return sessionModel;
   const pool = availableModels(models, defaults);
-  if (!pool.length) return "";
-  const preferred = pool.find((entry) => entry.model === defaults.model && (!defaults.providerId || providerIdOf(entry) === defaults.providerId));
+  if (!pool.length) return defaults.model || "";
+  const preferred = pool.find((entry) => (entry.model === defaults.model || entry.model.split('::').at(-1) === defaults.model.split('::').at(-1)) && (!defaults.providerId || providerIdOf(entry) === defaults.providerId));
   if (preferred) return preferred.model;
+  if (defaults.model && defaults.providerId) return defaults.model;
   const providerId = defaults.providerId || "current";
   const group = pool.filter((entry) => providerIdOf(entry) === providerId);
   const target = group.length ? group : pool.filter((entry) => providerIdOf(entry) === "current");

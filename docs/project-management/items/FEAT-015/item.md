@@ -4,17 +4,17 @@ type: feature
 title: 自然语言生图与自动化工作台
 category: development
 priority: P2
-status: in_progress
-updated_at: 2026-08-06
+status: handoff_pending
+updated_at: 2026-09-30
 source: docs/feature-development/features/FEAT-015-image-generation-and-automation-workbench.md
 related: [FEAT-001, FEAT-002, FEAT-003, FEAT-007, FEAT-008]
 owner: product_and_runtime
-product_base_commit: 267a27cd9c6c8ab141dcc1e743d38d38a9d7f611
+product_base_commit: c8c7b66d686fb3a896c4c939fe6dec9bb2d8d8d4
 product_commit: f1ac977e4db3b797e636219f1958d704f19a10c8
 docs_commit: f1ac977e4db3b797e636219f1958d704f19a10c8
 audited_product_commit: pending
-sync_status: committed
-next_action: 用户验收现有对话生图；之后再开发专门工作台、Artifact、批量模板、队列和定时任务
+sync_status: uncommitted
+next_action: 经用户授权发布正式设置页和图片配置服务，再做浏览器及供应商验收
 last_user_visible_change: 网页生图已进入真实 Codex Thread/Turn；2.35：1 4K、同会话自动引用上一张图编辑及普通后续对话均已真实通过
 ---
 

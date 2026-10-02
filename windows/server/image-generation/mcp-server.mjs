@@ -3,11 +3,12 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import fs from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
-import { createHappyEveringImageClient } from "./happyevering-client.mjs";
+import { createConfiguredImageClient } from "./configured-image-client.mjs";
 import { providerImageRequestFromArgs } from "./image-contract.mjs";
 
 const commonInput = {
   prompt: z.string().min(1).describe("Use the user's original visual request. Do not rewrite it or add extra quality terms unless requested."),
+  quality: z.enum(["auto", "low", "medium", "high", "xhigh", "max"]).optional().describe("Independent of pixel resolution. Set only when explicitly requested; supported levels depend on the configured image model."),
   resolution: z.enum(["1K", "2K", "4K"]).optional().describe("Set only when the user explicitly requests 1K, 2K, or 4K. Omit otherwise."),
   size: z.string().min(1).optional().describe("Output ratio or pixel size. Follow an explicit user ratio first. Without one, use the primary composition reference ratio; with no references, use 3:4 for a person-focused portrait or 4:3 for a scene/object."),
   n: z.number().int().min(1).max(20).optional().describe("Requested image count. Omit for the default of one image."),
@@ -44,14 +45,18 @@ const toolResult = async (operation, successVerb) => {
   }
 };
 
-export const createImageMcpServer = ({ client = createHappyEveringImageClient() } = {}) => {
+export const createImageMcpServer = ({ client } = {}) => {
+  const configured = client ? {
+    generate: args => client.generate(providerImageRequestFromArgs(args)),
+    edit: args => client.edit({ ...providerImageRequestFromArgs(args), imagePaths: args.image_paths, maskPath: args.mask_path }),
+  } : createConfiguredImageClient();
   const server = new McpServer({ name: "negus-image", version: "0.1.0" }, { capabilities: { tools: {} } });
   server.registerTool("generate_image", {
     title: "Generate image",
     description: "Generate an image without reference-image inputs. Follow the user's requested resolution and aspect ratio; otherwise choose a natural 3:4 portrait or 4:3 scene/object ratio. The result already includes the image.",
     inputSchema: z.object(commonInput),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, (args) => toolResult(() => client.generate(providerImageRequestFromArgs(args)), "Generated"));
+  }, (args) => toolResult(() => configured.generate(args), "Generated"));
   server.registerTool("edit_image", {
     title: "Edit image",
     description: "Generate or edit using one or more reference images. Choose the operation from the user's intent, preserve attachment order, and use the main composition reference ratio unless the user specifies another ratio. The result already includes the image.",
@@ -62,11 +67,7 @@ export const createImageMcpServer = ({ client = createHappyEveringImageClient() 
       mask_path: z.string().min(1).optional().describe("Optional absolute path to a PNG mask."),
     }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, (args) => toolResult(() => client.edit({
-    ...providerImageRequestFromArgs(args),
-    imagePaths: args.image_paths,
-    maskPath: args.mask_path,
-  }), "Edited"));
+  }, (args) => toolResult(() => configured.edit(args), "Edited"));
   return server;
 };
 

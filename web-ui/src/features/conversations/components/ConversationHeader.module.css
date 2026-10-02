@@ -26,7 +26,8 @@
 
 @media (max-width: 760px) {
   .topbar { position: relative; gap: 7px; padding-right: 146px; }
-  .statusbar { padding: 0 12px 0 54px; }
+  .statusbar { padding: 0 12px; gap: 10px; justify-content: space-between; }
+  .statusDivider { display: none; }
   .titleIcon { display: none; }
   .meta { display: none; }
   .heading { flex: 1; }

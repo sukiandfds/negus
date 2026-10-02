@@ -1,11 +1,16 @@
-import { forwardRef, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { createContext, useContext, Children, isValidElement, forwardRef, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Download, FileText, ImageOff, X } from "lucide-react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ContentBlock, ImageBlock, SessionMessage } from "../model/types";
 import { withAccessToken } from "../../../shared/api/http";
 import styles from "./ContentRenderer.module.css";
+import { CodeBlock } from "../../../shared/components/CodeBlock";
+
+import { conversationQuery } from "../../../shared/api/conversationScope";
+
+const FileLinkContext = createContext<{ threadId: string; messageId: string } | null>(null);
 
 const IMAGE_VIEWER_HISTORY_KEY = "codexImageViewer";
 
@@ -163,33 +168,56 @@ const markdownComponents: Components = {
   img: ({ src, alt }) => <RenderedImage source={src || ""} alt={alt || ""} />,
 };
 
-export const MarkdownContent = forwardRef<HTMLDivElement, { text: string; className?: string; style?: CSSProperties }>(function MarkdownContent({ text, className, style }, ref) {
-  return <div ref={ref} className={className} style={style}><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{text}</ReactMarkdown></div>;
+function MarkdownCode({ children, collapsible = true }: { children?: ReactNode; collapsible?: boolean }) {
+  const child = Children.toArray(children)[0];
+  if (!isValidElement<{ children?: ReactNode; className?: string }>(child) || typeof child.props.children !== "string") return <pre>{children}</pre>;
+  return <CodeBlock text={child.props.children} language={child.props.className?.replace(/^language-/, "") || ""} collapsible={collapsible} />;
+}
+
+const conversationMarkdownComponents: Components = { ...markdownComponents, pre: MarkdownCode };
+const expandedMarkdownComponents: Components = { ...markdownComponents, pre: ({ children }) => <MarkdownCode collapsible={false}>{children}</MarkdownCode> };
+
+export const MarkdownContent = forwardRef<HTMLDivElement, { text: string; className?: string; style?: CSSProperties; codeBlocks?: boolean; collapseCode?: boolean }>(function MarkdownContent({ text, className, style, codeBlocks = false, collapseCode = true }, ref) {
+  const scope = useContext(FileLinkContext);
+  const urlTransform = (url: string, key: string) => {
+    if (key !== "href" || !scope?.threadId || /^(?:https?:|mailto:|tel:|#|\/\/|\/api\/)/i.test(url)) return defaultUrlTransform(url);
+    if (/^(?!file:|[a-z]:[\\/])[a-z][a-z0-9+.-]*:/i.test(url)) return defaultUrlTransform(url);
+    const query = new URLSearchParams({ threadId: scope.threadId, messageId: scope.messageId, href: url });
+    return withAccessToken("/api/session/file?" + query + conversationQuery());
+  };
+  return <div ref={ref} className={className} style={style}><ReactMarkdown urlTransform={urlTransform} remarkPlugins={[remarkGfm]} components={codeBlocks ? collapseCode ? conversationMarkdownComponents : expandedMarkdownComponents : markdownComponents}>{text}</ReactMarkdown></div>;
 });
 
-export function CollapsedMarkdown({ text, lines = 2 }: { text: string; lines?: number }) {
+export function CollapsedMarkdown({ text, lines = 2, characterLimit }: { text: string; lines?: number; characterLimit?: number }) {
   const contentRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
   const collapsedStyle = { "--clamp-lines": String(lines) } as CSSProperties;
+  const characters = characterLimit === undefined ? [] : Array.from(text);
+  let count = 0;
+  const cutoff = characters.findIndex((character) => character !== "\n" && character !== "\r" && ++count > (characterLimit ?? Infinity));
+  const characterOverflow = cutoff >= 0;
+  const preview = characterOverflow ? characters.slice(0, cutoff).join("") + "…" : text;
 
   useLayoutEffect(() => {
     const element = contentRef.current;
-    if (!element || expanded) return;
+    if (!element || expanded || characterLimit !== undefined) return;
     setOverflowing(element.scrollHeight > element.clientHeight + 1);
-  }, [expanded, lines, text]);
+  }, [expanded, lines, text, characterLimit]);
 
   return (
     <div>
       <MarkdownContent
         ref={contentRef}
-        text={text}
-        className={expanded ? styles.content : `${styles.content} ${styles.clamp}`}
-        style={expanded ? undefined : collapsedStyle}
+        text={characterLimit !== undefined && !expanded ? preview : text}
+        codeBlocks={characterLimit !== undefined && (!characterOverflow || expanded)}
+        collapseCode={false}
+        className={expanded || characterLimit !== undefined ? styles.content : `${styles.content} ${styles.clamp}`}
+        style={expanded || characterLimit !== undefined ? undefined : collapsedStyle}
       />
-      {overflowing ? (
+      {(characterLimit !== undefined ? characterOverflow : overflowing) ? (
         <button type="button" className={styles.expand} aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
-          {expanded ? "收起" : "显示更多"}
+          {expanded ? "收起" : characterLimit !== undefined ? "展开" : "显示更多"}
         </button>
       ) : null}
     </div>
@@ -216,7 +244,7 @@ function ImageGallery({ blocks }: { blocks: ImageBlock[] }) {
 
 function Block({ block }: { block: ContentBlock }) {
   if (block.type === "markdown") {
-    return <MarkdownContent text={block.text} />;
+    return <MarkdownContent text={block.text} codeBlocks />;
   }
   if (block.type === "options") {
     return <div className={styles.options}>{block.options.map((option) => <div key={option}>{option}</div>)}</div>;
@@ -256,13 +284,23 @@ function Block({ block }: { block: ContentBlock }) {
   );
 }
 
-export function ContentRenderer({ message }: { message: SessionMessage }) {
+export function ContentRenderer({ message, threadId = "" }: { message: SessionMessage; threadId?: string }) {
   const blocks = message.blocks?.length
     ? message.blocks
     : [{ id: `${message.id}-text`, type: "markdown" as const, text: message.text }];
   const content = [];
+  // One budget for the user's complete text, even when native input splits it
+  // into multiple text blocks. Media stays outside the collapsible text.
+  const userText = message.role === "user" ? blocks.filter((block) => block.type === "markdown").map((block) => block.text).join("\n") : "";
+  let renderedUserText = false;
   for (let index = 0; index < blocks.length;) {
     const block = blocks[index];
+    if (message.role === "user" && block.type === "markdown") {
+      if (!renderedUserText) content.push(<CollapsedMarkdown key={`${message.id}-text`} text={userText} characterLimit={500} />);
+      renderedUserText = true;
+      index += 1;
+      continue;
+    }
     if (block.type !== "image") {
       content.push(<Block key={block.id} block={block} />);
       index += 1;
@@ -276,5 +314,5 @@ export function ContentRenderer({ message }: { message: SessionMessage }) {
     }
     content.push(<ImageGallery key={`gallery-${images[0].id}`} blocks={images} />);
   }
-  return <div className={styles.content}>{content}</div>;
+  return <FileLinkContext.Provider value={{ threadId, messageId: message.id }}><div className={styles.content}>{content}</div></FileLinkContext.Provider>;
 }

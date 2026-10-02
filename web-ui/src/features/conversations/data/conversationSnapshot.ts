@@ -41,7 +41,15 @@ const validSnapshot = (value: ConversationSnapshot | null): ConversationSnapshot
       && entry.session.threadId !== value.selectedId,
     )).slice(0, maxCachedConversations - 1)
     : [];
-  return { ...value, recentSessions };
+  // Refetch only snapshots affected by the old attachment-as-prose parser.
+  // Keep selection/list state and unrelated cached conversations intact.
+  const hasLegacyAttachmentText = (session: SessionDetail) => session.messages.some((message) =>
+    message.role === "user" && message.text?.includes("[附件正文：") && message.text.includes("[附件正文结束]"));
+  return {
+    ...value,
+    session: value.session && hasLegacyAttachmentText(value.session) ? null : value.session,
+    recentSessions: recentSessions.filter((entry) => !hasLegacyAttachmentText(entry.session)),
+  };
 };
 
 const selectNewestSnapshot = (...snapshots: Array<ConversationSnapshot | null>) => snapshots.reduce<ConversationSnapshot | null>(

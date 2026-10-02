@@ -47,12 +47,13 @@ export function useFollowUpQueue(threadId: string) {
     void refresh();
   }, [refresh]);
 
-  const enqueue = useCallback(async (text: string, attachments: MediaFile[] = [], targetThreadId = threadId) => {
+  const enqueue = useCallback(async (text: string, attachments: MediaFile[] = [], targetThreadId = threadId, modelSettings?: { model: string; reasoningEffort: string }) => {
     return run(targetThreadId, () => followUpQueueApi.enqueue(
       targetThreadId,
       text.trim(),
       attachments.map((attachment) => attachment.id),
       `queue-${createSubmissionId()}`,
+      modelSettings,
     ));
   }, [run, threadId]);
 

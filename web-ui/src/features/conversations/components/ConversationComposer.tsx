@@ -384,7 +384,7 @@ export function ConversationComposer({
               loading={modelsLoading}
               changing={modelChanging}
               error={modelError}
-              disabled={!connected || !selected || archived || status.active}
+              disabled={!connected || !selected || archived}
               onModelChange={onModelChange}
               onReasoningEffortChange={onReasoningEffortChange}
             />

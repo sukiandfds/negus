@@ -280,7 +280,7 @@ export function useConversationSession(initial: InitialConversationState) {
     window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
   }, []);
 
-  const setCreatedSession = useCallback((detail: SessionDetail) => {
+  const setCreatedSession = useCallback((detail: SessionDetail, preserveComposer = false) => {
     const previousId = selectedIdRef.current;
     const replacingPending = isPendingThread(previousId) && !isPendingThread(detail.threadId);
     if (replacingPending) sessionCache.current.delete(previousId);
@@ -288,7 +288,7 @@ export function useConversationSession(initial: InitialConversationState) {
     sessionCache.current.set(detail.threadId, detail);
     selectedIdRef.current = detail.threadId;
     setSelectedId(detail.threadId);
-    if (!replacingPending) setComposerKey(detail.threadId);
+    if (!replacingPending && !preserveComposer) setComposerKey(detail.threadId);
     setSession(detail);
     setSessionError("");
     setLoadingSession(false);

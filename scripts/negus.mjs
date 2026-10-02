@@ -1,4 +1,5 @@
-import { spawn, spawnSync } from "node:child_process";
+import { initializeCredentials, startManaged } from "./negus-deployment.mjs";
+import { spawnSync } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { promises as fs } from "node:fs";
 import http from "node:http";
@@ -9,11 +10,10 @@ import { createAppServerClient } from "../windows/server/app-server-client.mjs";
 const projectRoot = path.resolve(import.meta.dirname, "..");
 const runtimeRoot = path.join(projectRoot, "runtime");
 const stateFile = path.join(runtimeRoot, "negus-web-demo.json");
-const logFile = path.join(runtimeRoot, "negus-web-demo.log");
 const serverScript = path.join(projectRoot, "windows", "scripts", "remote-room-demo.mjs");
 const webRoot = path.join(projectRoot, "web-ui", "dist");
 const port = Number(process.env.NEGUS_PORT || "9360");
-const token = process.env.NEGUS_TOKEN || "demo123";
+const token = process.env.NEGUS_TOKEN || (await fs.readFile(path.join(runtimeRoot, "access-token"), "utf8").catch(() => "")).trim();
 const deviceName = process.env.NEGUS_DEVICE_NAME || os.hostname();
 const command = process.argv[2] || "status";
 const runtimeDirectories = ["uploads", "group-rooms", "employee-conversations", "agent-artifacts"];
@@ -64,6 +64,7 @@ const initialize = async () => {
   if (missing.length) throw new Error(`Required project files are missing: ${missing.join(", ")}. Use a complete repository checkout.`);
   await fs.mkdir(runtimeRoot, { recursive: true });
   await Promise.all(runtimeDirectories.map((entry) => fs.mkdir(path.join(runtimeRoot, entry), { recursive: true })));
+  await initializeCredentials();
   console.log(`[OK] Runtime initialized: ${runtimeRoot}`);
 };
 
@@ -137,66 +138,22 @@ const build = () => {
   if (result.status !== 0) process.exit(result.status || 1);
 };
 
-const stop = async () => {
-  const state = await readState();
-  if (!state || !processIsAlive(state.pid)) {
-    await fs.rm(stateFile, { force: true });
-    console.log("[OK] Web demo is not running.");
-    return;
-  }
-  process.kill(state.pid, "SIGTERM");
-  for (let attempt = 0; attempt < 20 && processIsAlive(state.pid); attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  if (processIsAlive(state.pid)) process.kill(state.pid, "SIGKILL");
-  await fs.rm(stateFile, { force: true });
-  console.log(`[OK] Stopped web demo PID ${state.pid}.`);
-};
-
 const status = async () => {
   const state = await readState();
   const ready = await request();
-  if (ready) console.log(`[OK] Web demo is ready: http://127.0.0.1:${port}/?token=${encodeURIComponent(token)}`);
+  if (ready) console.log(`[OK] Web demo is ready on port ${port}.`);
   else if (state && processIsAlive(state.pid)) console.log(`[WARN] Web demo PID ${state.pid} is running but not ready.`);
   else console.log("[INFO] Web demo is not running.");
 };
 
-const start = async () => {
-  await initialize();
-  if (!await fs.stat(webRoot).then(() => true).catch(() => false)) throw new Error("UI build output was not found. Run `pnpm negus:build` first.");
-  if (await request()) {
-    console.log(`[OK] Web demo is already running: http://127.0.0.1:${port}/?token=${encodeURIComponent(token)}`);
-    return;
-  }
-  await fs.mkdir(runtimeRoot, { recursive: true });
-  const log = await fs.open(logFile, "a");
-  const child = spawn(process.execPath, [serverScript, "--port", String(port), "--observer-port", "9350", "--project", "negus", "--project-root", projectRoot, "--web-root", webRoot, "--token", token, "--device-name", deviceName], {
-    cwd: projectRoot,
-    detached: true,
-    stdio: ["ignore", log.fd, log.fd],
-    env: process.env,
-  });
-  child.unref();
-  await log.close();
-  await fs.writeFile(stateFile, `${JSON.stringify({ pid: child.pid, port, startedAt: new Date().toISOString() })}\n`, "utf8");
-  for (let attempt = 0; attempt < 24; attempt += 1) {
-    if (await request()) {
-      console.log(`[OK] Web demo started: http://127.0.0.1:${port}/?token=${encodeURIComponent(token)}`);
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  const tail = await fs.readFile(logFile, "utf8").then((value) => value.trim().split(/\r?\n/u).slice(-8).join("\n")).catch(() => "");
-  if (!processIsAlive(child.pid)) await fs.rm(stateFile, { force: true });
-  throw new Error(`Web demo did not become ready within 6 seconds.${tail ? `\n${tail}` : ""}`);
-};
 
 try {
   if (command === "build") build();
+  else if (command === "rebuild") await (await import("./negus-frontend.mjs")).main(["restart"]);
   else if (command === "init") await initialize();
-  else if (command === "start") await start();
-  else if (command === "stop") await stop();
-  else if (command === "restart") { await stop(); await start(); }
+  else if (command === "start") console.log(JSON.stringify(await startManaged({ initialize })));
+  else if (command === "stop") await (await import("./negus-backend.mjs")).main(["stop"]);
+  else if (command === "restart") await (await import("./negus-supervisor.mjs")).main(["restart", ...process.argv.slice(3)]);
   else if (command === "status") await status();
   else if (command === "diagnose") await diagnose();
   else fail(`Unknown command: ${command}`);

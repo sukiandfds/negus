@@ -52,11 +52,11 @@ export function useDesktopWorkspace(session: SessionDetail | null, status: Execu
     return true;
   };
   const prepareRequest = (text: string) => {
-    if (!selected || !session) return { text, rollback: () => {} };
+    if (!selected || !session) return { text, rollback: () => {}, commit: (_threadId: string) => {} };
     const suffix = `\n\n区域执行上下文：针对桌面组件「${selected.title}」（ID: ${selected.id}，类型: ${selected.kind}）：位于第 ${selected.x + 1} 至 ${selected.x + selected.w} 列、第 ${selected.y + 1} 至 ${selected.y + selected.h} 行（共12列）。当前内容：${selected.image ? `图片 ${selected.image.src}，${selected.image.shape}` : selected.content?.text?.slice(0, 1200) || "空白"}。这是操作需求，默认直接完成可撤销的展示修改；未指定素材时自行选用合适的已有素材，不追问非必要偏好。仅在缺少执行必需信息或涉及付费、删除业务数据、对外发布时询问。实际结果必须更新此组件，不能把解释文字当成功能；回复留在助手对话里。`;
     const request = { threadId: session.threadId, text: text + suffix, after: session.messages.map((message) => message.id), state: "waiting" as const };
     setTiles((current) => current.map((tile) => tile.id === selected.id ? { ...tile, request } : tile));
-    return { text: request.text, rollback: () => setTiles((current) => current.map((tile) => tile.id === selected.id && tile.request === request ? { ...tile, request: selected.request } : tile)) };
+    return { text: request.text, commit: (threadId: string) => setTiles((current) => current.map((tile) => tile.id === selected.id && tile.request === request ? { ...tile, request: { ...request, threadId } } : tile)), rollback: () => setTiles((current) => current.map((tile) => tile.id === selected.id && tile.request === request ? { ...tile, request: selected.request } : tile)) };
   };
   const requestLabel = (tile: DesktopTile) => {
     const request = tile.request;

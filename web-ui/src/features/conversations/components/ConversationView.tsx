@@ -90,7 +90,7 @@ function Message({
       ) : null}
       {!executionPlaceholder ? <div className={styles.body}>
         {message.turnStatus === "interrupted" ? <small>已中断</small> : null}
-        {streaming ? <div className={styles.streamingText}>{assistantText ?? message.text}<i className={styles.cursor} /></div> : heartbeatUser ? <CollapsedMarkdown text={heartbeatUser.instructions} /> : <>{showPriorReply ? <div className={styles.priorReply}>追加指令前的回复</div> : null}<ContentRenderer message={shown} /></>}
+        {streaming ? <div className={styles.streamingText}>{assistantText ?? message.text}<i className={styles.cursor} /></div> : heartbeatUser ? <CollapsedMarkdown text={heartbeatUser.instructions} /> : <>{showPriorReply ? <div className={styles.priorReply}>追加指令前的回复</div> : null}<ContentRenderer message={shown} threadId={threadId} /></>}
         {message.deliveryState === "pending" ? (
           <span className={styles.deliveryState} title="正在确认指令是否已送达" aria-label="正在确认指令是否已送达">
             <Clock3 aria-hidden="true" />

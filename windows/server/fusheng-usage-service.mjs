@@ -1,4 +1,6 @@
 import fs from "node:fs/promises";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
 const DEFAULT_FEATURED_GROUP = "gpt 易燃易爆炸";
@@ -49,7 +51,7 @@ const requestJson = async (fetchImpl, url, headers = undefined) => {
   let response;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      response = await fetchImpl(url, { method: "GET", headers });
+      response = await fetchImpl(url, { method: "GET", headers, signal: AbortSignal.timeout(8000), redirect: "error" });
       break;
     } catch {
       if (attempt === 1) throw serviceError("浮生云算网络连接失败");
@@ -67,6 +69,7 @@ const requestJson = async (fetchImpl, url, headers = undefined) => {
 
 export const createFushengUsageService = ({
   credentialsFile,
+  legacyCredentialsFile,
   fetchImpl = fetch,
   now = () => new Date(),
   cacheMs = 15_000,
@@ -76,10 +79,59 @@ export const createFushengUsageService = ({
   let cachedAt = 0;
   let cachedKey = "";
   let inFlight = null;
+  const loadCredentials = async () => {
+    // Only fall back when the new file does not exist, never after a corrupt write.
+    const exists = await fs.access(credentialsFile).then(() => true, () => false);
+    return readCredentials(!exists && legacyCredentialsFile ? legacyCredentialsFile : credentialsFile);
+  };
+  const credentialStatus = async () => {
+    const value = await loadCredentials().catch(() => null);
+    return { configured: Boolean(value), userId: value?.userId ?? null };
+  };
+  const saveCredentials = async (input) => {
+    const userId = Number(input.userId);
+    const accessToken = typeof input.accessToken === 'string' ? input.accessToken.trim() : '';
+    if (!Number.isSafeInteger(userId) || userId <= 0 || !accessToken || accessToken.length > 8192 || /\s/.test(accessToken))
+      throw serviceError('请填写有效的用户 ID 和账户访问令牌', 400);
+    const value = { base_url: 'https://fushengyunsuan.cn', user_id: userId, access_token: accessToken };
+    const temporary = `${credentialsFile}.${randomUUID()}.tmp`;
+    await fs.mkdir(path.dirname(credentialsFile), { recursive: true, mode: 0o700 });
+    try {
+      await fs.writeFile(temporary, JSON.stringify(value), { mode: 0o600, flag: 'wx' });
+      await fs.rename(temporary, credentialsFile);
+    } finally {
+      await fs.rm(temporary, { force: true });
+    }
+    if (inFlight) await inFlight.catch(() => {});
+    cached = null;
+    cachedAt = 0;
+    cachedKey = '';
+    return { configured: true, userId };
+  };
+
 
   const readChannelRatios = async (entries) => {
-    const credentials = await readCredentials(credentialsFile);
+    const credentials = await loadCredentials().catch(() => null);
     const timedFetch = (url, options) => fetchImpl(url, { ...options, signal: AbortSignal.timeout(6000), redirect: 'error' });
+    if (!credentials) {
+      const eligible = entries.filter(entry => entry.key && entry.baseUrl && (() => {
+        try { return new URL(entry.baseUrl).origin === 'https://fushengyunsuan.cn'; } catch { return false; }
+      })());
+      if (!eligible.length) return {};
+      const pricing = await requestJson(timedFetch, 'https://fushengyunsuan.cn/api/pricing');
+      const result = {};
+      await Promise.all(eligible.map(async entry => {
+        try {
+          const token = await requestJson(timedFetch, 'https://fushengyunsuan.cn/api/usage/token/', { Authorization: 'Bearer ' + entry.key });
+          // A token name is not a group identifier. Never guess from configuration names.
+          const group = token.data?.group;
+          const ratio = group ? pricing.group_ratio?.[group] : undefined;
+          if (ratio !== undefined && Number.isFinite(Number(ratio)) && Number(ratio) >= 0)
+            result[entry.id] = { priceRatio: Number(ratio), priceGroup: group, ratioSource: 'supplier' };
+        } catch {}
+      }));
+      return result;
+    }
     const headers = { Authorization: `Bearer ${credentials.accessToken}`, 'New-Api-User': String(credentials.userId) };
     const [tokens, pricing] = await Promise.all([
       requestJson(timedFetch, new URL('/api/token/?p=1&page_size=100', credentials.baseUrl), headers),
@@ -106,7 +158,7 @@ export const createFushengUsageService = ({
   const query = async () => {
     const currentDate = now();
     const range = shanghaiRange(currentDate);
-    const credentials = await readCredentials(credentialsFile);
+    const credentials = await loadCredentials();
     const headers = {
       Authorization: `Bearer ${credentials.accessToken}`,
       "New-Api-User": String(credentials.userId),
@@ -184,5 +236,5 @@ export const createFushengUsageService = ({
     return inFlight;
   };
 
-  return { read, readChannelRatios };
+  return { read, readChannelRatios, credentialStatus, saveCredentials };
 };

@@ -3,6 +3,7 @@ import { Brain, ChevronRight, CircleAlert, FilePenLine, LoaderCircle, Search, Te
 import type { ExecutionActivity, ExecutionStatus } from "../model/types";
 import type { ContextStatus } from "../../context-management/model/types";
 import styles from "./ExecutionTimeline.module.css";
+import { CodeBlock } from "../../../shared/components/CodeBlock";
 
 const iconFor = (activity: ExecutionActivity) => {
   if (activity.phase === "command") return Terminal;
@@ -78,7 +79,9 @@ export function ExecutionTimeline({
                   {activity.detail
                     ? activity.phase === "working"
                       ? <span>{activity.detail}</span>
-                      : <code>{activity.detail}</code>
+                      : activity.phase === "command"
+                        ? <CodeBlock text={activity.detail} language="命令" compact />
+                        : <code>{activity.detail}</code>
                     : null}
                 </div>
               </div>

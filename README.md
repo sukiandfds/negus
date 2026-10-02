@@ -1,62 +1,32 @@
-# negus 仓库入口
+# Negus
 
-文档更新时间：2026-09-14 01:03 +08:00
+**以个人助理为主要沟通入口、可以持续自定义的工作空间。**
 
-**Negus：你需要什么工作功能，直接说出来。**
+用户从桌面查看自己关心的内容，与总助理沟通；简单请求快速处理，复杂工作可以委派给专业 Agent，过程和结果可追踪。功能应连接真实数据，并能相互复用。上述为产品方向，具体实现与验收见功能档案。
 
-产品方向是一个可以用自然语言不断定制的个人／企业工作空间：有网络和浏览器即可访问已部署、获授权的工作区；按需求创建或调整功能页面，把入口放在需要的位置。每日资讯、项目进度、进销存入口、报销上传、会议预约和员工间 AI 通信都是目标场景，具体实现状态见[产品定义](./PRODUCT_DEFINITION.md#产品定位与核心卖点)。
+## 从这里开始
 
-本仓库包含两套相互独立的产品代码：
+- [产品定义](PRODUCT_DEFINITION.md)：当前方向、有效行为和待定边界。
+- [项目说明](PROJECT.md)：现有能力、代码与运行入口。
+- [文档导航与项目记忆](docs/README.md)：最新决定、历史依据、开放问题和按需阅读路径。
+- [功能状态索引](docs/feature-development/FEATURE_STATUS_INDEX.md)：23 个功能的入口与记录边界。
+- [助手工作规则](AI_ASSISTANT_WORK_RULES.md)：开发前阅读；用户偏好见 [用户画像](USER_PROFILE.md)。
 
-1. **negus Web 工作空间**：当前提供真实 Codex 对话与控制、项目群聊、Agent 和交付物能力，逐步发展自然语言定制功能页面的完整流程。
-2. **Codex Dream Skin 换肤工具**：通过本机 CDP 给 Codex 桌面端加载外部主题。
+## 代码入口
 
-两套产品共用仓库，但文档、代码和运行方式分开维护。
-
-## negus Web 协作工作台
-
-当前开发分支已有真实 Codex 对话与执行控制、后续消息队列、模型与上下文设置、原生 Goal 状态操作、多项目目录、员工单聊与项目群聊、附件与生图、Artifact/HTML/PDF 交付，以及移动端和项目管理入口。
-
-完整介绍见 [现有实现功能介绍](./PROJECT.md#现有实现功能介绍)。本轮按 `codex/publish-current-panel` 的源码核对；代码存在不等于运行环境可用或用户验收通过。员工自动成长、群聊完整体验、Desktop/Web 同步和远程长期稳定性仍有明确边界。
-
-- 项目说明、运行方式和模块代码索引：[`PROJECT.md`](./PROJECT.md)
-- 当前全部产品功能和不可违反的规则：[`PRODUCT_DEFINITION.md`](./PRODUCT_DEFINITION.md)
-- 助手工作规则：[`AI_ASSISTANT_WORK_RULES.md`](./AI_ASSISTANT_WORK_RULES.md)
-- 功能状态：[`docs/feature-development/FEATURE_STATUS_INDEX.md`](./docs/feature-development/FEATURE_STATUS_INDEX.md)
-- 功能开发说明：[`docs/feature-development/README.md`](./docs/feature-development/README.md)
-- 架构说明：[`docs/architecture/README.md`](./docs/architecture/README.md)
-- 宣传口径与演示建议：[`docs/promo-copy.md`](./docs/promo-copy.md)
-
-主要代码：
-
-| 目录 | 内容 |
+| 路径 | 用途 |
 | --- | --- |
-| `web-ui/` | React、TypeScript、Vite 前端 |
-| `windows/server/` | Web 服务、API、SSE 和业务模块 |
-| `runtime/` | 会话、执行、Artifact、员工和媒体数据 |
+| `web-ui/` | React / TypeScript / Vite 页面 |
+| `windows/server/` | Node.js API、SSE、会话与业务服务 |
+| `scripts/negus.mjs` | 跨平台构建、启动和状态入口 |
+| `runtime/` | 本机运行数据，不作为可随意清理的源码残留 |
 
-开发命令：
+Mac 部署正常执行 `pnpm negus:build`、`pnpm negus:start` 后，自带每 3 小时检查及退出恢复，无需单独安装定时任务。依赖、访问凭据和平台边界见 [部署与服务维护](docs/operations/NEGUS_SERVICE_CONTROL.md)。
 
-```powershell
-pnpm build:ui
-pnpm start:demo
-```
+运行前查看 [项目说明](PROJECT.md)。真实 Codex 执行、群聊、桌面、配置、附件及成果能力已有代码基础；任意业务组件自动生成发布、完整助理组织和双端无缝同步尚不能视为已交付。
 
-## Codex Dream Skin 换肤工具
+## 历史换肤工具
 
-平台说明紧挨对应代码目录：
+Codex Dream Skin 是项目的历史来源，已确定逐步退出当前产品范围。代码尚未删除，清理前须核对共用脚本、素材和 CI 依赖。原有 [macOS](macos/README.md) / [Windows](windows/README.md) 文档保留供追溯。
 
-| 平台 | 用户说明 | 助手和维护者规则 | 代码目录 |
-| --- | --- | --- | --- |
-| macOS | [`macos/README.md`](./macos/README.md) | [`macos/SKILL.md`](./macos/SKILL.md) | [`macos/`](./macos/) |
-| Windows | [`windows/README.md`](./windows/README.md) | [`windows/SKILL.md`](./windows/SKILL.md) | [`windows/`](./windows/) |
-
-换肤工具只通过本机回环 CDP 注入，不修改官方 `.app`、`app.asar`、WindowsApps 或代码签名。
-
-## 其他资料
-
-- 换肤项目记录：[`docs/CODEX_DREAM_SKIN_PROJECT_NOTES.md`](./docs/CODEX_DREAM_SKIN_PROJECT_NOTES.md)
-- 架构、研究和运行记录：[`docs/`](./docs/)
-- 历史开发记录：[`docs/records/`](./docs/records/)
-
-本项目不是 OpenAI 官方产品。具体功能和安全边界以对应产品目录中的说明和当前源码为准。
+[English](README.en.md) · 非 OpenAI 官方产品。文档整理：2026-09-29 18:31 +08:00，PM-003。

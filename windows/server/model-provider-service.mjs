@@ -1,3 +1,5 @@
+import { withVerifiedReasoning } from './model-capabilities.mjs';
+import { readCurrentApiConfiguration } from "./current-api-configuration.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from 'node:os';
@@ -14,6 +16,8 @@ export const GROK_MODEL_ID = "grok-4.6";
 const SHARED_CONFIG_CACHE_MS = 15_000;
 
 const providerIdPattern = /^[a-z0-9][a-z0-9_-]{0,79}$/u;
+const sharedProviderIdPattern = /^ccswitch_[\p{L}\p{N}_-]+$/u;
+const validProviderId = (id) => id.length <= 80 && (providerIdPattern.test(id) || sharedProviderIdPattern.test(id));
 const helperScript = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -27,8 +31,8 @@ const tomlString = (value) => JSON.stringify(String(value));
 const tomlStringArray = (values) => `[${values.map(tomlString).join(", ")}]`;
 
 const normalizeProvider = (value) => {
-  const id = clean(value?.id, 80);
-  if (!providerIdPattern.test(id)) throw new Error(`Invalid model provider id: ${id || "empty"}`);
+  const id = String(value?.id || "");
+  if (!validProviderId(id)) throw new Error(`Invalid model provider id: ${id || "empty"}`);
   const mode = value?.mode === "current" ? "current" : "isolated";
   const models = (Array.isArray(value?.models) ? value.models : []).map((entry) => ({
     id: clean(entry?.id || entry?.model, 120),
@@ -44,6 +48,7 @@ const normalizeProvider = (value) => {
   return {
     id,
     mode,
+    credentialFingerprint: value?.credentialFingerprint || "",
     displayName: clean(value?.displayName, 160) || id,
     baseUrl: clean(value?.baseUrl, 500),
     wireApi: clean(value?.wireApi, 40) || "responses",
@@ -83,8 +88,8 @@ export const defaultModelProviders = () => [
 ];
 
 const requireProviderId = (providerId) => {
-  const id = clean(providerId, 80);
-  if (!providerIdPattern.test(id)) throw statusError("Invalid model provider id.", 400);
+  const id = String(providerId || "");
+  if (!validProviderId(id)) throw statusError("Invalid model provider id.", 400);
   return id;
 };
 
@@ -166,12 +171,14 @@ export const renderModelProviderConfig = ({
   credentialFile,
   credentialHelper = helperScript,
   workingDirectory,
+  credentialCommand,
 }) => {
   const normalized = normalizeProvider(provider);
   if (normalized.mode !== "isolated" || !normalized.baseUrl || !normalized.defaultModel) {
     throw new Error(`Provider ${normalized.id} does not have an isolated runtime configuration.`);
   }
   const cwd = path.resolve(workingDirectory);
+  const providerKey = /^[A-Za-z0-9_-]+$/u.test(normalized.id) ? normalized.id : tomlString(normalized.id);
   const args = [
     "-NoProfile",
     "-NonInteractive",
@@ -184,14 +191,14 @@ export const renderModelProviderConfig = ({
     `model_provider = ${tomlString(normalized.id)}`,
     `model = ${tomlString(normalized.defaultModel)}`,
     "",
-    `[model_providers.${normalized.id}]`,
+    `[model_providers.${providerKey}]`,
     `name = ${tomlString(normalized.displayName)}`,
     `base_url = ${tomlString(normalized.baseUrl)}`,
     `wire_api = ${tomlString(normalized.wireApi)}`,
     "",
-    `[model_providers.${normalized.id}.auth]`,
-    `command = ${tomlString("powershell.exe")}`,
-    `args = ${tomlStringArray(args)}`,
+    `[model_providers.${providerKey}.auth]`,
+    `command = ${tomlString(credentialCommand?.command || "powershell.exe")}`,
+    `args = ${tomlStringArray(credentialCommand?.args || args)}`,
     "timeout_ms = 5000",
     "refresh_interval_ms = 300000",
     `cwd = ${tomlString(cwd)}`,
@@ -199,14 +206,15 @@ export const renderModelProviderConfig = ({
   ].join("\n");
 };
 
-const ensureCodexHome = async ({ runtimeRoot, provider, credentialStore, credentialHelper, projectRoot }) => {
+const ensureCodexHome = async ({ runtimeRoot, provider, credentialStore, credentialHelper, projectRoot, sharedConfig }) => {
   const codexHome = path.join(path.resolve(runtimeRoot), provider.id, "codex-home");
   const configFile = path.join(codexHome, "config.toml");
   const config = renderModelProviderConfig({
     provider,
-    credentialFile: credentialStore.credentialPath(provider.id),
+    credentialFile: provider.id.startsWith('ccswitch_') ? '' : credentialStore.credentialPath(provider.id),
     credentialHelper,
     workingDirectory: projectRoot,
+    credentialCommand: provider.id.startsWith('ccswitch_') ? sharedConfig.credentialCommand(provider.id, provider.credentialFingerprint) : undefined,
   });
   let current = "";
   try { current = await fs.readFile(configFile, "utf8"); } catch {}
@@ -230,6 +238,7 @@ export const createModelProviderService = ({
   createClient = createAppServerClient,
   sharedConfig = createCcSwitchConfigService(),
   fetchModels = globalThis.fetch,
+  currentApiConfiguration = readCurrentApiConfiguration,
 } = {}) => {
   if (!projectRoot) throw new Error("Project root is required for model provider routing.");
   const providerMap = new Map(providers.map(normalizeProvider).map((provider) => [provider.id, provider]));
@@ -237,6 +246,7 @@ export const createModelProviderService = ({
   if (!currentProvider || currentProvider.mode !== "current") {
     throw new Error(`Provider ${CURRENT_MODEL_PROVIDER_ID} must use the current runtime.`);
   }
+  const nativeConfiguration = Promise.resolve().then(currentApiConfiguration).catch(() => null);
   const clientPromises = new Map();
   const ownedClients = new Map();
   let refreshing = null;
@@ -255,14 +265,20 @@ export const createModelProviderService = ({
     if (!refreshing) refreshing = (async () => {
       await catalogReady;
       const entries = await sharedConfig.runtimeProviders({ force });
-      const currentDisplayName = await sharedConfig.currentDisplayName?.({ force });
-      if (currentDisplayName) currentProvider.displayName = currentDisplayName;
+      const native = await nativeConfiguration;
+      if (native) {
+        const match = entries.find(entry => entry.baseUrl.replace(/\/$/u, "") === native.baseUrl && entry.key === native.key);
+        currentProvider.sharedConfigId = match?.id?.replace(/^ccswitch_/u, '') || '';
+        currentProvider.displayName = match?.displayName || native.name || "当前运行配置";
+        currentProvider.baseUrl = native.baseUrl;
+        applyCatalog(currentProvider);
+      }
       for (const entry of entries) {
         // Running clients retain their configuration until the service is safely restarted.
         if (clientPromises.has(entry.id)) continue;
         const fingerprint = createHash('sha256').update(JSON.stringify(entry)).digest('hex');
         if (fingerprints.get(entry.id) === fingerprint) continue;
-        await credentialStore.save(entry.id, entry.key);
+        // Shared providers read the authoritative DB through command auth; no DPAPI copy.
         providerMap.set(entry.id, normalizeProvider(entry));
         fingerprints.set(entry.id, fingerprint);
       }
@@ -282,10 +298,16 @@ export const createModelProviderService = ({
     const id = requireProviderId(providerId);
     if (catalogRequests.has(id)) return catalogRequests.get(id);
     const request = (async () => {
-      await refreshShared({ force: true });
+      const native = id === CURRENT_MODEL_PROVIDER_ID ? await nativeConfiguration : null;
+      if (id === CURRENT_MODEL_PROVIDER_ID && !native) return; // OAuth/native-only runtime uses model/list.
+      if (native) { await catalogReady; currentProvider.baseUrl = native.baseUrl; applyCatalog(currentProvider); }
+      if (id.startsWith('ccswitch_')) await refreshShared({ force: true });
+      else { await catalogReady; for (const entry of providerMap.values()) applyCatalog(entry); }
       const provider = providerMap.get(id);
-      if (!provider || provider.mode === 'current') return;
-      const credential = await credentialStore.read(id);
+      if (!provider) throw statusError('配置不存在，请刷新配置列表', 404);
+      const credential = native ? native.key : id.startsWith('ccswitch_')
+        ? await sharedConfig.readCredential(id, provider.credentialFingerprint)
+        : await credentialStore.read(id);
       let payload;
       try {
         const url = new URL(`${provider.baseUrl.replace(/\/$/, '')}/models`);
@@ -335,7 +357,7 @@ export const createModelProviderService = ({
     const inferred = modelOwner(modelId);
     const provider = requestedProvider || inferred;
     if (!provider) throw statusError("Model provider is not registered.", 400);
-    if (provider.id.startsWith('ccswitch_') ? Boolean(modelId && !provider.models.some((entry) => entry.model === modelId)) : provider.id !== inferred.id) {
+    if (provider.mode !== 'current' && modelId && !provider.models.some((entry) => entry.model === modelId)) {
       throw statusError(`Model ${modelId || "(default)"} does not belong to provider ${provider.id}.`, 400);
     }
     return { modelProviderId: provider.id, model: modelId, provider };
@@ -344,13 +366,29 @@ export const createModelProviderService = ({
   const isProviderConfigured = async (providerId) => {
     const provider = providerMap.get(requireProviderId(providerId));
     if (!provider) return false;
-    return provider.mode === "current" || credentialStore.isConfigured(provider.id);
+    if (provider.mode === "current") return true;
+    if (provider.id.startsWith('ccswitch_')) {
+      try { await sharedConfig.readCredential(provider.id, provider.credentialFingerprint); return true; } catch { return false; }
+    }
+    return credentialStore.isConfigured(provider.id);
   };
 
   const listModels = async (currentModels = []) => {
     await refreshShared().catch(() => {});
-    const current = (Array.isArray(currentModels) ? currentModels : []).filter((model) => !model.modelProviderId || model.modelProviderId === CURRENT_MODEL_PROVIDER_ID).map((model) => ({
-      ...model,
+    const native = await nativeConfiguration;
+    await catalogReady;
+    if (native) { currentProvider.baseUrl = native.baseUrl; applyCatalog(currentProvider); }
+    const nativeModels = Array.isArray(currentModels) ? currentModels : [];
+    const currentCatalog = catalogs[CURRENT_MODEL_PROVIDER_ID]?.baseUrl === native?.baseUrl
+      ? catalogs[CURRENT_MODEL_PROVIDER_ID]?.models : null;
+    const nativeByModel = new Map(nativeModels.map(entry => [entry.model, entry]));
+    const visibleCurrent = currentCatalog
+      ? currentCatalog.map(entry => ({ ...entry, ...(nativeByModel.get(entry.model) || {}) }))
+      : nativeModels;
+    const current = visibleCurrent.filter((model) => !model.modelProviderId || model.modelProviderId === CURRENT_MODEL_PROVIDER_ID).map((model) => ({
+      ...withVerifiedReasoning(model, native?.baseUrl),
+      ...(modelOwner(model.model).id !== CURRENT_MODEL_PROVIDER_ID
+        ? { id: `current::${model.model}`, model: `current::${model.model}` } : {}),
       modelProviderId: CURRENT_MODEL_PROVIDER_ID,
       providerDisplayName: currentProvider.displayName,
       available: true,
@@ -359,18 +397,21 @@ export const createModelProviderService = ({
     const external = [];
     for (const provider of providerMap.values()) {
       if (provider.mode === "current") continue;
-      const available = await credentialStore.isConfigured(provider.id);
-      external.push(...provider.models.map((model) => ({
-        ...model,
-        ...(provider.id === GROK_MODEL_PROVIDER_ID && model.model === 'grok-4.7'
-          ? { supportedReasoningEfforts: ['low', 'medium', 'high'].map((reasoningEffort) => ({ reasoningEffort, description: '' })) }
-          : {}),
-        ...(provider.id.startsWith('ccswitch_') ? { supportedReasoningEfforts: current.find((entry) => entry.model === model.model)?.supportedReasoningEfforts || model.supportedReasoningEfforts } : {}),
+      const available = await isProviderConfigured(provider.id);
+      external.push(...provider.models.map((storedModel) => {
+        const nativeEfforts = provider.id.startsWith("ccswitch_")
+          ? nativeByModel.get(storedModel.model)?.supportedReasoningEfforts : null;
+        const model = withVerifiedReasoning({ ...storedModel,
+          supportedReasoningEfforts: nativeEfforts?.length ? nativeEfforts : storedModel.supportedReasoningEfforts,
+        }, provider.baseUrl);
+        return {
+          ...model,
         ...(provider.id.startsWith('ccswitch_') ? { id: `${provider.id}::${model.model}`, model: `${provider.id}::${model.model}`, displayName: `${provider.displayName} · ${model.model}` } : {}),
         modelProviderId: provider.id,
         providerDisplayName: provider.displayName,
         available,
-      })));
+        };
+      }));
     }
     return [...current, ...external];
   };
@@ -382,16 +423,17 @@ export const createModelProviderService = ({
       if (!defaultClient) throw statusError("Current Codex provider is unavailable.", 503);
       return defaultClient;
     }
-    if (!await credentialStore.isConfigured(route.provider.id)) {
+    if (!await isProviderConfigured(route.provider.id)) {
       throw statusError(`${route.provider.displayName} credential is not configured.`, 503);
     }
     if (!clientPromises.has(route.provider.id)) {
       const promise = ensureCodexHome({
         runtimeRoot,
-        provider: route.provider,
+        provider: route.provider.defaultModel ? route.provider : { ...route.provider, defaultModel: route.model || route.provider.models[0]?.model },
         credentialStore,
         credentialHelper,
         projectRoot,
+        sharedConfig,
       }).then((codexHome) => {
         const client = createClient({
           codexHome,
@@ -434,6 +476,8 @@ export const createModelProviderService = ({
   };
 
   return {
+    isInUse: (providerId) => clientPromises.has(providerId),
+    currentConfiguration: () => nativeConfiguration,
     providers: () => [...providerMap.values()].map((provider) => ({ ...provider })),
     resolveRoute,
     listModels,

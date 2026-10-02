@@ -162,6 +162,55 @@ const cleanUserAttachmentEnvelope = (blocks) => blocks.flatMap((block) => {
   return cleaned ? [{ ...block, text: cleaned }] : [];
 });
 
+// Normalize attachment context before Markdown parsing: document text must not
+// become user prose (or produce inline images/options in the conversation).
+const userBlocksFromContent = (content, registerMedia) => {
+  const files = [];
+  const names = new Set();
+  const collect = (value) => {
+    if (Array.isArray(value)) return value.forEach(collect);
+    if (value && typeof value === "object") {
+      if (["mention", "file", "attachment", "inputfile"].includes(String(value.type || "").replace(/[_-]/g, "").toLowerCase())) {
+        if (value.name && blocksFromContent(value, registerMedia).length) names.add(value.name);
+      }
+      if (typeof value.text === "string") collect(value.text);
+      return;
+    }
+    if (typeof value !== "string" || !value.startsWith("# Files mentioned by the user:")) return;
+    const marker = /^## My request(?: for Codex)?:\s*$/mu.exec(value);
+    if (!marker) return;
+    for (const match of value.slice(0, marker.index).matchAll(/^## (.+?): (.+)$/gmu)) {
+      const block = mediaBlock("file", match[2].trim(), registerMedia, { name: match[1] });
+      if (block) { names.add(match[1]); files.push(block); }
+    }
+  };
+  const clean = (value) => {
+    if (Array.isArray(value)) return value.map(clean);
+    if (value && typeof value === "object") {
+      if (["text", "input_text", "inputText"].includes(value.type)) return { ...value, text: clean(value.text || value.input_text || "") };
+      return value;
+    }
+    if (typeof value !== "string") return value;
+    let text = value.trimEnd();
+    // Only remove complete trailing envelopes paired with a real file reference.
+    // A bare marker in ordinary prose is not evidence of an uploaded document.
+    while (text.endsWith("\n[附件正文结束]")) {
+      let start = -1;
+      for (const name of names) {
+        const index = text.indexOf(`[附件正文：${name}]\n`);
+        if (index >= 0 && (index === 0 || text[index - 1] === "\n")) start = start < 0 ? index : Math.min(start, index);
+      }
+      if (start < 0) break;
+      text = text.slice(0, start).trimEnd();
+    }
+    return text;
+  };
+  collect(content);
+  const blocks = cleanUserAttachmentEnvelope(blocksFromContent(clean(content), registerMedia));
+  const sources = new Set(blocks.filter((block) => block.type === "file").map((block) => block.source));
+  return [...blocks, ...files.filter((block) => !sources.has(block.source) && sources.add(block.source))];
+};
+
 const typedInputs = (value, type) => {
   const items = Array.isArray(value) ? value : value ? [value] : [];
   return items.map((item) => typeof item === "string" ? { type, path: item } : item);
@@ -204,8 +253,7 @@ export const messageFromItem = (item, registerMedia) => {
     return null;
   }
 
-  const parsedBlocks = blocksFromContent(content, registerMedia);
-  const blocks = role === "user" ? cleanUserAttachmentEnvelope(parsedBlocks) : parsedBlocks;
+  const blocks = role === "user" ? userBlocksFromContent(content, registerMedia) : blocksFromContent(content, registerMedia);
   const text = visibleText(blocks);
   if (role === "user" && !isUsefulUserMessage(text, blocks)) return null;
   if (!blocks.length) return null;
@@ -252,7 +300,7 @@ export const dedupeAssistantMediaMessages = (messages, seen = new Set()) => (Arr
 
 export const messageFromThreadItem = (item, registerMedia) => {
   if (item?.type === "userMessage") {
-    const blocks = cleanUserAttachmentEnvelope(blocksFromContent(item.content, registerMedia));
+    const blocks = userBlocksFromContent(item.content, registerMedia);
     const text = visibleText(blocks);
     if (!isUsefulUserMessage(text, blocks)) return null;
     const submissionId = typeof item.clientId === "string" ? item.clientId.trim() : "";

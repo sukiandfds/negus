@@ -22,12 +22,12 @@ export function ReasoningEffortSelect({
     <select
       className={styles.select}
       aria-label="调整推理强度"
-      title={error || `推理强度：${formatReasoningEffort(selected) || "未读取"}`}
+      title={error || `推理强度：${formatReasoningEffort(selected) || "可选档位尚未确认"}`}
       value={selected}
       disabled={disabled || loading || changing || !options.length}
       onChange={(event) => void onChange(event.target.value)}
     >
-      {!selected ? <option value="">推理强度</option> : null}
+      {!selected ? <option value="">{options.length ? "推理强度" : "强度未确认"}</option> : null}
       {options.map((entry) => {
         const description = reasoningEffortDescription(entry.reasoningEffort);
         return (

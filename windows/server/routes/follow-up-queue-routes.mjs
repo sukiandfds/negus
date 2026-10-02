@@ -1,3 +1,4 @@
+import { isReasoningEffort } from '../reasoning-efforts.mjs';
 import { randomUUID } from "node:crypto";
 import { readJson, sendJson } from "../http/request-utils.mjs";
 
@@ -41,7 +42,16 @@ export const createFollowUpQueueRoutes = ({ queue, media }) => async (request, r
       sendJson(response, { error: "message is too long" }, 413);
       return true;
     }
+    const modelSettings = body.modelSettings;
+    if (modelSettings !== undefined && (!modelSettings || typeof modelSettings.model !== "string"
+      || !modelSettings.model || modelSettings.model.length > 240
+      || typeof modelSettings.reasoningEffort !== "string"
+      || !isReasoningEffort(modelSettings.reasoningEffort))) {
+      sendJson(response, { error: "排队消息的模型设置无效" }, 400);
+      return true;
+    }
     const item = await queue.enqueue({
+      modelSettings,
       threadId,
       text,
       attachmentIds,

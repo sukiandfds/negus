@@ -1,3 +1,5 @@
+import { createModelDefaultsStore } from "../model-defaults-store.mjs";
+import { createProviderProbe } from "../provider-probe.mjs";
 import path from "node:path";
 import { sendJson } from "../http/request-utils.mjs";
 import {
@@ -22,15 +24,40 @@ const createObserverReader = (observerPort) => async (threadId = "") => {
 };
 
 export const createSystemRoutes = ({ token, project, projectRoot, device, observerPort, media, realtime, modelProviders, fushengUsage }) => {
+  const defaults = createModelDefaultsStore(path.join(projectRoot, "runtime/model-defaults.json"));
+  const probe = modelProviders?.sharedConfig?.resolveDraft
+    ? createProviderProbe({ resolveDraft: modelProviders.sharedConfig.resolveDraft }) : null;
   const readObserverStatus = createObserverReader(observerPort);
   const progressFile = path.join(projectRoot, "docs", "feature-development", "FEATURE_STATUS_INDEX.md");
   return async (request, response, url) => {
+    if (url.pathname === '/api/model-defaults') {
+      response.setHeader('Cache-Control', 'no-store');
+      if (request.method === 'GET') { sendJson(response, await defaults.read()); return true; }
+      if (request.method === 'POST') {
+        const body = await readJson(request, 4096);
+        if (body.providerId?.startsWith('ccswitch_')) {
+          const entries = await modelProviders.sharedConfig.list(undefined, { force: true });
+          const entry = entries.find(e => 'ccswitch_' + e.id === body.providerId);
+          if (!entry || !body.model?.startsWith(body.providerId + '::')) throw Object.assign(new Error('配置已不存在或模型不属于此配置'), { statusCode: 400 });
+        } else if (body.providerId) modelProviders.resolveRoute({ model: body.model, modelProviderId: body.providerId });
+        sendJson(response, await defaults.save(body)); return true;
+      }
+    }
     if (url.pathname === '/api/model-channels' && modelProviders?.sharedConfig) {
-      response.setHeader('Cache-Control', 'private, max-age=5, stale-while-revalidate=30');
+      response.setHeader('Cache-Control', 'no-store');
       if (request.method === 'GET') {
         const force = url.searchParams.get('refresh') === '1';
+        await modelProviders.refreshShared?.({ force });
         sendJson(response, { channels: await modelProviders.sharedConfig.list(async (entries) => {
           // Include built-in API providers in the same cached supplier lookup.
+          const current = (modelProviders.providers?.() || []).find(entry => entry.id === 'current');
+          if (current?.baseUrl) {
+            const native = await modelProviders.currentConfiguration?.();
+            const shared = entries.find(entry => entry.id === current.sharedConfigId);
+            entries.push({ ...shared, id: 'current', sharedConfigId: current.sharedConfigId,
+              name: current.displayName, baseUrl: current.baseUrl, key: native?.key || '',
+              model: native?.model || shared?.model || '', modelKey: 'current', configured: Boolean(native?.key), editable: false });
+          }
           const builtIns = (modelProviders.providers?.() || []).filter((entry) => entry.mode === 'isolated' && !entry.id.startsWith('ccswitch_'));
           await Promise.all(builtIns.map(async (provider) => {
             const key = await modelProviders.credentials.read(provider.id).catch(() => '');
@@ -44,9 +71,21 @@ export const createSystemRoutes = ({ token, project, projectRoot, device, observ
       }
       if (request.method === 'POST') {
         const body = await readJson(request, 16384);
+        if (body.action === 'discover' || body.action === 'test') {
+          if (!probe) throw new Error('配置测试暂不可用');
+          sendJson(response, await probe(body));
+          return true;
+        }
+        if (body.action === 'delete' && modelProviders.isInUse?.('ccswitch_' + body.id))
+          throw Object.assign(new Error('配置仍有运行环境在使用，暂不能删除'), { statusCode: 409 });
         const result = body.action === 'delete'
           ? await modelProviders.sharedConfig.remove(String(body.id || ''))
           : await modelProviders.sharedConfig.save(body);
+        const savedDefaults = await defaults.read();
+        if (savedDefaults.providerId === 'ccswitch_' + (body.id || '')) {
+          if (body.action === 'delete' || !body.model) await defaults.save({});
+          else await defaults.save({ ...savedDefaults, model: savedDefaults.providerId + '::' + body.model, effort: body.reasoningEffort || '' });
+        }
         await modelProviders.refreshShared({ force: true });
         sendJson(response, result);
         return true;

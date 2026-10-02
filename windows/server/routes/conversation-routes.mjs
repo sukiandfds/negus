@@ -1,3 +1,4 @@
+import { resolveConversationFile } from "../conversation-file.mjs";
 import { randomUUID } from "node:crypto";
 import { paginationFrom, readJson, sendJson } from "../http/request-utils.mjs";
 
@@ -149,6 +150,15 @@ export const createConversationRoutes = ({
   };
 
   return async (request, response, url) => {
+  if (url.pathname === "/api/session/file" && request.method === "GET") {
+    const threadId = url.searchParams.get("threadId") || "";
+    const conversationId = url.searchParams.get("conversationId") || "";
+    const binding = await authorizeAgentThread({ threadId, conversationId, allowGroup: true });
+    const session = binding ? await readAgentSession(binding, "all", {}) : await conversations.findSession(threadId, "all", {});
+    const file = await resolveConversationFile(session, url.searchParams.get("messageId"), url.searchParams.get("href"));
+    await media.serve(request, response, media.register(file).id, { text: true });
+    return true;
+  }
   if (url.pathname === "/api/session/user-input" && request.method === "GET") {
     const threadId = String(url.searchParams.get("threadId") || "").trim();
     const conversationId = String(url.searchParams.get("conversationId") || "").trim();
@@ -578,15 +588,22 @@ export const createConversationRoutes = ({
     const body = await readJson(request);
     const threadId = String(body.threadId || "").trim();
     const conversationId = String(body.conversationId || "").trim();
-    const lastTurnId = String(body.lastTurnId || "").trim();
-    if (!threadId || !lastTurnId) {
+    let lastTurnId = String(body.lastTurnId || "").trim();
+    if (!threadId || (!lastTurnId && body.latest !== true)) {
       sendJson(response, { error: "threadId and lastTurnId are required" }, 400);
       return true;
     }
-    await authorizeAgentThread({ threadId, conversationId });
+    const binding = await authorizeAgentThread({ threadId, conversationId });
     if (execution.getStatus(threadId).active) {
       sendJson(response, { error: "当前任务运行中，请完成后再从这里继续" }, 409);
       return true;
+    }
+    if (body.latest === true) {
+      const source = binding ? await readAgentSession(binding, "all", { limit: 1 })
+        : await conversations.findSession(threadId, "all", { limit: 1 });
+      if (!source || source.archived || source.readOnly) throw Object.assign(new Error("请先恢复可操作的源对话"), { statusCode: 409 });
+      lastTurnId = source.messages?.at(-1)?.turnId || "";
+      if (!lastTurnId) throw Object.assign(new Error("对话尚无可创建分支的消息"), { statusCode: 409 });
     }
     const session = await conversations.forkSession(threadId, lastTurnId);
     sendJson(response, {

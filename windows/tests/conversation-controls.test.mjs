@@ -59,7 +59,7 @@ test("creates a persisted project thread and exposes the real model catalog", as
   assert.deepEqual(models.map((entry) => entry.model), ["gpt-5.6-sol", "gpt-5.6-terra"]);
   assert.deepEqual(calls[0], {
     method: "thread/start",
-    params: { cwd: "D:\\project", model: "gpt-5.6-sol" },
+    params: { cwd: "D:\\project", model: "gpt-5.6-sol", sandbox: "danger-full-access", approvalPolicy: "never", developerInstructions: calls[0].params.developerInstructions },
   });
   assert.equal(calls.filter((call) => call.method === "model/list").length, 2);
 });
@@ -153,7 +153,7 @@ test("creates a thread in a registered business project and rejects unknown fold
   });
 
   await store.createSession("gpt-5.6-sol", "D:\\finance");
-  assert.equal(calls[0].params.cwd, "D:\\finance");
+  assert.equal(calls[0].params.cwd, path.resolve("D:\\finance"));
   await assert.rejects(() => store.createSession("", "D:\\unknown"), /not registered/iu);
   store.close();
 });
@@ -612,7 +612,7 @@ test("forks, archives, and restores a project thread through app-server actions"
   assert.equal(forked.forkedFromId, "thread-source");
   assert.deepEqual(calls[1], {
     method: "thread/fork",
-    params: { threadId: "thread-source", lastTurnId: "turn-1", cwd: "D:\\project" },
+    params: { threadId: "thread-source", lastTurnId: "turn-1", cwd: "D:\\project", sandbox: "danger-full-access", approvalPolicy: "never" },
   });
 
   assert.deepEqual(await store.archiveSession("thread-source"), { threadId: "thread-source", archived: true });
@@ -764,7 +764,7 @@ test("uses the native Codex thread goal protocol", async () => {
 
   assert.deepEqual(calls, [
     { method: "thread/read", params: { threadId: thread.id, includeTurns: false } },
-    { method: "thread/resume", params: { threadId: thread.id, persistExtendedHistory: true } },
+    { method: "thread/resume", params: { threadId: thread.id, persistExtendedHistory: true, sandbox: "danger-full-access", approvalPolicy: "never" } },
     {
       method: "thread/goal/set",
       params: { threadId: thread.id, objective: goal.objective, status: "active", tokenBudget: 1000 },

@@ -1,3 +1,6 @@
+import { createImageSettingsRoutes } from "./routes/image-settings-routes.mjs";
+import { createConversationForwardRoutes } from "./routes/conversation-forward-routes.mjs";
+import { createMaintenanceGate } from "./http/maintenance-gate.mjs";
 import { authorized, rememberAuthorizedDevice } from "./http/access-control.mjs";
 import { sendJson } from "./http/request-utils.mjs";
 import { createArtifactRoutes } from "./routes/artifact-routes.mjs";
@@ -16,17 +19,28 @@ import { createDesktopAutomationReader } from "./desktop-automations.mjs";
 
 export const createRequestHandler = ({
   token, project, projectRoot, device, observerPort, conversations, execution, media, realtime, submissions,
-  followUpQueue, contextManagement, groupRoom, roomDirectory, multiAgent, multiAgentDirectory, artifacts, webOutputs, fushengUsage, readWebVersion, serveStatic,
+  conversationForward, followUpQueue, contextManagement, groupRoom, roomDirectory, multiAgent, multiAgentDirectory, artifacts, webOutputs, fushengUsage, readWebVersion, serveStatic,
   agentConversationStore, agentPublicationService,
   employeeRuntime, employeeProjectDirectory, employeeGrowth, modelProviders, projectActivityIndex, projectStatus,
 }) => {
   const readAutomations = createDesktopAutomationReader();
+  const maintenance = createMaintenanceGate({
+    projectRoot,
+    isBusy: () => {
+      const services = [execution, followUpQueue, employeeRuntime, conversationForward,
+        ...(multiAgentDirectory ? [...multiAgentDirectory.values()] : multiAgent ? [multiAgent] : [])].filter(Boolean);
+      // A service missing its busy contract is unknown, never safe to stop.
+      return services.some((service) => typeof service.hasPendingWork !== "function" || service.hasPendingWork());
+    },
+  });
   const routes = [
+    createImageSettingsRoutes({ projectRoot }),
     async (request, response, url) => {
       if (url.pathname !== '/api/desktop/automations' || request.method !== 'GET') return false;
       sendJson(response, await readAutomations());
       return true;
     },
+    ...(conversationForward ? [createConversationForwardRoutes({ service: conversationForward })] : []),
     createVersionRoutes({ readWebVersion }),
     createArtifactRoutes({ groupRoom, roomDirectory, artifacts, webOutputs }),
     createAgentPublicationRoutes({
@@ -63,6 +77,7 @@ export const createRequestHandler = ({
       return;
     }
 
+    if (maintenance(request, response, url)) return;
     try {
       for (const route of routes) {
         if (await route(request, response, url)) return;
@@ -70,6 +85,8 @@ export const createRequestHandler = ({
       await serveStatic(url, response);
     } catch (error) {
       sendJson(response, { error: error instanceof Error ? error.message : String(error) }, error?.statusCode || 503);
+    } finally {
+      maintenance.release(request);
     }
   };
 };

@@ -1,19 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Archive, ArchiveRestore, ArrowLeft, Pencil, Plus, RefreshCw, Save, X } from 'lucide-react';
+import { ArrowLeft, MoreHorizontal, Plus, RefreshCw, Save, X } from 'lucide-react';
 import { fetchJson, postJson } from '../../../shared/api/http';
 import { readLocalCache, writeLocalCache } from '../../../shared/state/localCache';
 import styles from './ChannelManager.module.css';
-import { channelProviderId, chooseEffort, groupModels, providerIdOf, readModelDefaults, useModelDefaults, writeModelDefaults } from '../model/modelDefaults';
+import { channelProviderId, refreshModelDefaults, useModelDefaults, writeModelDefaults } from '../model/modelDefaults';
 import { formatReasoningEffort } from '../model/reasoningEffortLabels';
 import type { CodexModel } from '../model/types';
-import { ModelSelect } from './ModelSelect';
-import { ReasoningEffortSelect } from './ReasoningEffortSelect';
-import modelStyles from './ModelSelect.module.css';
 
-export type Channel = { id: string; name: string; baseUrl?: string; model?: string; multiplier?: string; editable: boolean; switchable?: boolean; priceRatio?: number; priceGroup?: string; modelKey?: string; isCurrent?: boolean };
-const formatChannelRatio = (entry: Channel) => entry.priceRatio !== undefined ? `${entry.priceRatio.toFixed(2)}×` : entry.multiplier ? `${Number(entry.multiplier).toFixed(2)}×` : "--";
-const channelCacheKey = 'negus-model-channels-v1';
+export type Channel = { hasCredential?: boolean; configured?: boolean; reasoningEffort?: string; sharedConfigId?: string; id: string; name: string; baseUrl?: string; model?: string; multiplier?: string; editable: boolean; switchable?: boolean; priceRatio?: number; priceGroup?: string; modelKey?: string; isCurrent?: boolean };
+const channelCacheKey = 'negus-model-channels-v2';
 const validChannels = (value: unknown): value is Channel[] => Array.isArray(value)
   && value.every((entry) => Boolean(entry) && typeof entry === 'object'
     && typeof (entry as Channel).id === 'string' && typeof (entry as Channel).name === 'string');
@@ -44,9 +40,9 @@ export const buildBuiltInChannels = (models: CodexModel[], currentModel: string,
   .flatMap((id) => {
     const available = models.filter((entry) => (entry.modelProviderId || 'current') === id && entry.available !== false);
     const model = available.find((entry) => entry.model === currentModel) || available.find((entry) => entry.isDefault) || available[0];
-    const pricing = channels.find((entry) => id === 'current' ? entry.isCurrent : entry.id === id);
-    return model ? [{ priceRatio: pricing?.priceRatio, priceGroup: pricing?.priceGroup, multiplier: pricing?.multiplier, id, name: model.providerDisplayName || (id === 'current' ? '当前运行配置' : id),
-      model: model.model, modelKey: model.model, editable: false, switchable: true }] : [];
+    const pricing = channels.find((entry) => entry.id === id);
+    return model ? [{ configured: pricing?.configured, reasoningEffort: pricing?.reasoningEffort, sharedConfigId: pricing?.sharedConfigId, baseUrl: pricing?.baseUrl, priceRatio: pricing?.priceRatio, priceGroup: pricing?.priceGroup, multiplier: pricing?.multiplier, id, name: model.providerDisplayName || (id === 'current' ? '当前运行配置' : id),
+      model: pricing?.model || model.model, modelKey: model.model, editable: false, switchable: true }] : [];
   });
 
 export function useChannelCatalog(models: CodexModel[], currentModel: string) {
@@ -64,219 +60,196 @@ export function useChannelCatalog(models: CodexModel[], currentModel: string) {
     window.addEventListener('negus-channels-updated', refresh);
     return () => { cancelled = true; window.removeEventListener('negus-channels-updated', refresh); };
   }, []);
-  return { channels, allChannels: [...builtInChannels, ...channels.filter((entry) => !entry.isCurrent && !entry.modelKey)], load };
+  return { channels, allChannels: [...builtInChannels, ...channels.filter((entry) => !entry.modelKey && entry.id !== channels.find(c => c.id === 'current')?.sharedConfigId)], load };
 }
 
-export function ChannelManager({ onClose, currentModel, models, disabled, onSwitch }: { onClose: () => void; currentModel: string; models: CodexModel[]; disabled: boolean; onSwitch: (model: string) => Promise<boolean> }) {
+export function ChannelManager({ onClose, currentModel, models }: { onClose: () => void; currentModel: string; models: CodexModel[] }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const defaults = useModelDefaults();
-  const [showArchived, setShowArchived] = useState(false);
-  const [channels, setChannels] = useState<Channel[]>(cachedChannels);
-  const builtInChannels = buildBuiltInChannels(models, currentModel, channels);
-  const [loading, setLoading] = useState(false);
-  const mounted = useRef(true);
-  const allChannels = [...builtInChannels, ...channels.filter((entry) => !entry.isCurrent && !entry.modelKey)];
-  const visibleChannels = allChannels.filter((entry) => !defaults.archivedProviderIds.includes(channelProviderId(entry)));
-  const archivedChannels = allChannels.filter((entry) => defaults.archivedProviderIds.includes(channelProviderId(entry)));
-  const groupIds = [...new Set([...models.filter((entry) => entry.available !== false).map(providerIdOf), ...allChannels.map(channelProviderId)])];
-  const activeGroupIds = groupIds.filter((id) => !defaults.archivedProviderIds.includes(id));
-  const effectiveProviderId = defaults.providerId && activeGroupIds.includes(defaults.providerId)
-    ? defaults.providerId
-    : activeGroupIds.includes("current") ? "current" : activeGroupIds[0] || "";
-  const selectedGroup = groupModels(models, effectiveProviderId);
-  const selectedDefaultModel = selectedGroup.find((entry) => entry.model === defaults.model) || selectedGroup.find((entry) => entry.isDefault) || selectedGroup[0];
-  const selectedDefaultEffort = chooseEffort(selectedDefaultModel, defaults.effort);
-  const groupName = (id: string) => models.find((entry) => providerIdOf(entry) === id)?.providerDisplayName
-    || allChannels.find((entry) => channelProviderId(entry) === id)?.name
-    || (id === "current" ? "\u5f53\u524d\u8fd0\u884c\u6e20\u9053" : id === "fusheng-grok" ? "Fusheng Grok" : id);
-  const applyChoice = (providerId: string, modelId: string, effort: string) => {
-    const group = groupModels(models, providerId);
-    const entry = group.find((item) => item.model === modelId) || group.find((item) => item.isDefault) || group[0];
-    writeModelDefaults({ ...readModelDefaults(), providerId, model: entry?.model || "", effort: chooseEffort(entry, effort) });
-  };
-  const archiveProvider = (providerId: string) => {
-    const current = readModelDefaults();
-    const archivedProviderIds = [...new Set([...current.archivedProviderIds, providerId])];
-    const remaining = groupIds.filter((id) => !archivedProviderIds.includes(id));
-    if (providerId !== effectiveProviderId) {
-      writeModelDefaults({ ...current, archivedProviderIds });
-      return;
-    }
-    const providerIdNext = remaining.includes("current") ? "current" : remaining[0] || "";
-    const group = groupModels(models, providerIdNext);
-    const entry = group.find((item) => item.isDefault) || group[0];
-    writeModelDefaults({ providerId: providerIdNext, model: entry?.model || "", effort: chooseEffort(entry, ""), archivedProviderIds });
-  };
-  const restoreProvider = (providerId: string) => {
-    const current = readModelDefaults();
-    writeModelDefaults({ ...current, archivedProviderIds: current.archivedProviderIds.filter((id) => id !== providerId) });
-  };
-  const [selected, setSelected] = useState('');
+  const { channels, allChannels, load } = useChannelCatalog(models, currentModel);
   const [editing, setEditing] = useState(false);
-  const [editingEntry, setEditingEntry] = useState<Channel | null>(null);
-  const [draftProviderId, setDraftProviderId] = useState(effectiveProviderId);
-  const [draftDefaultModel, setDraftDefaultModel] = useState(selectedDefaultModel?.model || "");
-  const [draftDefaultEffort, setDraftDefaultEffort] = useState(selectedDefaultEffort);
-  const [defaultsTouched, setDefaultsTouched] = useState(false);
-  const [draft, setDraft] = useState({ name: '', baseUrl: '', model: '', apiKey: '', multiplier: '1.0' });
+  const [menu, setMenu] = useState('');
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
+  useEffect(() => {
+    if (!menu) return;
+    const dismiss = (event: Event) => { if (!(event.target as Element)?.closest?.('[data-channel-menu]')) setMenu(''); };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setMenu(''); } };
+    const close = () => setMenu('');
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', escape, true);
+    window.addEventListener('resize', close);
+    dialog.current?.addEventListener('scroll', close);
+    return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', escape, true); window.removeEventListener('resize', close); dialog.current?.removeEventListener('scroll', close); };
+  }, [menu]);
+  const empty = { id: '', sourceId: '', name: '', baseUrl: '', model: '', reasoningEffort: '', apiKey: '', keyMode: 'clear' };
+  const [draft, setDraft] = useState(empty);
+  const [initial, setInitial] = useState(JSON.stringify(empty));
+  const [pendingDefault, setPendingDefault] = useState<Channel | null>(null);
+  const [choices, setChoices] = useState<string[]>([]);
+  const [capabilities, setCapabilities] = useState<Array<{ model: string; supportedReasoningEfforts: CodexModel['supportedReasoningEfforts'] }>>([]);
+  const [testModel, setTestModel] = useState('');
+  const [testing, setTesting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const load = async (force = false) => {
-    setLoading(true); setError('');
-    try { const next = await readChannels(force); if (mounted.current) setChannels(next); }
-    catch (reason) { if (mounted.current) setError(reason instanceof Error ? reason.message : '读取失败'); }
-    finally { if (mounted.current) setLoading(false); }
-  };
-  useEffect(() => { mounted.current = true; dialog.current?.showModal(); void load(); return () => { mounted.current = false; }; }, []);
+  const dirty = editing && !testing && JSON.stringify(draft) !== initial;
+  const defaultDirty = Boolean(pendingDefault && channelProviderId(pendingDefault) !== defaults.providerId);
+  const currentProvider = models.find(m => m.model === currentModel)?.modelProviderId || (currentModel.includes('::') ? currentModel.split('::')[0] : 'current');
+  const currentLink = channels.find(c => c.id === 'current')?.sharedConfigId;
+  const matches = (entry: Channel, id: string) => channelProviderId(entry) === id
+    || (entry.id === 'current' && Boolean(currentLink) && id === 'ccswitch_' + currentLink);
+  const selectedEntry = channels.find(c => c.id === draft.id);
+  const protectedEntry = Boolean(draft.id && (selectedEntry?.isCurrent || selectedEntry?.editable === false));
+  const draftProvider = draft.id ? 'ccswitch_' + draft.id : draft.sourceId === 'current' ? 'current' : 'ccswitch_' + draft.sourceId;
+  const sourceChannel = channels.find(channel => channel.id === (draft.id || draft.sourceId));
+  const sameEndpoint = sourceChannel?.baseUrl?.replace(/\/$/u, '') === draft.baseUrl.replace(/\/$/u, '');
+  const discoveredEfforts = capabilities.find(m => m.model === draft.model)?.supportedReasoningEfforts;
+  const effortOptions = (discoveredEfforts?.length ? discoveredEfforts : undefined)
+    || (sameEndpoint ? models.find(m => m.modelProviderId === draftProvider && m.model.split('::').at(-1) === draft.model)?.supportedReasoningEfforts : undefined) || [];
+  const resetFeedback = () => { setError(''); setNotice(''); };
+  const confirmLeave = () => !(dirty || defaultDirty) || window.confirm('放弃未保存的修改？');
+  const close = () => { if (!busy && confirmLeave()) onClose(); };
   useEffect(() => {
-    if (defaultsTouched) return;
-    setDraftProviderId(effectiveProviderId);
-    setDraftDefaultModel(selectedDefaultModel?.model || "");
-    setDraftDefaultEffort(selectedDefaultEffort);
-  }, [defaultsTouched, effectiveProviderId, selectedDefaultModel?.model, selectedDefaultEffort]);
-  const choose = (id: string) => {
-    const entry = channels.find((item) => item.id === id);
-    setSelected(id); setError(''); setNotice('');
-    setEditing(true);
-    setEditingEntry(entry || null);
-    setDraft({ name: entry?.name || '', baseUrl: entry?.baseUrl || '', model: entry?.model || '', apiKey: '', multiplier: entry?.multiplier || '1.0' });
+    dialog.current?.showModal();
+    const unload = (event: BeforeUnloadEvent) => { if (dirty || defaultDirty) event.preventDefault(); };
+    window.addEventListener('beforeunload', unload);
+    return () => window.removeEventListener('beforeunload', unload);
+  }, [dirty, defaultDirty]);
+  useEffect(() => { setChoices([]); setCapabilities([]); if (editing) setNotice(''); }, [draft.baseUrl, draft.apiKey, draft.keyMode, draft.sourceId, draft.id]);
+  useEffect(() => { if (editing) setNotice(''); }, [testModel, draft.model]);
+  const open = (entry?: Channel, copy = false, test = false) => {
+    if (!confirmLeave()) return;
+    setMenu(''); resetFeedback(); setPendingDefault(null);
+    const linked = entry?.id === 'current' && currentLink ? channels.find(c => c.id === currentLink) : entry;
+    const source = linked || entry;
+    const next = {
+      ...empty, id: copy ? '' : source?.modelKey ? '' : source?.id || '',
+      sourceId: copy || source?.modelKey ? source?.id || '' : '',
+      name: (source?.name || '') + (copy ? ' 副本' : ''),
+      baseUrl: source?.baseUrl || '', model: (source?.model || '').split('::').at(-1) || '',
+      reasoningEffort: source?.reasoningEffort || '',
+      keyMode: source?.hasCredential || source?.configured ? 'keep' : 'clear',
+    };
+    setDraft(next); setInitial(JSON.stringify(next)); setEditing(true); setTesting(test);
+    setTestModel(next.model); setChoices([]);
+    if (copy) setInitial('copy');
   };
-  const openEditor = (entry: Channel) => {
-    setError(''); setNotice('');
-    setEditing(true);
-    setEditingEntry(entry);
-    if (entry.modelKey) {
-      setSelected('');
-      return;
-    }
-    choose(entry.id);
+  const requestBody = () => ({ ...draft, id: draft.id || undefined, sourceId: draft.sourceId || undefined });
+  const query = async (action: 'discover' | 'test') => {
+    setBusy(true); resetFeedback();
+    try {
+      const result = await postJson<{ models?: string[]; capabilities?: typeof capabilities; notice?: string }>('/api/model-channels',
+        { ...requestBody(), action, model: action === 'test' ? testModel || draft.model : draft.model }, AbortSignal.timeout(50000));
+      if (action === 'discover') { setChoices(result.models || []); setCapabilities(result.capabilities || []); }
+      else setNotice('已通过 · ' + (testModel || draft.model));
+    } catch (reason) { setError(reason instanceof Error ? reason.message : '请求失败'); }
+    finally { setBusy(false); }
   };
-  const stageDefaultGroup = (providerId: string) => {
-    const group = groupModels(models, providerId);
-    const entry = group.find((item) => item.isDefault) || group[0];
-    setDefaultsTouched(true);
-    setDraftProviderId(providerId);
-    setDraftDefaultModel(entry?.model || "");
-    setDraftDefaultEffort(chooseEffort(entry, ""));
+  const defaultFor = (entry: Channel, model = entry.model || '', effort = entry.reasoningEffort || '') => {
+    const providerId = channelProviderId(entry);
+    const raw = model.split('::').at(-1) || '';
+    return { providerId, model: entry.modelKey && providerId === 'current' ? 'current::' + raw : providerId + '::' + raw,
+      effort, archivedProviderIds: [] };
   };
-  const saveDefaults = () => {
-    applyChoice(draftProviderId, draftDefaultModel, draftDefaultEffort);
-    setDefaultsTouched(false);
-    setNotice("默认配置已保存");
+  const setDefault = (entry: Channel) => {
+    setMenu(''); resetFeedback();
+    if (!entry.model) {
+      open(entry);
+      setPendingDefault(entry);
+      setError('请选择默认模型');
+    } else setPendingDefault(entry);
   };
   const save = async () => {
-    setBusy(true); setError(''); setNotice('');
+    if (pendingDefault && editing && !draft.model) { setError('请选择默认模型'); return; }
+    setBusy(true); resetFeedback();
     try {
-      const result = await postJson<{ notice: string }>('/api/model-channels', { ...draft, id: selected || undefined });
-      setDraft((value) => ({ ...value, apiKey: '' }));
-      setNotice(result.notice);
-      await load(true);
-      setEditing(false);
-      window.dispatchEvent(new CustomEvent('negus-channels-updated', { detail: { providerId: selected ? `ccswitch_${selected}` : undefined } }));
+      let target = pendingDefault;
+      if (editing && dirty) {
+        const result = await postJson<{ id: string }>('/api/model-channels', requestBody());
+        if (pendingDefault) target = { ...pendingDefault, id: result.id, modelKey: undefined, model: draft.model, reasoningEffort: draft.reasoningEffort };
+        setDraft(value => ({ ...value, id: result.id, sourceId: '', apiKey: '', keyMode: value.keyMode === 'clear' ? 'clear' : 'keep' }));
+        window.dispatchEvent(new CustomEvent('negus-channels-updated', { detail: { providerId: 'ccswitch_' + result.id } }));
+      }
+      if (target) await writeModelDefaults(defaultFor(target));
+      await load(true); await refreshModelDefaults();
+      setPendingDefault(null); setEditing(false); setTesting(false); setDraft(empty); setInitial(JSON.stringify(empty)); setNotice('已保存');
     } catch (reason) { setError(reason instanceof Error ? reason.message : '保存失败'); }
     finally { setBusy(false); }
   };
-  const switchChannel = async (entry: Channel) => {
-    if (disabled || busy || !entry.switchable) return;
-    setBusy(true); setError('');
+  const remove = async (entry: Channel) => {
+    setMenu('');
+    if (!window.confirm('删除「' + entry.name + '」？')) return;
+    setBusy(true); resetFeedback();
     try {
-      if (await onSwitch(entry.modelKey || `ccswitch_${entry.id}::${entry.model}`)) onClose();
-      else setError('配置未切换成功，请重试');
-    } catch (reason) { setError(reason instanceof Error ? reason.message : '切换失败'); }
-    finally { setBusy(false); }
-  };
-  const unsupported = Boolean(selected && channels.find((item) => item.id === selected)?.editable === false);
-  const defaultsDirty = defaultsTouched && (
-    draftProviderId !== effectiveProviderId
-    || draftDefaultModel !== (selectedDefaultModel?.model || "")
-    || draftDefaultEffort !== selectedDefaultEffort
-  );
-  const draftGroup = groupModels(models, draftProviderId);
-  const draftModelEntry = draftGroup.find((entry) => entry.model === draftDefaultModel) || draftGroup.find((entry) => entry.isDefault) || draftGroup[0];
-  const closeEditor = () => { setEditing(false); setEditingEntry(null); setError(''); setDraft((value) => ({ ...value, apiKey: '' })); };
-  const archiveEditing = () => {
-    if (!editingEntry) return;
-    archiveProvider(channelProviderId(editingEntry));
-    setDefaultsTouched(false);
-    closeEditor();
-  };
-  const removeChannel = async () => {
-    if (!editingEntry || editingEntry.modelKey || busy) return;
-    if (!window.confirm(`删除「${editingEntry.name}」？`)) return;
-    setBusy(true); setError('');
-    try {
-      const result = await postJson<{ notice?: string }>('/api/model-channels', { action: 'delete', id: editingEntry.id });
-      setNotice(result.notice || '已删除');
-      await load(true);
-      closeEditor();
-      window.dispatchEvent(new CustomEvent('negus-channels-updated', { detail: { providerId: `ccswitch_${editingEntry.id}` } }));
+      const id = entry.id === 'current' ? currentLink : entry.id;
+      await postJson('/api/model-channels', { action: 'delete', id });
+      await load(true); await refreshModelDefaults();
+      window.dispatchEvent(new CustomEvent('negus-channels-updated'));
+      setNotice('已删除');
     } catch (reason) { setError(reason instanceof Error ? reason.message : '删除失败'); }
     finally { setBusy(false); }
   };
-  return createPortal(<dialog ref={dialog} className={styles.dialog} onCancel={(event) => { if (busy) event.preventDefault(); else onClose(); }}>
-    <header>{editing ? <button type="button" title="返回" aria-label="返回" disabled={busy} onClick={closeEditor}><ArrowLeft size={18} /></button> : null}<h2>{editing ? selected ? "编辑配置" : editingEntry ? "编辑配置" : "添加配置" : "配置"}</h2><button type="button" title="关闭" aria-label="关闭" disabled={busy} onClick={onClose}><X size={18} /></button></header>
-    {editing && editingEntry ? <div className={styles.channelInfo}>
-      <span>{editingEntry.priceRatio !== undefined ? editingEntry.priceGroup : "配置倍率"}</span>
-      <strong>{formatChannelRatio(editingEntry)}</strong>
-    </div> : null}
-    {!editing ? <>
-      <div className={styles.toolbar}><span>{!visibleChannels.length && loading ? "读取中…" : `${visibleChannels.length} 个配置`}</span><button type="button" title="添加配置" aria-label="添加配置" disabled={busy} onClick={() => choose("")}><Plus size={18} /></button><button type="button" title="刷新配置" aria-label="刷新配置" disabled={busy || loading} onClick={() => void load(true)}><RefreshCw size={18} /></button><button type="button" title="保存默认配置" aria-label="保存默认配置" disabled={busy || !defaultsDirty} onClick={saveDefaults}><Save size={18} /></button></div>
-      <div className={styles.defaults}>
-        <div className={modelStyles.settingRow}>
-          <span>默认配置</span>
-          <select className={modelStyles.select} aria-label="默认配置" value={draftProviderId} disabled={busy || !activeGroupIds.length} onChange={(event) => stageDefaultGroup(event.target.value)}>
-            {activeGroupIds.map((id) => <option key={id} value={id}>{groupName(id)}</option>)}
-          </select>
+  const back = () => { if (confirmLeave()) { setEditing(false); setTesting(false); setPendingDefault(null); setDraft(empty); setInitial(JSON.stringify(empty)); resetFeedback(); } };
+  return createPortal(<dialog ref={dialog} className={styles.dialog} onCancel={event => { event.preventDefault(); close(); }}>
+    <header>{editing ? <button type="button" aria-label="返回" disabled={busy} onClick={back}><ArrowLeft size={18} /></button> : null}
+      <h2>{editing ? testing ? '测试配置' : draft.id ? '编辑配置' : '添加配置' : '配置'}</h2>
+      <button type="button" aria-label="关闭" disabled={busy} onClick={close}><X size={18} /></button></header>
+    <div className={styles.toolbar}><span>{editing ? draft.name : allChannels.length + ' 个配置'}</span>
+      <button type="button" title="添加配置" aria-label="添加配置" disabled={busy} onClick={() => open()}><Plus size={18} /></button>
+      <button type="button" title="刷新配置" aria-label="刷新配置" disabled={busy} onClick={() => { setBusy(true); void Promise.all([load(true), refreshModelDefaults()]).catch(e => setError(e.message)).finally(() => setBusy(false)); }}><RefreshCw size={18} /></button>
+      <button type="button" title="保存" aria-label="保存" disabled={busy || (!dirty && !defaultDirty)} onClick={() => void save()}><Save size={18} /></button>
+    </div>
+    {!editing ? <div className={styles.channels}>{allChannels.map(entry => {
+      const active = Boolean(currentModel) && matches(entry, currentProvider);
+      const isDefault = matches(entry, pendingDefault ? channelProviderId(pendingDefault) : defaults.providerId);
+      const linked = entry.id === 'current' ? channels.find(c => c.id === currentLink) : entry;
+      return <div key={entry.id} className={styles.channel} >
+        <div className={styles.channelInfo}><div className={styles.nameRow}><strong>{entry.name}</strong>
+          {linked?.isCurrent ? <span className={styles.badge}>CC Switch 占用中</span> : null}
+          {isDefault ? <span className={styles.badge}>默认配置</span> : null}</div>
+          {entry.model ? <small>{entry.model.split('::').at(-1)}</small> : null}</div>
+        <span className={styles.ratio} title={entry.priceGroup || '供应商倍率'}>{entry.priceRatio !== undefined ? entry.priceRatio.toFixed(2) + '×' : '未获取'}</span>
+        <div className={styles.actions} data-channel-menu>
+          <button type="button" className={styles.iconButton} aria-label={'操作 ' + entry.name} aria-expanded={menu === entry.id} disabled={busy} onClick={event => { const box = event.currentTarget.getBoundingClientRect(); setMenuPosition({ left: Math.max(8, Math.min(box.right - 144, window.innerWidth - 152)), top: Math.max(8, Math.min(box.bottom + 4, window.innerHeight - 202)) }); setMenu(menu === entry.id ? '' : entry.id); }}><MoreHorizontal size={18} /></button>
+          {menu === entry.id ? <div className={styles.actionMenu} style={menuPosition} role="menu">
+            <button role="menuitem" onClick={() => open(entry)}>编辑</button>
+            <button role="menuitem" onClick={() => open(entry, true)}>复制</button>
+            <button role="menuitem" onClick={() => setDefault(entry)}>设为默认</button>
+            <button role="menuitem" onClick={() => open(entry, false, true)}>测试配置</button>
+            <button role="menuitem" className={styles.danger} disabled={active || linked?.isCurrent || !linked || Boolean(linked.modelKey)} title={active || linked?.isCurrent ? '正在使用的配置暂不删除' : undefined} onClick={() => void remove(entry)}>删除</button>
+          </div> : null}
         </div>
-        <div className={modelStyles.settingRow}>
-          <span>默认模型</span>
-          <ModelSelect currentModel={draftDefaultModel} models={draftGroup} disabled={busy} loading={false} changing={false} error="" onChange={async (model) => { setDefaultsTouched(true); setDraftDefaultModel(model); setDraftDefaultEffort(chooseEffort(draftGroup.find((entry) => entry.model === model), "")); return true; }} />
-        </div>
-        <div className={modelStyles.settingRow}>
-          <span>默认思考等级</span>
-          <ReasoningEffortSelect currentModel={draftModelEntry} currentEffort={draftDefaultEffort} disabled={busy} loading={false} changing={false} error="" onChange={async (effort) => { setDefaultsTouched(true); setDraftDefaultEffort(effort); return true; }} />
-        </div>
-      </div>
-      <div className={styles.channels}>{visibleChannels.map((entry) => {
-        const active = currentModel === (entry.modelKey || `ccswitch_${entry.id}::${entry.model}`);
-        return <div key={entry.id} className={styles.channel} data-active={active}>
-          <span className={styles.channelInfo}><strong>{entry.name}</strong><small>{entry.model || "认证暂不支持"}</small></span>
-          <span className={styles.ratio}><strong>{formatChannelRatio(entry)}</strong><small>{entry.priceRatio !== undefined ? entry.priceGroup : "配置倍率"}</small></span>
-          <button className={styles.iconButton} type="button" title={`编辑 ${entry.name}`} aria-label={`编辑 ${entry.name}`} disabled={busy} onClick={() => openEditor(entry)}><Pencil size={15} /></button>
-        </div>;
-      })}</div>
-      {archivedChannels.length ? <div className={styles.archived}>
-        <button type="button" onClick={() => setShowArchived((value) => !value)}>{showArchived ? "收起已归档" : `已归档 ${archivedChannels.length}`}</button>
-        {showArchived ? archivedChannels.map((entry) => <div key={`archived-${entry.id}`} className={styles.channel}><span className={styles.channelInfo}><strong>{entry.name}</strong></span><button type="button" title={`恢复 ${entry.name}`} aria-label={`恢复 ${entry.name}`} disabled={busy} onClick={() => restoreProvider(channelProviderId(entry))}><ArchiveRestore size={15} /></button></div>) : null}
-      </div> : null}
-      {disabled ? <p>任务结束后可切换配置。</p> : null}
-      {!loading && !visibleChannels.length && !error ? <p>暂无配置</p> : null}
-      {error ? <p role="alert" className={styles.error}>{error}</p> : null}{notice ? <p role="status">{notice}</p> : null}
-    </> : editingEntry?.modelKey ? <>
-      <div className={styles.channelInfo}><strong>{editingEntry.name}</strong><small>{editingEntry.model || "认证暂不支持"}</small></div>
-      {error ? <p role="alert" className={styles.error}>{error}</p> : null}
-      <footer>
-        <button type="button" disabled={busy} onClick={archiveEditing}><Archive size={16} />归档</button>
-        <button className={styles.danger} type="button" disabled title="这个配置不能删除">删除</button>
-      </footer>
-    </> : <>
-    <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
-      <fieldset disabled={busy || unsupported}>
-        <label>名称<input required maxLength={160} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-        <label>API 地址<input required type="url" value={draft.baseUrl} placeholder="https://example.com/v1" onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /></label>
-        <label>模型<input required maxLength={120} value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} /></label>
-        <label>API Key<input type="password" autoComplete="new-password" autoCapitalize="none" spellCheck={false} required={!selected} value={draft.apiKey} placeholder={selected ? "留空保留原 Key" : ""} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} /></label>
-        <label>配置倍率<input required type="number" min="0.001" step="any" value={draft.multiplier} onChange={(event) => setDraft({ ...draft, multiplier: event.target.value })} /></label>
+      </div>;
+    })}</div> : <>
+      <fieldset disabled={busy}>
+        {!testing ? <>
+          <label>名称<input maxLength={160} value={draft.name} disabled={protectedEntry} onChange={e => setDraft({ ...draft, name: e.target.value })} /></label>
+          <label>API 地址<input value={draft.baseUrl} disabled={protectedEntry} placeholder="https://example.com/v1" onChange={e => setDraft({ ...draft, baseUrl: e.target.value })} /></label>
+          <label>API Key{draft.keyMode === 'keep' ? <div className={styles.keyRow}>
+            <span>•••••••• · 已保存</span><button type="button" disabled={protectedEntry} onClick={() => setDraft({ ...draft, keyMode: 'replace', apiKey: '' })}>修改</button>
+            <button type="button" disabled={protectedEntry} onClick={() => setDraft({ ...draft, keyMode: 'clear', apiKey: '' })}>清空</button>
+          </div> : <input type="password" autoComplete="new-password" disabled={protectedEntry} value={draft.apiKey} onChange={e => setDraft({ ...draft, apiKey: e.target.value, keyMode: e.target.value ? 'replace' : 'clear' })} />}</label>
+        </> : null}
+        <button type="button" onClick={() => void query('discover')}>查询模型</button>
+        {choices.length > 0 ? <label>查询结果<select aria-label="查询到的模型" value="" onChange={e => {
+          if (!e.target.value) return;
+          setTestModel(e.target.value);
+          if (!testing && !protectedEntry) setDraft({ ...draft, model: e.target.value, reasoningEffort: '' });
+        }}><option value="">已找到 {choices.length} 个模型 · 请选择</option>{choices.map(model => <option key={model} value={model}>{model}</option>)}</select></label> : null}
+        {!testing ? <>
+          <label>默认模型<input disabled={protectedEntry} value={draft.model} placeholder="可不填" onChange={e => { setDraft({ ...draft, model: e.target.value, reasoningEffort: '' }); setTestModel(e.target.value); }} /></label>
+          <label>默认思考等级<select disabled={protectedEntry} value={draft.reasoningEffort} onChange={e => setDraft({ ...draft, reasoningEffort: e.target.value })}>
+            <option value="">{effortOptions.length ? '自动' : '自动（可选档位尚未确认）'}</option>
+            {draft.reasoningEffort && !effortOptions.some(e => e.reasoningEffort === draft.reasoningEffort) ? <option value={draft.reasoningEffort}>{draft.reasoningEffort}</option> : null}
+            {effortOptions.map(e => <option key={e.reasoningEffort} value={e.reasoningEffort}>{formatReasoningEffort(e.reasoningEffort)}</option>)}
+          </select></label>
+        </> : <label>测试模型<input value={testModel} placeholder="选择或填写模型" onChange={e => setTestModel(e.target.value)} /></label>}
+        <button type="button" onClick={() => void query('test')}>测试{testModel || draft.model ? ' · ' + (testModel || draft.model) : '模型'}</button>
+        <small>测试会产生少量用量。</small>
       </fieldset>
-      {unsupported ? <p>此配置使用的认证方式暂不支持编辑。</p> : null}
-      {error ? <p role="alert" className={styles.error}>{error}</p> : null}
-      {notice ? <p role="status">{notice}</p> : null}
-      <footer>
-        {editingEntry ? <button type="button" disabled={busy} onClick={archiveEditing}><Archive size={16} />归档</button> : null}
-        {editingEntry ? <button className={styles.danger} type="button" disabled={busy} onClick={() => void removeChannel()}>删除</button> : null}
-        <button type="submit" disabled={busy || unsupported}><Save size={16} />{busy ? "处理中…" : "保存"}</button>
-      </footer>
-    </form></>}
+      {protectedEntry && !testing ? <p>正在使用的原配置保持不变。<button type="button" disabled={busy} onClick={() => open(selectedEntry, true)}>复制后修改</button></p> : null}
+    </>}
+    {error ? <p role="alert" className={styles.error}>{error}</p> : null}
+    {notice ? <p role="status">{notice}</p> : null}
   </dialog>, document.body);
 }

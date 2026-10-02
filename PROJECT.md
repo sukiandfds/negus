@@ -1,6 +1,6 @@
 # negus Web 协作工作台项目说明
 
-更新日期：2026-09-14 01:03 +08:00
+方向与入口整理：2026-09-29 18:31 +08:00（PM-003）。以下能力说明原核对日期为 2026-09-14，未经本轮重新验收。
 
 本次核对分支：`codex/publish-current-panel`。代码基线：`2114b7c6275db02479b7ff708f47491fab8c53ef`。
 本轮依据现有文档、前端组件、后端路由及服务实现进行静态核对，未启动服务、运行构建或重新进行实机验收。以下“已有实现”不表示已部署，也不替代功能档案的验收状态。
@@ -9,20 +9,11 @@
 
 ## 项目定位
 
-negus 的产品定位是一个可以用自然语言不断定制的个人／企业工作空间：通过浏览器访问，按需求增加或调整功能页面，并把入口放在实际工作需要的位置。
+当前方向：**以个人助理为主要沟通入口、可以持续自定义的工作空间**。桌面展示真实工作内容，总助理处理快速请求，专业 Agent 支持咨询与后台执行。正式行为与未定边界见 [产品定义](PRODUCT_DEFINITION.md)，来源见 [文档导航](docs/README.md)。
 
-2026-09-14 确认的三个核心卖点是“能联网，有浏览器就能用”“随时随地按需求定制页面”“任何功能，任何位置”。详细用户流程、发展方向与现有／待实现边界统一见 [`PRODUCT_DEFINITION.md`](./PRODUCT_DEFINITION.md#产品定位与核心卖点)。
+本文件的能力介绍保留原静态核对基线，不将历史测试结果视为本次验收。当前入口源码默认进入桌面；后端仍在 `windows/server/`，目录名称不等于仅支持 Windows。
 
-当前实现以真实 Codex 工作过程为基础，主要包括：
-
-- 查看真实 Codex Thread；
-- 在浏览器中继续发送和控制任务；
-- 显示执行过程、流式回复和项目状态；
-- 项目群聊、Agent 单聊和交付物协作；完整体验以对应功能的验收状态为准。
-
-仓库同时保留早期的 macOS 和 Windows Codex 换肤工具。换肤工具是历史产品线，当前 Web 工作台的主要代码在 web-ui 和 windows/server。
-
-本项目不是 OpenAI 官方产品。
+Codex Dream Skin 是历史来源，已确定逐步退出；本轮未删除代码，也不把换肤工具作为长期并行产品。下文已有 Codex、群聊和交付物能力是可复用基础，后续投入按新方向评估。
 
 ## 现有实现功能介绍
 
@@ -132,16 +123,18 @@ app-server 是主要数据源。本地 Codex JSONL 是降级数据源。
 
 主要页面：
 
-- /：单人对话
+- /：默认桌面；/?view=conversation：单人对话
 - /group.html：项目群聊
 - /progress.html：项目进度
 - /project-management.html：项目管理兼容入口
 
 构建和运行：
 
-- 构建：pnpm build:ui
-- 启动：pnpm start:demo
-- 重启：pnpm restart:demo
+- 跨平台构建：`pnpm negus:build`；启动：`pnpm negus:start`；只读状态：`pnpm negus:status`。
+- Windows 原有入口：`pnpm build:ui`、`pnpm start:demo`。
+- Mac 检查/恢复：`pnpm negus:health` / `pnpm negus:recover`；后端独立重启：`pnpm negus:backend:restart`（`negus:restart` 同入口）；前端构建发布：`pnpm negus:frontend:restart`，不重启后端。
+- Mac 正常启动 `pnpm negus:start` 自动初始化访问凭据，并在服务就绪后安装每 3 小时检查；重复启动复用或更新定时配置，无需独立安装。
+- 定时检查、结果查询、首次加载与限制见 [服务维护说明](docs/operations/NEGUS_SERVICE_CONTROL.md)。Mac 进程身份检查尚未适配 Windows，Windows 原有封装保留。
 - canonical 服务端口：9360
 - 4173 是旧的 Vite Preview 入口，不作为交付地址
 
@@ -156,6 +149,7 @@ app-server 是主要数据源。本地 Codex JSONL 是降级数据源。
 
 ## 资料入口
 
+- 方向证据、开放问题与历史利用：[文档导航](docs/README.md)
 - 助手工作规则：`AI_ASSISTANT_WORK_RULES.md`
 - 功能状态：`docs/feature-development/FEATURE_STATUS_INDEX.md`
 - 功能详情：`docs/feature-development/features/`

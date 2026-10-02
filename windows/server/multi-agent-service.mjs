@@ -596,5 +596,5 @@ export const createMultiAgentService = ({
     if (ownsDefaultClient) defaultClient.close();
   };
 
-  return { enqueueDiscussion, interruptDiscussion, updateAgentSettings, ensureAgentThread, close };
+  return { hasPendingWork: () => Boolean(currentRun) || discussions.size > 0, enqueueDiscussion, interruptDiscussion, updateAgentSettings, ensureAgentThread, close };
 };

@@ -10,7 +10,7 @@ export function useModels(threadId: string, onChanged: (threadId: string, result
   const catalog = modelCatalogFor(conversationId);
   const cached = useSyncExternalStore(catalog.subscribe, catalog.getSnapshot);
   const models = cached.data ?? readModelCatalog();
-  const loading = cached.data === null && !cached.error;
+  const loading = cached.refreshing || (cached.data === null && !cached.error);
   const [changing, setChanging] = useState(false);
   const [error, setError] = useState("");
   const [catalogRevision, setCatalogRevision] = useState(0);
@@ -43,7 +43,7 @@ export function useModels(threadId: string, onChanged: (threadId: string, result
     const entry = models.find((item) => item.model === model);
     const modelProvider = entry?.modelProviderId || (model.includes("::") ? model.split("::")[0] : "current");
     const pending = pendingRef.current.get(activeThreadId) || { modelChanged: false, effortChanged: false };
-    const nextEffort = reasoningEffort || pending.reasoningEffort;
+    const nextEffort = reasoningEffort !== undefined ? reasoningEffort : pending.reasoningEffort;
     pendingRef.current.set(activeThreadId, {
       ...pending,
       model,
