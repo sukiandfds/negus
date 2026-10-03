@@ -8,5 +8,11 @@
       "alt": "科比·布莱恩特，洛杉矶湖人队官方球员照片；来源 NBA.com",
       "shape": "rectangle"
     }
+  },
+  {
+    "id": "20261003-live-clock-88faa279",
+    "regionId": "88faa279-e7a1-43da-b10d-6d5ce75d85b7",
+    "action": "set-clock",
+    "clock": { "timeZone": "Asia/Shanghai" }
   }
 ]

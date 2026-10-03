@@ -626,7 +626,10 @@ export const createAppServerConversationStore = ({
     // New project threads already start with the requested full-access policy;
     // empty threads cannot be resumed before their first persisted turn.
     if (freshRuntime && (!runtimeOptions?.resume || runtimeOptions.resume.sandbox === "danger-full-access")) return freshRuntime;
-    return client.request("thread/resume", { threadId, persistExtendedHistory: true, ...(runtimeOptions?.resume || {}) });
+    return client.request("thread/resume", {
+      threadId, persistExtendedHistory: true, ...(runtimeOptions?.resume || {}),
+      developerInstructions: await getUserProfilePrompt(),
+    });
   };
 
   const forkSession = async (threadId, lastTurnId) => {
@@ -837,6 +840,7 @@ export const createAppServerConversationStore = ({
     if (!isAllowedProjectRoot(options.cwd) || !path.isAbsolute(options.path)) throw new Error('无法验证原会话记录的位置');
     const result = await client.request('thread/resume', {
       threadId, path: options.path, cwd: options.cwd, model: options.model,
+      developerInstructions: await getUserProfilePrompt(),
       ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
       ...(options.reasoningEffort ? { config: { model_reasoning_effort: options.reasoningEffort } } : {}),
       excludeTurns: true,

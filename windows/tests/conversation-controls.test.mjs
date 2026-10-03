@@ -5,6 +5,33 @@ import path from "node:path";
 import test from "node:test";
 import { createAppServerConversationStore } from "../server/app-server-conversation-store.mjs";
 
+test("existing and switched threads receive current GitHub instructions through thread/resume before sending", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "negus-resume-instructions-"));
+  const calls = [];
+  const thread = { id: "existing", cwd: root };
+  const store = createAppServerConversationStore({
+    projectRoot: root, registerMedia: () => null, autoTitleEnabled: false,
+    client: {
+      subscribe: () => () => {}, close: () => {},
+      request: async (method, params) => {
+        calls.push({ method, params });
+        if (method === 'thread/read' || method === 'thread/resume') return { thread };
+        if (method === 'turn/start') {
+          const resume = calls.findLast((call) => call.method === 'thread/resume');
+          assert.match(resume.params.developerInstructions, /gh api user\/repos/);
+          return { turn: { id: 'turn' } };
+        }
+        throw new Error(`Unexpected request: ${method}`);
+      },
+    },
+  });
+  try {
+    await store.sendMessage(thread.id, '查询私有仓库');
+    await store.resumeProviderSession(thread.id, { cwd: root, path: path.join(root, 'rollout.jsonl'), model: 'test' });
+    assert.match(calls.at(-1).params.developerInstructions, /gh api user\/repos/);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("creates a persisted project thread and exposes the real model catalog", async () => {
   const calls = [];
   const client = {
@@ -764,7 +791,7 @@ test("uses the native Codex thread goal protocol", async () => {
 
   assert.deepEqual(calls, [
     { method: "thread/read", params: { threadId: thread.id, includeTurns: false } },
-    { method: "thread/resume", params: { threadId: thread.id, persistExtendedHistory: true, sandbox: "danger-full-access", approvalPolicy: "never" } },
+    { method: "thread/resume", params: { threadId: thread.id, persistExtendedHistory: true, sandbox: "danger-full-access", approvalPolicy: "never", developerInstructions: calls[1].params.developerInstructions } },
     {
       method: "thread/goal/set",
       params: { threadId: thread.id, objective: goal.objective, status: "active", tokenBudget: 1000 },

@@ -8,6 +8,7 @@ export interface DesktopTile extends DesktopRect {
   content?: SessionMessage;
   shape?: "rectangle" | "circle";
   image?: { src: string; alt: string; shape: "circle" | "rectangle" };
+  clock?: { timeZone: string };
   appliedOperations?: string[];
   preview?: SessionMessage;
   request?: { threadId: string; text: string; after: string[]; state: "waiting" | "failed" };
@@ -51,6 +52,7 @@ export const validTiles = (value: unknown): value is DesktopTile[] => Array.isAr
   && value.every((entry) => entry && typeof entry.id === "string" && typeof entry.title === "string" && ["tasks", "content", "automations"].includes(entry.kind)
     && (entry.pinned === undefined || typeof entry.pinned === "boolean")
     && (entry.shape === undefined || ["rectangle", "circle"].includes(entry.shape))
+    && (entry.clock === undefined || (typeof entry.clock.timeZone === "string" && entry.clock.timeZone.length < 64))
     && [entry.x, entry.y, entry.w, entry.h].every(Number.isFinite) && entry.x >= 0 && entry.w >= 2 && entry.x + entry.w <= COLUMNS && entry.y >= 0 && entry.h >= 2 && entry.h <= 24
     && (!entry.content || (entry.content.role === "assistant" && typeof entry.content.text === "string"))
     && (!entry.preview || (entry.preview.role === "assistant" && typeof entry.preview.text === "string"))

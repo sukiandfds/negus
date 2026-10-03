@@ -11,16 +11,19 @@ test("maintenance instructions reach new deployments without a user profile and 
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const missing = await loadUserProfilePrompt(root);
   assert.match(missing, /negus_service_maintenance/);
+  assert.match(missing, /gh api user\/repos/);
   assert.ok(!missing.includes(JSON.stringify(root)), "user project is not the Negus installation");
   await fs.writeFile(path.join(root, "USER_PROFILE.md"), "用户偏好" + "x".repeat(13000));
   const full = await loadUserProfilePrompt(root);
   assert.match(full, /用户偏好/);
+  assert.match(full, /gh api user\/repos/);
   assert.match(full, /runtime\/negus-backend-result.json/);
   assert.equal(full.split("<negus_service_maintenance>").length, 2);
 });
 test("employee and group instruction builder preserves role and context and includes maintenance rules", () => {
   const prompt = employeeTurnInstructions("角色职责", "本轮上下文");
   assert.match(prompt, /角色职责/);
+  assert.match(prompt, /gh api user\/repos/);
   assert.match(prompt, /本轮上下文/);
   assert.match(prompt, /negus_service_maintenance/);
   assert.match(prompt, /scheduled 仅代表已安排/);

@@ -1,4 +1,5 @@
 import { imageMcpArguments } from "./image-generation/image-runtime.mjs";
+import { githubEnvironment } from "./github-runtime.mjs";
 import { computerMcpArguments, nativeComputerMcpArguments } from "./computer-control/runtime.mjs";
 import fs from "node:fs";
 import os from "node:os";
@@ -136,6 +137,7 @@ export const buildAppServerEnvironment = ({
     else next[name] = String(value);
   }
   if (codexHome) next.CODEX_HOME = path.resolve(codexHome);
+  Object.assign(next, githubEnvironment(next));
   return next;
 };
 

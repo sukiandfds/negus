@@ -1,4 +1,5 @@
 import { createImageSettingsRoutes } from "./routes/image-settings-routes.mjs";
+import { createLynnWorkbenchRoutes } from "./routes/lynn-workbench-routes.mjs";
 import { createConversationForwardRoutes } from "./routes/conversation-forward-routes.mjs";
 import { createMaintenanceGate } from "./http/maintenance-gate.mjs";
 import { authorized, rememberAuthorizedDevice } from "./http/access-control.mjs";
@@ -34,6 +35,7 @@ export const createRequestHandler = ({
     },
   });
   const routes = [
+    createLynnWorkbenchRoutes(),
     createImageSettingsRoutes({ projectRoot }),
     async (request, response, url) => {
       if (url.pathname !== '/api/desktop/automations' || request.method !== 'GET') return false;

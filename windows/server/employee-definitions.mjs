@@ -1,4 +1,5 @@
 import { imageInstructions } from "./image-generation/image-runtime.mjs";
+import { githubInstructions } from "./github-runtime.mjs";
 import { maintenanceInstructions } from "./maintenance-instructions.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -19,6 +20,7 @@ export const employeeTurnInstructions = (instructions, extra = "") => [
   clean(extra, 8000),
   maintenanceInstructions(),
   imageInstructions(),
+  githubInstructions(),
 ].filter(Boolean).join("\n");
 
 const normalize = (value, workRoot) => {

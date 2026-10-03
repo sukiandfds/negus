@@ -49,14 +49,18 @@ test("manual provider discovery adds new Grok models, persists routing and retai
   });
 });
 
-test("app-server environment keeps the default behavior unless isolation is requested", () => {
+test("all provider environments share GitHub tools and login while isolating model secrets", () => {
   const base = {
     PATH: "C:\\tools",
+    GH_CONFIG_DIR: "/shared/github-config",
+    NEGUS_GITHUB_PROXY: "http://127.0.0.1:7892",
     OPENAI_API_KEY: "do-not-copy",
     FUSHENG_GROK_API_KEY: "do-not-copy-either",
   };
   const ordinary = buildAppServerEnvironment({ baseEnvironment: base });
-  assert.deepEqual(ordinary, base);
+  assert.equal(ordinary.OPENAI_API_KEY, base.OPENAI_API_KEY);
+  assert.ok(ordinary.PATH.endsWith(path.delimiter + base.PATH));
+  assert.ok(ordinary.GH_CONFIG_DIR);
 
   const isolated = buildAppServerEnvironment({
     baseEnvironment: base,
@@ -64,7 +68,10 @@ test("app-server environment keeps the default behavior unless isolation is requ
     sanitizeEnvironment: true,
     environment: { NEGUS_RUNTIME: "provider" },
   });
-  assert.equal(isolated.PATH, "C:\\tools");
+  assert.equal(isolated.PATH, ordinary.PATH);
+  assert.equal(isolated.GH_CONFIG_DIR, ordinary.GH_CONFIG_DIR);
+  assert.equal(isolated.GH_CONFIG_DIR, base.GH_CONFIG_DIR);
+  assert.equal(isolated.NEGUS_GITHUB_PROXY, base.NEGUS_GITHUB_PROXY);
   assert.equal(isolated.CODEX_HOME, path.resolve("C:\\runtime\\grok"));
   assert.equal(isolated.NEGUS_RUNTIME, "provider");
   assert.equal(isolated.OPENAI_API_KEY, undefined);

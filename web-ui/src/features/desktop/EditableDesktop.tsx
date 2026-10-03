@@ -3,6 +3,7 @@ import { Grip, Plus, Scan, Trash2, X, ArrowDownRight, Pin, PinOff, MessageSquare
 import { ContentRenderer } from "../conversations/rendering/ContentRenderer";
 import { CurrentTasksWidget } from "./CurrentTasksWidget";
 import { AutomationsWidget } from "./AutomationsWidget";
+import { LiveClock } from "./LiveClock";
 import type { useDesktopWorkspace } from "./useDesktopWorkspace";
 import { COLUMNS, ROW, clampRect, overlaps, type DesktopRect, type DesktopTile } from "./desktopLayout";
 import { recognizeStroke, shapeRect, type Point, type RegionShape, type StrokeResult } from "./desktopShapes";
@@ -121,14 +122,15 @@ export function EditableDesktop({ workspace, onDiscuss, editing, onEditingChange
   return <div ref={scroll} className={`${styles.viewport} ${editing ? styles.customizing : ""}`} onPointerDownCapture={(event) => { suppressClick.current = false; if (event.isPrimary === false) cancelGesture(); }} onPointerMove={move} onPointerUp={finish} onPointerCancel={cancelGesture}
     onClickCapture={(event) => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; } }}
     onContextMenu={(event) => { if (editing) event.preventDefault(); }}>
+    {!editing && <a className={styles.photoShortcut} href="/api/apps/lynn/">仿拍生图 <ArrowDownRight size={16} /></a>}
     {workspace.storageError && <p className={styles.hint} role="alert">布局保存失败，请暂时不要刷新。</p>}
     {hint && <div className={styles.feedback} role="status">{hint}</div>}
     <div ref={canvas} className={`${styles.canvas} ${editing ? styles.editing : ""} ${dragging ? styles.dragging : ""}`} style={{ height }} aria-label="桌面绘制区域"
       onPointerDown={(event) => { if (editing && (event.target as HTMLElement).dataset.drawSurface !== undefined) start(event, "draw"); }}>
       {editing && <><div className={styles.drawSurface} data-draw-surface="" /><div className={`${styles.scrollSafeArea} ${styles.scrollSafeLeft}`} aria-hidden="true" /><div className={`${styles.scrollSafeArea} ${styles.scrollSafeRight}`} aria-hidden="true" /></>}
       {workspace.tiles.map((tile) => <section key={tile.id} data-tile-id={tile.id} data-region-shape={tile.shape || "rectangle"} className={`${styles.tile} ${tile.shape === "circle" ? styles.circleTile : ""} ${focused === tile.id && editing || workspace.selectedId === tile.id ? styles.selected : ""}`} style={position(tile)} aria-label={tile.title}>
-        <div className={styles.tileContent} inert={editing}>
-          {tile.kind === "tasks" ? <CurrentTasksWidget {...taskProps} active={taskProps.active && !dragging} /> : tile.kind === "automations" ? <AutomationsWidget active={taskProps.active} /> : <div className={styles.contentCard}>
+        <div className={`${styles.tileContent} ${tile.clock ? styles.clockTile : ""}`} inert={editing}>
+          {tile.kind === "tasks" ? <CurrentTasksWidget {...taskProps} active={taskProps.active && !dragging} /> : tile.kind === "automations" ? <AutomationsWidget active={taskProps.active} /> : tile.clock ? <LiveClock timeZone={tile.clock.timeZone} /> : <div className={styles.contentCard}>
             {!tile.image && tile.content && tile.shape !== "circle" && <button type="button" className={styles.contentTitle} onClick={() => discuss(tile)}>{tile.title}<Scan size={14} /></button>}
             {tile.image ? <button type="button" className={styles.imageArea} aria-label={`修改 ${tile.title} 的图片`} onClick={() => discuss(tile)}><img src={tile.image.src} alt={tile.image.alt} draggable={false} style={tile.image.shape === "rectangle" ? { width: "100%", height: "100%", borderRadius: 0, objectFit: "contain" } : undefined} /></button> : tile.content ? <div className={styles.scrollContent}><ContentRenderer message={tile.content} /></div>
               : <button type="button" className={styles.emptyArea} onClick={() => discuss(tile)}><Plus size={22} /><span>{workspace.requestLabel(tile) || "这里想要什么？"}</span></button>}
