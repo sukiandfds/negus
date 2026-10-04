@@ -22,7 +22,7 @@ export interface SessionMessage {
   id: string;
   role: MessageRole;
   text: string;
-  deliveryState?: "pending";
+  deliveryState?: "sending" | "pending" | "failed";
   submissionId?: string;
   blocks?: ContentBlock[];
   createdAt?: string;

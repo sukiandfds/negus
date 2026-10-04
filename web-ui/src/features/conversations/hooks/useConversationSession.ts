@@ -5,7 +5,7 @@ import { mergeMessageList, mergeOlderMessages, mergePendingOptimisticMessages, m
 import { isPendingThread } from "../model/pendingThread";
 import type { ContentSyncState, SessionDelta, SessionDetail, SessionMessage, SessionResponse } from "../model/types";
 
-type LoadOptions = { older?: boolean; quiet?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean };
+type LoadOptions = { older?: boolean; quiet?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean; conversationId?: string };
 
 
 const blockSignature = (message: SessionMessage) => (message.blocks || [])
@@ -78,6 +78,7 @@ export function useConversationSession(initial: InitialConversationState) {
     retry = true,
     recovery = false,
     prefetch = false,
+    conversationId,
   }: LoadOptions = {}) => {
     const cached = sessionCache.current.get(threadId);
     const isSelected = () => selectedIdRef.current === threadId;
@@ -109,7 +110,7 @@ export function useConversationSession(initial: InitialConversationState) {
         // Recovery must receive a fresh page. A partial local snapshot must
         // never be allowed to turn into an "unchanged" delta.
         ...(recovery ? {} : { contentVersion: cached?.contentVersion }),
-      }, controller.signal);
+      }, controller.signal, conversationId);
       if (controller.signal.aborted) return false;
       const latest = sessionCache.current.get(threadId);
       const pendingOptimistic = pendingOptimisticMessagesRef.current.get(threadId) || [];
@@ -283,7 +284,10 @@ export function useConversationSession(initial: InitialConversationState) {
   const setCreatedSession = useCallback((detail: SessionDetail, preserveComposer = false) => {
     const previousId = selectedIdRef.current;
     const replacingPending = isPendingThread(previousId) && !isPendingThread(detail.threadId);
-    if (replacingPending) sessionCache.current.delete(previousId);
+    if (replacingPending) {
+      detail = mergePendingOptimisticMessages(detail, sessionCache.current.get(previousId)?.messages || []);
+      sessionCache.current.delete(previousId);
+    }
     pendingOptimisticMessagesRef.current.delete(detail.threadId);
     sessionCache.current.set(detail.threadId, detail);
     selectedIdRef.current = detail.threadId;
@@ -341,6 +345,17 @@ export function useConversationSession(initial: InitialConversationState) {
     }));
   }, [updateCurrentSession]);
 
+  const updateOptimisticMessage = useCallback((threadId: string, messageId: string, patch: Partial<SessionMessage>) => {
+    const update = (messages: SessionMessage[]) => messages.map(message => message.id === messageId ? { ...message, ...patch } : message);
+    const pending = pendingOptimisticMessagesRef.current.get(threadId);
+    if (pending) pendingOptimisticMessagesRef.current.set(threadId, update(pending));
+    updateCurrentSession(threadId, current => ({ ...current, messages: update(current.messages) }));
+  }, [updateCurrentSession]);
+
+  const cacheCreatedSession = useCallback((detail: SessionDetail) => {
+    sessionCache.current.set(detail.threadId, mergePendingOptimisticMessages(detail, pendingOptimisticMessagesRef.current.get(detail.threadId) || []));
+  }, []);
+
   const invalidate = useCallback((threadId: string) => sessionCache.current.delete(threadId), []);
   const markSyncing = useCallback((value: boolean) => {
     setSyncing(value);
@@ -359,6 +374,6 @@ export function useConversationSession(initial: InitialConversationState) {
   return {
     selectedId, selectedIdRef, session, loadingSession, loadingOlder, syncing, contentSyncState, sessionError, composerKey,
     setSyncing: markSyncing, loadSession, selectSession, adoptSelection, clearSelection, setCreatedSession, setSessionError,
-    updateCurrentSession, addOptimisticMessage, removeOptimisticMessage, invalidate, loadOlder,
+    cacheCreatedSession, updateOptimisticMessage, updateCurrentSession, addOptimisticMessage, removeOptimisticMessage, invalidate, loadOlder,
   };
 }

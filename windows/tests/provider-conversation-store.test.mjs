@@ -35,6 +35,9 @@ test("channel switching preserves the thread and sends only the next user messag
     };
     const options = { current: store("current"), providers, createStore: () => store("fusheng-grok"), stateFile: path.join(root,"routes.json") };
     const service = createProviderConversationStore(options);
+    await service.renameSession("original", "手动标题");
+    sessions.get("original").title = "过时的自动标题";
+    assert.equal((await service.findSession("original")).title, "手动标题");
     await service.updateModel("original", "grok-4.6");
     assert.equal(sessions.size, 1);
     assert.equal(calls.length, 0);
@@ -48,6 +51,8 @@ test("channel switching preserves the thread and sends only the next user messag
     assert.equal(calls[0].providerId, "fusheng-grok");
     assert.equal((await service.listSessions()).length, 1);
     const restored = createProviderConversationStore(options);
+    assert.equal((await restored.findSession("original")).title, "手动标题");
+    assert.equal((await restored.listSessions())[0].title, "手动标题");
     await restored.updateModel(next.threadId, "grok-4.5");
     assert.equal(calls.at(-1).providerId, "fusheng-grok");
     assert.equal(sessions.size, 1);

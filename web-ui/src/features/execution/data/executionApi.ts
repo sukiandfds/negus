@@ -1,5 +1,5 @@
 import { fetchJson, postJson } from "../../../shared/api/http";
-import { conversationQuery, withConversation } from "../../../shared/api/conversationScope";
+import { conversationQuery, withConversation, currentConversationId } from "../../../shared/api/conversationScope";
 import type { ExecutionStatus, UserInputRequest } from "../model/types";
 
 export interface SendMessageResult {
@@ -34,13 +34,13 @@ export const executionApi = {
     `/api/execution-status?threadId=${encodeURIComponent(threadId)}${conversationQuery()}${reconcile ? "&reconcile=1" : ""}`,
     signal,
   ),
-  sendMessage: (threadId: string, text: string, attachmentIds: string[] = [], submissionId = "", signal?: AbortSignal) => postJson<SendMessageResult>(
+  sendMessage: (threadId: string, text: string, attachmentIds: string[] = [], submissionId = "", signal?: AbortSignal, conversationId = currentConversationId()) => postJson<SendMessageResult>(
     "/api/session/message",
-    withConversation({ threadId, text, attachmentIds, submissionId }),
+    withConversation({ threadId, text, attachmentIds, submissionId }, conversationId),
     signal,
   ),
-  submissionStatus: (threadId: string, submissionId: string, signal?: AbortSignal) => fetchJson<SubmissionStatusResult>(
-    `/api/session/submission?threadId=${encodeURIComponent(threadId)}&submissionId=${encodeURIComponent(submissionId)}${conversationQuery()}`,
+  submissionStatus: (threadId: string, submissionId: string, signal?: AbortSignal, conversationId = currentConversationId()) => fetchJson<SubmissionStatusResult>(
+    `/api/session/submission?threadId=${encodeURIComponent(threadId)}&submissionId=${encodeURIComponent(submissionId)}${conversationQuery(conversationId)}`,
     signal,
   ),
   interrupt: (threadId: string, signal?: AbortSignal) => postJson<InterruptResult>(

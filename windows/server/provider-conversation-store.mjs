@@ -29,6 +29,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
   };
   const owner = (id) => routes[id]?.providerId || "current";
   const decorate = (session) => session && ({ ...session,
+    ...(routes[session.threadId]?.manualTitle ? { title: routes[session.threadId].manualTitle } : {}),
     model: routes[session.threadId]?.model || session.model || "",
     modelProviderId: routes[session.threadId]?.pendingProviderId || owner(session.threadId),
   });
@@ -136,6 +137,10 @@ export const createProviderConversationStore = ({ current, providers, createStor
         await rememberPreviousSettings(id, source);
       }
       const result = await source[method](id, ...args);
+      if (method === "renameSession") {
+        routes[id] = { ...routes[id], providerId: owner(id), manualTitle: args[0], summary: { ...routes[id]?.summary, ...result, threadId: id, title: args[0] } };
+        await save();
+      }
       if (method === "sendMessage" && routes[id]?.attemptSettings && result?.turn?.id) {
         routes[id].attemptSettings.turnId = result.turn.id;
       }
@@ -240,8 +245,10 @@ export const createProviderConversationStore = ({ current, providers, createStor
         const targetStore = await storeFor(target.modelProviderId);
         const created = await targetStore.createSession(target.model || model, routes[id]?.summary?.cwd || "");
         await source.releaseSession?.(id);
+        const manualTitle = routes[id]?.manualTitle;
+        if (manualTitle) await targetStore.renameSession(created.threadId, manualTitle);
         delete routes[id];
-        routes[created.threadId] = { providerId: target.modelProviderId, model, summary: created, lastSuccessfulSettings: null };
+        routes[created.threadId] = { manualTitle, providerId: target.modelProviderId, model, summary: created, lastSuccessfulSettings: null };
         await save();
         return { threadId: created.threadId, model, modelProvider: target.modelProviderId, reasoningEffort };
       }
@@ -249,7 +256,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
       const info = await source.getSessionResumeInfo(id);
       routes[id] = { ...routes[id], providerId: owner(id), pendingProviderId: target.modelProviderId,
         activeModel: routes[id]?.activeModel || info.model || routes[id]?.runtimeModel || routes[id]?.model,
-        model, runtimeModel: target.model || model, reasoningEffort, summary: info.summary || routes[id]?.summary };
+        model, runtimeModel: target.model || model, reasoningEffort, manualTitle: routes[id]?.manualTitle || info.manualTitle || "", summary: info.summary || routes[id]?.summary };
       await save();
       return { threadId: id, model, modelProvider: target.modelProviderId, reasoningEffort };
     })();

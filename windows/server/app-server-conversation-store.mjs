@@ -819,7 +819,7 @@ export const createAppServerConversationStore = ({
     }
     if (!thread?.path || !isAllowedProjectRoot(thread.cwd)) throw persistedThreadError();
     await fs.access(thread.path).catch(() => { throw persistedThreadError(); });
-    return { path: thread.path, cwd: thread.cwd, model: thread.model, reasoningEffort: thread.reasoningEffort, summary: summaryFromThread(thread) };
+    return { path: thread.path, cwd: thread.cwd, model: thread.model, reasoningEffort: thread.reasoningEffort, manualTitle: thread.name?.trim() || "", summary: summaryFromThread(thread) };
   };
 
   const releaseSession = async (threadId) => {

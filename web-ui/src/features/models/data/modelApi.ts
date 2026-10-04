@@ -13,14 +13,14 @@ export const modelApi = {
     );
   },
   listForAgents: (signal?: AbortSignal) => fetchJson<CodexModel[]>("/api/models?scope=agents", signal),
-  update: (threadId: string, model: string, signal?: AbortSignal, reasoningEffort?: string) => postJson<ModelUpdateResult>(
+  update: (threadId: string, model: string, signal?: AbortSignal, reasoningEffort?: string, conversationId = currentConversationId()) => postJson<ModelUpdateResult>(
     "/api/session/model",
-    withConversation({ threadId, model, allowProviderSwitch: true, reasoningEffort }),
+    withConversation({ threadId, model, allowProviderSwitch: true, reasoningEffort }, conversationId),
     signal,
   ),
-  updateReasoningEffort: (threadId: string, reasoningEffort: string, signal?: AbortSignal) => postJson<ModelUpdateResult>(
+  updateReasoningEffort: (threadId: string, reasoningEffort: string, signal?: AbortSignal, conversationId = currentConversationId()) => postJson<ModelUpdateResult>(
     "/api/session/reasoning-effort",
-    withConversation({ threadId, reasoningEffort }),
+    withConversation({ threadId, reasoningEffort }, conversationId),
     signal,
   ),
 };

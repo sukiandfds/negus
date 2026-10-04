@@ -76,10 +76,10 @@ export function useModels(threadId: string, onChanged: (threadId: string, result
     setError("");
     try {
       let result = pending.modelChanged
-        ? await modelApi.update(activeThreadId, pending.model || "", undefined, pending.reasoningEffort)
-        : await modelApi.updateReasoningEffort(activeThreadId, pending.reasoningEffort || "");
+        ? await modelApi.update(activeThreadId, pending.model || "", undefined, pending.reasoningEffort, conversationId)
+        : await modelApi.updateReasoningEffort(activeThreadId, pending.reasoningEffort || "", undefined, conversationId);
       if (pending.modelChanged && pending.effortChanged && pending.reasoningEffort) {
-        const effortResult = await modelApi.updateReasoningEffort(result.threadId || activeThreadId, pending.reasoningEffort);
+        const effortResult = await modelApi.updateReasoningEffort(result.threadId || activeThreadId, pending.reasoningEffort, undefined, conversationId);
         result = { ...result, threadId: effortResult.threadId || result.threadId || activeThreadId, reasoningEffort: effortResult.reasoningEffort || pending.reasoningEffort };
       }
       const selectedModel = pending.model || currentModel;
@@ -92,7 +92,7 @@ export function useModels(threadId: string, onChanged: (threadId: string, result
       };
       if (pendingRef.current.get(activeThreadId) === pending) pendingRef.current.delete(activeThreadId);
       writeLocalCache("negus-preferred-model-v1", applied.model || "");
-      onChanged(activeThreadId, applied);
+      onChanged(activeThreadId, { ...applied, committed: true });
       return applied;
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : String(reason);
@@ -106,7 +106,8 @@ export function useModels(threadId: string, onChanged: (threadId: string, result
     });
     applyingRef.current.set(activeThreadId, request);
     return request;
-  }, [currentModel, models, onChanged, threadId]);
+  }, [currentModel, models, onChanged, threadId, conversationId]);
 
-  return { models, loading, changing, error: error || cached.error, change, changeReasoningEffort, applyPending };
+  const clearPending = useCallback((id: string) => { pendingRef.current.delete(id); }, []);
+  return { clearPending, models, loading, changing, error: error || cached.error, change, changeReasoningEffort, applyPending };
 }

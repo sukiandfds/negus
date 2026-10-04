@@ -44,32 +44,11 @@ export const createConversationRoutes = ({
   const submissionTtlMs = 60000;
   const maxSubmissions = 200;
 
-  const submissionResult = (entry, status) => ({
-    body: {
-      threadId: entry.threadId,
-      turnId: status.turnId || entry.result?.turnId || "",
-      status: status.active && status.turnId ? status.phase : "pending",
-      submissionId: entry.submissionId,
-      messageId: entry.messageId,
-      ...(entry.result?.migratedFromThreadId ? { migratedFromThreadId: entry.result.migratedFromThreadId } : {}),
-      ...(status.turnId ? { recovered: true } : {}),
-    },
-    statusCode: 202,
-  });
-
   const resolveStoredSubmission = async (entry) => {
     if (!entry) return null;
     if (entry.state === "accepted" && entry.result) return entry.result;
     if (entry.state === "failed") return { body: { error: entry.error || "指令发送失败", submissionId: entry.submissionId }, statusCode: 409 };
-    const current = execution.getStatus(entry.threadId);
-    const startedAt = Date.parse(current.startedAt || "");
-    const submittedAt = Date.parse(entry.createdAt || "");
-    if (current.active && current.turnId && (!Number.isFinite(submittedAt) || !Number.isFinite(startedAt) || startedAt >= submittedAt - 1000)) {
-      const result = submissionResult(entry, current);
-      submissionStore?.complete(entry.submissionId, result);
-      return result;
-    }
-    return submissionResult(entry, current);
+    return { body: { threadId: entry.threadId, submissionId: entry.submissionId, status: "pending" }, statusCode: 202 };
   };
 
   const rememberSubmission = (submissionId, fingerprint, promise) => {

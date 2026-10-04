@@ -1,5 +1,5 @@
 import type { ProjectInfo, SessionResponse, SessionSummary } from "../model/types";
-import { conversationQuery, withConversation } from "../../../shared/api/conversationScope";
+import { currentConversationId, conversationQuery, withConversation } from "../../../shared/api/conversationScope";
 import { fetchJson, postJson } from "../../../shared/api/http";
 
 const PAGE_SIZE = 60;
@@ -42,12 +42,12 @@ export const conversationApi = {
     before?: number;
     cursor?: string;
     contentVersion?: number;
-  } = {}, signal?: AbortSignal) => {
+  } = {}, signal?: AbortSignal, conversationId = currentConversationId()) => {
     const beforeQuery = before === undefined ? "" : `&before=${before}`;
     const cursorQuery = cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`;
     const contentVersionQuery = contentVersion === undefined ? "" : `&contentVersion=${contentVersion}`;
     return fetchConversationJson<SessionResponse>(
-      `/api/session?threadId=${encodeURIComponent(threadId)}&limit=${PAGE_SIZE}${conversationQuery()}${beforeQuery}${cursorQuery}${contentVersionQuery}`,
+      `/api/session?threadId=${encodeURIComponent(threadId)}&limit=${PAGE_SIZE}${conversationQuery(conversationId)}${beforeQuery}${cursorQuery}${contentVersionQuery}`,
       signal,
     );
   },

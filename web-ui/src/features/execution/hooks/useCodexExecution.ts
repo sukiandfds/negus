@@ -9,6 +9,7 @@ const SEND_SLOW_NOTICE_MS = 3000;
 const MAX_RETIRED_TURNS = 20;
 const MAX_CACHED_STATUSES = 100;
 const statusCache = new Map<string, ExecutionStatus>();
+const sendingThreads = new Set<string>();
 
 type RefreshStatus = (signal?: AbortSignal, reconcile?: boolean) => Promise<ExecutionStatus | null>;
 
@@ -74,8 +75,6 @@ export function useCodexExecution(threadId: string) {
   const streamingItemId = useRef("");
   const streamingBuffer = useRef("");
   const streamingTimer = useRef(0);
-  const sendingSlowTimer = useRef(0);
-  const sendingRef = useRef(false);
   const currentTurnIdRef = useRef("");
   const retiredTurnIdsRef = useRef(new Set<string>());
   const stateRevisionRef = useRef(0);
@@ -86,8 +85,13 @@ export function useCodexExecution(threadId: string) {
   const activeEventEpochRef = useRef("");
   const knownEventEpochsRef = useRef(new Set<string>());
   const lastEventSeqRef = useRef(0);
-  const [sending, setSending] = useState(false);
-  const [sendingSlow, setSendingSlow] = useState(false);
+  const [sendingIds, setSendingIds] = useState(new Set<string>());
+  const [slowIds, setSlowIds] = useState(new Set<string>());
+  const markSending = (id: string, value: boolean) => setSendingIds(current => {
+    const next = new Set(current);
+    if (value) next.add(id); else next.delete(id);
+    return next;
+  });
 
   const clearStreaming = useCallback(() => {
     window.clearTimeout(streamingTimer.current);
@@ -217,7 +221,6 @@ export function useCodexExecution(threadId: string) {
 
   useEffect(() => () => {
     window.clearTimeout(streamingTimer.current);
-    window.clearTimeout(sendingSlowTimer.current);
   }, []);
 
   const handleEvent = useCallback((event: ProjectEvent) => {
@@ -260,19 +263,19 @@ export function useCodexExecution(threadId: string) {
     attachmentIds: string[] = [],
     submissionId = "",
     targetThreadId = threadId,
+    conversationId?: string,
   ): Promise<SendMessageAttempt | null> => {
     const message = text.trim();
-    if (!targetThreadId || (!message && !attachmentIds.length) || sendingRef.current) return null;
-    sendingRef.current = true;
-    setSending(true);
-    setSendingSlow(false);
+    if (!targetThreadId || (!message && !attachmentIds.length) || sendingThreads.has(targetThreadId)) return null;
+    sendingThreads.add(targetThreadId);
+    markSending(targetThreadId, true);
     const acceptedSubmissionId = submissionId || createClientId();
-    sendingSlowTimer.current = window.setTimeout(() => setSendingSlow(true), SEND_SLOW_NOTICE_MS);
+    const slowTimer = window.setTimeout(() => setSlowIds(current => new Set(current).add(targetThreadId)), SEND_SLOW_NOTICE_MS);
     const steering = status.active;
     const previousTurnId = status.turnId;
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), SEND_CONFIRM_TIMEOUT_MS);
-    if (!steering && isCurrent()) {
+    if (!steering && isCurrent() && targetThreadId === threadId) {
       retireTurn(currentTurnIdRef.current || previousTurnId);
       currentTurnIdRef.current = "";
       stateRevisionRef.current += 1;
@@ -286,7 +289,7 @@ export function useCodexExecution(threadId: string) {
         startedAt: submittedAt,
         updatedAt: submittedAt,
       });
-    } else if (isCurrent()) {
+    } else if (isCurrent() && targetThreadId === threadId) {
       stateRevisionRef.current += 1;
       setStatus((current) => ({
         ...current,
@@ -296,8 +299,8 @@ export function useCodexExecution(threadId: string) {
       }));
     }
     try {
-      const accepted = await executionApi.sendMessage(targetThreadId, message, attachmentIds, acceptedSubmissionId, controller.signal);
-      if (!isCurrent()) return accepted.status === "pending"
+      const accepted = await executionApi.sendMessage(targetThreadId, message, attachmentIds, acceptedSubmissionId, controller.signal, conversationId);
+      if (!isCurrent() || targetThreadId !== threadId) return accepted.status === "pending"
         ? { outcome: "uncertain", result: null }
         : { outcome: "accepted", result: accepted };
       if (accepted.status === "pending") {
@@ -326,19 +329,11 @@ export function useCodexExecution(threadId: string) {
       }
       return { outcome: "accepted", result: accepted };
     } catch (reason) {
-      const recovered = isCurrent() ? await refreshStatus(undefined, true) : null;
+      const receipt = await executionApi.submissionStatus(targetThreadId, acceptedSubmissionId, undefined, conversationId).catch(() => null);
+      if (receipt?.status === "accepted") return { outcome: "accepted", result: { threadId: receipt.threadId, turnId: receipt.turnId || "", status: "accepted" } };
+      if (receipt?.status === "failed") return { outcome: "failed", result: null };
       if (!isCurrent()) return { outcome: "uncertain", result: null };
-      const acceptedAfterFailure = !steering
-        && Boolean(recovered?.turnId)
-        && recovered?.turnId !== previousTurnId
-        && !["failed", "systemError"].includes(recovered?.phase || "");
-      if (acceptedAfterFailure) {
-        return {
-          outcome: "accepted",
-          result: { threadId: targetThreadId, turnId: recovered?.turnId || "", status: recovered?.phase || "inProgress" },
-        };
-      }
-      const uncertain = controller.signal.aborted;
+      const uncertain = receipt?.status === "pending" || controller.signal.aborted || reason instanceof TypeError;
       const detail = uncertain
         ? "发送确认超时，未重复提交；请确认任务状态后重试"
         : reason instanceof Error ? reason.message : String(reason);
@@ -357,12 +352,11 @@ export function useCodexExecution(threadId: string) {
       }
       return { outcome: uncertain ? "uncertain" : "failed", result: null };
     } finally {
+      sendingThreads.delete(targetThreadId);
       window.clearTimeout(timeout);
-      window.clearTimeout(sendingSlowTimer.current);
-      sendingSlowTimer.current = 0;
-      setSendingSlow(false);
-      sendingRef.current = false;
-      setSending(false);
+      window.clearTimeout(slowTimer);
+      setSlowIds(current => { const next = new Set(current); next.delete(targetThreadId); return next; });
+      markSending(targetThreadId, false);
     }
   }, [clearStreaming, refreshStatus, retireTurn, status.active, status.turnId, isCurrent, setStatus, threadId]);
 
@@ -376,9 +370,9 @@ export function useCodexExecution(threadId: string) {
   }, [threadId]);
 
   const interrupt = useCallback(async () => {
-    if (!threadId || !status.active || sendingRef.current) return false;
-    sendingRef.current = true;
-    setSending(true);
+    if (!threadId || !status.active || sendingThreads.has(threadId)) return false;
+    sendingThreads.add(threadId);
+    markSending(threadId, true);
     setStatus((current) => ({
       ...current,
       phase: "stopping",
@@ -402,10 +396,10 @@ export function useCodexExecution(threadId: string) {
       }
       return false;
     } finally {
-      sendingRef.current = false;
-      setSending(false);
+      sendingThreads.delete(threadId);
+      markSending(threadId, false);
     }
   }, [refreshStatus, status.active, isCurrent, setStatus, threadId]);
 
-  return { status, streamingText: status.streamingText || "", commentaryText: status.commentary || "", sending, sendingSlow, handleEvent, sendMessage, reconcileSubmission, interrupt, clearStreaming, refreshStatus };
+  return { status, streamingText: status.streamingText || "", commentaryText: status.commentary || "", sending: sendingIds.has(threadId), sendingSlow: slowIds.has(threadId), handleEvent, sendMessage, reconcileSubmission, interrupt, clearStreaming, refreshStatus };
 }

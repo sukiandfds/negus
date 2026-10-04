@@ -1,3 +1,4 @@
+import { currentConversationId } from "../../../shared/api/conversationScope";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MediaFile } from "../../../shared/model/media";
 import type { ProjectEvent } from "../../execution/model/types";
@@ -6,6 +7,7 @@ import type { FollowUpQueueItem } from "../model/followUpQueue";
 import { createSubmissionId } from "../state/optimisticMessage";
 
 export function useFollowUpQueue(threadId: string) {
+  const conversationId = currentConversationId();
   const [snapshot, setSnapshot] = useState({ threadId, items: [] as FollowUpQueueItem[] });
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -18,11 +20,11 @@ export function useFollowUpQueue(threadId: string) {
   }
 
   const run = useCallback(async (targetThreadId: string, request: () => Promise<{ items: FollowUpQueueItem[] }>, reading = false) => {
-    if (!targetThreadId || targetThreadId !== threadIdRef.current) return false;
+    if (!targetThreadId) return false;
     const requestId = ++requestRef.current;
     const isCurrent = () => threadIdRef.current === targetThreadId && requestRef.current === requestId;
     const setPending = reading ? setLoading : setBusy;
-    setPending(true);
+    if (threadIdRef.current === targetThreadId) setPending(true);
     try {
       const response = await request();
       if (isCurrent()) {
@@ -54,8 +56,9 @@ export function useFollowUpQueue(threadId: string) {
       attachments.map((attachment) => attachment.id),
       `queue-${createSubmissionId()}`,
       modelSettings,
+      conversationId,
     ));
-  }, [run, threadId]);
+  }, [run, threadId, conversationId]);
 
   const edit = useCallback((itemId: string, text: string) => {
     if (!threadId) return Promise.resolve(false);

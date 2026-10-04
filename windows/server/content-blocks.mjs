@@ -303,7 +303,7 @@ export const messageFromThreadItem = (item, registerMedia) => {
     const blocks = userBlocksFromContent(item.content, registerMedia);
     const text = visibleText(blocks);
     if (!isUsefulUserMessage(text, blocks)) return null;
-    const submissionId = typeof item.clientId === "string" ? item.clientId.trim() : "";
+    const submissionId = String(item.clientUserMessageId || item.clientId || "").trim();
     return {
       id: item.id || blockId("message", JSON.stringify(blocks)),
       role: "user",

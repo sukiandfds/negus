@@ -17,6 +17,7 @@ interface ConversationSelection {
   selectSession: (threadId: string) => void;
   setCreatedSession: (detail: SessionDetail, preserveComposer?: boolean) => void;
   setSessionError: (message: string) => void;
+  cacheCreatedSession: (detail: SessionDetail) => void;
 }
 
 interface RemovedSession {
@@ -69,7 +70,7 @@ export function useConversationCatalog(
   const archivedViewRef = useRef(initialArchivedView);
   const viewCacheRef = useRef(new Map<boolean, SessionSummary[]>());
   const archiveSwitchTimerRef = useRef(0);
-  const creatingRef = useRef(false);
+  const creatingRef = useRef(new Set<string>());
   const archiveBusyIdsRef = useRef(new Set<string>());
   const listRetryTimerRef = useRef(0);
   const listRequestRef = useRef(0);
@@ -234,11 +235,12 @@ export function useConversationCatalog(
   }, [initial, refreshSessions, selection.loadSession]);
 
   const createSession = useCallback(async (projectRoot = "", requestedModel = "", pendingId = "", requestedProviderId = "", preserveComposer = false) => {
-    if (creatingRef.current) {
+    const createKey = pendingId || "new";
+    if (creatingRef.current.has(createKey)) {
       if (pendingId && selection.selectedIdRef.current === pendingId) selection.setSessionError("新对话创建失败，请重试");
       return "";
     }
-    creatingRef.current = true;
+    creatingRef.current.add(createKey);
     setCreating(true);
     setListError("");
     try {
@@ -259,6 +261,7 @@ export function useConversationCatalog(
       const providerId = requestedProviderId || (catalogEntry ? providerIdOf(catalogEntry) : readModelDefaults().providerId);
       const created = await conversationApi.create(model, projectRoot, providerId);
       const detail: SessionDetail = { ...created, messages: [] };
+      selection.cacheCreatedSession(detail);
       transientSessionsRef.current.set(created.threadId, created);
       const stillCurrent = !pendingId || selection.selectedIdRef.current === pendingId;
       if (stillCurrent) {
@@ -275,8 +278,8 @@ export function useConversationCatalog(
       if (pendingId && selection.selectedIdRef.current === pendingId) selection.setSessionError(message);
       return "";
     } finally {
-      creatingRef.current = false;
-      setCreating(false);
+      creatingRef.current.delete(createKey);
+      setCreating(creatingRef.current.size > 0);
     }
   }, [currentModel, selection.clearSelection, selection.selectedIdRef, selection.setCreatedSession, selection.setSessionError, updateArchiveQuery]);
 
@@ -286,6 +289,7 @@ export function useConversationCatalog(
       const result = await conversationApi.fork(threadId, lastTurnId);
       const created = result.session;
       const detail: SessionDetail = { ...created, archived: false, messages: [] };
+      selection.cacheCreatedSession(detail);
       transientSessionsRef.current.set(created.threadId, created);
       archivedViewRef.current = false;
       setArchivedView(false);
@@ -413,7 +417,19 @@ export function useConversationCatalog(
     if (latest) selection.selectSession(latest.threadId);
   }, [selection.selectSession, setArchiveViewMode]);
 
+  const updateSessionSummary = useCallback((summary: SessionSummary) => {
+    listAbortControllerRef.current?.abort();
+    ++listRequestRef.current;
+    setLoadingList(false);
+    const update = (items: SessionSummary[]) => items.map(item => item.threadId === summary.threadId ? { ...item, ...summary } : item);
+    sessionsRef.current = update(sessionsRef.current);
+    setSessions(sessionsRef.current);
+    if (transientSessionsRef.current.has(summary.threadId)) transientSessionsRef.current.set(summary.threadId, summary);
+    for (const [key, items] of viewCacheRef.current) viewCacheRef.current.set(key, update(items));
+  }, []);
+
   return {
+    updateSessionSummary,
     project,
     sessions,
     archivedView,

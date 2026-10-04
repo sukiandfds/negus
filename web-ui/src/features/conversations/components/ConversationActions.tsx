@@ -50,9 +50,10 @@ export function ConversationActions({ session, archived, disabled, onArchive, cl
     if (busy || !normalized || normalized.length > 120) return;
     setBusy(true); setError("");
     try {
-      await postJson("/api/session/name", {
+      const renamed = await postJson<SessionSummary>("/api/session/name", {
         threadId: session.threadId, name: normalized, conversationId: await sourceConversationId(),
       });
+      window.dispatchEvent(new CustomEvent("negus:session-renamed", { detail: renamed }));
       setDialog("");
       button.current?.focus();
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
@@ -67,9 +68,12 @@ export function ConversationActions({ session, archived, disabled, onArchive, cl
         threadId: session.threadId, conversationId, latest: true,
       });
       const url = new URL(window.location.href);
-      for (const key of ["conversation", "employeeId", "agent", "archived"]) url.searchParams.delete(key);
+      for (const key of ["conversation", "employee", "employeeId", "agent", "archived"]) url.searchParams.delete(key);
       url.searchParams.set("thread", result.session.threadId);
-      window.location.assign(url.toString());
+      url.searchParams.set("view", "conversation");
+      window.history.pushState(null, "", url.toString());
+      window.dispatchEvent(new Event("negus:navigate"));
+      setMenu(false);
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   };

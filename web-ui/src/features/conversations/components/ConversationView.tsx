@@ -91,6 +91,7 @@ function Message({
       {!executionPlaceholder ? <div className={styles.body}>
         {message.turnStatus === "interrupted" ? <small>已中断</small> : null}
         {streaming ? <div className={styles.streamingText}>{assistantText ?? message.text}<i className={styles.cursor} /></div> : heartbeatUser ? <CollapsedMarkdown text={heartbeatUser.instructions} /> : <>{showPriorReply ? <div className={styles.priorReply}>追加指令前的回复</div> : null}<ContentRenderer message={shown} threadId={threadId} /></>}
+        {message.deliveryState === "failed" ? <small>发送失败</small> : null}
         {message.deliveryState === "pending" ? (
           <span className={styles.deliveryState} title="正在确认指令是否已送达" aria-label="正在确认指令是否已送达">
             <Clock3 aria-hidden="true" />
@@ -169,7 +170,7 @@ const sameRenderedMessage = (left: SessionMessage, right: SessionMessage) => (
 );
 
 const staysAtEnd = (item: ConversationItem) => (
-  item.streaming || item.executionPlaceholder || (item.message.id.startsWith("optimistic-") && item.message.source !== "native-goal")
+  item.streaming || item.executionPlaceholder
 );
 
 const orderVisibleItems = (items: ConversationItem[]) => {
@@ -506,7 +507,7 @@ export function ConversationView({
                           && !session?.archived}
                         editing={editingMessageId === item.message.id}
                         onEdit={() => onEditMessage(item.message)}
-                        retryable={item.message.deliveryState === "pending"}
+                        retryable={item.message.deliveryState === "pending" || item.message.deliveryState === "failed"}
                         retrying={retryingMessageId === item.message.id}
                         onRetry={() => onRetryMessage(item.message)}
                         shareable={agentScoped

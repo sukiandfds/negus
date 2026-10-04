@@ -96,7 +96,7 @@ function ConversationApp({ active, desktop, onViewChange, onOpenSettings }: { ac
     setSidebarOpen(false);
   }, [conversations.selectSession, onViewChange]);
   const createSession = (root?: string, model?: string, providerId?: string) => {
-    const opened = conversations.openNewSession(root || "", model || "", providerId || "");
+    const opened = conversations.openNewSession(root || "", model || "", providerId || "", { deferred: true });
     if (opened) { onViewChange("conversation"); setSidebarOpen(false); }
     return Promise.resolve(opened);
   };
@@ -176,7 +176,7 @@ function ConversationApp({ active, desktop, onViewChange, onOpenSettings }: { ac
         {desktop && <div className={desktopStyles.answerHeader}><strong>{conversations.session?.title || "桌面助手"}</strong><button type="button" aria-label="收起回复" onClick={() => setAnswerOpen(false)}><ChevronDown size={18} /></button></div>}
         <div className={desktopStyles.answerBody}><ConversationView
           completedGoal={conversations.goal?.status === "complete" ? conversations.goal : null}
-          key={conversations.selectedId || "conversation"}
+          key={conversations.composerKey || "conversation"}
           active={active && (!desktop || answerOpen)}
           session={conversations.session}
           loading={conversations.loadingSession}

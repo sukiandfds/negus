@@ -116,3 +116,9 @@ for (const heading of ["## My request:", "## My request for Codex:"]) {
     assert.equal(message.blocks[0].text, "Show these images in a compact gallery.");
   });
 }
+
+
+test("native user receipt retains the submission id used by the send API", () => {
+  const message = messageFromThreadItem({ id: "native-user", type: "userMessage", clientUserMessageId: "submission-1", content: [{ type: "text", text: "hello" }] }, registerMedia);
+  assert.equal(message.submissionId, "submission-1");
+});

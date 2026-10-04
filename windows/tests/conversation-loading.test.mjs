@@ -21,6 +21,7 @@ async function harness(cachedSessions = [], partialSessionIds = []) {
   globalThis[key] = { hooks, api };
   const rewritten = source.replace(/import .* from "react";/, `const {useState,useRef,useCallback,useEffect}=globalThis.${key}.hooks;`)
     .replace(/import .* from "\.\.\/data\/conversationApi";/, `const conversationApi=globalThis.${key}.api;`)
+    .replace(/import .* from ".*pendingThread";/, 'const isPendingThread=id=>id.startsWith("pending:");')
     .replace('"../state/conversationMerge"', JSON.stringify(mergeUrl));
   const { useConversationSession } = await import(moduleUrl(rewritten));
   delete globalThis[key];
@@ -216,4 +217,27 @@ test("group switch cancels the old frame and new-room deltas still paint; closed
     globalThis.document = previousDocument;
     globalThis.EventSource = previousEventSource;
   }
+});
+
+
+test("first send preserves draft content and composer while adopting the real thread", async () => {
+  const h = await harness([detail("a")]);
+  h.render().setCreatedSession({ ...detail("pending:draft"), messages: [] });
+  h.render().addOptimisticMessage("pending:draft", { id: "optimistic-send", role: "user", text: "hello", submissionId: "send", deliveryState: "sending" });
+  h.render().setCreatedSession({ ...detail("real"), messages: [] }, true);
+  assert.equal(h.render().selectedId, "real");
+  assert.equal(h.render().composerKey, "pending:draft");
+  assert.equal(h.render().session.messages[0].text, "hello");
+});
+
+test("background receipt updates survive before the destination session is loaded", async () => {
+  const h = await harness([detail("a")]);
+  h.render().addOptimisticMessage("b", { id: "optimistic-send", role: "user", text: "hello", submissionId: "send" });
+  h.render().updateOptimisticMessage("b", "optimistic-send", { deliveryState: "failed" });
+  const load = h.render().loadSession("b");
+  h.pending[0].resolve({ ...detail("b"), messages: [] });
+  await load;
+  h.render().selectSession("b");
+  assert.equal(h.render().session.messages[0].deliveryState, "failed");
+  h.pending[1].resolve({ ...detail("b"), messages: [] });
 });

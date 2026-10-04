@@ -22,6 +22,7 @@ const validStatusRecord = (value: unknown): value is Record<string, ContextStatu
 let persistedStatuses = readLocalCache(contextStatusCacheKey, validStatusRecord) || {};
 const uncommittedChoice = new Map<string, { model: string; reasoningEffort: string }>();
 const serverModelReady = new Set<string>();
+const submittedChoices = new Map<string, { model: string; reasoningEffort: string }>();
 
 const emptyStatus = (threadId: string): ContextStatus => ({
   type: "context_status",
@@ -37,11 +38,6 @@ const emptyStatus = (threadId: string): ContextStatus => ({
   updatedAt: null,
 });
 
-const storedStatus = (status: ContextStatus): ContextStatus => {
-  const saved = uncommittedChoice.get(status.threadId);
-  return saved ? { ...status, model: saved.model, reasoningEffort: saved.reasoningEffort } : status;
-};
-
 const rememberStatus = (status: ContextStatus) => {
   if (!status.threadId) return status;
   statusCache.delete(status.threadId);
@@ -51,14 +47,14 @@ const rememberStatus = (status: ContextStatus) => {
     if (!oldest) break;
     statusCache.delete(oldest);
   }
-  persistedStatuses = { ...persistedStatuses, ...Object.fromEntries([...statusCache].map(([id, value]) => [id, storedStatus(value)])) };
+  persistedStatuses = { ...persistedStatuses, ...Object.fromEntries([...statusCache].map(([id, value]) => [id, value])) };
   writeLocalCache(contextStatusCacheKey, persistedStatuses);
   return status;
 };
 
 const keepUncommittedChoice = (current: ContextStatus, next: ContextStatus): ContextStatus => {
   if (!uncommittedChoice.has(next.threadId) || current.threadId !== next.threadId) return next;
-  return { ...next, model: current.model, reasoningEffort: current.reasoningEffort };
+  return { ...next, ...uncommittedChoice.get(next.threadId)! };
 };
 
 const cachedStatus = (threadId: string) => {
@@ -88,7 +84,7 @@ export function useContextManagement(threadId: string) {
     try {
       let next = await contextApi.status(threadId, signal);
       if (signal?.aborted || version !== refreshVersion.current || activeThread.current !== threadId) return null;
-      if (!serverModelReady.has(threadId) && !uncommittedChoice.has(threadId) && next.lastSuccessfulSettings !== undefined) {
+      if (!uncommittedChoice.has(threadId) && next.lastSuccessfulSettings) {
         const models = readModelCatalog();
         const defaults = readModelDefaults();
         const saved = next.lastSuccessfulSettings;
@@ -96,7 +92,6 @@ export function useContextManagement(threadId: string) {
         const reasoningEffort = resolveVisibleEffort(models, defaults, model, saved?.reasoningEffort || "");
         next = { ...next, model, reasoningEffort };
         // Restoring the selection is local; the next send applies it to the runtime.
-        uncommittedChoice.set(threadId, { model, reasoningEffort });
         rememberStatus(next);
         setStoredStatus(next);
       } else {
@@ -121,20 +116,18 @@ export function useContextManagement(threadId: string) {
     if (!threadId) return;
     const controller = new AbortController();
     void refresh(controller.signal);
-    return () => controller.abort();
+    return () => { controller.abort(); uncommittedChoice.delete(threadId); serverModelReady.delete(threadId); };
   }, [refresh, threadId]);
 
   const handleEvent = useCallback((event: ContextStatus) => {
     if (event.type === "context_status" && event.threadId === activeThread.current) {
-      ++refreshVersion.current;
       setStatus((current) => {
         if (current.threadId !== event.threadId) return event;
         if (current.updatedAt && event.updatedAt && Date.parse(event.updatedAt) < Date.parse(current.updatedAt)) return current;
-        const canKeepQualifiedModel = serverModelReady.has(event.threadId) || uncommittedChoice.has(event.threadId);
-        const model = canKeepQualifiedModel && current.model.includes("::") && event.model && !event.model.includes("::")
-          ? current.model
-          : event.model;
-        return model === event.model ? event : { ...event, model };
+        if (serverModelReady.has(event.threadId) || uncommittedChoice.has(event.threadId)) {
+          return { ...event, model: current.model, reasoningEffort: current.reasoningEffort };
+        }
+        return event;
       });
     }
   }, [threadId]);
@@ -144,8 +137,8 @@ export function useContextManagement(threadId: string) {
     const current = cachedStatus(changedThreadId);
     const { committed, ...visible } = settings;
     if (committed) uncommittedChoice.delete(changedThreadId);
-    else if (!uncommittedChoice.has(changedThreadId)) {
-      uncommittedChoice.set(changedThreadId, { model: current.model, reasoningEffort: current.reasoningEffort });
+    else {
+      uncommittedChoice.set(changedThreadId, { model: visible.model, reasoningEffort: visible.reasoningEffort });
     }
     const modelChanged = Boolean(visible.model && current.model && visible.model !== current.model);
     const next = rememberStatus({
@@ -187,5 +180,13 @@ export function useContextManagement(threadId: string) {
     }
   }, [threadId]);
 
-  return { status, handleEvent, compact, setThreshold, refresh, applyModelSettings };
+  const markSubmitted = useCallback((id: string, settings: { model: string; reasoningEffort: string }) => { submittedChoices.set(id, settings); }, []);
+  const completeSettings = useCallback((id: string) => {
+    const sent = submittedChoices.get(id);
+    const choice = uncommittedChoice.get(id);
+    if (sent && choice?.model === sent.model && choice?.reasoningEffort === sent.reasoningEffort) uncommittedChoice.delete(id);
+    submittedChoices.delete(id);
+    if (activeThread.current === id) void refresh();
+  }, [refresh]);
+  return { status, handleEvent, compact, setThreshold, refresh, applyModelSettings, markSubmitted, completeSettings };
 }
