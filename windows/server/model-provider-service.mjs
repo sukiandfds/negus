@@ -48,7 +48,6 @@ const normalizeProvider = (value) => {
   return {
     id,
     mode,
-    credentialFingerprint: value?.credentialFingerprint || "",
     displayName: clean(value?.displayName, 160) || id,
     baseUrl: clean(value?.baseUrl, 500),
     wireApi: clean(value?.wireApi, 40) || "responses",
@@ -214,7 +213,7 @@ const ensureCodexHome = async ({ runtimeRoot, provider, credentialStore, credent
     credentialFile: provider.id.startsWith('ccswitch_') ? '' : credentialStore.credentialPath(provider.id),
     credentialHelper,
     workingDirectory: projectRoot,
-    credentialCommand: provider.id.startsWith('ccswitch_') ? sharedConfig.credentialCommand(provider.id, provider.credentialFingerprint) : undefined,
+    credentialCommand: provider.id.startsWith('ccswitch_') ? sharedConfig.credentialCommand(provider.id) : undefined,
   });
   let current = "";
   try { current = await fs.readFile(configFile, "utf8"); } catch {}
@@ -306,7 +305,7 @@ export const createModelProviderService = ({
       const provider = providerMap.get(id);
       if (!provider) throw statusError('配置不存在，请刷新配置列表', 404);
       const credential = native ? native.key : id.startsWith('ccswitch_')
-        ? await sharedConfig.readCredential(id, provider.credentialFingerprint)
+        ? await sharedConfig.readCredential(id)
         : await credentialStore.read(id);
       let payload;
       try {
@@ -368,7 +367,7 @@ export const createModelProviderService = ({
     if (!provider) return false;
     if (provider.mode === "current") return true;
     if (provider.id.startsWith('ccswitch_')) {
-      try { await sharedConfig.readCredential(provider.id, provider.credentialFingerprint); return true; } catch { return false; }
+      try { await sharedConfig.readCredential(provider.id); return true; } catch { return false; }
     }
     return credentialStore.isConfigured(provider.id);
   };

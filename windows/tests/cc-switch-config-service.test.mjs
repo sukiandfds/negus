@@ -101,7 +101,7 @@ test('first-use reads create nothing; saving initializes shared DB; Node auth re
   const entries = await service.runtimeProviders({ force: true });
   assert.equal(entries.length, 1);
   const entry = entries[0];
-  const auth = service.credentialCommand(entry.id, entry.credentialFingerprint);
+  const auth = service.credentialCommand(entry.id);
   const secret = execFileSync(auth.command, auth.args, { encoding: 'utf8', env: { ...process.env, PATH: '' } });
   assert.equal(secret, input.apiKey);
   assert.ok(!JSON.stringify(auth).includes(input.apiKey));
@@ -110,8 +110,18 @@ test('first-use reads create nothing; saving initializes shared DB; Node auth re
   assert.equal(db.prepare("SELECT count(*) AS n FROM providers WHERE app_type='codex'").get().n, 1);
   db.close();
   const [publicEntry] = await service.list();
+  // Reuse the already-generated command after default settings change.
+  await service.save({ ...input, id: publicEntry.id, model: 'gpt-other', reasoningEffort: 'high', keyMode: 'keep' });
+  assert.equal(execFileSync(auth.command, auth.args, { encoding: 'utf8' }), input.apiKey);
+  // Existing runtime TOML may still pass the removed fingerprint argument.
+  const legacyArgs = [...auth.args, '0'.repeat(64)];
+  assert.equal(execFileSync(auth.command, legacyArgs, { encoding: 'utf8' }), input.apiKey);
   await service.save({ ...input, id: publicEntry.id, apiKey: 'changed-secret' });
-  await assert.rejects(service.readCredential(entry.id, entry.credentialFingerprint), /变更/);
+  assert.equal(execFileSync(auth.command, legacyArgs, { encoding: 'utf8' }), 'changed-secret');
+  await service.save({ ...input, id: publicEntry.id, keyMode: 'clear' });
+  await assert.rejects(service.readCredential(entry.id), /不支持/);
+  await service.remove(publicEntry.id);
+  await assert.rejects(service.readCredential(entry.id), /不存在/);
 });
 
 test('existing unknown fields and other app rows survive; conflicts refuse writes; delete backs up and cascades', async (t) => {
@@ -180,7 +190,7 @@ test('shared model refresh and isolated command auth use same DB without credent
   db.close();
   const [entry] = await sharedConfig.runtimeProviders({ force: true });
   assert.equal(entry.id, "ccswitch_折扣-1790603771586");
-  const auth = sharedConfig.credentialCommand(entry.id, entry.credentialFingerprint);
+  const auth = sharedConfig.credentialCommand(entry.id);
   assert.equal(execFileSync(auth.command, auth.args, { encoding: "utf8", env: { ...process.env, PATH: "" } }), input.apiKey);
 
   const models = createModelProviderService({ currentApiConfiguration: async () => null,

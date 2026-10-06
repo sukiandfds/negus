@@ -2,7 +2,7 @@ import { isReasoningEffort } from './reasoning-efforts.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { operateSharedDatabase } from './shared-config-database.mjs';
 import TOML from '@iarna/toml';
 import { readCurrentApiConfiguration } from './current-api-configuration.mjs';
@@ -62,7 +62,6 @@ export const createCcSwitchConfigService = ({ database = path.join(os.homedir(),
       if (!item.editable || !item.baseUrl.startsWith('https://') || !item.key || item.wireApi !== 'responses') return [];
       return [{ id: `ccswitch_${item.id}`, displayName: item.name, baseUrl: item.baseUrl,
         wireApi: item.wireApi, defaultModel: item.model, key: item.key, multiplier: item.multiplier,
-        credentialFingerprint: createHash('sha256').update(row.settings_config).digest('hex'),
         models: item.model ? [{ id: `ccswitch_${item.id}::${item.model}`, model: item.model, displayName: item.model }] : [] }];
     } catch { return []; }
   });
@@ -152,20 +151,17 @@ export const createCcSwitchConfigService = ({ database = path.join(os.homedir(),
     cachedListAt = 0;
     return { deleted: true, notice: '已从共享配置删除。' };
   };
-  const readCredential = async (providerId, fingerprint) => {
+  const readCredential = async (providerId) => {
     const id = String(providerId).replace(/^ccswitch_/u, "");
     const row = (await invoke({ action: "list" })).find(entry => entry.id === id);
     if (!row) throw failure("供应商配置已不存在，请刷新。", 409);
-    if (fingerprint && createHash("sha256").update(row.settings_config).digest("hex") !== fingerprint) {
-      throw failure("供应商配置已变更，请在任务结束后重新加载运行环境。", 409);
-    }
     const entry = decode(row);
     if (!entry.switchable) throw failure("此配置暂不支持使用 API Key 接入。", 400);
     return entry.key;
   };
-  const credentialCommand = (providerId, fingerprint) => ({
+  const credentialCommand = (providerId) => ({
     command: process.execPath,
-    args: [fileURLToPath(new URL("../scripts/shared-provider-credential.mjs", import.meta.url)), path.resolve(database), providerId, fingerprint],
+    args: [fileURLToPath(new URL("../scripts/shared-provider-credential.mjs", import.meta.url)), path.resolve(database), providerId],
   });
   return { list, save, remove, resolveDraft, runtimeProviders, currentDisplayName, readCredential, credentialCommand };
 };
