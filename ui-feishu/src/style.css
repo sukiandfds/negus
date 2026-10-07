@@ -21,7 +21,39 @@ button,input { font:inherit; } button { cursor:pointer; } button:disabled { curs
 .content-panel { flex:1; overflow:auto; padding:28px; }.panel-title { display:flex; align-items:center; gap:10px; margin-bottom:24px; color:#c3cbdc; }.panel-title h2 { font-size:18px; margin:0; }.file-row { border-bottom:1px solid #2d3039; padding:16px 0; }.file-row small { display:block; color:#7f8795; margin-bottom:10px; }.files-empty { display:flex; align-items:center; flex-direction:column; gap:14px; padding:80px 16px; color:#697386; }.files-empty strong { color:#a6b1c3; font-weight:500; }.files-empty span { color:#7d8899; font-size:12px; }.settings-overlay { position:fixed; inset:0; z-index:60; background:#151619; }.mobile-back { display:none; }
 @media(min-width:1440px) { .feishu-app { grid-template-columns:180px 355px minmax(0,1fr); } }
 @media(max-width:1100px) { .feishu-app { grid-template-columns:70px 285px minmax(0,1fr); }.rail-profile > span:not(.avatar),.rail-profile > svg,.rail-item span,.global-search span,.global-search:not(svg) { font-size:0; }.rail-profile { margin:4px 6px 24px; }.rail-item { justify-content:center; padding:9px; }.rail-bottom .rail-item { font-size:0; }.connection { font-size:0; justify-content:center; }.global-search { justify-content:center; padding:8px; }.detail-panel { position:absolute; z-index:10; right:6px; top:105px; bottom:6px; box-shadow:-12px 0 24px #0004; }.chat-title-row { padding:12px 15px; } }
-@media(max-width:760px) { .feishu-app { grid-template-columns:58px minmax(0,1fr); gap:0; padding:0; }.app-rail { padding:18px 5px 12px; }.rail-profile { margin:0 4px 20px; }.rail-profile .avatar { width:38px; height:38px; }.global-search { margin-bottom:12px; }.rail-item { min-height:38px; }.message-list { border-radius:0; }.chat-workspace { display:none; border-radius:0; }.show-chat { display:block; }.show-chat .app-rail,.show-chat .message-list { display:none; }.show-chat .chat-workspace { display:flex; height:100%; }.mobile-back { display:inline-grid; }.chat-title-row { height:62px; padding:10px; gap:8px; }.chat-title h1 { font-size:15px; }.header-tools { gap:0; }.chat-tabs { padding-left:58px; }.detail-panel { top:95px; bottom:0; right:0; width:min(320px,100%); }.content-panel { padding:20px; }.global-search { font-size:0; } }
+@media(max-width:760px) {
+  .feishu-app { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr) auto; gap:0; padding:0; background:#17181c; }
+  .app-rail { grid-row:2; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); padding:6px max(8px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left)); border-top:1px solid #2b2d33; background:#1c1d23; }
+  .app-rail nav,.rail-bottom { display:contents; }
+  .app-rail .rail-profile,.app-rail .global-search,.app-rail .connection,.app-rail .rail-item:disabled,.app-rail .rail-secondary { display:none; }
+  .app-rail .rail-item { flex-direction:column; gap:4px; min-height:52px; padding:6px 2px; border-radius:10px; }
+  .app-rail .rail-item span { font-size:11px; font-weight:500; }
+  .app-rail .rail-item svg { width:21px; height:21px; }
+  .app-rail .rail-item.selected { background:#263249; color:#91b4ff; }
+  .message-list { grid-row:1; border-radius:0; }
+  .list-heading { padding:12px 16px 8px; }.list-heading h2 { font-size:21px; }
+  .list-search { margin:0 16px 10px; padding:10px 12px; border-radius:10px; }
+  .list-filters { padding:0 12px 8px; gap:6px; }.list-filters button { min-height:40px; padding:8px 14px; font-size:14px; border-radius:8px; }
+  .contacts-scroll { padding:0 8px 12px; overscroll-behavior-y:contain; }
+  .contact-main { min-height:80px; padding:14px 48px 14px 8px; gap:12px; }
+  .contact-top strong { font-size:15px; }.contact-preview { font-size:13px; }.contact-top time { font-size:11px; }
+  .contact-row > .contact-more { top:50%; bottom:auto; right:0; transform:translateY(-50%); width:44px; height:44px; opacity:1; }
+  .contact-row.expandable .contact-main { padding-right:48px; }.contact-row .contact-expand { right:0; }
+  .list-footer { display:none; }
+  .chat-workspace { display:none; border-radius:0; }
+  .show-chat { display:block; }.show-chat .app-rail,.show-chat .message-list { display:none; }.show-chat .chat-workspace { display:flex; height:100%; }
+  .icon-button { width:44px; height:44px; border-radius:9px; }.mobile-back { display:inline-grid; }
+  .chat-title-row { height:62px; padding:6px 8px; gap:4px; }.chat-title-row > .avatar { width:32px; height:32px; margin-right:4px; }
+  .chat-title h1 { font-size:15px; }.chat-title > span { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .header-tools { gap:0; }.header-tools .icon-button { width:40px; }
+  .chat-tabs { height:40px; padding:0 14px 0 56px; gap:20px; }.chat-tabs button { padding:0 4px 8px; font-size:13px; }
+  .detail-panel { top:0; bottom:0; right:0; width:100%; z-index:20; padding:16px 16px max(16px,env(safe-area-inset-bottom)); }
+  .content-panel { padding:16px; }.rename-bar { padding:8px 12px; }.rename-bar input { font-size:16px; }
+  .feishu-app .group-task-panel { padding:0 12px; flex:none; }.group-task-panel summary { min-height:36px; padding:10px 0; }
+  .group-task-list article { flex-wrap:wrap; gap:8px; }.group-task-list article div { flex-basis:100%; }.group-task-list button,.group-task-list a { min-height:40px; display:inline-flex; align-items:center; }
+  .settings-overlay { padding-bottom:env(safe-area-inset-bottom); }
+}
+
 .chat-title { flex:1; }.contact-more { opacity:0; }.contact-row:hover .contact-more,.contact-row:focus-within .contact-more { opacity:1; }
 .contact-row.expandable .contact-main { padding-right:35px; }
 .contact-row .contact-expand { position:absolute; right:3px; top:50%; bottom:auto; transform:translateY(-50%); opacity:1; }

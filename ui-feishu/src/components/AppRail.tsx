@@ -24,9 +24,9 @@ export function AppRail({ section, connected, onSearch, onSectionChange, onSetti
   return <aside className="app-rail" aria-label="功能导航">
       <div className="rail-profile"><Avatar name="N" /><span>Negus<small>我的工作空间</small></span><ChevronDown size={15} /></div>
       <button className="global-search" onClick={onSearch}><Search size={16} />搜索<span>⌘ K</span></button>
-      <nav>{nav.map(({ label, icon: Icon, id }) => <button key={label} className={`rail-item ${id === section ? 'selected' : ''}`} title={id ? label : `${label} · 暂未接入`} disabled={!id}
+      <nav>{nav.map(({ label, icon: Icon, id }) => <button key={label} className={`rail-item ${id === section ? 'selected' : ''} ${label === '通讯录' ? 'rail-secondary' : ''}`} title={id ? label : `${label} · 暂未接入`} disabled={!id}
         onClick={() => { if (id) onSectionChange(id); }}><Icon size={18} /><span>{label}</span></button>)}</nav>
-      <div className="rail-bottom"><button className="rail-item" onClick={onSettings}><Settings size={18} />设置</button>
+      <div className="rail-bottom"><button className="rail-item" onClick={onSettings}><Settings size={18} /><span>设置</span></button>
         <span className={`connection ${connected ? 'online' : ''}`}><i />{connected ? '已连接' : '正在连接'}</span></div>
     </aside>;
 }

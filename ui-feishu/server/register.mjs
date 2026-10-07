@@ -8,6 +8,7 @@ import fs from 'node:fs';
 const extension = new URL('./group-extension.mjs', import.meta.url).href;
 const taskRoutes = new URL('./task-routes.mjs', import.meta.url).href;
 const employeeTasks = new URL('./employee-task-extension.mjs', import.meta.url).href;
+const existingProjects = new URL('./existing-projects.mjs', import.meta.url).href;
 const stateRoot = fileURLToPath(new URL('../runtime/groups/', import.meta.url));
 registerHooks({ load(url, context, nextLoad) {
   const result = nextLoad(url, context);
@@ -26,6 +27,13 @@ registerHooks({ load(url, context, nextLoad) {
     if (!source.includes(marker)) throw new Error('Group extension: route integration point changed');
     source = `import { createGroupCreationRoute } from ${JSON.stringify(extension)};\nimport { createTaskRoutes } from ${JSON.stringify(taskRoutes)};\n` + source.replace(marker, `${marker}\n    ...(roomDirectory?.create ? [createGroupCreationRoute({ roomDirectory }), createTaskRoutes({ roomDirectory, multiAgentDirectory, groupRoom, media, agentTasks })] : []),`);
   } else {
+    const projectsMarker = 'const businessProjects = await loadBusinessProjects(path.join(projectRoot, "runtime", "business-projects.json"));';
+    const conversationsMarker = 'followUpQueue = createFollowUpQueueService({';
+    if (!source.includes(projectsMarker) || !source.includes(conversationsMarker)) throw Error('Existing project integration changed');
+    source = `import { existingProjects, withExistingConversations } from ${JSON.stringify(existingProjects)};\n` + source
+      .replace(projectsMarker, 'const businessProjects = [...await loadBusinessProjects(path.join(projectRoot, "runtime", "business-projects.json")), ...await existingProjects(projectRoot)];')
+      .replace('const conversations = createConversationService({', 'let conversations = createConversationService({')
+      .replace(conversationsMarker, `conversations = await withExistingConversations(conversations, conversationStoreOptions);\n${conversationsMarker}`);
     const executionMarker = '    execution.handleProtocolMessage(message);';
     if (!source.includes(executionMarker)) throw new Error('Employee execution integration changed');
     source = source.replace(executionMarker, '    if (!employeeRuntime?.ownsThread(message?.params?.threadId)) execution.handleProtocolMessage(message);');

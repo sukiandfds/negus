@@ -44,6 +44,21 @@ export function ChatSkin() {
     .feishu-app :is(.${composer.sendButton}, .${groupComposer.sendButton}):not(:disabled) { background: #447ded; color: white; border-radius: 6px; }
     .feishu-app :is(.${composer.sendButton}, .${groupComposer.sendButton}):disabled { background: #31353c; color: #81848d; border-radius: 6px; }
     .feishu-app .${groupComposer.personnelMenu} { left: 20px; right: 20px; }
-    @media(max-width: 760px) { .feishu-app :is(.${messages.scrollArea}, .${group.timeline}) { padding: 20px 12px; } .feishu-app .${messages.message}, .feishu-app .${group.message} { padding-left: 42px; } .feishu-app .${messages.user}, .feishu-app .${group.message}:has(.${group.ownMessageBubble}) { padding-left: 0; padding-right: 42px; } .feishu-app .${messages.assistant} .${messages.body}, .feishu-app .${messages.user} .${messages.body}, .feishu-app .${group.messageBubble}:not(.${group.ownMessageBubble}), .feishu-app .${group.ownMessageBubble} { max-width: 100%; } .feishu-app :is(.${composer.positioner}, .${groupComposer.composerArea}) { padding: 8px 10px 10px; } .feishu-app .${group.roster} { padding: 8px 12px; } .feishu-app .${groupComposer.personnelMenu} { left: 10px; right: 10px; } }
+    @media(max-width: 760px) {
+      .feishu-app :is(.${messages.scrollArea}, .${group.timeline}) { padding: 16px 12px 8px; scrollbar-gutter: auto; }
+      .feishu-app .${messages.message}, .feishu-app .${group.message} { padding-left: 40px; padding-bottom: 18px; }
+      .feishu-app .${messages.message}::before, .feishu-app .${group.messageAvatar} { width: 30px; height: 30px; font-size: 12px; }
+      .feishu-app .${messages.user}, .feishu-app .${group.message}:has(.${group.ownMessageBubble}) { padding-left: 0; padding-right: 40px; }
+      .feishu-app .${messages.assistant} .${messages.body}, .feishu-app .${messages.user} .${messages.body}, .feishu-app .${group.messageBubble}:not(.${group.ownMessageBubble}), .feishu-app .${group.ownMessageBubble} { max-width: 100%; padding: 10px 12px; overflow-wrap: anywhere; }
+      .feishu-app .${messages.actionRow} button, .feishu-app .${group.copyButton} { min-width: 36px; min-height: 36px; }
+      .feishu-app :is(.${composer.positioner}, .${groupComposer.composerArea}) { padding: 6px 10px max(8px, env(safe-area-inset-bottom)); }
+      .feishu-app :is(.${composer.composer}, .${groupComposer.composer}) { min-height: 0; border-radius: 14px; }
+      .feishu-app :is(.${composer.composer}, .${groupComposer.composer}) textarea { min-height: 48px; max-height: min(140px, 25dvh); padding: 11px 12px 5px; font-size: 16px; }
+      .feishu-app :is(.${composer.footer}, .${groupComposer.footer}) { grid-template-columns: minmax(0, 1fr) 44px; }
+      .feishu-app :is(.${composer.sendButton}, .${groupComposer.sendButton}) { width: 44px; height: 44px; }
+      .feishu-app .${group.roster} { padding: 8px 12px; }
+      .feishu-app .${groupComposer.personnelMenu} { left: 10px; right: 10px; }
+    }
+
   `}</style>;
 }
