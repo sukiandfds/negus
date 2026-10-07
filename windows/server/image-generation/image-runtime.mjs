@@ -11,7 +11,12 @@ export const imageMcpArguments = () => {
     enabled: true,
     required: false,
     enabled_tools: ["generate_image", "edit_image"],
-    env: { NEGUS_INSTALL_ROOT: imageInstallationRoot, NEGUS_IMAGE_OUTPUT_DIR: path.join(imageInstallationRoot, "runtime/generated-images") },
+    env: {
+      NEGUS_INSTALL_ROOT: imageInstallationRoot,
+      NEGUS_IMAGE_OUTPUT_DIR: path.join(imageInstallationRoot, "runtime/generated-images"),
+      NEGUS_IMAGE_PROVIDER_MODE: process.env.NEGUS_IMAGE_PROVIDER_MODE || "flare",
+      NEGUS_FAST_IMAGE_MODEL: process.env.NEGUS_FAST_IMAGE_MODEL || "gpt-image-2.5-flare",
+    },
     startup_timeout_sec: 20,
     tool_timeout_sec: 900,
   };

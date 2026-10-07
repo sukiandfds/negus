@@ -327,7 +327,7 @@ export const createAgentConversationStore = async ({ stateFile, groupRoom, roomD
 
   const recordRuntimeMessage = async (runtimeKind, runtimeSessionId, message) => {
     const binding = findByActiveRuntimeSession(runtimeKind, runtimeSessionId);
-    if (!binding || binding.conversationKind !== "direct") return null;
+    if (!binding || !["direct", "task"].includes(binding.conversationKind)) return null;
     return appendMessage({
       conversationId: binding.conversationId,
       message: { ...message, runtimeKind, runtimeSessionId },

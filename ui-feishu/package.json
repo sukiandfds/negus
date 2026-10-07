@@ -1,0 +1,9 @@
+{
+  "name": "negus-feishu-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node ../web-ui/node_modules/vite/bin/vite.js --config vite.config.ts",
+    "build": "node ../web-ui/node_modules/typescript/bin/tsc -p tsconfig.json && node ../web-ui/node_modules/vite/bin/vite.js build --config vite.config.ts"
+  }
+}

@@ -44,6 +44,7 @@ export const createEmployeeRuntimeService = ({
   broadcast = () => {},
   growthService = null,
   contextProvider = null,
+  taskService = null,
   execution = null,
   onTurnCompleted = null,
   client = null,
@@ -53,6 +54,8 @@ export const createEmployeeRuntimeService = ({
   const ownsDefaultClient = !client;
   const threadEmployees = new Map();
   const threadClients = new Map();
+  const freshThreads = new Map();
+  const taskConfiguredClients = new Map();
   const clientSubscriptions = new Map();
   const statuses = new Map();
   const openPromises = new Map();
@@ -169,11 +172,25 @@ export const createEmployeeRuntimeService = ({
 
   const resumeThread = async (threadId, employee) => {
     const runtimeClient = await clientForThread(threadId, employee);
-    return runtimeClient.request("thread/resume", {
+    if (freshThreads.has(threadId)) return freshThreads.get(threadId);
+    const config = taskService?.leaderConfig(employee.id);
+    if (Object.keys(config || {}).length && taskConfiguredClients.get(threadId) !== runtimeClient) {
+      const status = await readAuthoritativeStatus(threadId, employee);
+      if (status.active) return runtimeClient.request("thread/resume", { threadId });
+      if (!status.known) throw statusError("暂时无法确认员工是否空闲，请稍后重试", 409);
+      // Reload tools on the same idle thread; never fork or replace its history.
+      await runtimeClient.request("thread/unsubscribe", { threadId });
+    }
+    const result = await runtimeClient.request("thread/resume", {
       threadId,
       persistExtendedHistory: true,
+      ...(Object.keys(config || {}).length ? { config,
+        developerInstructions: employeeTurnInstructions(employee.instructions, taskService?.leaderInstructions(employee.id)),
+      } : {}),
       ...policyFor(employee),
     });
+    taskConfiguredClients.set(threadId, runtimeClient);
+    return result;
   };
 
   const readAuthoritativeStatus = async (threadId, employee) => {
@@ -199,7 +216,8 @@ export const createEmployeeRuntimeService = ({
     const route = routeForEmployee(employee);
     const result = await runtimeClient.request("thread/start", {
       cwd: clean(employee.projectRoot, 400) || projectRoot,
-      developerInstructions: employeeTurnInstructions(employee.instructions),
+      developerInstructions: employeeTurnInstructions(employee.instructions, taskService?.leaderInstructions(employee.id)),
+      config: taskService?.leaderConfig(employee.id),
       ephemeral: false,
       serviceName: `negus-${employee.projectKey}`,
       ...(route.model ? { model: route.model } : {}),
@@ -209,6 +227,8 @@ export const createEmployeeRuntimeService = ({
     if (!threadId) throw new Error("Codex 未返回员工主对话");
     rememberThread(employee.id, threadId);
     threadClients.set(threadId, runtimeClient);
+    freshThreads.set(threadId, result);
+    taskConfiguredClients.set(threadId, runtimeClient);
     try {
       await runtimeClient.request("thread/name/set", {
         threadId,
@@ -243,7 +263,7 @@ export const createEmployeeRuntimeService = ({
       }
       const latest = registry.require(employee.id);
       const binding = await bindConversation(latest, threadId);
-      publishStatus(employee.id, {
+      if (!statusFor(employee.id).active) publishStatus(employee.id, {
         phase: "idle",
         label: latest.modificationConfirmed ? "等待任务" : "等待确认",
         detail: "",
@@ -253,7 +273,7 @@ export const createEmployeeRuntimeService = ({
       if (hadExistingThread) {
         const authoritative = await readAuthoritativeStatus(threadId, registry.require(employee.id));
         if (authoritative.known && authoritative.active) {
-          publishStatus(employee.id, { phase: "working", label: "正在处理", detail: "", active: true, turnId: "" });
+          publishStatus(employee.id, { phase: "working", label: "正在处理", detail: "", active: true, turnId: statusFor(employee.id).turnId });
         }
       }
       return { employee: registry.require(employee.id), binding, threadId };
@@ -340,6 +360,7 @@ export const createEmployeeRuntimeService = ({
     }
 
     if (method === "turn/started") {
+      freshThreads.delete(threadId);
       publishStatus(employeeId, {
         phase: "working",
         label: "正在处理",
@@ -363,7 +384,7 @@ export const createEmployeeRuntimeService = ({
       const completion = { employeeId, threadId, turnId, status, error };
       broadcast({ type: "employee_turn_completed", ...completion });
       if (typeof onTurnCompleted === "function") {
-        void Promise.resolve(onTurnCompleted(completion))
+        void Promise.resolve(sendLocks.get(employeeId)).catch(() => {}).then(() => onTurnCompleted(completion))
           .catch((cause) => console.warn(`[employee-runtime] completion listener failed: ${String(cause?.message || cause)}`));
       }
       if (status === "completed" && growthService) {
@@ -448,9 +469,10 @@ export const createEmployeeRuntimeService = ({
     if (cleanText.length > 32000) throw statusError("消息过长", 413);
     const cleanRequestId = clean(requestId, 120) || randomUUID();
     if (sendLocks.has(employee.id)) throw statusError("员工正在处理上一条消息", 409);
-    const { binding, threadId } = await ensureOpen(employee.id);
     if (statusFor(employee.id).active) throw statusError("员工正在处理上一条消息", 409);
     const sending = (async () => {
+      const { binding, threadId } = await ensureOpen(employee.id);
+      if (statusFor(employee.id).active) throw statusError("员工正在处理上一条消息", 409);
       publishStatus(employee.id, {
         phase: "submitted",
         label: "已提交",
@@ -466,11 +488,13 @@ export const createEmployeeRuntimeService = ({
           threadId,
           input: [{ type: "text", text: cleanText, text_elements: [] }],
           cwd: clean(employee.projectRoot, 400) || projectRoot,
+          clientUserMessageId: cleanRequestId,
           developerInstructions: employeeTurnInstructions(
             employee.instructions,
-            context && runtimeClient.turnDeveloperInstructions === true ? context : "",
+            [runtimeClient.turnDeveloperInstructions === true ? context : "", taskService?.leaderInstructions(employee.id)].filter(Boolean).join("\n"),
           ),
         });
+        freshThreads.delete(threadId);
         const currentStatus = statusFor(employee.id);
         if (currentStatus.active && ["submitted", "working"].includes(currentStatus.phase)) {
           publishStatus(employee.id, {
@@ -602,12 +626,7 @@ export const createEmployeeRuntimeService = ({
     const employeeId = threadEmployees.get(cleanThreadId);
     if (!employeeId) throw statusError("员工 Thread 不存在", 404);
     const employee = registry.require(employeeId);
-    const runtimeClient = await clientForThread(cleanThreadId, employee);
-    const result = await runtimeClient.request("thread/resume", {
-      threadId: cleanThreadId,
-      persistExtendedHistory: true,
-      ...policyFor(employee),
-    });
+    const result = await resumeThread(cleanThreadId, employee);
     return {
       model: result?.model || employee.model || "",
       modelProvider: result?.modelProvider || employee.modelProviderId || CURRENT_MODEL_PROVIDER_ID,

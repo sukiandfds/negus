@@ -1,0 +1,90 @@
+← Back
+Voice chat with a Bot
+
+A voice chat is a live spoken conversation with one Bot. You talk, and the Bot talks back. Voice chat works in the desktop app and the phone app.
+
+How do I start a voice chat?
+
+
+Open the chat with the Bot.
+
+Leave the message box empty.
+
+Choose Start voice chat. It is the waveform button in the message box.
+
+Allow microphone access if your computer or phone asks.
+
+
+The call shows Connecting… on desktop or Calling… on the phone, then the Bot starts talking.
+
+Start voice chat shows only when the message box is empty. If the box is empty and you still don't see it, update Grok Bot. See How do I update Grok Bot?
+
+What can I do during a voice chat?
+
+
+Mute or Unmute your microphone.
+
+Hang up to end the call.
+
+Show transcript to read along.
+
+Show settings to change the Voice, the Speed, and the Language. Auto-detect picks the language from what you say.
+
+
+You can open other chats while the call runs. On desktop, choose Return to the voice chat to go back to it.
+
+Only one voice chat runs at a time. If you start another one, Grok Bot asks End the current voice chat? Choose End and Chat to switch.
+
+How is a voice chat different from voice typing?
+
+Voice typing turns your speech into text in the message box. You read it, edit it, and send it like any other message. The Bot replies in text.
+
+
+On desktop, choose Start voice input in the message box. You can also press Cmd+DCtrl+D on Mac or Ctrl+D on Windows and Linux, or hold the keys while you talk.
+
+On the phone, tap Start dictation.
+
+
+A voice chat is a live conversation. The Bot answers out loud and keeps listening until you hang up.
+
+On the phone, stop dictation before you start a voice chat.
+
+Can I voice chat in a group chat?
+
+No. Voice chat works with one Bot at a time. Open that Bot's own chat to start a call.
+
+Voice chat isn't available with a teammate's Team Bot.
+
+What happens if a voice chat drops?
+
+The call ends and Grok Bot shows Voice chat failed. The notice may say The call ended unexpectedly. or The realtime connection failed.
+
+
+Choose Dismiss.
+
+Check your internet connection.
+
+Choose Start voice chat again.
+
+
+If Grok Bot says microphone access was denied, allow Grok Bot to use the microphone in your system settings. If it says no microphone was found, connect one and try again. To pick which microphone Grok Bot uses, open Settings and choose one under Microphone.
+
+Where do the call notes go?
+
+After you hang up, a Voice chat card appears in that Bot's chat. It shows how long the call lasted. Open it to read the full transcript.
+
+If the call left work to do, the Bot may follow up in the chat with next steps or results.
+
+Grok Bot may ask How was the call? Choose Good or Bad to send feedback.
+
+Related
+
+
+Grok Bot How Tos
+
+Group chats and Bot-to-Bot messages
+
+Grok Bot on mobile
+
+Get help
+

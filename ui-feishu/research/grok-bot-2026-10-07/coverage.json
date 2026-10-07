@@ -1,0 +1,2674 @@
+{
+  "matrixRows": 169,
+  "officialDocuments": 39,
+  "documents": [
+    {
+      "url": "https://docs.x.ai/grok-bot/approvals-security-and-privacy.md",
+      "source": "sources/official/approvals-security-and-privacy.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Manage and protect"
+        },
+        {
+          "line": 3,
+          "heading": "# Approvals, security, and privacy"
+        },
+        {
+          "line": 9,
+          "heading": "## Set a boundary in the request"
+        },
+        {
+          "line": 30,
+          "heading": "## Review an action"
+        },
+        {
+          "line": 41,
+          "heading": "## Configure Auto Review"
+        },
+        {
+          "line": 69,
+          "heading": "## Enter passwords and verification codes yourself"
+        },
+        {
+          "line": 95,
+          "heading": "## Control access to your local computer"
+        },
+        {
+          "line": 118,
+          "heading": "## Understand the shared-computer boundary"
+        },
+        {
+          "line": 134,
+          "heading": "## Sharing a Bot is not a security boundary"
+        },
+        {
+          "line": 141,
+          "heading": "## Cursor account and data settings"
+        },
+        {
+          "line": 156,
+          "heading": "## Remove access and working data"
+        },
+        {
+          "line": 170,
+          "heading": "## Use a least-privilege setup"
+        }
+      ],
+      "matrixIds": [
+        "F086",
+        "F087",
+        "F088",
+        "F089",
+        "F090",
+        "F091"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/bots.md",
+      "source": "sources/official/bots.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Work with Grok Bot"
+        },
+        {
+          "line": 3,
+          "heading": "# Create and manage Bots"
+        },
+        {
+          "line": 8,
+          "heading": "## Give each Bot a clear job"
+        },
+        {
+          "line": 29,
+          "heading": "## Create a Bot"
+        },
+        {
+          "line": 43,
+          "heading": "## Edit a Bot"
+        },
+        {
+          "line": 55,
+          "heading": "## Pin or hide a Bot"
+        },
+        {
+          "line": 66,
+          "heading": "## Duplicate a Bot"
+        },
+        {
+          "line": 76,
+          "heading": "## Share a Bot"
+        },
+        {
+          "line": 103,
+          "heading": "## Delete a Bot"
+        },
+        {
+          "line": 111,
+          "heading": "## What a Bot remembers"
+        },
+        {
+          "line": 127,
+          "heading": "## Organize a team of Bots"
+        }
+      ],
+      "matrixIds": [
+        "F012",
+        "F013",
+        "F014",
+        "F015",
+        "F016",
+        "F017",
+        "F018"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/chat-and-collaboration.md",
+      "source": "sources/official/chat-and-collaboration.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Work with Grok Bot"
+        },
+        {
+          "line": 3,
+          "heading": "# Message and collaborate"
+        },
+        {
+          "line": 8,
+          "heading": "## Message a Bot"
+        },
+        {
+          "line": 26,
+          "heading": "### Dictate a message"
+        },
+        {
+          "line": 35,
+          "heading": "### Play a voice memo"
+        },
+        {
+          "line": 41,
+          "heading": "### Start a voice chat"
+        },
+        {
+          "line": 48,
+          "heading": "### Review a draft before it is sent"
+        },
+        {
+          "line": 55,
+          "heading": "### Redirect work in progress"
+        },
+        {
+          "line": 63,
+          "heading": "## Start a group chat"
+        },
+        {
+          "line": 75,
+          "heading": "### Direct a message"
+        },
+        {
+          "line": 93,
+          "heading": "## Let Bots hand work off"
+        },
+        {
+          "line": 109,
+          "heading": "## Use threads and reactions"
+        },
+        {
+          "line": 119,
+          "heading": "## Find prior work"
+        },
+        {
+          "line": 135,
+          "heading": "## Keyboard shortcuts"
+        },
+        {
+          "line": 164,
+          "heading": "## Keep conversations effective"
+        }
+      ],
+      "matrixIds": [
+        "F022",
+        "F023",
+        "F024",
+        "F025",
+        "F026",
+        "F027",
+        "F028",
+        "F029",
+        "F030",
+        "F031",
+        "F032",
+        "F038",
+        "F039",
+        "F040",
+        "F041",
+        "F042",
+        "F043",
+        "F044",
+        "F045",
+        "F046",
+        "F047",
+        "F048",
+        "F049"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/computer-and-apps.md",
+      "source": "sources/official/computer-and-apps.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Work with Grok Bot"
+        },
+        {
+          "line": 3,
+          "heading": "# Use the computer and apps"
+        },
+        {
+          "line": 9,
+          "heading": "## One computer, shared by all your Bots"
+        },
+        {
+          "line": 27,
+          "heading": "## Watch computer work"
+        },
+        {
+          "line": 35,
+          "heading": "## Take over for a sensitive step"
+        },
+        {
+          "line": 51,
+          "heading": "## Sign in once"
+        },
+        {
+          "line": 61,
+          "heading": "## Connect an app"
+        },
+        {
+          "line": 80,
+          "heading": "## Work with files"
+        },
+        {
+          "line": 90,
+          "heading": "## Update, recover, or reset the computer"
+        },
+        {
+          "line": 106,
+          "heading": "## Your local computer is separate"
+        }
+      ],
+      "matrixIds": [
+        "F057",
+        "F058",
+        "F059",
+        "F060",
+        "F061",
+        "F062"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/computers.md",
+      "source": "sources/official/computers.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Manage and protect"
+        },
+        {
+          "line": 3,
+          "heading": "# Manage Grok Bot computers"
+        },
+        {
+          "line": 19,
+          "heading": "## Recreate or terminate"
+        },
+        {
+          "line": 31,
+          "heading": "## Run an operation"
+        },
+        {
+          "line": 33,
+          "heading": "### Open Manage Bot Computers"
+        },
+        {
+          "line": 38,
+          "heading": "### Select members"
+        },
+        {
+          "line": 43,
+          "heading": "### Choose an action"
+        },
+        {
+          "line": 50,
+          "heading": "### Confirm"
+        },
+        {
+          "line": 55,
+          "heading": "### Watch the results"
+        },
+        {
+          "line": 61,
+          "heading": "## How an operation runs"
+        },
+        {
+          "line": 79,
+          "heading": "## Skipped and failed members"
+        },
+        {
+          "line": 91,
+          "heading": "## Restart after a settings change"
+        },
+        {
+          "line": 103,
+          "heading": "## Terminate inactive computers automatically"
+        },
+        {
+          "line": 126,
+          "heading": "## What members see"
+        },
+        {
+          "line": 139,
+          "heading": "## FAQ"
+        },
+        {
+          "line": 141,
+          "heading": "### Can I recreate a member's computer from a different team?"
+        },
+        {
+          "line": 147,
+          "heading": "### Does terminating stop a member from using Grok Bot?"
+        },
+        {
+          "line": 156,
+          "heading": "### Can automatic termination interrupt a Bot that is still working?"
+        },
+        {
+          "line": 162,
+          "heading": "## Related pages"
+        }
+      ],
+      "matrixIds": [
+        "F155",
+        "F156",
+        "F157",
+        "F158"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/faq.md",
+      "source": "sources/official/faq.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Help"
+        },
+        {
+          "line": 3,
+          "heading": "# Frequently asked questions"
+        },
+        {
+          "line": 5,
+          "heading": "## How is Grok Bot different from an AI assistant?"
+        },
+        {
+          "line": 11,
+          "heading": "## Where do I talk to Grok Bot?"
+        },
+        {
+          "line": 17,
+          "heading": "## Does Grok Bot keep working when my laptop is closed?"
+        },
+        {
+          "line": 22,
+          "heading": "## Do my Bots share one computer?"
+        },
+        {
+          "line": 30,
+          "heading": "## Can several Bots work at the same time?"
+        },
+        {
+          "line": 36,
+          "heading": "## What does a Bot remember?"
+        },
+        {
+          "line": 46,
+          "heading": "## Can Grok Bot use any website?"
+        },
+        {
+          "line": 56,
+          "heading": "## What actions require my approval?"
+        },
+        {
+          "line": 67,
+          "heading": "## How does Grok Bot handle data and privacy?"
+        },
+        {
+          "line": 77,
+          "heading": "## How much does Grok Bot cost?"
+        },
+        {
+          "line": 89,
+          "heading": "## Is Grok Bot available to teams and enterprises?"
+        },
+        {
+          "line": 96,
+          "heading": "## Can I dictate or talk to a Bot?"
+        },
+        {
+          "line": 103,
+          "heading": "## What keyboard shortcuts does the desktop app have?"
+        },
+        {
+          "line": 109,
+          "heading": "## Can I change the app language?"
+        },
+        {
+          "line": 115,
+          "heading": "## Can I use more than one account?"
+        },
+        {
+          "line": 120,
+          "heading": "## Which platforms are supported?"
+        },
+        {
+          "line": 131,
+          "heading": "## What is the difference between a skill and a routine?"
+        },
+        {
+          "line": 139,
+          "heading": "## Can I show a Bot how I do a task?"
+        },
+        {
+          "line": 146,
+          "heading": "## Can I share a Bot with someone else?"
+        },
+        {
+          "line": 162,
+          "heading": "## What happens if I delete a Bot?"
+        }
+      ],
+      "matrixIds": [],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/files-and-results.md",
+      "source": "sources/official/files-and-results.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Work with Grok Bot"
+        },
+        {
+          "line": 3,
+          "heading": "# Files and results"
+        },
+        {
+          "line": 8,
+          "heading": "## Attach files"
+        },
+        {
+          "line": 39,
+          "heading": "## Share a link"
+        },
+        {
+          "line": 49,
+          "heading": "## Ask for a reviewable result"
+        },
+        {
+          "line": 68,
+          "heading": "## Preview generated work"
+        },
+        {
+          "line": 80,
+          "heading": "## Results from Cloud Agents"
+        },
+        {
+          "line": 89,
+          "heading": "## Preserve evidence"
+        },
+        {
+          "line": 104,
+          "heading": "## Shared computer files"
+        }
+      ],
+      "matrixIds": [
+        "F050",
+        "F051",
+        "F052",
+        "F053",
+        "F054",
+        "F055",
+        "F056"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/get-started.md",
+      "source": "sources/official/get-started.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Start"
+        },
+        {
+          "line": 3,
+          "heading": "# Get started"
+        },
+        {
+          "line": 7,
+          "heading": "## Before you begin"
+        },
+        {
+          "line": 25,
+          "heading": "## 1. Install the desktop app"
+        },
+        {
+          "line": 30,
+          "heading": "### macOS"
+        },
+        {
+          "line": 40,
+          "heading": "### Windows"
+        },
+        {
+          "line": 48,
+          "heading": "### Linux"
+        },
+        {
+          "line": 66,
+          "heading": "## 2. Sign in"
+        },
+        {
+          "line": 86,
+          "heading": "## 3. Create your first Bot"
+        },
+        {
+          "line": 108,
+          "heading": "## 4. Give it a first task"
+        },
+        {
+          "line": 139,
+          "heading": "## 5. Sign in to the tools it needs"
+        },
+        {
+          "line": 156,
+          "heading": "## 6. Review the result"
+        },
+        {
+          "line": 167,
+          "heading": "## Next steps"
+        }
+      ],
+      "matrixIds": [
+        "F001",
+        "F002",
+        "F003",
+        "F004",
+        "F005"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/identity-and-access.md",
+      "source": "sources/official/identity-and-access.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Manage and protect"
+        },
+        {
+          "line": 3,
+          "heading": "# Configure identity and access"
+        },
+        {
+          "line": 19,
+          "heading": "## What you will change"
+        },
+        {
+          "line": 33,
+          "heading": "## Before you start"
+        },
+        {
+          "line": 47,
+          "heading": "## Assign the Cursor app"
+        },
+        {
+          "line": 56,
+          "heading": "### Assign the app in Okta"
+        },
+        {
+          "line": 73,
+          "heading": "### Assign the app in Microsoft Entra ID"
+        },
+        {
+          "line": 96,
+          "heading": "## Allow sign-in to IdP apps from the computer"
+        },
+        {
+          "line": 124,
+          "heading": "### Add the rule in Okta"
+        },
+        {
+          "line": 151,
+          "heading": "### Add the policy in Microsoft Entra ID"
+        },
+        {
+          "line": 186,
+          "heading": "## Limitations"
+        },
+        {
+          "line": 194,
+          "heading": "## FAQ"
+        },
+        {
+          "line": 196,
+          "heading": "### Do I need a separate Grok Bot app in Okta or Entra ID?"
+        },
+        {
+          "line": 201,
+          "heading": "### Does the device-trust change affect plugin sign-in?"
+        },
+        {
+          "line": 206,
+          "heading": "### Will these changes weaken sign-in on employee laptops?"
+        },
+        {
+          "line": 211,
+          "heading": "### If I unassign a user from the Cursor app, do they lose access?"
+        },
+        {
+          "line": 217,
+          "heading": "## Related pages"
+        }
+      ],
+      "matrixIds": [
+        "F159",
+        "F160",
+        "F161"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/mobile.md",
+      "source": "sources/official/mobile.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Start"
+        },
+        {
+          "line": 3,
+          "heading": "# Grok Bot for Mobile"
+        },
+        {
+          "line": 12,
+          "heading": "## Requirements"
+        },
+        {
+          "line": 28,
+          "heading": "## Sign in and set up"
+        },
+        {
+          "line": 45,
+          "heading": "## Message a Bot"
+        },
+        {
+          "line": 75,
+          "heading": "## Create Bots and groups"
+        },
+        {
+          "line": 81,
+          "heading": "## Review the computer"
+        },
+        {
+          "line": 92,
+          "heading": "## Manage recurring work"
+        },
+        {
+          "line": 101,
+          "heading": "## Search and review prior work"
+        },
+        {
+          "line": 107,
+          "heading": "## Settings"
+        }
+      ],
+      "matrixIds": [
+        "F105",
+        "F106",
+        "F107"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/overview.md",
+      "source": "sources/official/overview.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Grok Bot"
+        },
+        {
+          "line": 3,
+          "heading": "# Grok Bot"
+        },
+        {
+          "line": 22,
+          "heading": "## What makes Grok Bot different"
+        },
+        {
+          "line": 42,
+          "heading": "## Your Bots share one computer"
+        },
+        {
+          "line": 51,
+          "heading": "## A good first handoff"
+        },
+        {
+          "line": 64,
+          "heading": "## FAQ"
+        },
+        {
+          "line": 66,
+          "heading": "### Does Grok Bot keep working when my laptop is closed?"
+        },
+        {
+          "line": 71,
+          "heading": "### Can several Bots work at the same time?"
+        },
+        {
+          "line": 77,
+          "heading": "### What does a Bot remember?"
+        },
+        {
+          "line": 85,
+          "heading": "### Can a Bot use any website?"
+        },
+        {
+          "line": 91,
+          "heading": "### Which platforms are supported?"
+        },
+        {
+          "line": 97,
+          "heading": "### How much does Grok Bot cost?"
+        },
+        {
+          "line": 103,
+          "heading": "## Next steps"
+        }
+      ],
+      "matrixIds": [],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/private-networks.md",
+      "source": "sources/official/private-networks.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Manage and protect"
+        },
+        {
+          "line": 3,
+          "heading": "# Connect to private networks"
+        },
+        {
+          "line": 22,
+          "heading": "## What you can do"
+        },
+        {
+          "line": 33,
+          "heading": "## Choose a connection method"
+        },
+        {
+          "line": 40,
+          "heading": "### Route through a member's desktop"
+        },
+        {
+          "line": 52,
+          "heading": "### Install a networking client with Team Setup"
+        },
+        {
+          "line": 63,
+          "heading": "## Before you start"
+        },
+        {
+          "line": 77,
+          "heading": "## How Team Setup runs your scripts"
+        },
+        {
+          "line": 104,
+          "heading": "## Create the manifest"
+        },
+        {
+          "line": 142,
+          "heading": "## Set up your networking client"
+        },
+        {
+          "line": 151,
+          "heading": "### Tailscale"
+        },
+        {
+          "line": 200,
+          "heading": "### Cloudflare Tunnel"
+        },
+        {
+          "line": 259,
+          "heading": "## Roll out to existing computers"
+        },
+        {
+          "line": 272,
+          "heading": "## Work with the network policy"
+        },
+        {
+          "line": 282,
+          "heading": "## Limitations"
+        },
+        {
+          "line": 300,
+          "heading": "## FAQ"
+        },
+        {
+          "line": 302,
+          "heading": "### Can I put an auth key or credential in the setup script?"
+        },
+        {
+          "line": 311,
+          "heading": "### Which networking tools can I use?"
+        },
+        {
+          "line": 317,
+          "heading": "### Do existing computers get a new manifest?"
+        },
+        {
+          "line": 323,
+          "heading": "### Does this change the IP addresses my services see?"
+        },
+        {
+          "line": 330,
+          "heading": "### We use a strict network allowlist. Will our client work?"
+        },
+        {
+          "line": 336,
+          "heading": "### Is this the same as the Tailscale and Cloudflare Tunnel sections in the Cloud Agents docs?"
+        },
+        {
+          "line": 342,
+          "heading": "### Which plans include Team Setup?"
+        },
+        {
+          "line": 348,
+          "heading": "### What happens if the setup script fails on some computers?"
+        },
+        {
+          "line": 354,
+          "heading": "## Related pages"
+        }
+      ],
+      "matrixIds": [
+        "F148",
+        "F149",
+        "F150",
+        "F151",
+        "F152"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/proxies.md",
+      "source": "sources/official/proxies.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Manage and protect"
+        },
+        {
+          "line": 3,
+          "heading": "# Configure TLS-inspecting proxies"
+        },
+        {
+          "line": 24,
+          "heading": "## Symptoms"
+        },
+        {
+          "line": 37,
+          "heading": "## Allow these domain patterns"
+        },
+        {
+          "line": 59,
+          "heading": "## Exempt the same domains from TLS inspection and buffering"
+        },
+        {
+          "line": 76,
+          "heading": "## Apply to every profile, including off-network"
+        },
+        {
+          "line": 89,
+          "heading": "## Verify from a member's device"
+        },
+        {
+          "line": 94,
+          "heading": "### Check who issues the certificate"
+        },
+        {
+          "line": 104,
+          "heading": "### Check that computer hostnames resolve"
+        },
+        {
+          "line": 115,
+          "heading": "### Test streaming"
+        },
+        {
+          "line": 121,
+          "heading": "### Retry in the app"
+        },
+        {
+          "line": 127,
+          "heading": "## Scope"
+        },
+        {
+          "line": 144,
+          "heading": "## FAQ"
+        },
+        {
+          "line": 146,
+          "heading": "### We allowlisted \\*.cursorvm.com. Why does computer setup still fail?"
+        },
+        {
+          "line": 154,
+          "heading": "### We allowed cursor.sh. Why does that not cover the computer?"
+        },
+        {
+          "line": 162,
+          "heading": "### It works in the office but not from home. What is different?"
+        },
+        {
+          "line": 168,
+          "heading": "### Our policy requires TLS inspection on all traffic."
+        },
+        {
+          "line": 176,
+          "heading": "### Does this list also cover the Cursor editor?"
+        },
+        {
+          "line": 183,
+          "heading": "## Related pages"
+        }
+      ],
+      "matrixIds": [
+        "F153",
+        "F154"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/security-faq.md",
+      "source": "sources/official/security-faq.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Manage and protect"
+        },
+        {
+          "line": 3,
+          "heading": "# Grok Bot security FAQ"
+        },
+        {
+          "line": 10,
+          "heading": "## Isolation and access"
+        },
+        {
+          "line": 12,
+          "heading": "### How are users isolated from each other?"
+        },
+        {
+          "line": 20,
+          "heading": "### What can a Bot access?"
+        },
+        {
+          "line": 28,
+          "heading": "### If we block a plugin, can a Bot still reach that service in the browser?"
+        },
+        {
+          "line": 35,
+          "heading": "### Can admins push connectors to members?"
+        },
+        {
+          "line": 40,
+          "heading": "## Network and egress"
+        },
+        {
+          "line": 42,
+          "heading": "### Can we restrict which destinations computers can reach?"
+        },
+        {
+          "line": 49,
+          "heading": "### Do admin controls apply per group, or only org-wide?"
+        },
+        {
+          "line": 63,
+          "heading": "### Why do some websites block Bots?"
+        },
+        {
+          "line": 69,
+          "heading": "### Are dedicated egress IPs available?"
+        },
+        {
+          "line": 75,
+          "heading": "### Can traffic run through our own network?"
+        },
+        {
+          "line": 82,
+          "heading": "### Grok Bot hangs at computer setup from our network. Why?"
+        },
+        {
+          "line": 91,
+          "heading": "## Approvals, logging, and data"
+        },
+        {
+          "line": 93,
+          "heading": "### What does Auto Review check?"
+        },
+        {
+          "line": 105,
+          "heading": "### Can I see what Bots did on behalf of my team?"
+        },
+        {
+          "line": 120,
+          "heading": "### Can I restrict which models Grok Bot uses?"
+        },
+        {
+          "line": 128,
+          "heading": "### Where do Grok Bot computers run?"
+        },
+        {
+          "line": 136,
+          "heading": "### Can we run Grok Bot on-premises or from our own image?"
+        },
+        {
+          "line": 142,
+          "heading": "### Can we install our own security tooling on team computers?"
+        },
+        {
+          "line": 148,
+          "heading": "### Why do members have to sign in to company tools again?"
+        },
+        {
+          "line": 154,
+          "heading": "### What happens to data when an admin terminates a computer?"
+        },
+        {
+          "line": 162,
+          "heading": "### What certifications apply to Grok Bot?"
+        },
+        {
+          "line": 168,
+          "heading": "## Related pages"
+        }
+      ],
+      "matrixIds": [],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/security.md",
+      "source": "sources/official/security.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Manage and protect"
+        },
+        {
+          "line": 3,
+          "heading": "# Grok Bot security"
+        },
+        {
+          "line": 21,
+          "heading": "## Network policy"
+        },
+        {
+          "line": 52,
+          "heading": "## Static egress IPs"
+        },
+        {
+          "line": 71,
+          "heading": "## Approvals and Auto Review"
+        },
+        {
+          "line": 125,
+          "heading": "## Identity and sign-ins"
+        },
+        {
+          "line": 172,
+          "heading": "## Logging and audit"
+        },
+        {
+          "line": 201,
+          "heading": "## Endpoint tooling"
+        },
+        {
+          "line": 209,
+          "heading": "## Data retention and deletion"
+        },
+        {
+          "line": 231,
+          "heading": "## Data residency"
+        },
+        {
+          "line": 239,
+          "heading": "## Models and data"
+        },
+        {
+          "line": 262,
+          "heading": "## Local execution"
+        },
+        {
+          "line": 281,
+          "heading": "## Hosting"
+        },
+        {
+          "line": 290,
+          "heading": "## Prompt injection"
+        },
+        {
+          "line": 301,
+          "heading": "## Certifications"
+        },
+        {
+          "line": 311,
+          "heading": "## Related pages"
+        }
+      ],
+      "matrixIds": [
+        "F141",
+        "F142",
+        "F143",
+        "F144",
+        "F145",
+        "F146",
+        "F147"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/settings-and-notifications.md",
+      "source": "sources/official/settings-and-notifications.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Manage and protect"
+        },
+        {
+          "line": 3,
+          "heading": "# Settings and notifications"
+        },
+        {
+          "line": 8,
+          "heading": "## Open Grok Bot settings"
+        },
+        {
+          "line": 18,
+          "heading": "## General"
+        },
+        {
+          "line": 20,
+          "heading": "### Account"
+        },
+        {
+          "line": 30,
+          "heading": "### Appearance"
+        },
+        {
+          "line": 40,
+          "heading": "### Bot"
+        },
+        {
+          "line": 49,
+          "heading": "### Auto-review"
+        },
+        {
+          "line": 68,
+          "heading": "## Computer"
+        },
+        {
+          "line": 70,
+          "heading": "### Route traffic through your desktop"
+        },
+        {
+          "line": 85,
+          "heading": "## Plugins"
+        },
+        {
+          "line": 99,
+          "heading": "## Usage and billing"
+        },
+        {
+          "line": 109,
+          "heading": "## Team Setup"
+        },
+        {
+          "line": 116,
+          "heading": "## Updates"
+        },
+        {
+          "line": 131,
+          "heading": "## Edit one Bot"
+        },
+        {
+          "line": 142,
+          "heading": "## Understand attention states"
+        },
+        {
+          "line": 153,
+          "heading": "## Control notifications"
+        },
+        {
+          "line": 167,
+          "heading": "## Handle in-app errors"
+        },
+        {
+          "line": 177,
+          "heading": "## Related pages"
+        }
+      ],
+      "matrixIds": [
+        "F099",
+        "F100",
+        "F101",
+        "F102"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/skills-routines-and-automations.md",
+      "source": "sources/official/skills-routines-and-automations.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Work with Grok Bot"
+        },
+        {
+          "line": 3,
+          "heading": "# Skills and routines"
+        },
+        {
+          "line": 15,
+          "heading": "## Save a skill"
+        },
+        {
+          "line": 44,
+          "heading": "## Teach a workflow by demonstration"
+        },
+        {
+          "line": 66,
+          "heading": "## Create a routine"
+        },
+        {
+          "line": 87,
+          "heading": "## Trigger work from an event"
+        },
+        {
+          "line": 103,
+          "heading": "## Test before enabling"
+        },
+        {
+          "line": 118,
+          "heading": "## Manage routines"
+        },
+        {
+          "line": 137,
+          "heading": "## Design routines for trust"
+        }
+      ],
+      "matrixIds": [
+        "F069",
+        "F070",
+        "F071",
+        "F072",
+        "F082",
+        "F083"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/team-bots.md",
+      "source": "sources/official/team-bots.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Work with Grok Bot"
+        },
+        {
+          "line": 3,
+          "heading": "# Team Bots"
+        },
+        {
+          "line": 10,
+          "heading": "## Why use Team Bots?"
+        },
+        {
+          "line": 35,
+          "heading": "### Team Bots, personal Bots, and public templates"
+        },
+        {
+          "line": 43,
+          "heading": "## How to access"
+        },
+        {
+          "line": 52,
+          "heading": "## Create a Team Bot"
+        },
+        {
+          "line": 65,
+          "heading": "### Start from a Bot you already have"
+        },
+        {
+          "line": 93,
+          "heading": "## Set up what the Bot needs"
+        },
+        {
+          "line": 101,
+          "heading": "### Plugins"
+        },
+        {
+          "line": 137,
+          "heading": "### Secrets"
+        },
+        {
+          "line": 159,
+          "heading": "### Skills and files"
+        },
+        {
+          "line": 175,
+          "heading": "### Memory"
+        },
+        {
+          "line": 189,
+          "heading": "## Publish a Team Bot"
+        },
+        {
+          "line": 209,
+          "heading": "## Use a Team Bot"
+        },
+        {
+          "line": 227,
+          "heading": "### Routines on a Team Bot"
+        },
+        {
+          "line": 237,
+          "heading": "## Where the work runs"
+        },
+        {
+          "line": 252,
+          "heading": "## Personal connectors and approvals"
+        },
+        {
+          "line": 277,
+          "heading": "## Add a Team Bot to Slack"
+        },
+        {
+          "line": 298,
+          "heading": "### Slack admin approval"
+        },
+        {
+          "line": 311,
+          "heading": "### How the Bot behaves in Slack"
+        },
+        {
+          "line": 322,
+          "heading": "### Link your Slack account"
+        },
+        {
+          "line": 337,
+          "heading": "### Remove a Team Bot from Slack"
+        },
+        {
+          "line": 343,
+          "heading": "## Usage"
+        },
+        {
+          "line": 355,
+          "heading": "## For admins"
+        },
+        {
+          "line": 361,
+          "heading": "### Add Team Bots for members by default"
+        },
+        {
+          "line": 375,
+          "heading": "### Delete a Team Bot as an admin"
+        },
+        {
+          "line": 382,
+          "heading": "### Audit logs"
+        },
+        {
+          "line": 388,
+          "heading": "## Delete a Team Bot"
+        },
+        {
+          "line": 397,
+          "heading": "## Related pages"
+        }
+      ],
+      "matrixIds": [
+        "F112",
+        "F113",
+        "F114",
+        "F115",
+        "F116",
+        "F117",
+        "F118",
+        "F119",
+        "F120",
+        "F121",
+        "F122",
+        "F123",
+        "F124",
+        "F125",
+        "F126",
+        "F127",
+        "F128",
+        "F129",
+        "F130"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/teams-and-enterprises.md",
+      "source": "sources/official/teams-and-enterprises.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Manage and protect"
+        },
+        {
+          "line": 3,
+          "heading": "# Grok Bot for teams and enterprises"
+        },
+        {
+          "line": 12,
+          "heading": "## Availability"
+        },
+        {
+          "line": 27,
+          "heading": "## Enabling Grok Bot for your team"
+        },
+        {
+          "line": 48,
+          "heading": "## Before you roll out"
+        },
+        {
+          "line": 65,
+          "heading": "## Architecture"
+        },
+        {
+          "line": 67,
+          "heading": "### How Grok Bot is built"
+        },
+        {
+          "line": 117,
+          "heading": "### How users are isolated"
+        },
+        {
+          "line": 130,
+          "heading": "## Admin controls"
+        },
+        {
+          "line": 141,
+          "heading": "### Access and identity"
+        },
+        {
+          "line": 145,
+          "heading": "#### Enable Grok Bot"
+        },
+        {
+          "line": 155,
+          "heading": "#### SCIM"
+        },
+        {
+          "line": 166,
+          "heading": "### Agent capabilities"
+        },
+        {
+          "line": 171,
+          "heading": "#### Cloud Agents"
+        },
+        {
+          "line": 179,
+          "heading": "#### Public template sharing"
+        },
+        {
+          "line": 187,
+          "heading": "#### Connector policy"
+        },
+        {
+          "line": 199,
+          "heading": "#### Execution on Local Computer"
+        },
+        {
+          "line": 211,
+          "heading": "#### Allow Local Egress"
+        },
+        {
+          "line": 221,
+          "heading": "### Rules and approvals"
+        },
+        {
+          "line": 225,
+          "heading": "#### Team Rules"
+        },
+        {
+          "line": 234,
+          "heading": "#### Enforce Auto-review"
+        },
+        {
+          "line": 244,
+          "heading": "#### Auto-review rules"
+        },
+        {
+          "line": 256,
+          "heading": "### Computers and network"
+        },
+        {
+          "line": 261,
+          "heading": "#### Network Controls"
+        },
+        {
+          "line": 275,
+          "heading": "#### Team Setup"
+        },
+        {
+          "line": 289,
+          "heading": "#### Team Secrets"
+        },
+        {
+          "line": 328,
+          "heading": "#### Manage Bot Computers"
+        },
+        {
+          "line": 345,
+          "heading": "### Logging and audit"
+        },
+        {
+          "line": 349,
+          "heading": "#### Action Recording"
+        },
+        {
+          "line": 374,
+          "heading": "#### Conversation content export"
+        },
+        {
+          "line": 401,
+          "heading": "#### Audit logs"
+        },
+        {
+          "line": 414,
+          "heading": "#### OpenTelemetry Export"
+        },
+        {
+          "line": 427,
+          "heading": "### Group settings"
+        },
+        {
+          "line": 472,
+          "heading": "## Admin API"
+        },
+        {
+          "line": 479,
+          "heading": "## Security"
+        },
+        {
+          "line": 486,
+          "heading": "## Recommended configuration"
+        },
+        {
+          "line": 527,
+          "heading": "## FAQ"
+        },
+        {
+          "line": 529,
+          "heading": "### Can I turn Grok Bot on or off for my team?"
+        },
+        {
+          "line": 535,
+          "heading": "### Can I manage Grok Bot through the Admin API?"
+        },
+        {
+          "line": 540,
+          "heading": "### Can I set a Grok Bot spend cap?"
+        },
+        {
+          "line": 546,
+          "heading": "### Why does a member see a plugin as Disabled by team admin?"
+        },
+        {
+          "line": 556,
+          "heading": "### How do members request access?"
+        },
+        {
+          "line": 563,
+          "heading": "### Can I see what kind of work my team does with Grok Bot?"
+        },
+        {
+          "line": 573,
+          "heading": "## Related pages"
+        }
+      ],
+      "matrixIds": [
+        "F133",
+        "F134",
+        "F135",
+        "F136",
+        "F137",
+        "F138",
+        "F139",
+        "F140"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/troubleshooting.md",
+      "source": "sources/official/troubleshooting.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Help"
+        },
+        {
+          "line": 3,
+          "heading": "# Troubleshooting"
+        },
+        {
+          "line": 8,
+          "heading": "## Sign-in does not complete"
+        },
+        {
+          "line": 23,
+          "heading": "## The computer is still setting up"
+        },
+        {
+          "line": 36,
+          "heading": "## The computer cannot be reached"
+        },
+        {
+          "line": 59,
+          "heading": "## A Bot appears stuck"
+        },
+        {
+          "line": 74,
+          "heading": "## A website keeps asking for login"
+        },
+        {
+          "line": 85,
+          "heading": "## A plugin will not install or authenticate"
+        },
+        {
+          "line": 98,
+          "heading": "## An attachment cannot be read"
+        },
+        {
+          "line": 112,
+          "heading": "## A routine did not run"
+        },
+        {
+          "line": 129,
+          "heading": "## An approval is blocked"
+        },
+        {
+          "line": 142,
+          "heading": "## Local computer work is refused"
+        },
+        {
+          "line": 151,
+          "heading": "## Update Grok Bot"
+        },
+        {
+          "line": 162,
+          "heading": "## Before contacting support"
+        }
+      ],
+      "matrixIds": [],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://docs.x.ai/grok-bot/use-cases.md",
+      "source": "sources/official/use-cases.md",
+      "sections": [
+        {
+          "line": 1,
+          "heading": "#### Start"
+        },
+        {
+          "line": 3,
+          "heading": "# Use cases"
+        },
+        {
+          "line": 9,
+          "heading": "## Sales Outbound"
+        },
+        {
+          "line": 27,
+          "heading": "## Talent Scout"
+        },
+        {
+          "line": 44,
+          "heading": "## Paid Media"
+        },
+        {
+          "line": 61,
+          "heading": "## Expense Manager"
+        },
+        {
+          "line": 77,
+          "heading": "## Product Performance"
+        },
+        {
+          "line": 94,
+          "heading": "## Bug Reproduction"
+        },
+        {
+          "line": 109,
+          "heading": "## Account Health"
+        },
+        {
+          "line": 125,
+          "heading": "## Chief of Staff"
+        },
+        {
+          "line": 141,
+          "heading": "## Turn an example into a durable Bot"
+        }
+      ],
+      "matrixIds": [
+        "F169"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/plans",
+      "source": "sources/official/cursor-help-plans.txt",
+      "sections": [
+        {
+          "line": 6,
+          "heading": "How do I get access to Grok Bot?"
+        },
+        {
+          "line": 25,
+          "heading": "What's the difference between Pro, Pro+, and Ultra for Grok Bot?"
+        },
+        {
+          "line": 37,
+          "heading": "Do I need a separate Grok Bot subscription?"
+        },
+        {
+          "line": 41,
+          "heading": "Does joining a Cursor Teams plan require a Premium seat for Grok Bot?"
+        },
+        {
+          "line": 47,
+          "heading": "How does Grok Bot usage work?"
+        },
+        {
+          "line": 53,
+          "heading": "How does the Grok Bot free trial work and how do I use it efficiently?"
+        },
+        {
+          "line": 67,
+          "heading": "Is Grok Bot usage shared between macOS and iOS?"
+        },
+        {
+          "line": 71,
+          "heading": "What if my trial ran out during a single run?"
+        },
+        {
+          "line": 81,
+          "heading": "What happens to my Cursor plan when I link SuperGrok or X Premium+?"
+        },
+        {
+          "line": 95,
+          "heading": "Do Cursor and SuperGrok plans stack?"
+        },
+        {
+          "line": 117,
+          "heading": "What do the plan and spending screens call usage?"
+        },
+        {
+          "line": 131,
+          "heading": "What if I upgrade SuperGrok after I already linked?"
+        },
+        {
+          "line": 141,
+          "heading": "How does the on-demand monthly limit apply to Grok Bot?"
+        },
+        {
+          "line": 159,
+          "heading": "What happens if I downgrade or my Teams seat changes?"
+        },
+        {
+          "line": 175,
+          "heading": "How do I cancel my Grok Bot trial?"
+        },
+        {
+          "line": 185,
+          "heading": "How do I cancel a free trial I started in the iOS app?"
+        },
+        {
+          "line": 193,
+          "heading": "How do refunds work for Grok Bot?"
+        }
+      ],
+      "matrixIds": [
+        "F162",
+        "F163",
+        "F164",
+        "F165",
+        "F166"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/secrets",
+      "source": "sources/official/cursor-help-secrets.txt",
+      "sections": [
+        {
+          "line": 6,
+          "heading": "How should I add an API key or secret?"
+        },
+        {
+          "line": 16,
+          "heading": "Why can't I see the secret value?"
+        },
+        {
+          "line": 32,
+          "heading": "Did Update delete my secrets?"
+        }
+      ],
+      "matrixIds": [],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/computer-recovery",
+      "source": "sources/official/cursor-help-computer-recovery.txt",
+      "sections": [
+        {
+          "line": 8,
+          "heading": "What do Update, Recover, and Reset each do?"
+        },
+        {
+          "line": 17,
+          "heading": "Which should I try first?"
+        },
+        {
+          "line": 33,
+          "heading": "How long should I wait?"
+        },
+        {
+          "line": 45,
+          "heading": "Why does Update say Backup not ready?"
+        },
+        {
+          "line": 51,
+          "heading": "Why did a bot fail to respond?"
+        },
+        {
+          "line": 57,
+          "heading": "What happens if I delete files inside the computer?"
+        },
+        {
+          "line": 65,
+          "heading": "Data typeRecoverable?"
+        },
+        {
+          "line": 74,
+          "heading": "My chats or bots look missing. Were they deleted?"
+        },
+        {
+          "line": 92,
+          "heading": "When should I contact support?"
+        }
+      ],
+      "matrixIds": [
+        "F063",
+        "F064",
+        "F065",
+        "F066",
+        "F067",
+        "F068"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/get-help",
+      "source": "sources/official/cursor-help-get-help.txt",
+      "sections": [
+        {
+          "line": 6,
+          "heading": "How do I contact Grok Bot support?"
+        },
+        {
+          "line": 10,
+          "heading": "What should I include in a support request?"
+        },
+        {
+          "line": 26,
+          "heading": "What if my question is about billing or cancellation?"
+        }
+      ],
+      "matrixIds": [],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/connect-plugins",
+      "source": "sources/official/cursor-help-connect-plugins.txt",
+      "sections": [
+        {
+          "line": 6,
+          "heading": "What are plugins?"
+        },
+        {
+          "line": 10,
+          "heading": "How do I add a plugin?"
+        },
+        {
+          "line": 24,
+          "heading": "Why does a plugin say \"Disabled by team admin\"?"
+        },
+        {
+          "line": 30,
+          "heading": "What if Google says an admin needs to review Grok?"
+        },
+        {
+          "line": 58,
+          "heading": "What can a plugin do?"
+        },
+        {
+          "line": 82,
+          "heading": "Can I connect two Gmail accounts?"
+        },
+        {
+          "line": 88,
+          "heading": "Some other plugins, like Notion, can connect a second account. See How do I add a second account for the same plugin?"
+        },
+        {
+          "line": 90,
+          "heading": "A plugin is added, but the Bot says it's missing. What do I do?"
+        },
+        {
+          "line": 92,
+          "heading": "Added means the plugin is installed, not that you are signed in. Open the plugin and choose Authorize if it shows Needs auth or Disconnected. For a connect card that never shows up or does nothing, see How do I reconnect a plugin?"
+        },
+        {
+          "line": 94,
+          "heading": "Why does connecting to Zoom fail with error 4700 during authorization?"
+        }
+      ],
+      "matrixIds": [],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/delete-account",
+      "source": "sources/official/cursor-help-delete-account.txt",
+      "sections": [
+        {
+          "line": 6,
+          "heading": "How do I delete my Grok Bot account on iOS?"
+        },
+        {
+          "line": 20,
+          "heading": "How do I delete my Grok Bot account on desktop or the web?"
+        },
+        {
+          "line": 38,
+          "heading": "Can I delete Grok Bot without deleting my Cursor account?"
+        },
+        {
+          "line": 42,
+          "heading": "What gets deleted when I delete my account?"
+        },
+        {
+          "line": 54,
+          "heading": "What is not affected by account deletion?"
+        },
+        {
+          "line": 66,
+          "heading": "What if I don't see Delete Account?"
+        }
+      ],
+      "matrixIds": [
+        "F167",
+        "F168"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/faqs",
+      "source": "sources/official/cursor-help-faqs.txt",
+      "sections": [
+        {
+          "line": 6,
+          "heading": "Do I need a separate Grok Bot subscription?"
+        },
+        {
+          "line": 10,
+          "heading": "Is Grok Bot the same as the Grok app?"
+        },
+        {
+          "line": 14,
+          "heading": "Which Grok plans can I link?"
+        },
+        {
+          "line": 22,
+          "heading": "I linked SuperGrok to the wrong Cursor account. Can I unlink it?"
+        },
+        {
+          "line": 26,
+          "heading": "Can I change the email on my account?"
+        },
+        {
+          "line": 34,
+          "heading": "Is Grok Bot down?"
+        },
+        {
+          "line": 50,
+          "heading": "My Bot stopped replying and says I hit my usage limit. Is it broken?"
+        },
+        {
+          "line": 54,
+          "heading": "Why doesn't my SuperGrok limit match my Grok Bot usage?"
+        },
+        {
+          "line": 58,
+          "heading": "Do a Cursor plan and SuperGrok add together?"
+        },
+        {
+          "line": 62,
+          "heading": "How do I stop charges after my weekly usage runs out?"
+        },
+        {
+          "line": 66,
+          "heading": "My trial ran out in one task. Can I get it back?"
+        },
+        {
+          "line": 70,
+          "heading": "I paid in the iPhone or Android app. How do I cancel or get a refund?"
+        },
+        {
+          "line": 74,
+          "heading": "Do I have to pay again on my phone?"
+        },
+        {
+          "line": 78,
+          "heading": "Does my Bot keep working when my laptop is closed?"
+        },
+        {
+          "line": 82,
+          "heading": "Does the Bot use my own computer?"
+        },
+        {
+          "line": 86,
+          "heading": "Why does a website block my Bot or show a captcha?"
+        },
+        {
+          "line": 99,
+          "heading": "What does the low disk space warning mean?"
+        },
+        {
+          "line": 103,
+          "heading": "Why did an approval expire before I saw it?"
+        },
+        {
+          "line": 105,
+          "heading": "Approvals from work that started without you, like a routine or a message from another Bot, expire after about 10 minutes. Approvals in a chat you are in wait for you. Turn on the Bot's Notifications, or choose Always allow for actions you trust. See Why did an approval expire?"
+        },
+        {
+          "line": 107,
+          "heading": "Can I pick the model?"
+        },
+        {
+          "line": 111,
+          "heading": "Which devices work?"
+        },
+        {
+          "line": 115,
+          "heading": "How do I contact support?"
+        }
+      ],
+      "matrixIds": [],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/how-to",
+      "source": "sources/official/cursor-help-how-to.txt",
+      "sections": [
+        {
+          "line": 6,
+          "heading": "How do I organize bots by project or business?"
+        },
+        {
+          "line": 38,
+          "heading": "How do I hide a Bot from the sidebar?"
+        },
+        {
+          "line": 47,
+          "heading": "How do I troubleshoot Grok Bot computer, routine, connector, and startup problems?"
+        },
+        {
+          "line": 64,
+          "heading": "How do I copy a request ID?"
+        },
+        {
+          "line": 70,
+          "heading": "How do I find my Grok Bot version?"
+        },
+        {
+          "line": 74,
+          "heading": "How do I update Grok Bot?"
+        },
+        {
+          "line": 82,
+          "heading": "Why does Grok Bot say Update required?"
+        },
+        {
+          "line": 106,
+          "heading": "Grok Bot closed to update, but it is still on the old version. What do I do?"
+        },
+        {
+          "line": 117,
+          "heading": "On Linux, run the update command for your system. See Why does Grok Bot say Update required?"
+        },
+        {
+          "line": 122,
+          "heading": "How do I change the app language?"
+        },
+        {
+          "line": 131,
+          "heading": "How do I reconnect a plugin?"
+        },
+        {
+          "line": 144,
+          "heading": "Disabled by team admin: ask your Cursor team admin to turn it on. See Why does a plugin say \"Disabled by team admin\"?"
+        },
+        {
+          "line": 151,
+          "heading": "How do I add a second account for the same plugin?"
+        },
+        {
+          "line": 169,
+          "heading": "If you don't see Add Another Account, that plugin connects one account at a time. See Can I connect two Gmail accounts?"
+        },
+        {
+          "line": 171,
+          "heading": "How do I sign in to a work app that uses Okta or single sign-on?"
+        },
+        {
+          "line": 193,
+          "heading": "Why is the Bot asking me to approve something?"
+        },
+        {
+          "line": 212,
+          "heading": "Where do pending approvals show up?"
+        },
+        {
+          "line": 222,
+          "heading": "On the phone, allow notifications for Grok Bot in your phone settings to get alerts there. See How do I stop phone notifications while I work on desktop?"
+        },
+        {
+          "line": 224,
+          "heading": "Why did an approval expire?"
+        },
+        {
+          "line": 238,
+          "heading": "How do I turn off notifications for helper Bots?"
+        },
+        {
+          "line": 246,
+          "heading": "You can also hide the helper Bot. A hidden Bot doesn't send notifications. See How do I hide a Bot from the sidebar?"
+        }
+      ],
+      "matrixIds": [
+        "F019",
+        "F020",
+        "F021",
+        "F084",
+        "F085",
+        "F108",
+        "F109",
+        "F110",
+        "F111"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/mobile",
+      "source": "sources/official/cursor-help-mobile.txt",
+      "sections": [
+        {
+          "line": 6,
+          "heading": "How do I set up the Grok Bot mobile app?"
+        },
+        {
+          "line": 16,
+          "heading": "Do I need to buy again on mobile if my Cursor account already includes Grok Bot?"
+        },
+        {
+          "line": 36,
+          "heading": "Can I update the Grok Bot computer from my phone?"
+        },
+        {
+          "line": 40,
+          "heading": "How do I stop phone notifications while I work on desktop?"
+        },
+        {
+          "line": 48,
+          "heading": "How do I reconnect mobile to my Grok Bot computer?"
+        }
+      ],
+      "matrixIds": [
+        "F103",
+        "F104"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/mobile-purchase",
+      "source": "sources/official/cursor-help-mobile-purchase.txt",
+      "sections": [
+        {
+          "line": 6,
+          "heading": "Which plans carry over to mobile?"
+        },
+        {
+          "line": 26,
+          "heading": "How do I subscribe to Grok Bot from the mobile app?"
+        },
+        {
+          "line": 40,
+          "heading": "How do I use SuperGrok or X Premium+ on mobile?"
+        },
+        {
+          "line": 44,
+          "heading": "How do I manage or cancel a mobile subscription?"
+        }
+      ],
+      "matrixIds": [],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/sign-in",
+      "source": "sources/official/cursor-help-sign-in.txt",
+      "sections": [
+        {
+          "line": 6,
+          "heading": "How do I sign in to Grok Bot on desktop?"
+        },
+        {
+          "line": 18,
+          "heading": "How do I sign in to Grok Bot on mobile?"
+        },
+        {
+          "line": 28,
+          "heading": "Why is Grok Bot showing a persistent authentication error even after I log out, clear cache, and reinstall?"
+        },
+        {
+          "line": 46,
+          "heading": "What if Grok Bot authentication or account-link errors don't resolve with standard troubleshooting?"
+        },
+        {
+          "line": 66,
+          "heading": "What if my Grok Bot account is access-blocked by a phone verification failure?"
+        }
+      ],
+      "matrixIds": [],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/supergrok",
+      "source": "sources/official/cursor-help-supergrok.txt",
+      "sections": [
+        {
+          "line": 6,
+          "heading": "What do I need before linking SuperGrok?"
+        },
+        {
+          "line": 12,
+          "heading": "What do I get after linking SuperGrok?"
+        },
+        {
+          "line": 32,
+          "heading": "Does linking SuperGrok change my Cursor plan?"
+        },
+        {
+          "line": 42,
+          "heading": "How do I link my Grok account?"
+        },
+        {
+          "line": 52,
+          "heading": "How do I link my X Premium+ account?"
+        },
+        {
+          "line": 62,
+          "heading": "Which SuperGrok tiers grant Grok Bot?"
+        },
+        {
+          "line": 76,
+          "heading": "Can I unlink or move a SuperGrok link to a different Cursor account?"
+        },
+        {
+          "line": 82,
+          "heading": "Why am I still on the plan screen after linking?"
+        },
+        {
+          "line": 86,
+          "heading": "Why don't I see a Link Grok Account option after I've already logged in?"
+        },
+        {
+          "line": 100,
+          "heading": "What if my SuperGrok access, email, or usage looks wrong after linking?"
+        }
+      ],
+      "matrixIds": [],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/team-bots",
+      "source": "sources/official/cursor-help-team-bots.txt",
+      "sections": [
+        {
+          "line": 8,
+          "heading": "Who can use Team Bots?"
+        },
+        {
+          "line": 12,
+          "heading": "How do I create a Team Bot?"
+        },
+        {
+          "line": 23,
+          "heading": "Publish it. See How do I publish a Team Bot?"
+        },
+        {
+          "line": 26,
+          "heading": "How do I turn a Bot I already have into a Team Bot?"
+        },
+        {
+          "line": 40,
+          "heading": "How do I publish a Team Bot?"
+        },
+        {
+          "line": 48,
+          "heading": "How do teammates find a Team Bot?"
+        },
+        {
+          "line": 60,
+          "heading": "Can the owner see my chats with a Team Bot?"
+        },
+        {
+          "line": 66,
+          "heading": "Whose plugins and secrets does a Team Bot use?"
+        },
+        {
+          "line": 86,
+          "heading": "Which computer does a Team Bot use?"
+        },
+        {
+          "line": 92,
+          "heading": "Whose usage pays for a Team Bot chat?"
+        },
+        {
+          "line": 96,
+          "heading": "How do approvals work on a Team Bot?"
+        },
+        {
+          "line": 102,
+          "heading": "How do I add a Team Bot to Slack?"
+        },
+        {
+          "line": 118,
+          "heading": "How do I edit, unpublish, or delete a Team Bot?"
+        },
+        {
+          "line": 134,
+          "heading": "How do I remove a Team Bot from my sidebar?"
+        },
+        {
+          "line": 140,
+          "heading": "Can I use Team Bots on my phone?"
+        },
+        {
+          "line": 146,
+          "heading": "Can a Team Bot join a group chat?"
+        },
+        {
+          "line": 150,
+          "heading": "How do admins add a Team Bot for everyone?"
+        },
+        {
+          "line": 154,
+          "heading": "Why can't I see or use a Team Bot?"
+        }
+      ],
+      "matrixIds": [
+        "F131",
+        "F132"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/edit-bot",
+      "source": "sources/official/cursor-help-edit-bot.txt",
+      "sections": [
+        {
+          "line": 6,
+          "heading": "How do I rename a Bot?"
+        },
+        {
+          "line": 10,
+          "heading": "You can also change the name in Bot settings. See How do I change what a Bot does?"
+        },
+        {
+          "line": 14,
+          "heading": "How do I change a Bot's picture?"
+        },
+        {
+          "line": 40,
+          "heading": "How do I change what a Bot does?"
+        },
+        {
+          "line": 61,
+          "heading": "Where did Edit Profile go?"
+        },
+        {
+          "line": 67,
+          "heading": "Why can't I rename or edit a Bot?"
+        }
+      ],
+      "matrixIds": [
+        "F009",
+        "F010",
+        "F011"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/group-chats",
+      "source": "sources/official/cursor-help-group-chats.txt",
+      "sections": [
+        {
+          "line": 6,
+          "heading": "Where do Bots reply in a group chat?"
+        },
+        {
+          "line": 12,
+          "heading": "How do I keep a Bot's replies in the group chat?"
+        },
+        {
+          "line": 21,
+          "heading": "A Bot's own description applies everywhere that Bot works. See How do I change what a Bot does?"
+        },
+        {
+          "line": 24,
+          "heading": "How do I stop Bots from messaging each other?"
+        },
+        {
+          "line": 36,
+          "heading": "To quiet a helper Bot without deleting it, turn off its notifications or hide it. See How do I turn off notifications for helper Bots?"
+        },
+        {
+          "line": 40,
+          "heading": "How do I rename a group chat or change what it is for?"
+        },
+        {
+          "line": 46,
+          "heading": "Do group chats have notifications?"
+        },
+        {
+          "line": 50,
+          "heading": "Can I voice chat in a group chat?"
+        }
+      ],
+      "matrixIds": [
+        "F033",
+        "F034",
+        "F035",
+        "F036",
+        "F037"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/onboarding",
+      "source": "sources/official/cursor-help-onboarding.txt",
+      "sections": [
+        {
+          "line": 6,
+          "heading": "How do I create my first Bot?"
+        },
+        {
+          "line": 17,
+          "heading": "How do I create another Bot?"
+        },
+        {
+          "line": 43,
+          "heading": "What should I ask my Bot to do first?"
+        },
+        {
+          "line": 53,
+          "heading": "How do I give my Bot access to a tool?"
+        },
+        {
+          "line": 59,
+          "heading": "What should I check before my Bot takes action?"
+        },
+        {
+          "line": 65,
+          "heading": "What should I do after my first task?"
+        }
+      ],
+      "matrixIds": [
+        "F006",
+        "F007",
+        "F008"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/routines",
+      "source": "sources/official/cursor-help-routines.txt",
+      "sections": [
+        {
+          "line": 6,
+          "heading": "How do I set up or change a routine?"
+        },
+        {
+          "line": 14,
+          "heading": "Where do I see a Bot's routines?"
+        },
+        {
+          "line": 40,
+          "heading": "How do schedules and time zones work?"
+        },
+        {
+          "line": 49,
+          "heading": "How do I test a routine?"
+        },
+        {
+          "line": 57,
+          "heading": "What should I change if usage drops quickly?"
+        },
+        {
+          "line": 65,
+          "heading": "How do Slack triggers work?"
+        },
+        {
+          "line": 73,
+          "heading": "Where do the webhook URL and key live, and what does a 200 mean?"
+        },
+        {
+          "line": 89,
+          "heading": "Why hasn't my routine run?"
+        }
+      ],
+      "matrixIds": [
+        "F073",
+        "F074",
+        "F075",
+        "F076",
+        "F077",
+        "F078",
+        "F079",
+        "F080",
+        "F081"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    },
+    {
+      "url": "https://cursor.com/help/grok-bot/voice-chat",
+      "source": "sources/official/cursor-help-voice-chat.txt",
+      "sections": [
+        {
+          "line": 6,
+          "heading": "How do I start a voice chat?"
+        },
+        {
+          "line": 20,
+          "heading": "Start voice chat shows only when the message box is empty. If the box is empty and you still don't see it, update Grok Bot. See How do I update Grok Bot?"
+        },
+        {
+          "line": 22,
+          "heading": "What can I do during a voice chat?"
+        },
+        {
+          "line": 38,
+          "heading": "How is a voice chat different from voice typing?"
+        },
+        {
+          "line": 52,
+          "heading": "Can I voice chat in a group chat?"
+        },
+        {
+          "line": 58,
+          "heading": "What happens if a voice chat drops?"
+        },
+        {
+          "line": 72,
+          "heading": "Where do the call notes go?"
+        }
+      ],
+      "matrixIds": [
+        "F092",
+        "F093",
+        "F094",
+        "F095",
+        "F096",
+        "F097",
+        "F098"
+      ],
+      "reviewed": true,
+      "runtimeTested": false
+    }
+  ]
+}

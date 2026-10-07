@@ -1,0 +1,5 @@
+import http from 'node:http';
+import fs from 'node:fs/promises';
+const page = `<!doctype html><meta charset="utf-8"><title>Negus 独立操作验收</title><body style="font:24px system-ui;padding:50px"><h1>Negus 独立操作验收</h1><p>仅验证本地输入和点击，不会提交到外部网站。</p><input id="entry" aria-label="验收文字" placeholder="请输入验收文字" style="font:24px system-ui;width:600px;padding:16px"><p><button id="verify" style="font:24px system-ui;padding:18px">验证输入</button></p><p id="result">等待操作</p><script>verify.onclick=async()=>{let r=await fetch('/result',{method:'POST',body:JSON.stringify({value:entry.value,trustedClick:event.isTrusted})});result.textContent='收到：'+entry.value}</script>`;
+const server=http.createServer(async(req,res)=>{if(req.method==='POST'&&req.url==='/result'){let raw='';for await(const c of req)raw+=c;const data={...JSON.parse(raw),time:new Date().toISOString()};await fs.writeFile('work/demo-interaction-evidence.json',JSON.stringify(data,null,2));console.log('VERIFIED',JSON.stringify(data));res.end('ok');return;}res.setHeader('Content-Type','text/html; charset=utf-8');res.end(page);});
+server.listen(18763,'127.0.0.1',()=>console.log('READY http://127.0.0.1:18763'));

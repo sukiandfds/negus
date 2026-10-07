@@ -504,3 +504,30 @@ test("copy latest delegates to the same native fork and retains explicit message
  active=true;const run=invokePost(route,"/api/session/fork",{threadId:"source",latest:true});
  await run.promise;assert.equal(run.response.status,409);assert.equal(calls.length,2);
 });
+
+test('task binding opens, steers and stops its own thread while leader is busy', async () => {
+  const binding = { conversationId: 'task-chat', runtimeSessionId: 'worker', agentId: 'researcher', runtimeKind: 'codex', conversationKind: 'task' };
+  const calls = [];
+  const route = createConversationRoutes({
+    agentTasks: { ownsThread: id => id === 'worker' },
+    agentConversationStore: { findByRuntimeSession: () => binding, resolve: async () => binding },
+    employeeRuntime: { supportsEmployee: () => true, ownsConversation: () => false, sendMessage: () => assert.fail('must not send to leader') },
+    conversations: {
+      findSession: async id => ({ threadId: id, source: 'codex', messages: [], archived: false }),
+      steerMessage: async (...args) => { calls.push(['steer', ...args]); return {}; },
+      interrupt: async (...args) => { calls.push(['stop', ...args]); },
+      getGoal: async () => ({ goal: null }),
+    },
+    execution: { getStatus: () => ({ active: true, turnId: 'worker-turn' }) },
+    media: { resolveMany: () => [] },
+  });
+  const read = invokeGet(route, '/api/sessions?conversationId=task-chat');
+  await read.promise;
+  assert.equal(JSON.parse(read.response.body)[0].threadId, 'worker');
+  const body = { threadId: 'worker', conversationId: 'task-chat', text: '补充资料', submissionId: 'amend-task' };
+  await invoke(route, body).promise;
+  await invokePost(route, '/api/session/interrupt', body).promise;
+  assert.deepEqual(calls.map(c => c.slice(0, 3)), [['steer', 'worker', 'worker-turn'], ['stop', 'worker', 'worker-turn']]);
+  await assert.rejects(invoke(route, { ...body, threadId: 'leader', submissionId: 'wrong-thread' }).promise, /不匹配/);
+  await assert.rejects(invoke(route, { ...body, conversationId: '', submissionId: 'missing-binding' }).promise, /conversationId/);
+});

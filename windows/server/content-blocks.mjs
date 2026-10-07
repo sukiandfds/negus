@@ -92,8 +92,9 @@ const negusImageBlocks = (item, registerMedia) => {
   const outputs = structuredContentFrom(item)?.outputs;
   if (!Array.isArray(outputs)) return [];
   return outputs.flatMap((output) => {
-    const block = mediaBlock("image", output?.path, registerMedia, {
-      alt: path.basename(String(output?.path || "generated-image")),
+    const source = output?.url || output?.path;
+    const block = mediaBlock("image", source, registerMedia, {
+      alt: path.basename(String(source || "generated-image")),
       ...(Number.isSafeInteger(output?.width) ? { width: output.width } : {}),
       ...(Number.isSafeInteger(output?.height) ? { height: output.height } : {}),
     });

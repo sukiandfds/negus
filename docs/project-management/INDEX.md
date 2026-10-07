@@ -41,6 +41,7 @@ last_updated: "2026-09-29 18:31 +08:00"
 | `RESEARCH-001` | research | research | `items/RESEARCH-001/` | 2 |
 | `RESEARCH-002` | research | research | `items/RESEARCH-002/` | 3 |
 | `RESEARCH-003` | research | research | `items/RESEARCH-003/` | 4 |
+| `RESEARCH-005` | research | research | [items/RESEARCH-005/](items/RESEARCH-005/item.md) | 19 |
 | `FEAT-001` | feature | development | `items/FEAT-001/` | 5 |
 | `FEAT-002` | feature | development | `items/FEAT-002/` | 6 |
 | `FEAT-003` | feature | development | `items/FEAT-003/` | 7 |

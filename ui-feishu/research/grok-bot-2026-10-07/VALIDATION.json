@@ -1,0 +1,44 @@
+{
+  "validatedAt": "2026-10-06T18:11:51.002652+00:00",
+  "validationKind": "research artifact integrity; NOT product/runtime acceptance",
+  "originalFilesChecked": 1247,
+  "originalFilesChanged": [],
+  "officialDocuments200": 39,
+  "officialIndexedDocuments": 21,
+  "officialHelpDocuments": 18,
+  "githubRepositoriesPinned": 8,
+  "githubSourceSnapshotsVerified": 57,
+  "featureRows": 169,
+  "plannedAcceptanceCases": 62,
+  "localLinksChecked": 187,
+  "consolidatedOfficialPages": [
+    "sources/official/faq.md",
+    "sources/official/overview.md",
+    "sources/official/security-faq.md",
+    "sources/official/troubleshooting.md",
+    "sources/official/cursor-help-secrets.txt",
+    "sources/official/cursor-help-get-help.txt",
+    "sources/official/cursor-help-connect-plugins.txt",
+    "sources/official/cursor-help-faqs.txt",
+    "sources/official/cursor-help-mobile-purchase.txt",
+    "sources/official/cursor-help-sign-in.txt",
+    "sources/official/cursor-help-supergrok.txt"
+  ],
+  "documentedSourceFetchFailures": [
+    {
+      "repo": "openclaw/openclaw",
+      "path": "src/agents/subagents/registry/subagent-registry-store.ts",
+      "error": "HTTP Error 404: Not Found",
+      "url": "https://raw.githubusercontent.com/openclaw/openclaw/df73bb11139acae998676f2876337dbcb8385985/src/agents/subagents/registry/subagent-registry-store.ts"
+    },
+    {
+      "repo": "langchain-ai/langgraph",
+      "path": "libs/langgraph/langgraph/checkpoint/base/__init__.py",
+      "error": "HTTP Error 404: Not Found",
+      "url": "https://raw.githubusercontent.com/langchain-ai/langgraph/70dd64065bffaa3b6ab61a33f1f020fb54db8efa/libs/langgraph/langgraph/checkpoint/base/__init__.py"
+    }
+  ],
+  "productRuntimeTested": false,
+  "errors": [],
+  "passed": true
+}

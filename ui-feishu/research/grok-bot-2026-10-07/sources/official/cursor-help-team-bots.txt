@@ -1,0 +1,179 @@
+← Back
+Team Bots
+
+A Team Bot is a Bot one person owns and publishes to their Cursor team. After it's published, everyone on the team can chat with it. Each person's chat with a Team Bot is private.
+
+Team Bots always run in the cloud. A Bot that runs on your own computer can't be a Team Bot. Your personal Bots don't change.
+
+Who can use Team Bots?
+
+Team Bots are for members of a Cursor team who have Grok Bot. If you don't see Create new Team Bot after you choose New in the sidebar, Team Bots aren't on for your team yet. Opening a Team Bot link then shows Team Bots Not Available.
+
+How do I create a Team Bot?
+
+
+Choose New in the sidebar, then Create new Team Bot. Grok Bot creates a Bot named New team bot and opens its chat.
+
+Tell the Bot what it should help the team with. A sentence is enough.
+
+Follow its setup steps. It asks for plugins, then secrets, then files. Only add keys and files you're happy for the whole team to use.
+
+Give the Bot a name and description. Click the Bot's name at the top of the chat, then choose Edit details. Teammates can't see a Team Bot that still has the default name and no description.
+
+Publish it. See How do I publish a Team Bot?
+
+
+How do I turn a Bot I already have into a Team Bot?
+
+Open the Bot's Share menu and choose Publish to Team. The Bot makes a separate team copy of itself and walks you through what to bring:
+
+
+Secrets. Only bring keys you're happy for the whole team to use.
+
+Memories. The Bot shows you which of its memories the team should have.
+
+Routines. You can move them to the team copy or keep them on your personal Bot.
+
+
+The personal Bot keeps working, and its chats don't move to the team copy. The team copy appears in your sidebar, hidden from teammates until you publish it.
+
+How do I publish a Team Bot?
+
+When the Bot is ready, it shows a card that says it's ready for your team. Choose Publish to team.
+
+After you publish, teammates can find the Bot by choosing New, then Team Bots. The card also has a button to copy the Bot's link, so you can send it to people.
+
+To stop sharing, click the Bot's name at the top of the chat and choose Unpublish. Teammates lose access until you publish it again.
+
+How do teammates find a Team Bot?
+
+
+Choose New in the sidebar, then Team Bots. Search or scroll the list. Each Bot shows who made it.
+
+In the regular New search, type at least 3 characters of the Bot's name.
+
+Open a link a teammate sent you, then choose Start a chat.
+
+
+To copy a published Team Bot's link, right-click it in the sidebar and choose Copy link. A Team Bot link opens the same shared Bot. It's different from sharing a Bot template, which gives each person their own copy.
+
+Can the owner see my chats with a Team Bot?
+
+No. Each person's chat with a Team Bot is private. The owner can't read your chats, and you can't read the owner's or anyone else's.
+
+The Bot can save things it learns for the whole team, and it tells you when it does. It doesn't save anything about you personally for the team. What it remembers about working with you stays between you and the Bot.
+
+Whose plugins and secrets does a Team Bot use?
+
+A Team Bot uses the plugins and secrets its owner added. Those work the same for everyone who chats with it.
+
+In your own chat with a Team Bot, it can also use your plugins. It asks before it uses one of your personal accounts. The card says Allow, then the plugin name:
+
+
+Allow once lets it use that account this time.
+
+Always allow remembers your answer. Its menu has Always allow for this Bot and Always allow for all Team Bots.
+
+Skip means it doesn't use that account this time.
+
+
+In Slack channels, threads, and group chats, a Team Bot uses only its owner's plugins, and asks before it uses your accounts.
+
+A connected account always acts as the person the Bot is answering. One teammate's connection is never used for someone else.
+
+To make every Team Bot ask again, open Settings > General > Team Bots and choose Clear next to Clear connector preferences.
+
+Which computer does a Team Bot use?
+
+In your own chat with a teammate's Team Bot, the Bot usually works on your Grok Bot computer. That means it can use the files there and the sites you're signed in to there. Sometimes it uses a separate computer just for that conversation, for example when your privacy mode is stricter than the owner's.
+
+In Slack channels, threads, and group chats, a Team Bot uses one shared computer of its own.
+
+Whose usage pays for a Team Bot chat?
+
+When you chat with a teammate's Team Bot, the chat uses your Grok Bot usage, not the owner's. See Plans and billing.
+
+How do approvals work on a Team Bot?
+
+A Team Bot asks for approval only in its owner's own chat with it. In teammates' chats, in Slack, and in group chats, nobody who can answer an approval card is there. So the Bot works within the permissions its owner set up, without stopping to ask. It still asks before it uses your personal accounts.
+
+If your Enterprise admin enforces Auto-review, Auto-review still checks actions in those chats. See Grok Bot for Teams and Enterprise.
+
+How do I add a Team Bot to Slack?
+
+The owner adds it, after publishing:
+
+
+Click the Bot's name at the top of the chat.
+
+Find Bring to your team's Slack and choose Connect. Before the Bot is published, this says Connect after publishing.
+
+If it says Awaiting admin approval, a Slack workspace admin needs to approve the app.
+
+
+Once it says Connected, teammates can message the Bot directly or mention it in channels.
+
+Each teammate needs to link their Slack account first. Open Settings > General > Team Bots and choose Link. If you message the Bot before you link, it replies with steps to link your account.
+
+How do I edit, unpublish, or delete a Team Bot?
+
+Only the owner can change a Team Bot. Click the Bot's name at the top of the chat to open its details:
+
+
+Plugins, Secrets, Skills, and Files hold what the Bot uses for everyone.
+
+Edit details changes the name and description.
+
+Unpublish hides the Bot from teammates until you publish it again.
+
+
+To rename it, you can also right-click the Bot in the sidebar and choose Rename Bot.
+
+To delete it, right-click the Bot in the sidebar and choose Delete. This deletes the Bot for your whole team. Teammates lose it, along with their chats and routines on it. It can't be undone.
+
+How do I remove a Team Bot from my sidebar?
+
+Right-click the Bot and choose Hide from sidebar. To add it back, choose New, then Team Bots, and pick it again.
+
+If your admin added the Bot to your sidebar for you, Hide from sidebar isn't in its menu, and you can't remove it.
+
+Can I use Team Bots on my phone?
+
+Yes, for chatting. Team Bots you've added appear in the phone app. You can chat with them and answer their Allow cards. Create, publish, edit, and connect Team Bots to Slack on desktop.
+
+You can't start a voice call with a teammate's Team Bot.
+
+Can a Team Bot join a group chat?
+
+Yes. You can add a teammate's published Team Bot to your own group chat. It can't share a group with Bots that run on your own computer. See Group chats and Bot-to-Bot messages.
+
+How do admins add a Team Bot for everyone?
+
+On the Grok Bot page of the Cursor dashboard, find Manage Team Bots and choose Manage. For each Team Bot, choose All team or specific groups. Those members get the Bot in their sidebar automatically, and can't hide it. See Grok Bot for Teams and Enterprise.
+
+Why can't I see or use a Team Bot?
+
+What you seeWhat it means
+Create new Team Bot is missingTeam Bots aren't on for your team yet, or you aren't on a Cursor team.
+Team Bots Not AvailableYour account doesn't have access to Team Bots.
+Bot Not FoundThe Bot may have been removed, or it isn't shared with you.
+A teammate's Bot isn't in Team BotsThe owner hasn't published it yet, or it still has the default name and no description.
+This Bot's owner has reached their usage limitThe account paying for this chat has reached its usage limit. In your own chat with a teammate's Team Bot, that's your account. See Plans and billing.
+This conversation can't run on your computer because your privacy mode is stricter than the bot owner's.Your privacy mode setting is stricter than the owner's, so this chat can't use your computer.
+In Slack, the Bot asks you to link a Cursor accountLink your Slack account under Settings > General > Team Bots, using the Cursor account on the Bot's team.
+
+If none of these match, contact support with the Bot's name, the exact message, and your Grok Bot version.
+
+Related
+
+
+Group chats and Bot-to-Bot messages
+
+Connect plugins
+
+Store secrets securely
+
+Plans and billing
+
+Grok Bot for Teams and Enterprise
+

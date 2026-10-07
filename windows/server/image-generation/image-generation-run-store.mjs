@@ -2,7 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 const fileVersion = 1;
-const unfinishedStatuses = new Set(["queued", "running"]);
+const unfinishedStatuses = new Set(["queued", "submitting", "generating", "running", "provider_ready", "saving"]);
+const activeStatuses = new Set(["queued", "submitting", "generating", "running", "provider_ready", "saving"]);
 
 const safeText = (value, limit = 8000) => String(value || "").trim().slice(0, limit);
 const safeMedia = (value = {}) => ({
@@ -34,8 +35,10 @@ const specText = (record) => `${record.intent.resolution} · ${record.intent.siz
 
 const assistantMessageFrom = async (record, media) => {
   const id = `image-assistant-${record.runId}`;
-  if (record.status === "queued" || record.status === "running") {
-    const text = `Negus Image 正在生成图片…\n\n规格：${specText(record)}`;
+  if (activeStatuses.has(record.status)) {
+    const labels = { queued: "排队中", submitting: "正在提交供应商", generating: "供应商生成中", running: "正在生成图片", provider_ready: "供应商已返回图片", saving: "本地保存中" };
+    const elapsed = Math.max(0, Date.now() - Date.parse(record.createdAt));
+    const text = `Negus Image ${labels[record.status]}…（已耗时 ${Math.round(elapsed / 1000)} 秒）\n\n规格：${specText(record)}`;
     return { id, role: "assistant", text, blocks: [{ id: `${id}-text`, type: "markdown", text }], createdAt: record.createdAt };
   }
   if (record.status === "failed" || record.status === "unknown") {
@@ -58,9 +61,12 @@ const assistantMessageFrom = async (record, media) => {
       unavailable += 1;
     }
   }
-  const text = files.length
-    ? `Negus Image 已生成 ${files.length} 张图片。${unavailable ? `另有 ${unavailable} 张文件已不可用。` : ""}`
-    : "Negus Image 已完成，但生成文件当前不可用。";
+  const remoteFiles = record.outputs.filter(output => output.url && !files.some(file => file.url === output.url));
+  const text = record.status === "partial"
+    ? `Negus Image 已生成 ${files.length + remoteFiles.length} 张图片，本地副本保存失败，可继续查看或下载远程结果。`
+    : files.length
+      ? `Negus Image 已生成 ${files.length} 张图片。${unavailable ? `另有 ${unavailable} 张文件已不可用。` : ""}`
+      : remoteFiles.length ? `Negus Image 已生成 ${remoteFiles.length} 张图片，本地副本保存中。` : "Negus Image 已完成，但生成文件当前不可用。";
   return {
     id,
     role: "assistant",
@@ -75,6 +81,14 @@ const assistantMessageFrom = async (record, media) => {
         width: file.width,
         height: file.height,
         file,
+      })),
+      ...remoteFiles.map((output, index) => ({
+        id: `${id}-remote-${index}`,
+        type: "image",
+        source: output.url,
+        alt: `Negus Image 生成图片 ${files.length + index + 1}`,
+        width: output.width,
+        height: output.height,
       })),
     ],
     createdAt: record.createdAt,
@@ -196,6 +210,8 @@ export const createImageGenerationRunStore = ({ stateFile = "", media }) => {
       const outputCount = latest.outputs?.length || 0;
       const latestAssistant = latest.status === "succeeded"
         ? `Negus Image 已生成 ${outputCount} 张图片。`
+        : latest.status === "partial"
+          ? `Negus Image 已生成 ${outputCount} 张图片，本地副本保存失败。`
         : latest.status === "failed" || latest.status === "unknown"
           ? `Negus Image ${latest.status === "unknown" ? "任务状态无法确认" : "生成失败"}：${latest.error || "未知错误"}`
           : "Negus Image 正在生成图片...";
@@ -249,13 +265,22 @@ export const createImageGenerationRunStore = ({ stateFile = "", media }) => {
 
   return {
     create,
-    markRunning: (runId) => update(runId, { status: "running", error: "" }),
+    markRunning: (runId) => update(runId, { status: "generating", error: "" }),
+    markSubmitting: (runId) => update(runId, { status: "submitting", error: "" }),
+    markGenerating: (runId) => update(runId, { status: "generating", error: "" }),
+    providerReady: (runId, result) => update(runId, {
+      status: "provider_ready", outputs: result.outputs || [], providerTaskId: result.taskId || "", model: result.model || "", error: "",
+    }),
+    markSaving: (runId) => update(runId, { status: "saving", error: "" }),
     complete: (runId, result) => update(runId, {
       status: "succeeded",
       outputs: result.outputs || [],
       providerTaskId: result.taskId || "",
       model: result.model || "",
       error: "",
+    }),
+    partial: (runId, result, error) => update(runId, {
+      status: "partial", outputs: result.outputs || [], providerTaskId: result.taskId || "", model: result.model || "", error: safeText(error, 1000),
     }),
     fail: (runId, error) => update(runId, { status: "failed", error: safeText(error, 1000) }),
     get,

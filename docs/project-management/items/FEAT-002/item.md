@@ -4,17 +4,17 @@ type: feature
 title: 项目群聊与多 Agent 协作
 category: development
 priority: P1
-status: code_ready_pending_user_review
-updated_at: "2026-08-17 11:10 +08:00"
+status: handoff_pending
+updated_at: "2026-10-04 17:31 +08:00"
 source: docs/feature-development/features/FEAT-002-group-multi-agent.md
 related: [FEAT-001, FEAT-003, FEAT-005, FEAT-007, FEAT-010]
-product_base_commit: d5b39e8be1e6273299d3606eef3d1153ba001f3e
+product_base_commit: b90664a750b94f88c4c08068d3550c49cfcf4bd0
 product_commit: pending
 docs_commit: pending
 audited_product_commit: pending
 sync_status: docs_pending
-next_action: 完成最新构建后，由用户验收员工页成长面板、审批失败重试和既有单聊/群聊体验；技术侧保留既有 conversation-routes 广播 mock 失败待单独处理
-last_user_visible_change: 独立员工项目页显示成长事实和待审批建议；审批写入失败可重试，审批期间旧轮询/SSE 不覆盖新状态
+next_action: 后台调研代码及隔离验证完成；待授权更新后端，再验收主对话继续聊天、任务补充与停止、结果主动回报
+last_user_visible_change: 待部署：产品分析可委派独立后台调研，任务列于员工下，结果排队回到主对话
 ---
 
 # 项目群聊与多 Agent 协作

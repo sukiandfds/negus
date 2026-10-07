@@ -22,13 +22,13 @@ export const createRequestHandler = ({
   token, project, projectRoot, device, observerPort, conversations, execution, media, realtime, submissions,
   conversationForward, followUpQueue, contextManagement, groupRoom, roomDirectory, multiAgent, multiAgentDirectory, artifacts, webOutputs, fushengUsage, readWebVersion, serveStatic,
   agentConversationStore, agentPublicationService,
-  employeeRuntime, employeeProjectDirectory, employeeGrowth, modelProviders, projectActivityIndex, projectStatus,
+  employeeRuntime, employeeProjectDirectory, employeeGrowth, modelProviders, projectActivityIndex, projectStatus, agentTasks,
 }) => {
   const readAutomations = createDesktopAutomationReader();
   const maintenance = createMaintenanceGate({
     projectRoot,
     isBusy: () => {
-      const services = [execution, followUpQueue, employeeRuntime, conversationForward,
+      const services = [execution, followUpQueue, employeeRuntime, conversationForward, agentTasks,
         ...(multiAgentDirectory ? [...multiAgentDirectory.values()] : multiAgent ? [multiAgent] : [])].filter(Boolean);
       // A service missing its busy contract is unknown, never safe to stop.
       return services.some((service) => typeof service.hasPendingWork !== "function" || service.hasPendingWork());
@@ -62,6 +62,7 @@ export const createRequestHandler = ({
       publishThreadEvent: execution.publishThreadEvent,
       agentConversationStore,
       employeeRuntime,
+      agentTasks,
       roomDirectory,
       modelProviders,
     }),

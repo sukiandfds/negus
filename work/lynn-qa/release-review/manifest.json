@@ -1,0 +1,20 @@
+{
+  "activeRelease": "1790966888997-328685a4",
+  "productFiles": [
+    "web-ui/src/features/desktop/EditableDesktop.tsx",
+    "web-ui/src/features/desktop/EditableDesktop.module.css",
+    "windows/server/request-handler.mjs",
+    "windows/server/routes/lynn-workbench-routes.mjs"
+  ],
+  "testFiles": [
+    "windows/tests/lynn-workbench-routing.test.mjs"
+  ],
+  "files": {
+    "web-ui/src/features/desktop/EditableDesktop.tsx": "83f1c9a1ee2dfe98815499071d0be459c0908c03cacc37b8b43a6dc1a2dcdb2b",
+    "web-ui/src/features/desktop/EditableDesktop.module.css": "151cc28b5d535fabcda494d52c3f6a2e358012d892cebbd03f6313c70fee3749",
+    "windows/server/request-handler.mjs": "8427bf873818211bbcc67e98a8663bd42f3a8a31984d7c34276783ceca19839b",
+    "windows/server/routes/lynn-workbench-routes.mjs": "808c893d8c7afb103bb877b8b2fe207f2da41538d782e1eba0f06ff25451e787",
+    "windows/tests/lynn-workbench-routing.test.mjs": "c6729c12c8acd61a94e12292605ffe035d44d91c0a050d1ff3e734ff98e590c1"
+  },
+  "note": "Only these Negus files belong to this task. Other working-tree modifications predate this task. Publication and backend restart are awaiting explicit authorization."
+}

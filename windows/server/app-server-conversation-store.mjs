@@ -388,11 +388,11 @@ export const createAppServerConversationStore = ({
     return summaries.sort((left, right) => sessionTime(right.updatedAt) - sessionTime(left.updatedAt));
   };
 
-  const createSession = async (model = "", requestedProjectRoot = "") => {
+  const createSession = async (model = "", requestedProjectRoot = "", options = {}) => {
     const cwd = requestedProjectRoot ? path.resolve(requestedProjectRoot) : projectRoot;
-    if (!isAllowedProjectRoot(cwd)) throw new Error("This project folder is not registered in Negus.");
+    if (!options.managed && !isAllowedProjectRoot(cwd)) throw new Error("This project folder is not registered in Negus.");
     const profilePrompt = await getUserProfilePrompt();
-    const params = { cwd, sandbox: "danger-full-access", approvalPolicy: "never", ...(profilePrompt ? { developerInstructions: profilePrompt } : {}) };
+    const params = { cwd, sandbox: options.sandbox || "danger-full-access", approvalPolicy: options.approvalPolicy || "never", developerInstructions: [profilePrompt, options.developerInstructions].filter(Boolean).join("\n") };
     if (model) params.model = model;
     const result = await client.request("thread/start", params);
     let thread = result.thread;
@@ -603,11 +603,11 @@ export const createAppServerConversationStore = ({
   const ensureProjectThread = async (threadId) => {
     const thread = await getThread(threadId);
     const belongsToProject = isAllowedProjectRoot(thread?.cwd);
-    let runtimeOptions = belongsToProject ? null : await threadRuntimeOptions(thread);
+    let runtimeOptions = await threadRuntimeOptions(thread);
     if (!belongsToProject && !runtimeOptions) {
       throw new Error("This conversation does not belong to the current project.");
     }
-    if (belongsToProject) {
+    if (belongsToProject && !runtimeOptions) {
       let permissions = {};
       try { permissions = JSON.parse(await fs.readFile(path.join(projectRoot, "runtime", "thread-permissions.json"), "utf8")); }
       catch (error) { if (error.code !== "ENOENT") throw error; }
@@ -623,12 +623,12 @@ export const createAppServerConversationStore = ({
   const resumeThread = async (threadId) => {
     const { runtimeOptions } = await ensureProjectThread(threadId);
     const freshRuntime = freshThreadRuntime.get(threadId);
-    // New project threads already start with the requested full-access policy;
+    // New threads already start with their requested policy;
     // empty threads cannot be resumed before their first persisted turn.
-    if (freshRuntime && (!runtimeOptions?.resume || runtimeOptions.resume.sandbox === "danger-full-access")) return freshRuntime;
+    if (freshRuntime) return freshRuntime;
     return client.request("thread/resume", {
-      threadId, persistExtendedHistory: true, ...(runtimeOptions?.resume || {}),
-      developerInstructions: await getUserProfilePrompt(),
+      threadId, persistExtendedHistory: true,
+      developerInstructions: await getUserProfilePrompt(), ...(runtimeOptions?.resume || {}),
     });
   };
 

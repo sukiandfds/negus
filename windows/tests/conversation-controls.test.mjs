@@ -971,3 +971,27 @@ test("releases an unloaded thread without unsubscribing", async () => {
     store.close();
   }
 });
+
+test('managed research retains read-only policy inside a registered project on first send and resume', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'negus-task-policy-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const calls = [];
+  const thread = { id: 'research-task', cwd: root };
+  const store = createAppServerConversationStore({ projectRoot: root, registerMedia: () => null, autoTitleEnabled: false,
+    threadRuntimeOptions: () => ({ resume: { sandbox: 'read-only', approvalPolicy: 'never', developerInstructions: 'Only research' },
+      turn: { sandboxPolicy: { type: 'readOnly' }, approvalPolicy: 'never' } }),
+    client: { subscribe: () => () => {}, close() {}, request: async (method, params) => {
+      calls.push({ method, params });
+      return method === 'turn/start' ? { turn: { id: 'turn' } } : { thread };
+    } },
+  });
+  t.after(() => store.close());
+  await store.createSession('model', root, { managed: true, sandbox: 'read-only', developerInstructions: 'Only research' });
+  await store.sendMessage(thread.id, 'research');
+  assert.equal(calls.some(c => c.method === 'thread/resume'), false);
+  await store.sendMessage(thread.id, 'follow up');
+  const resume = calls.find(c => c.method === 'thread/resume');
+  assert.equal(resume.params.sandbox, 'read-only');
+  assert.equal(resume.params.developerInstructions, 'Only research');
+  for (const c of calls.filter(c => c.method === 'turn/start')) assert.equal(c.params.sandboxPolicy.type, 'readOnly');
+});

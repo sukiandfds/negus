@@ -45,6 +45,7 @@ export const createEmployeeProjectDirectory = ({
   employeeConversations,
   roomDirectory,
   personalStatus,
+  agentTasks,
 }) => {
   const readEmployeeStatus = async (employeeId) => {
     try {
@@ -142,7 +143,10 @@ export const createEmployeeProjectDirectory = ({
       const statusKey = clean(mainThreadId || mainConversationId, 120);
       const mainLastActivityAt = await employeeLastActivity({ ...employee, conversationId: mainConversationId, mainThreadId });
       const groupConversations = await groupConversationsFor(employee, identity, conversationStatuses);
+      const taskConversations = agentTasks?.directoryEntries(employee.id) || [];
+      for (const entry of taskConversations) conversationStatuses[entry.threadId] = entry.status;
       const lastActivityAt = latestTimestamp([
+        ...taskConversations.map(entry => entry.lastActivityAt),
         mainLastActivityAt,
         ...groupConversations.map((conversation) => conversation.lastActivityAt),
       ]);
@@ -161,6 +165,7 @@ export const createEmployeeProjectDirectory = ({
           lastActivityAt: mainLastActivityAt,
           status,
         }] : []),
+        ...taskConversations,
         ...groupConversations,
       ];
       return {

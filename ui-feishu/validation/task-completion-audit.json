@@ -1,0 +1,25 @@
+{
+  "checkedAt": "2026-10-07T05:30:38.925Z",
+  "scope": [
+    "automatic routing",
+    "asynchronous handoff across group and employee/task conversations",
+    "durable task state, stop and restart reconciliation"
+  ],
+  "checks": {
+    "newTests": true,
+    "existingTests": true,
+    "build": true,
+    "liveAutoRouting": true,
+    "liveGroupHandoff": true,
+    "livePrivateHandoff": true,
+    "liveFollowup": true,
+    "liveStop": true,
+    "liveRestart": true,
+    "noUnfinishedLiveTasks": true
+  },
+  "limitations": [
+    "Isolated preview has no scheduled-task database",
+    "External supplier variants were not all exercised",
+    "Original image stream parser changed independently; preserved"
+  ]
+}

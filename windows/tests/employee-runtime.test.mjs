@@ -6,7 +6,7 @@ import test from "node:test";
 import { createEmployeeProjectRegistry } from "../server/employee-project-registry.mjs";
 import { createEmployeeRuntimeService } from "../server/employee-runtime-service.mjs";
 
-const fixture = async (t, { execution = null, onTurnCompleted = null } = {}) => {
+const fixture = async (t, { execution = null, onTurnCompleted = null, taskService = null } = {}) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-employee-runtime-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const registry = await createEmployeeProjectRegistry({
@@ -43,6 +43,7 @@ const fixture = async (t, { execution = null, onTurnCompleted = null } = {}) => 
     broadcast: (event) => events.push(event),
     execution,
     onTurnCompleted,
+    taskService,
   });
   t.after(async () => {
     runtime.close();
@@ -230,4 +231,58 @@ test("employee native goal notifications and controls share the owned client", a
  await f.runtime.setGoal("employee-thread",{status:"paused"});
  assert.deepEqual(f.calls.at(-1),{method:"thread/goal/set",params:{threadId:"employee-thread",status:"paused"}});
  await assert.rejects(f.runtime.getGoal("unowned"),/Thread/);
+});
+
+const taskService = {
+  leaderConfig: id => id === 'researcher' ? { 'mcp_servers.negus_tasks': { command: 'task-tools' } } : {},
+  leaderInstructions: id => id === 'researcher' ? '委派后台调研' : '',
+};
+
+test('product leader starts with task tools and sends first message without resuming an empty thread', async t => {
+  const f = await fixture(t, { taskService });
+  await f.runtime.open('researcher');
+  await f.runtime.getRuntimeContext('employee-thread');
+  await f.runtime.sendMessage({ employeeId: 'researcher', text: '调研竞品' });
+  assert.equal(f.calls.filter(c => c.method === 'thread/resume').length, 0);
+  const start = f.calls.find(c => c.method === 'thread/start');
+  assert.ok(start.params.config['mcp_servers.negus_tasks']);
+  assert.match(start.params.developerInstructions, /委派后台调研/);
+});
+
+for (const state of ['idle', 'active', 'unknown']) test(`existing product leader tool reload respects ${state} state`, async t => {
+  const f = await fixture(t, { taskService });
+  await f.registry.bindMainThread('researcher', 'existing-product');
+  const original = f.client.request;
+  f.client.request = async (method, params) => method === 'thread/read'
+    ? { thread: { id: params.threadId, status: state === 'unknown' ? undefined : { type: state }, turns: [] } }
+    : original(method, params);
+  if (state === 'unknown') await assert.rejects(f.runtime.open('researcher'), /无法确认/);
+  else await f.runtime.open('researcher');
+  const unloads = f.calls.filter(c => c.method === 'thread/unsubscribe');
+  assert.equal(unloads.length, state === 'idle' ? 1 : 0);
+  assert.equal(f.calls.some(c => c.method === 'thread/start'), false);
+  if (state === 'idle') assert.ok(f.calls.find(c => c.method === 'thread/resume').params.config['mcp_servers.negus_tasks']);
+  if (state === 'active') assert.equal((await f.runtime.getStatus('researcher')).status.active, true);
+});
+
+test('completion callback waits for send lock even when a turn completes before its start response', async t => {
+  let completion;
+  const finished = new Promise(resolve => { completion = resolve; });
+  const f = await fixture(t, { onTurnCompleted: async () => {
+    try { await f.runtime.sendMessage({ employeeId: 'researcher', text: '后台结果' }); completion(); }
+    catch (error) { completion(error); }
+  } });
+  const original = f.client.request;
+  let first = true;
+  f.client.request = async (method, params) => {
+    const result = await original(method, params);
+    if (method === 'turn/start' && first) {
+      first = false;
+      f.listener({ method: 'turn/completed', params: { threadId: 'employee-thread', turn: { id: 'employee-turn', status: 'completed' } } });
+    }
+    return result;
+  };
+  await f.runtime.sendMessage({ employeeId: 'researcher', text: '主对话' });
+  assert.equal(await finished, undefined);
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').length, 2);
 });

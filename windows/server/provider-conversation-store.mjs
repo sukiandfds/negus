@@ -206,11 +206,11 @@ export const createProviderConversationStore = ({ current, providers, createStor
     return result.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
   };
   service.listModels = async () => providers.listModels(await current.listModels());
-  service.createSession = async (model = "", cwd = "", modelProviderId = "") => {
+  service.createSession = async (model = "", cwd = "", modelProviderId = "", options = {}) => {
     await ready;
     await providers.refreshShared?.().catch((error) => { if (model.includes('::')) throw error; });
     const route = providers.resolveRoute({ model, modelProviderId });
-    const session = await (await storeFor(route.modelProviderId)).createSession(route.model || model, cwd);
+    const session = await (await storeFor(route.modelProviderId)).createSession(route.model || model, cwd, options);
     routes[session.threadId] = { providerId: route.modelProviderId, model, summary: session, lastSuccessfulSettings: null };
     await save();
     return decorate(session);

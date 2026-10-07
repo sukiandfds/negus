@@ -11,13 +11,14 @@ const commonInput = {
   quality: z.enum(["auto", "low", "medium", "high", "xhigh", "max"]).optional().describe("Independent of pixel resolution. Set only when explicitly requested; supported levels depend on the configured image model."),
   resolution: z.enum(["1K", "2K", "4K"]).optional().describe("Set only when the user explicitly requests 1K, 2K, or 4K. Omit otherwise."),
   size: z.string().min(1).optional().describe("Output ratio or pixel size. Follow an explicit user ratio first. Without one, use the primary composition reference ratio; with no references, use 3:4 for a person-focused portrait or 4:3 for a scene/object."),
+  target_size: z.string().min(1).optional().describe("Optional final pixel size or ratio fallback supported by the provider."),
   n: z.number().int().min(1).max(20).optional().describe("Requested image count. Omit for the default of one image."),
 };
 
 const resultText = (verb, result) => {
   const lines = result.outputs.map((output) => {
     const dimensions = output.width && output.height ? ` (${output.width}x${output.height})` : "";
-    return `${output.path}${dimensions}`;
+    return `${output.url || output.path}${dimensions}`;
   });
   return `${verb} ${lines.length} image(s):\n${lines.join("\n")}`;
 };
@@ -26,11 +27,13 @@ const toolResult = async (operation, successVerb) => {
   const startedAt = Date.now();
   try {
     const result = await operation();
-    const images = await Promise.all(result.outputs.map(async (output) => ({
-      type: "image",
-      data: (await fs.readFile(output.path)).toString("base64"),
-      mimeType: output.mimeType,
-    })));
+    const images = await Promise.all(result.outputs.map(async (output) => {
+      try {
+        return { type: "image", data: (await fs.readFile(output.path)).toString("base64"), mimeType: output.mimeType || "image/png" };
+      } catch {
+        return { type: "text", text: output.url || output.path || "图片已生成，等待本地保存" };
+      }
+    }));
     process.stderr.write(`[negus-image] timing mcp_return_ready duration_ms=${Date.now() - startedAt} outputs=${images.length}\n`);
     return {
       content: [{ type: "text", text: resultText(successVerb, result) }, ...images],

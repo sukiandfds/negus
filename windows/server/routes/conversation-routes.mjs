@@ -38,7 +38,7 @@ const publicUserInputRequest = (message) => {
 export const createConversationRoutes = ({
   conversations, execution, followUpQueue, contextManagement, media, submissionStore,
   broadcast = () => {}, publishThreadEvent = (_threadId, event) => broadcast(event), agentConversationStore,
-  employeeRuntime, roomDirectory, modelProviders,
+  employeeRuntime, roomDirectory, modelProviders, agentTasks,
 }) => {
   const inFlightSubmissions = new Map();
   const submissionTtlMs = 60000;
@@ -98,6 +98,7 @@ export const createConversationRoutes = ({
     const allowed = binding.runtimeSessionId === cleanThreadId;
     if (!allowed) throw Object.assign(new Error("conversationId 与 threadId 不匹配"), { statusCode: 409 });
     if (binding.conversationKind === "group" && allowGroup) return binding;
+    if (binding.conversationKind === "task" && agentTasks?.ownsThread(cleanThreadId)) return binding;
     if (binding.conversationKind !== "direct") {
       throw Object.assign(new Error("Agent 单聊尚未绑定独立 Thread"), { statusCode: 409 });
     }
@@ -418,7 +419,7 @@ export const createConversationRoutes = ({
       });
       return true;
     }
-    sendJson(response, await conversations.updateModel(threadId, model, { allowProviderSwitch: body.allowProviderSwitch === true, reasoningEffort: body.reasoningEffort }));
+    sendJson(response, await conversations.updateModel(threadId, model, { allowProviderSwitch: binding?.conversationKind !== "task" && body.allowProviderSwitch === true, reasoningEffort: body.reasoningEffort }));
     return true;
   }
   if (url.pathname === "/api/session/reasoning-effort" && request.method === "POST") {
@@ -687,7 +688,8 @@ export const createConversationRoutes = ({
     const conversationId = String(url.searchParams.get("conversationId") || "").trim();
     if (conversationId && agentConversationStore) {
       const binding = await agentConversationStore.resolve({ conversationId });
-      if (binding.conversationKind !== "direct" && binding.conversationKind !== "group") {
+      if (binding.conversationKind !== "direct" && binding.conversationKind !== "group"
+        && !(binding.conversationKind === "task" && agentTasks?.ownsThread(binding.runtimeSessionId))) {
         sendJson(response, { error: "该 Agent 对话不是独立单聊" }, 409);
         return true;
       }

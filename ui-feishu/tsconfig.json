@@ -1,0 +1,15 @@
+{
+  "extends": "../web-ui/tsconfig.app.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "react": ["../web-ui/node_modules/@types/react"],
+      "react/*": ["../web-ui/node_modules/@types/react/*"],
+      "react-dom/*": ["../web-ui/node_modules/@types/react-dom/*"],
+      "react-dom": ["../web-ui/node_modules/@types/react-dom"],
+      "lucide-react": ["../web-ui/node_modules/lucide-react"],
+      "vite/client": ["../web-ui/node_modules/vite/client.d.ts"]
+    }
+  },
+  "include": ["src", "../web-ui/src/vite-env.d.ts"]
+}

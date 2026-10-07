@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="/icons/negus-icon-v2.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/negus-apple-touch-icon-v2.png" />
+    <link rel="manifest" href="/manifest.webmanifest?v=negus-4" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="Negus" />
+    <meta name="description" content="在 Negus 中管理项目记录" />
+    <title>Negus · 项目管理</title>
+    <script>
+      if (!navigator.language.toLowerCase().startsWith("zh")) {
+        document.documentElement.lang = "en";
+        document.title = "Negus · Project Management";
+        document.querySelector('meta[name="description"]').content = "Manage project records in Negus";
+      }
+    </script>
+    <script type="module" crossorigin src="/assets/projectManagement-DykWuW9n.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/global-Cp_gNpWw.js">
+    <link rel="modulepreload" crossorigin href="/assets/text-ClkzMaEf.js">
+    <link rel="modulepreload" crossorigin href="/assets/groupApi-8iNtyLJH.js">
+    <link rel="stylesheet" crossorigin href="/assets/global-GjLpurNO.css">
+    <link rel="stylesheet" crossorigin href="/assets/projectManagement-D3RIb-fv.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

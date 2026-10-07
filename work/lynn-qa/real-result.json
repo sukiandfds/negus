@@ -1,0 +1,21 @@
+{
+  "realProvider": true,
+  "jobId": "f96bc843-3c07-4ebf-9486-f71aea5ebd23",
+  "model": "gpt-image-2.5-flare",
+  "resolution": "1K",
+  "ratio": "3:4",
+  "postCount": 1,
+  "dimensions": {
+    "width": 1086,
+    "height": 1448,
+    "complete": true
+  },
+  "requestToAcceptanceMs": 52,
+  "requestToUrlMs": 51591,
+  "requestToDisplayMs": 54766,
+  "upstreamResponseMs": 51198,
+  "saveState": "saved",
+  "materializeMs": 2724,
+  "reloadAndReturn": true,
+  "browserErrors": []
+}

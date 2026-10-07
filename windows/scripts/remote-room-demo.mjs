@@ -1,3 +1,4 @@
+import { createAgentTaskService } from "../server/agent-tasks/service.mjs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -73,6 +74,7 @@ const submissions = createSubmissionStore({
   stateFile: path.join(projectRoot, "runtime", "session-submissions.json"),
 });
 let followUpQueue;
+let agentTasks;
 const execution = createExecutionTracker({
   broadcast: realtime.broadcast,
   stateFile: path.join(projectRoot, "runtime", "execution-runs.json"),
@@ -104,6 +106,7 @@ const conversationStoreOptions = {
   registerMedia: media.register,
   onProtocolMessage: (message) => {
     execution.handleProtocolMessage(message);
+    void agentTasks?.onProtocolMessage(message).catch(error => console.error("[agent-tasks]", error.message));
     void appServerConversations.handleProtocolMessage(message).catch((error) => {
       console.error("[model-settings] Could not save successful selection:", error.message);
     });
@@ -121,8 +124,13 @@ const conversationStoreOptions = {
   },
   onSubmitted: execution.markSubmitted,
   onFailed: execution.markFailed,
-  onHealthState: execution.handleHealthState,
+  onHealthState: event => {
+    execution.handleHealthState(event);
+    void agentTasks?.onHealthState(event).catch(error => console.error("[agent-tasks]", error.message));
+  },
   threadRuntimeOptions: async (thread) => {
+    const taskOptions = agentTasks?.runtimeOptions(thread);
+    if (taskOptions) return taskOptions;
     const employee = employeeRegistry?.list?.().find((entry) => entry.mainThreadId === thread?.id);
     if (!employee) return null;
     const policy = employee.modificationConfirmed
@@ -357,7 +365,12 @@ const employeeGrowth = createEmployeeGrowthService({
   conversationStore: employeeConversationStore,
   broadcast: realtime.broadcast,
 });
+agentTasks = await createAgentTaskService({
+  stateFile: path.join(projectRoot, "runtime", "agent-tasks.json"), registry: employeeRegistry,
+  conversations, bindings: employeeConversationStore, queue: followUpQueue, execution, broadcast: realtime.broadcast,
+});
 employeeRuntime = createEmployeeRuntimeService({
+  taskService: agentTasks,
   execution,
   registry: employeeRegistry,
   conversationStore: employeeConversationStore,
@@ -370,6 +383,7 @@ employeeRuntime = createEmployeeRuntimeService({
   modelProviders,
 });
 const employeeProjectDirectory = createEmployeeProjectDirectory({
+  agentTasks,
   project,
   projectRoot,
   registry: employeeRegistry,
@@ -462,7 +476,7 @@ const conversationForward = createConversationForwardService({
 });
 void followUpQueue.start();
 const requestHandler = createRequestHandler({
-  conversationForward,
+  conversationForward, agentTasks,
   token, project, projectRoot, device, observerPort, conversations, execution, media, realtime, submissions,
   followUpQueue, contextManagement, groupRoom, roomDirectory: groupRoomDirectory, multiAgent, multiAgentDirectory, artifacts, webOutputs, fushengUsage, readWebVersion, serveStatic,
   agentConversationStore, agentPublicationService, employeeRuntime,
@@ -483,7 +497,7 @@ const close = async () => {
   employeeRuntime.close();
   modelProviders.close();
   const results = await Promise.allSettled([
-    followUpQueue.close(), execution.close(), submissions.close(),
+    agentTasks.close(), followUpQueue.close(), execution.close(), submissions.close(),
     imageGenerationRuns.close(), contextManagement.close(), artifacts.close(),
     ...groupRoomEntries.map(({ room }) => room.close()),
     employeeGrowthStore.close(), employeeConversationStore.close(), projectIdentity.close(),

@@ -1,0 +1,81 @@
+← Back
+Change a Bot's name, picture, and description
+
+Each Bot has its own name, picture, and description. The description is the Bot's job. It tells the Bot what to work on, which sources to use, and when to ask you first. Only the Bot's owner can change these.
+
+How do I rename a Bot?
+
+On desktop, right-click the Bot in the sidebar and choose Rename Bot. You can also double-click the Bot's name in the sidebar. Type the new name and press Enter. If the sidebar is collapsed to icons, expand it first.
+
+You can also change the name in Bot settings. See How do I change what a Bot does?
+
+On the phone, tap the Bot's name at the top of the chat to open its profile. Then tap Edit name.
+
+How do I change a Bot's picture?
+
+On desktop:
+
+
+Open the chat with the Bot.
+
+Click the Bot's name at the top of the chat to open its details.
+
+Click the Bot's picture.
+
+Choose a tab:
+
+
+Bot changes the look of the Bot's character.
+
+Generate makes a picture from a short description. Describe the picture, choose Generate, then choose Set avatar.
+
+Upload uses your own image. Drag in an image or choose Browse files, adjust it, then choose Set avatar. The image must be smaller than 25 MB.
+
+
+
+
+
+On the phone, open the Bot's profile and tap its picture. Choose Select from Gallery, Generate, or Remove Photo.
+
+How do I change what a Bot does?
+
+Edit its description.
+
+On desktop:
+
+
+Open the chat with the Bot.
+
+Click the Bot's name at the top of the chat to open its details.
+
+Choose Bot settings.
+
+Edit Description. Name and Label (optional) are here too.
+
+
+
+On the phone, open the Bot's profile and tap Instructions. The phone app calls the description Instructions, and the label Title (optional).
+
+Put lasting rules in the description, like "Ask before sending any email." Put one-time requests in the chat. For what to write, see Onboarding and Edit a Bot.
+
+Where did Edit Profile go?
+
+The sidebar right-click menu no longer has Edit Profile. Rename Bot is still there.
+
+The picture, description, and other settings are now in the Bot's details. Click the Bot's name at the top of the chat, then choose Bot settings. You can also make these changes in the phone app.
+
+Why can't I rename or edit a Bot?
+
+Only the Bot's owner can change its name, picture, and description. Rename Bot does not appear for a Bot you don't own.
+
+Related
+
+
+Onboarding
+
+Grok Bot How Tos
+
+Grok Bot on mobile
+
+Work with Grok Bot
+

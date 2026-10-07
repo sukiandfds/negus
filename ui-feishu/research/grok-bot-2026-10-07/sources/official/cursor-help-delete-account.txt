@@ -1,0 +1,84 @@
+← Back
+Delete your Grok Bot account
+
+Grok Bot uses your Cursor account. Deleting it is self-serve and permanent.
+
+How do I delete my Grok Bot account on iOS?
+
+
+Open Grok Bot and tap your account avatar to open Settings
+
+Tap your account
+
+Tap Delete Account and confirm
+
+In the browser page, type Delete and confirm again
+
+
+The browser asks you to sign in first so deletion re-proves your identity.
+
+How do I delete my Grok Bot account on desktop or the web?
+
+Grok Bot does not have a separate account. Delete the Cursor account you use to sign in.
+
+Follow Delete your account:
+
+
+Cancel your subscription first if it is active. See Plans and billing and Cancel your subscription
+
+Go to cursor.com/dashboard
+
+Scroll to Advanced Account Settings
+
+Click Delete Account and confirm
+
+
+Desktop Grok Bot can sign you out. It does not delete the account.
+
+Can I delete Grok Bot without deleting my Cursor account?
+
+No. Grok Bot signs in with your Cursor account. Signing out of Grok Bot or uninstalling the app leaves the account in place.
+
+What gets deleted when I delete my account?
+
+
+Your Cursor account and Grok Bot access
+
+Grok Bot agents, chats, computers, and connected plugins
+
+Cursor chat history and settings
+
+
+All data is removed within 30 days.
+
+What is not affected by account deletion?
+
+
+Files on your computer stay on your machine
+
+If you subscribed through the App Store, cancel that subscription in Apple's settings. See Subscribe from the mobile app
+
+If you linked SuperGrok, that Grok subscription is separate. Cancel it on Grok if you no longer want it
+
+If you linked X Premium+, that X subscription is separate. Cancel it on X if you no longer want it
+
+
+What if I don't see Delete Account?
+
+On cursor.com, Delete Account appears for personal accounts. If you are on a Cursor Teams or Enterprise seat, ask a team admin or contact support.
+
+On iOS, Delete Account is in Settings under your account.
+
+Related
+
+
+Delete your account
+
+Plans and billing
+
+Sign in to Grok Bot
+
+Grok Bot on mobile
+
+Get help
+

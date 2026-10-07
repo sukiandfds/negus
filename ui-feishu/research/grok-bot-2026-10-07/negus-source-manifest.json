@@ -1,0 +1,43 @@
+{
+  "head": "427a708fa85f4564822caeac97c6601bd97b4745",
+  "branch": "codex/publish-current-panel",
+  "basis": "dirty workspace source inspection; not a running build verification",
+  "files": [
+    {
+      "path": "windows/server/routes/group-routes.mjs",
+      "sha256": "6ec12ce267591195a785616c9e48169f18a47e6952596b88d86bac0fb41eaef6"
+    },
+    {
+      "path": "windows/server/multi-agent-service.mjs",
+      "sha256": "4c30b23b95d9ffd8e61eb079512eb4e90682c5d9dde2708f284ed03c44ab21b0"
+    },
+    {
+      "path": "windows/server/multi-agent/agent-routing.mjs",
+      "sha256": "a23ec4a683ba202bec11153555a2f12833e808efc4453fc54e444108e6775f84"
+    },
+    {
+      "path": "windows/server/group-room-store.mjs",
+      "sha256": "23cd92ca5c1c12c69d12cc0ec9e30b7b4a170a25bffc34e92ef006f8ad58050d"
+    },
+    {
+      "path": "windows/server/multi-agent/discussion-prompt.mjs",
+      "sha256": "050f349add08353e0d40313f1202c18c2fa92f352bdf2a5b7a5cdefff981112b"
+    },
+    {
+      "path": "windows/server/multi-agent/protocol-state.mjs",
+      "sha256": "00b51abc16d4e7664d494b266ab9e7fdb8c0bec8e118b3a05e9d6dcc56374e96"
+    },
+    {
+      "path": "windows/server/agent-tasks/service.mjs",
+      "sha256": "af360b5cb04b84e433e8928bff1fed5fbae068f54f7ff1a14b7cfa5b46746c60"
+    },
+    {
+      "path": "web-ui/src/features/group-chat/model/types.ts",
+      "sha256": "3d84bb73576deb24ef40583f83323001aede21df73e23473b5ada6a380666259"
+    },
+    {
+      "path": "ui-feishu/server/group-extension.mjs",
+      "sha256": "153860342980afbda415085f4c78042370c8db9ea06ca456cc5d2129a28a4532"
+    }
+  ]
+}
