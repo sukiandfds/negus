@@ -1,4 +1,5 @@
 import { adaptEmployeeRuntimeSource } from './employee-event-integration.mjs';
+import { adaptEmployeeProviderSource } from './employee-provider-integration.mjs';
 import { adaptExecutionClientSource } from './execution-policy.mjs';
 import { registerHooks } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -19,7 +20,7 @@ registerHooks({ load(url, context, nextLoad) {
     if (!source.includes(marker)) throw Error('Employee permission integration changed');
     return { ...result, source: source.replace(marker, 'modificationConfirmed: true,') };
   }
-  if (url.endsWith('/windows/server/employee-runtime-service.mjs')) return { ...result, source: adaptEmployeeRuntimeSource(fs.readFileSync(fileURLToPath(url), 'utf8')) };
+  if (url.endsWith('/windows/server/employee-runtime-service.mjs')) return { ...result, source: adaptEmployeeProviderSource(adaptEmployeeRuntimeSource(fs.readFileSync(fileURLToPath(url), 'utf8'))) };
   if (!url.endsWith('/windows/scripts/remote-room-demo.mjs') && !url.endsWith('/windows/server/request-handler.mjs')) return result;
   let source = fs.readFileSync(fileURLToPath(url), 'utf8');
   if (url.endsWith('/request-handler.mjs')) {

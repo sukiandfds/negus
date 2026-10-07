@@ -46,6 +46,8 @@ node server/launch-preview.mjs
 
 `server/execution-policy.mjs`统一单聊、员工、群聊、外派任务的直接执行策略，新建与恢复对话均应用相同配置。员工无需单独确认修改权限。公网发布使用49974的静态构建与原有访问凭据，不能将附加内部认证的5180开发代理直接暴露到公网。
 
+`server/employee-provider-integration.mjs`让员工主对话支持切换供应商，复用供应商服务的原生记录复制能力，保留 Thread、对话编号与全部历史；成功恢复后才保存新配置，失败继续使用原配置。思考强度单独修改不会改变供应商，切换与发送按顺序执行；过期的忙碌状态会核对原生任务状态。回归测试：`node --test validation/employee-provider.test.mjs`。
+
 Vite仅监听本机，读取既有后端访问凭据，为API代理附加认证。凭据不写入新UI源码、不传入客户端构建、不放在浏览器地址中。
 
 切换后端时可指定`NEGUS_UI_BACKEND`及`NEGUS_UI_TOKEN_FILE`，必须成对匹配对应后端。本界面不管理或更改供应商配置。
