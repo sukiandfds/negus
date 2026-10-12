@@ -32,7 +32,8 @@
     "negus:watchdog:uninstall": "node scripts/negus-watchdog-macos.mjs uninstall",
     "negus:rebuild": "node scripts/negus.mjs rebuild",
     "negus:release:prepare": "node scripts/negus-supervisor.mjs prepare",
-    "negus:restart:status": "node scripts/negus-supervisor.mjs status"
+    "negus:restart:status": "node scripts/negus-supervisor.mjs status",
+    "test:routing": "node --test windows/server/multi-agent/agent-routing.test.mjs"
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",

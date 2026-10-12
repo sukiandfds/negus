@@ -19,11 +19,11 @@ export function createTaskMcpServer({ endpoint = process.env.NEGUS_TASK_ENDPOINT
       return { isError: true, content: [{ type: 'text', text: error.message }] };
     }
   };
-  server.registerTool('create_research_task', {
-    description: '将用户已要求的调研交给独立后台执行者。传入明确目标、必要背景、约束及交付标准；成功后立即告知用户并结束本轮，不等待结果。每位负责人同时支持一个后台任务。',
+  server.registerTool('create_background_task', {
+    description: '将需要较长时间的工作交给独立后台执行者。传入明确目标、必要背景、约束及交付标准；成功后立即告知用户并结束本轮，不等待结果。后台执行者继承员工的完整工作能力。',
     inputSchema: z.object({ title: z.string().min(1).max(120), instructions: z.string().min(1).max(16000) }),
   }, args => call('create', args));
-  server.registerTool('list_research_tasks', {
+  server.registerTool('list_background_tasks', {
     description: '读取自己的后台任务进度和最近结果，不重新执行工作。',
     inputSchema: z.object({}), annotations: { readOnlyHint: true },
   }, () => call('list'));

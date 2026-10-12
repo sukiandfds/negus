@@ -426,7 +426,6 @@ export const createAppServerConversationStore = ({
       model: AUTO_TITLE_MODEL,
       cwd,
       approvalPolicy: "never",
-      permissions: ":read-only",
       config: {
         model_reasoning_effort: "low",
         web_search: "disabled",

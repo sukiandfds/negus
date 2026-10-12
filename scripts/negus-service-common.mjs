@@ -8,6 +8,12 @@ import { fileURLToPath } from "node:url";
 
 const exec = promisify(execFile);
 export const root = process.env.NEGUS_INSTALL_ROOT ? path.resolve(process.env.NEGUS_INSTALL_ROOT) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// A managed installation may be a compact runtime snapshot without source
+// files.  Release preparation can point at the checked-out source tree while
+// keeping runtime state, locks and service ownership under `root`.
+export const sourceRoot = process.env.NEGUS_SOURCE_ROOT
+  ? path.resolve(process.env.NEGUS_SOURCE_ROOT)
+  : root;
 export const runtime = path.join(root, "runtime");
 export const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 export const alive = (pid) => {

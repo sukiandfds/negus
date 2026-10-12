@@ -10,8 +10,10 @@ import type { GroupMessage, GroupMessagePage, GroupRoom, GroupSnapshot, StoredMe
 import { useGroupEvents } from "../realtime/useGroupEvents";
 
 const describeSendResult = (result: {
-  execution: { queuedBehind?: number; agentNames?: string[]; agentIds?: string[] } | null;
+  execution: { queuedBehind?: number; agentNames?: string[]; agentIds?: string[]; mode?: string; targets?: Array<{ id: string; state?: string }> } | null;
   listening?: boolean;
+  mode?: string;
+  notice?: string;
 }) => {
   const queuedBehind = Number(result.execution?.queuedBehind || 0);
   const names = Array.isArray(result.execution?.agentNames)
@@ -20,6 +22,16 @@ const describeSendResult = (result: {
   const agentIds = Array.isArray(result.execution?.agentIds)
     ? result.execution.agentIds.filter((id): id is string => typeof id === "string" && Boolean(id))
     : [];
+  if (result.execution?.mode === "broadcast") {
+    const count = result.execution.targets?.length || agentIds.length;
+    const wait = queuedBehind > 0
+      ? `前面还有 ${queuedBehind} 个任务，${count} 位员工会在轮到后分别处理。`
+      : `已派给 ${count} 位员工，正在分别收集意见。`;
+    return {
+      notice: wait,
+      agentIds,
+    };
+  }
   if (queuedBehind > 0) {
     const who = names.length ? names.join("、") : "被点名的员工";
     const wait = queuedBehind === 1
@@ -27,8 +39,12 @@ const describeSendResult = (result: {
       : "前面还有 " + queuedBehind + " 个任务，会按顺序继续。";
     return { notice: who + "已记下这个请求，" + wait, agentIds };
   }
+  if (result.execution?.mode === "targeted" && agentIds.length) {
+    const who = names.length ? names.join("、") : `${agentIds.length} 位员工`;
+    return { notice: `已派给${who}。`, agentIds };
+  }
   return {
-    notice: result.listening ? "已记在群里。没有点名员工，所以不会有人回复。" : "",
+    notice: result.notice || (result.listening ? "已记在群里。没有点名员工，所以不会有人回复。" : ""),
     agentIds: [] as string[],
   };
 };

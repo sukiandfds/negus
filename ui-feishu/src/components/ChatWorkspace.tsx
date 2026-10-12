@@ -13,13 +13,14 @@ import type { ChatTab, Conversation, ConversationState, UsageState } from '../ty
 
 type Props = {
   c: ConversationState; usage: UsageState;
+  initialReady: boolean;
   tab: ChatTab; setTab: (tab: ChatTab) => void;
   details: boolean; setDetails: (open: boolean) => void;
   agentId: string; selectedName: string; selected?: Conversation;
   onBack: () => void; onShare: () => void;
 };
 
-export function ChatWorkspace({ c, usage, tab, setTab, details, setDetails, agentId, selectedName, selected, onBack, onShare }: Props) {
+export function ChatWorkspace({ c, usage, initialReady, tab, setTab, details, setDetails, agentId, selectedName, selected, onBack, onShare }: Props) {
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
   const displaySession = useMemo(() => c.session ? {
@@ -47,7 +48,7 @@ export function ChatWorkspace({ c, usage, tab, setTab, details, setDetails, agen
             <ConversationView session={displaySession} key={c.composerKey || 'conversation'} active={tab === 'messages'}
               completedGoal={c.goal?.status === 'complete' ? c.goal : null}
               loading={c.loadingSession} contentSyncState={c.contentSyncState} loadingOlder={c.loadingOlder}
-              error={c.sessionError} listAvailable={!c.listError} streamingText={c.streamingText}
+              error={c.sessionError} listAvailable={initialReady && !c.listError} streamingText={c.streamingText}
               executionStatus={c.executionStatus} contextStatus={c.contextStatus} onLoadOlder={c.loadOlder}
               onForkMessage={c.forkFromMessage} forkingMessageId={c.forkingMessageId} onEditMessage={c.beginEditMessage}
               editingMessageId={c.editingMessageId} onRetryMessage={c.retryPendingMessage} retryingMessageId={c.retryingMessageId} localSendVersion={c.localSendVersion} />

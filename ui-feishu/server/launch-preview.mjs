@@ -2,10 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { seedImageSettings } from './image-settings-bootstrap.mjs';
 
 const root = path.resolve(process.env.NEGUS_UI_STATE_ROOT || fileURLToPath(new URL('../../runtime/agent-experience-validation/2026-10-06T09-27-56-338Z/', import.meta.url)));
 const webRoot = fileURLToPath(new URL('../dist/', import.meta.url));
 if (!fs.existsSync(path.join(webRoot, 'index.html'))) throw Error('Build ui-feishu before starting the public backend.');
+seedImageSettings(fileURLToPath(new URL('../../', import.meta.url)), root);
 // Employee definitions use the host's existing loader and registry.
 fs.cpSync(fileURLToPath(new URL('../employees/', import.meta.url)), path.join(root, 'employees'), { recursive: true });
 const token = fs.readFileSync(path.join(root, 'runtime/browser-access-token'), 'utf8').trim();

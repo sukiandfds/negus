@@ -34,9 +34,7 @@ export function ModelSettingsControl({
   const rootRef = useRef<HTMLDivElement>(null);
   const current = models.find((entry) => entry.model === currentModel);
   const draftModelEntry = models.find((entry) => entry.model === draftModel);
-  const modelLabel = currentModel
-    ? formatModelDisplayName(currentModel, current?.displayName)
-    : loading ? "读取模型" : "选择模型";
+  const modelLabel = currentModel ? formatModelDisplayName(currentModel, current?.displayName) : "选择模型";
   const effortLabel = formatReasoningEffort(currentEffort);
   const buttonLabel = [modelLabel, effortLabel].filter(Boolean).join(" · ");
   const busy = changing || applying;

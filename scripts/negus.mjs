@@ -6,12 +6,14 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { createAppServerClient } from "../windows/server/app-server-client.mjs";
+import { sourceRoot } from "./negus-service-common.mjs";
 
-const projectRoot = path.resolve(import.meta.dirname, "..");
-const runtimeRoot = path.join(projectRoot, "runtime");
+const projectRoot = sourceRoot;
+const installRoot = path.resolve(import.meta.dirname, "..");
+const runtimeRoot = path.join(installRoot, "runtime");
 const stateFile = path.join(runtimeRoot, "negus-web-demo.json");
-const serverScript = path.join(projectRoot, "windows", "scripts", "remote-room-demo.mjs");
-const webRoot = path.join(projectRoot, "web-ui", "dist");
+const serverScript = path.join(installRoot, "windows", "scripts", "remote-room-demo.mjs");
+const webRoot = path.join(installRoot, "web-ui", "dist");
 const port = Number(process.env.NEGUS_PORT || "9360");
 const token = process.env.NEGUS_TOKEN || (await fs.readFile(path.join(runtimeRoot, "access-token"), "utf8").catch(() => "")).trim();
 const deviceName = process.env.NEGUS_DEVICE_NAME || os.hostname();

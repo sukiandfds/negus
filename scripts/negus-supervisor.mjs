@@ -78,7 +78,7 @@ const runJob = async (job) => withLock("negus-service-operation", async () => {
     cleanFailed: () => stopOwnedBackend(cfg),
     publish: (release) => publishBuild(path.join(release.directory, "web-ui/dist"), cfg.webRoot),
     launch: async (release) => {
-      const started = await startBackend(cfg, release.entryScript);
+      const started = await startBackend(cfg, release.entryScript, release.loaderScript);
       const version = await validateBuild(path.join(release.directory, "web-ui/dist"));
       // Require stable health and the expected frontend, not just one HTTP 200.
       for (let i = 0; i < 5; i++) {

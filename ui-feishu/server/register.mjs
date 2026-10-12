@@ -4,21 +4,29 @@ import { adaptExecutionClientSource } from './execution-policy.mjs';
 import { registerHooks } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
+import path from 'node:path';
 
 // Additive preview integration; existing source files remain unchanged on disk.
 const extension = new URL('./group-extension.mjs', import.meta.url).href;
 const taskRoutes = new URL('./task-routes.mjs', import.meta.url).href;
 const employeeTasks = new URL('./employee-task-extension.mjs', import.meta.url).href;
 const existingProjects = new URL('./existing-projects.mjs', import.meta.url).href;
-const stateRoot = fileURLToPath(new URL('../runtime/groups/', import.meta.url));
+const stateRoot = process.env.NEGUS_UI_STATE_ROOT
+  ? path.resolve(process.env.NEGUS_UI_STATE_ROOT)
+  : fileURLToPath(new URL('../runtime/groups/', import.meta.url));
 registerHooks({ load(url, context, nextLoad) {
   const result = nextLoad(url, context);
   if (url.endsWith('/windows/server/app-server-client.mjs')) return { ...result, source: adaptExecutionClientSource(fs.readFileSync(fileURLToPath(url), 'utf8')) };
   if (url.endsWith('/windows/server/employee-project-registry.mjs')) {
     const source = fs.readFileSync(fileURLToPath(url), 'utf8');
-    const marker = 'modificationConfirmed: saved.modificationConfirmed === true,';
-    if (!source.includes(marker)) throw Error('Employee permission integration changed');
-    return { ...result, source: source.replace(marker, 'modificationConfirmed: true,') };
+    // The source now carries the host-level employee authorization directly.
+    // Keep compatibility with an older checkout that still has the legacy
+    // marker, while refusing to silently load an unknown implementation.
+    const legacy = 'modificationConfirmed: saved.modificationConfirmed === true,';
+    const current = 'modificationConfirmed: true,';
+    if (source.includes(current)) return result;
+    if (!source.includes(legacy)) throw Error('Employee permission integration changed');
+    return { ...result, source: source.replace(legacy, current) };
   }
   if (url.endsWith('/windows/server/employee-runtime-service.mjs')) return { ...result, source: adaptEmployeeProviderSource(adaptEmployeeRuntimeSource(fs.readFileSync(fileURLToPath(url), 'utf8'))) };
   if (!url.endsWith('/windows/scripts/remote-room-demo.mjs') && !url.endsWith('/windows/server/request-handler.mjs')) return result;
@@ -52,7 +60,11 @@ await extendGroupRooms({ stateRoot: ${JSON.stringify(stateRoot)}, roomDirectory:
   projects: () => projectIdentity.list(), employees: () => employeeRegistry.listRuntimeProfiles(), broadcast: realtime.broadcast,
   onMessageCreated: broadcastEmployeeGroupMessage,
   createServiceOptions: (identity, room) => ({ projectRoot: identity.root || projectRoot,
-    employeeWorkRoots: Object.fromEntries(employeeRegistry.list().map(employee => [employee.id, employee.projectRoot])),
+    // Group work is performed on the selected project, so every employee sees
+    // the same repository and can review one another's changes.  The private
+    // employee roots are for personal conversations and must not become the
+    // cwd for a project group.
+    employeeWorkRoots: Object.fromEntries(employeeRegistry.list().map(employee => [employee.id, identity.root || projectRoot])),
     broadcast: event => realtime.broadcast({ ...event, roomId: room.snapshot().room.id }), webOutputs, attachmentContent,
     resolveAttachments: media.resolveMany, resolveArtifacts: resolveArtifactInputs,
     onContextDelivered: ({ agentId, threadId, messages }) => recordEmployeeGroupContext({ identity, room, agentId, threadId, messages }),

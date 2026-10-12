@@ -46,13 +46,15 @@ test('delegation is independent, one active task, retries reuse the same task an
   const [a, b] = await Promise.all([f.create('researcher', request), f.create('researcher', request)]);
   assert.equal(a.id, b.id); assert.equal(f.calls.length, 1);
   assert.equal(f.calls[0][0], 'chosen-model'); assert.equal(f.calls[0][2], 'chosen-provider');
-  assert.equal(f.calls[0][3].sandbox, 'read-only');
+  assert.equal(f.calls[0][3].sandbox, 'danger-full-access');
+  assert.equal(f.calls[0][3].approvalPolicy, 'never');
   assert.equal(f.bound[0].conversationKind, 'task'); assert.equal(f.bound[0].agentId, 'researcher');
   assert.equal(f.statuses.get('leader').turnId, 'leader-turn');
   f.statuses.set('leader', { active: true, turnId: 'another-turn' });
   await assert.rejects(f.create('researcher', request), /已有后台/);
   const runtime = f.service.runtimeOptions({ id: a.threadId });
-  assert.equal(runtime.turn.effort, 'high'); assert.equal(runtime.turn.sandboxPolicy.type, 'readOnly');
+  assert.equal(runtime.turn.effort, 'high'); assert.equal(runtime.turn.sandboxPolicy.type, 'dangerFullAccess');
+  assert.equal(runtime.turn.approvalPolicy, 'never');
 });
 
 test('user amendments and completion queue behind ongoing main chat, duplicates do not re-notify', async t => {
@@ -108,6 +110,24 @@ test('loopback tools require scoped capability and reject unsupported employees'
   response = await fetch(cfg.env.NEGUS_TASK_ENDPOINT, { method: 'POST', headers: { Authorization: `Bearer ${cfg.env.NEGUS_TASK_TOKEN}` }, body: JSON.stringify({ action: 'list' }) });
   assert.equal(response.status, 200); assert.deepEqual(await response.json(), { tasks: [] });
   await assert.rejects(f.service.create('developer', request), /尚未启用/);
+});
+
+test('loopback endpoint and capability survive a service restart', async t => {
+  const f = await setup(t);
+  const first = f.service.leaderConfig('researcher')['mcp_servers.negus_tasks'];
+  const firstEndpoint = first.env.NEGUS_TASK_ENDPOINT;
+  const firstToken = first.env.NEGUS_TASK_TOKEN;
+  await f.service.close();
+  const restored = await createAgentTaskService(f.options);
+  t.after(() => restored.close());
+  const second = restored.leaderConfig('researcher')['mcp_servers.negus_tasks'];
+  assert.equal(second.env.NEGUS_TASK_ENDPOINT, firstEndpoint);
+  assert.equal(second.env.NEGUS_TASK_TOKEN, firstToken);
+  const response = await fetch(second.env.NEGUS_TASK_ENDPOINT, {
+    method: 'POST', headers: { Authorization: `Bearer ${second.env.NEGUS_TASK_TOKEN}` },
+    body: JSON.stringify({ action: 'list' }),
+  });
+  assert.equal(response.status, 200);
 });
 
 test('start failure is persisted and reportable; no fake successful task', async t => {

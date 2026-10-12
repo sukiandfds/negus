@@ -423,6 +423,15 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
     return message;
   };
 
+  const markMessageFailure = async (messageId, failure = true) => {
+    const message = getMessage(cleanText(messageId, 80));
+    if (!message) throw Object.assign(new Error("群消息不存在"), { statusCode: 404 });
+    message.failure = failure === true;
+    await persist();
+    emit({ type: "group_message_updated", message: { ...message } });
+    return message;
+  };
+
   const updateAgent = async (agentId, patch) => {
     const current = agents.get(agentId);
     if (!current) throw Object.assign(new Error("Agent 不存在"), { statusCode: 404 });
@@ -448,6 +457,7 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
     beginAgentWork,
     finishAgentWork,
     attachArtifact,
+    markMessageFailure,
     updateAgent,
     close: () => writeQueue,
   };

@@ -24,9 +24,10 @@ const textFromItem = (item) => item?.type === "agentMessage"
   ? String(item.text || "")
   : textFromContent(item?.content);
 
-const policyFor = (employee) => employee?.modificationConfirmed
-  ? { sandbox: "workspace-write", approvalPolicy: "on-request" }
-  : { sandbox: "read-only", approvalPolicy: "never" };
+// Every employee exposed to the user shares the main agent's project access.
+// Approval remains disabled because Negus is the already-authorized host.
+const policyFor = () => ({ sandbox: "danger-full-access", approvalPolicy: "never" });
+const turnPolicyFor = () => ({ sandboxPolicy: { type: "dangerFullAccess" }, approvalPolicy: "never" });
 
 const publicMessage = ({ id, role, text, turnId, itemId, createdAt }) => ({
   id: clean(id, 240),
@@ -69,13 +70,14 @@ export const createEmployeeRuntimeService = ({
     clientSubscriptions.set(runtimeClient, runtimeClient.subscribe(handleProtocolMessage));
   };
 
-  const routeForEmployee = (employee) => modelProviders?.resolveRoute({
-    modelProviderId: employee?.modelProviderId || CURRENT_MODEL_PROVIDER_ID,
-    model: employee?.model || "",
-  }) || {
+  // Let getClient() refresh shared ccswitch providers before validating the
+  // saved route. A synchronous resolve here made every employee fail after a
+  // restart with “Model provider is not registered”.
+  const routeForEmployee = (employee) => ({
     modelProviderId: CURRENT_MODEL_PROVIDER_ID,
     model: clean(employee?.model, 120),
-  };
+    ...(employee?.modelProviderId ? { modelProviderId: clean(employee.modelProviderId, 80) } : {}),
+  });
 
   const clientForEmployee = async (employee) => {
     if (!modelProviders) return defaultClient;
@@ -96,7 +98,7 @@ export const createEmployeeRuntimeService = ({
     rememberInitialThread(employee);
     statuses.set(employee.id, {
       phase: "idle",
-      label: employee.modificationConfirmed ? "等待任务" : "等待确认",
+      label: "等待任务",
       detail: "",
       active: false,
       turnId: "",
@@ -111,7 +113,7 @@ export const createEmployeeRuntimeService = ({
 
   const statusFor = (employeeId) => statuses.get(employeeId) || {
     phase: "idle",
-    label: "等待确认",
+    label: "等待任务",
     detail: "",
     active: false,
     turnId: "",
@@ -175,11 +177,10 @@ export const createEmployeeRuntimeService = ({
     if (freshThreads.has(threadId)) return freshThreads.get(threadId);
     const config = taskService?.leaderConfig(employee.id);
     if (Object.keys(config || {}).length && taskConfiguredClients.get(threadId) !== runtimeClient) {
-      const status = await readAuthoritativeStatus(threadId, employee);
-      if (status.active) return runtimeClient.request("thread/resume", { threadId });
-      if (!status.known) throw statusError("暂时无法确认员工是否空闲，请稍后重试", 409);
-      // Reload tools on the same idle thread; never fork or replace its history.
-      await runtimeClient.request("thread/unsubscribe", { threadId });
+      // Reapply the current employee tools without requiring a separate
+      // status probe. A transient thread/read failure must never become a
+      // product-level "employee unavailable" gate.
+      await runtimeClient.request("thread/unsubscribe", { threadId }).catch(() => {});
     }
     const result = await runtimeClient.request("thread/resume", {
       threadId,
@@ -265,7 +266,7 @@ export const createEmployeeRuntimeService = ({
       const binding = await bindConversation(latest, threadId);
       if (!statusFor(employee.id).active) publishStatus(employee.id, {
         phase: "idle",
-        label: latest.modificationConfirmed ? "等待任务" : "等待确认",
+        label: "等待任务",
         detail: "",
         active: false,
         turnId: "",
@@ -468,15 +469,14 @@ export const createEmployeeRuntimeService = ({
     if (!cleanText) throw statusError("消息不能为空", 400);
     if (cleanText.length > 32000) throw statusError("消息过长", 413);
     const cleanRequestId = clean(requestId, 120) || randomUUID();
-    if (sendLocks.has(employee.id)) throw statusError("员工正在处理上一条消息", 409);
-    if (statusFor(employee.id).active) throw statusError("员工正在处理上一条消息", 409);
+    if (sendLocks.has(employee.id)) throw statusError("员工消息正在提交", 409);
     const sending = (async () => {
       const { binding, threadId } = await ensureOpen(employee.id);
-      if (statusFor(employee.id).active) throw statusError("员工正在处理上一条消息", 409);
+      const current = statusFor(employee.id);
       publishStatus(employee.id, {
         phase: "submitted",
         label: "已提交",
-        detail: employee.modificationConfirmed ? "" : "当前为只读讨论",
+        detail: "",
         active: true,
         turnId: "",
       });
@@ -484,15 +484,22 @@ export const createEmployeeRuntimeService = ({
         await resumeThread(threadId, registry.require(employee.id));
         const context = await contextProvider?.(employee.id);
         const runtimeClient = await clientForThread(threadId, registry.require(employee.id));
-        const result = await runtimeClient.request("turn/start", {
+        const input = [{ type: "text", text: cleanText, text_elements: [] }];
+        const requestMethod = current.active && current.turnId ? "turn/steer" : "turn/start";
+        const result = await runtimeClient.request(requestMethod, {
           threadId,
-          input: [{ type: "text", text: cleanText, text_elements: [] }],
-          cwd: clean(employee.projectRoot, 400) || projectRoot,
-          clientUserMessageId: cleanRequestId,
-          developerInstructions: employeeTurnInstructions(
-            employee.instructions,
-            [runtimeClient.turnDeveloperInstructions === true ? context : "", taskService?.leaderInstructions(employee.id)].filter(Boolean).join("\n"),
-          ),
+          input,
+          ...(requestMethod === "turn/steer" ? { expectedTurnId: current.turnId } : {
+            cwd: clean(employee.projectRoot, 400) || projectRoot,
+            clientUserMessageId: cleanRequestId,
+            ...turnPolicyFor(),
+          }),
+          ...(requestMethod === "turn/start" ? {
+            developerInstructions: employeeTurnInstructions(
+              employee.instructions,
+              [runtimeClient.turnDeveloperInstructions === true ? context : "", taskService?.leaderInstructions(employee.id)].filter(Boolean).join("\n"),
+            ),
+          } : {}),
         });
         freshThreads.delete(threadId);
         const currentStatus = statusFor(employee.id);
@@ -509,7 +516,7 @@ export const createEmployeeRuntimeService = ({
           employeeId: employee.id,
           conversationId: binding.conversationId,
           threadId,
-          status: "inProgress",
+          status: requestMethod === "turn/steer" ? "steered" : "inProgress",
           turnId: clean(result?.turn?.id, 160),
         };
       } catch (error) {
@@ -535,22 +542,16 @@ export const createEmployeeRuntimeService = ({
   const confirmModification = async (employeeId) => {
     const employee = registry.require(employeeId);
     const { threadId } = await ensureOpen(employee.id);
-    if (statusFor(employee.id).active) throw statusError("员工正在处理消息，请完成后再确认", 409);
     const runtimeClient = await clientForThread(threadId, employee);
     await runtimeClient.request("thread/resume", {
       threadId,
       persistExtendedHistory: true,
-      sandbox: "workspace-write",
-      approvalPolicy: "on-request",
+      ...policyFor(),
     });
+    // Keep this legacy endpoint idempotent for older clients. Confirmation
+    // never changes the execution policy or gates access anymore.
     const confirmed = await registry.setModificationConfirmed(employee.id, true);
-    publishStatus(employee.id, {
-      phase: "idle",
-      label: "等待任务",
-      detail: "已允许进入修改流程",
-      active: false,
-      turnId: "",
-    });
+    publishStatus(employee.id, { phase: "idle", label: "等待任务", detail: "", active: false, turnId: "" });
     broadcast({ type: "employee_confirmation_changed", employeeId: employee.id, modificationConfirmed: true });
     return { employee: confirmed, status: statusFor(employee.id) };
   };
@@ -579,10 +580,12 @@ export const createEmployeeRuntimeService = ({
     if (!modelProviders && requestedProviderId !== CURRENT_MODEL_PROVIDER_ID) {
       throw statusError("当前员工运行时未启用外部模型供应商", 503);
     }
-    const requestedRoute = modelProviders?.resolveRoute({
-      modelProviderId: requestedProviderId,
-      model: requestedModel,
-    }) || {
+    const requestedRoute = modelProviders && !requestedProviderId
+      ? modelProviders.resolveRoute({ modelProviderId: "", model: requestedModel })
+      : modelProviders ? {
+        modelProviderId: requestedProviderId,
+        model: requestedModel,
+      } : {
       modelProviderId: CURRENT_MODEL_PROVIDER_ID,
       model: clean(settings.model, 120),
     };
@@ -655,6 +658,7 @@ export const createEmployeeRuntimeService = ({
     await resumeThread(cleanThreadId, registry.require(employeeId));
     return runtimeClient.request("thread/compact/start", { threadId: cleanThreadId });
   };
+
 
   const interrupt = async (employeeId, expectedTurnId = "") => {
     const employee = registry.require(employeeId);

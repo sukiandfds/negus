@@ -109,9 +109,14 @@ export interface GroupSendResponse {
     agentNames?: string[];
     status: string;
     queuedBehind?: number;
+    mode?: "broadcast" | "targeted";
+    assignmentId?: string;
+    targets?: Array<{ id: string; state: string }>;
   } | null;
   deduplicated?: boolean;
   listening?: boolean;
+  mode?: "broadcast" | "targeted" | "listening";
+  notice?: string;
 }
 
 export interface GroupInterruptResponse {

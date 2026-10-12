@@ -245,7 +245,7 @@ export function MessageTimeline({
       <div className={styles.timeline} ref={scrollRef} onScroll={(event) => onTimelineScroll(event.currentTarget)}>
         {history?.hasOlder ? <div className={styles.historyMarker}>继续向上加载更早消息</div> : null}
         {!messages.length && !streams.length ? (
-          <div className={styles.emptyRoom}><Bot /><strong>这个群还没有消息</strong><p>直接发言只会留在群里。点上方员工，或用 @ 点名，对方才会回答。</p></div>
+          <div className={styles.emptyRoom}><Bot /><strong>这个群还没有消息</strong><p>可以直接发言，也可以用 @ 点名；说“各位”或“所有人”会让员工一起讨论。</p></div>
         ) : null}
         {messages.map((message, index) => {
           const agent = message.type === "agent"
@@ -263,6 +263,8 @@ export function MessageTimeline({
           const authorName = agent?.name || message.authorName;
           const ownMessage = message.type === "human" && Boolean(currentMemberId) && message.authorId === currentMemberId;
           const askedNames = (message.targetAgentIds || []).map((id) => agents.find((item) => item.id === id)?.name || "").filter(Boolean);
+          const broadcastMessage = message.type === "human"
+            && /(?:^|[\s,@，。！？：；、])(?:@?(?:所有人|全员|各位|每个人|全部员工|所有员工)|大家)(?=$|[\s,@，。！？：；、]|看|都|一起|讨论|检查|先|请|帮|来)/u.test(message.text || "");
           const statusText = message.type === "human" && message.pending
             ? "发送中"
             : message.type === "human" && message.failure
@@ -297,7 +299,7 @@ export function MessageTimeline({
                       {message.type === "system" && message.failure ? "未完成的任务" : "回复"} {message.replyTo.authorName}：{message.replyTo.text}
                     </button>
                   ) : null}
-                  {message.type === "human" && askedNames.length ? <p className={styles.askedLine}>{askedNames.length > 1 ? `按顺序点名了 ${askedNames.join("、")}` : `点名了 ${askedNames[0]}`}</p> : null}
+                  {message.type === "human" && askedNames.length ? <p className={styles.askedLine}>{broadcastMessage ? `已派给 ${askedNames.length} 位员工分别处理` : askedNames.length > 1 ? `按顺序点名了 ${askedNames.join("、")}` : `点名了 ${askedNames[0]}`}</p> : null}
                   {message.type === "agent"
                     ? pendingAgent
                       ? <p className={styles.streamingText}>{liveStream?.text || message.text}<i className={styles.cursor} /></p>

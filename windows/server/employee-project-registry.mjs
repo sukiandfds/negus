@@ -16,14 +16,19 @@ const readStored = async (stateFile) => {
 
 const normalize = (definition, saved = {}, workspaceRoot) => ({
   ...definition,
-  projectRoot: clean(definition.workRoot, 400) || path.join(workspaceRoot, "employees", definition.id),
+  // User-visible employees operate on the same project workspace as the main
+  // agent. Their private context remains isolated below, but cwd must not hide
+  // the repository behind employees/<id>.
+  projectRoot: clean(workspaceRoot, 400),
   contextRoot: clean(saved.contextRoot, 400) || path.join(workspaceRoot, "runtime", "employee-contexts", definition.id),
   modelProviderId: clean(saved.modelProviderId, 80) || clean(definition.modelProviderId, 80) || CURRENT_MODEL_PROVIDER_ID,
   model: clean(saved.model, 120) || clean(definition.model, 120) || "",
   reasoningEffort: clean(saved.reasoningEffort, 40) || clean(definition.reasoningEffort, 40) || "",
   mainThreadId: clean(saved.mainThreadId, 120) || null,
   conversationId: clean(saved.conversationId, 120) || null,
-  modificationConfirmed: saved.modificationConfirmed === true,
+  // User-visible employees inherit the main Agent's host-level authorization;
+  // the legacy confirmation flag is retained for API compatibility only.
+  modificationConfirmed: true,
   updatedAt: saved.updatedAt || null,
 });
 
@@ -82,7 +87,9 @@ export const createEmployeeProjectRegistry = async ({ stateFile, workspaceRoot, 
       model: clean(settings?.model, 120),
       reasoningEffort: clean(settings?.reasoningEffort, 40),
     }),
-    setModificationConfirmed: (employeeId, confirmed) => update(employeeId, { modificationConfirmed: Boolean(confirmed) }),
+    // Retain the legacy setter for callers that still acknowledge the old UI;
+    // employees are always authorized and cannot be downgraded by that flag.
+    setModificationConfirmed: (employeeId) => update(employeeId, { modificationConfirmed: true }),
     close: () => writeQueue,
   };
 };

@@ -64,6 +64,94 @@ test("retries the same group message without enqueueing a second discussion", as
   assert.equal(enqueueCount, 1);
 });
 
+test("retries a message after a dispatch failure instead of deduplicating it forever", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "negus-group-route-retry-failed-"));
+  const room = await createGroupRoomStore({ stateFile: path.join(directory, "group-room.json"), project: "negus", broadcast: () => {} });
+  let enqueueCount = 0;
+  const route = createGroupRoutes({
+    groupRoom: room,
+    media: { resolveMany: () => [] },
+    multiAgent: { enqueueDiscussion: async ({ agentIds }) => {
+      enqueueCount += 1;
+      if (enqueueCount === 1) throw Object.assign(new Error("连接暂时不可用"), { statusCode: 503 });
+      return { jobId: "job-retried", agentIds, status: "queued" };
+    } },
+    webOutputs: { isRequest: () => false },
+  });
+  const server = http.createServer(async (request, response) => {
+    if (!(await route(request, response, new URL(request.url, "http://127.0.0.1")))) { response.writeHead(404); response.end(); }
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { await new Promise((resolve) => server.close(resolve)); await room.close(); await fs.rm(directory, { recursive: true, force: true }); });
+  const { port } = server.address();
+  const body = { memberId: "member-1", authorName: "Hans", clientMessageId: "client-retry-failed-1", agentIds: ["manager"], text: "请处理连接问题", attachmentIds: [] };
+  const first = await fetch(`http://127.0.0.1:${port}/api/group/message`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  assert.equal(first.status, 503);
+  const second = await fetch(`http://127.0.0.1:${port}/api/group/message`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const result = await second.json();
+  assert.equal(second.status, 202);
+  assert.equal(result.retried, true);
+  assert.equal(result.deduplicated, undefined);
+  assert.equal(enqueueCount, 2);
+  const humanMessages = room.snapshot().messages.filter((message) => message.type === "human");
+  assert.equal(humanMessages.length, 1);
+  assert.equal(humanMessages[0].failure, false);
+});
+
+test("broadcast language creates one queued target per employee and exposes the mode", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "negus-group-route-broadcast-"));
+  const room = await createGroupRoomStore({ stateFile: path.join(directory, "group-room.json"), project: "negus", broadcast: () => {} });
+  let execution = null;
+  const route = createGroupRoutes({
+    groupRoom: room,
+    media: { resolveMany: () => [] },
+    multiAgent: { enqueueDiscussion: async (input) => { execution = input; return { jobId: "job-broadcast", agentIds: input.agentIds, agentNames: input.agentIds, status: "queued" }; } },
+    webOutputs: { isRequest: () => false },
+  });
+  const server = http.createServer(async (request, response) => {
+    if (!(await route(request, response, new URL(request.url, "http://127.0.0.1")))) { response.writeHead(404); response.end(); }
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { await new Promise((resolve) => server.close(resolve)); await room.close(); await fs.rm(directory, { recursive: true, force: true }); });
+  const { port } = server.address();
+  const response = await fetch(`http://127.0.0.1:${port}/api/group/message`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ memberId: "member-1", authorName: "Hans", clientMessageId: "client-broadcast-1", text: "各位看一下最近情况", attachmentIds: [] }),
+  });
+  const result = await response.json();
+  const employeeIds = room.snapshot().agents.map((agent) => agent.id);
+  assert.equal(response.status, 202);
+  assert.equal(result.execution.mode, "broadcast");
+  assert.deepEqual(result.execution.agentIds, employeeIds);
+  assert.deepEqual(execution.agentIds, employeeIds);
+  assert.deepEqual(result.execution.targets.map((target) => target.state), employeeIds.map(() => "queued"));
+});
+
+test("replying to an employee message keeps the follow-up with that employee", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "negus-group-route-reply-"));
+  const room = await createGroupRoomStore({ stateFile: path.join(directory, "group-room.json"), project: "negus", broadcast: () => {} });
+  const employeeMessage = await room.addMessage({ type: "agent", authorId: "researcher", authorName: "产品分析", agentId: "researcher", text: "初步结论" });
+  let execution = null;
+  const route = createGroupRoutes({
+    groupRoom: room,
+    media: { resolveMany: () => [] },
+    multiAgent: { enqueueDiscussion: async (input) => { execution = input; return { jobId: "job-reply", agentIds: input.agentIds, status: "queued" }; } },
+    webOutputs: { isRequest: () => false },
+  });
+  const server = http.createServer(async (request, response) => {
+    if (!(await route(request, response, new URL(request.url, "http://127.0.0.1")))) { response.writeHead(404); response.end(); }
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { await new Promise((resolve) => server.close(resolve)); await room.close(); await fs.rm(directory, { recursive: true, force: true }); });
+  const { port } = server.address();
+  const response = await fetch(`http://127.0.0.1:${port}/api/group/message`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ memberId: "member-1", authorName: "Hans", clientMessageId: "client-reply-1", text: "请补充依据", replyTo: { id: employeeMessage.id }, attachmentIds: [] }),
+  });
+  assert.equal(response.status, 202);
+  assert.deepEqual(execution.agentIds, ["researcher"]);
+});
+
 test("an explicit Agent mention is not replaced by the web-output shortcut", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "negus-group-route-mention-"));
   const room = await createGroupRoomStore({

@@ -67,8 +67,16 @@ export const createGroupRoutes = ({ groupRoom, roomDirectory, media, multiAgent,
     return true;
   }
   const agents = room.snapshot().agents;
-  const requestedAgentIds = Array.isArray(body.agentIds) ? body.agentIds : [body.agentId];
-  const { explicitAgentIds, targetAgentIds } = resolveAgentRouting({
+  const quotedMessage = body.replyTo?.id
+    ? room.snapshot().messages.find((candidate) => candidate.id === String(body.replyTo.id))
+    : null;
+  const quotedAgentId = quotedMessage?.type === "agent"
+    ? String(quotedMessage.agentId || quotedMessage.authorId || "").trim()
+    : "";
+  const requestedAgentIds = Array.isArray(body.agentIds)
+    ? body.agentIds
+    : [body.agentId || quotedAgentId];
+  const { explicitAgentIds, targetAgentIds, broadcast } = resolveAgentRouting({
     text,
     requestedAgentIds,
     agents,
@@ -85,20 +93,55 @@ export const createGroupRoutes = ({ groupRoom, roomDirectory, media, multiAgent,
     attachments: attachments.map(({ id, name, mimeType, url: attachmentUrl }) => ({ id, name, mimeType, url: attachmentUrl })),
   });
   if (!created) {
-    sendJson(response, { message, execution: null, deduplicated: true }, 202);
-    return true;
+    const dispatchFailed = room.snapshot().messages.some((candidate) => candidate.type === "system"
+      && candidate.failure === true && candidate.replyTo?.id === message.id
+      && String(candidate.text || "").startsWith("派工失败："));
+    if (!dispatchFailed) {
+      sendJson(response, { message, execution: null, deduplicated: true }, 202);
+      return true;
+    }
   }
   if (!targetAgentIds.length) {
-    sendJson(response, { message, execution: null, listening: true }, 202);
+    sendJson(response, { message, execution: null, mode: "listening", listening: true,
+      notice: "消息已进入群聊，但没有派给员工。请点名员工或使用‘各位/所有人’广播。" }, 202);
     return true;
   }
-  const execution = await service.enqueueDiscussion({
-    agentIds: targetAgentIds,
-    requestText: text || "请查看附件并根据内容进行处理。",
-    attachments,
-    sourceMessageId: message.id,
-    explicitAgentIds,
-  });
-  sendJson(response, { message, execution }, 202);
+  let execution;
+  try {
+    execution = await service.enqueueDiscussion({
+      agentIds: targetAgentIds,
+      requestText: text || "请查看附件并根据内容进行处理。",
+      attachments,
+      sourceMessageId: message.id,
+      explicitAgentIds,
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    await room.markMessageFailure?.(message.id, true);
+    await room.addMessage({
+      type: "system",
+      authorId: "system",
+      authorName: "系统",
+      agentId: targetAgentIds[0] || null,
+      failure: true,
+      replyTo: { id: message.id },
+      text: `派工失败：${detail}。请检查员工连接后重试。`,
+    });
+    sendJson(response, {
+      message,
+      execution: { mode: broadcast ? "broadcast" : "targeted", status: "failed",
+        assignmentId: message.id, agentIds: targetAgentIds,
+        targets: targetAgentIds.map((agentId) => ({ id: agentId, state: "failed" })),
+        error: detail },
+      error: detail,
+    }, error?.statusCode || 503);
+    return true;
+  }
+  if (!created) await room.markMessageFailure?.(message.id, false);
+  sendJson(response, { message, execution: { ...execution,
+    mode: broadcast ? "broadcast" : "targeted",
+    assignmentId: message.id,
+    targets: targetAgentIds.map((agentId) => ({ id: agentId, state: "queued" })),
+  }, retried: !created }, 202);
   return true;
 };

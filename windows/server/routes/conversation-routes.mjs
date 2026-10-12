@@ -90,11 +90,10 @@ export const createConversationRoutes = ({
     const boundByThread = cleanThreadId
       ? agentConversationStore.findByRuntimeSession?.("codex", cleanThreadId)
       : null;
-    if (!cleanConversationId) {
-      if (boundByThread) throw Object.assign(new Error("Agent 单聊需要 conversationId"), { statusCode: 400 });
-      return null;
-    }
-    const binding = await agentConversationStore.resolve({ conversationId: cleanConversationId });
+    if (!cleanConversationId && !boundByThread) return null;
+    const binding = cleanConversationId
+      ? await agentConversationStore.resolve({ conversationId: cleanConversationId })
+      : boundByThread;
     const allowed = binding.runtimeSessionId === cleanThreadId;
     if (!allowed) throw Object.assign(new Error("conversationId 与 threadId 不匹配"), { statusCode: 409 });
     if (binding.conversationKind === "group" && allowGroup) return binding;
@@ -231,15 +230,6 @@ export const createConversationRoutes = ({
     }
     const conversationId = String(body.conversationId || "").trim();
     const binding = await authorizeAgentThread({ threadId, conversationId });
-    const employeeId = String(binding?.agentId || "").trim();
-    const employeeOwned = Boolean(employeeId
-      && employeeRuntime?.supportsEmployee?.(employeeId)
-      && employeeRuntime?.ownsConversation?.(binding));
-    if (employeeOwned && Array.isArray(body.attachmentIds) && body.attachmentIds.length) {
-      const error = new Error("员工直连暂不支持附件");
-      error.statusCode = 400;
-      throw error;
-    }
     const submissionId = String(body.submissionId || "").trim().slice(0, 160) || randomUUID();
     const messageId = `optimistic-${submissionId}`;
     const createdAt = new Date().toISOString();
@@ -287,19 +277,6 @@ export const createConversationRoutes = ({
         attachments: attachments.map(publicAttachment),
         createdAt,
       });
-      if (employeeOwned) {
-        const result = await employeeRuntime.sendMessage({ employeeId, text, requestId: submissionId });
-        return {
-          body: {
-            threadId: result.threadId || threadId,
-            turnId: result.turnId || "",
-            status: result.status || "inProgress",
-            submissionId,
-            messageId,
-          },
-          statusCode: 202,
-        };
-      }
       let result;
       try {
         result = status.active
@@ -487,7 +464,7 @@ export const createConversationRoutes = ({
       sendJson(response, { error: "threadId is required" }, 400);
       return true;
     }
-    await authorizeAgentThread({ threadId, conversationId });
+    const binding = await authorizeAgentThread({ threadId, conversationId });
     if (execution.getStatus(threadId).active) {
       sendJson(response, { error: "当前任务完成后才能开始审查" }, 409);
       return true;
@@ -619,7 +596,7 @@ export const createConversationRoutes = ({
       sendJson(response, { error: "threadId is required" }, 400);
       return true;
     }
-    await authorizeAgentThread({ threadId, conversationId });
+    const binding = await authorizeAgentThread({ threadId, conversationId });
     const result = await conversations.unarchiveSession(threadId);
     publishThreadEvent(threadId, { type: "sessions_changed", threadId });
     sendJson(response, result, 202);

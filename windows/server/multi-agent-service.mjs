@@ -7,6 +7,7 @@ import { cleanAgentIds, mentionedAgentIds, resolveAgentRouting } from "./multi-a
 import { completeOutputJob } from "./multi-agent/output-job.mjs";
 import { agentStateFromItem, terminalAgentPhases } from "./multi-agent/protocol-state.mjs";
 import { CURRENT_MODEL_PROVIDER_ID } from "./model-provider-service.mjs";
+import { executionPolicy, turnExecutionPolicy } from "./execution-policy.mjs";
 
 const missingThreadPattern = /\bthread(?:\s+id)?\s+not\s+found\b/iu;
 
@@ -53,13 +54,14 @@ export const createMultiAgentService = ({
     clientSubscriptions.set(runtimeClient, runtimeClient.subscribe(handleProtocolMessage));
   };
 
-  const routeForAgent = (agent) => modelProviders?.resolveRoute({
-    modelProviderId: agent?.modelProviderId || CURRENT_MODEL_PROVIDER_ID,
-    model: agent?.model || "",
-  }) || {
+  // Keep saved routes opaque until getClient() has refreshed shared providers.
+  // Resolving synchronously here used to reject a valid ccswitch route before
+  // refreshShared() could register it after a service restart.
+  const routeForAgent = (agent) => ({
     modelProviderId: CURRENT_MODEL_PROVIDER_ID,
     model: String(agent?.model || "").trim().slice(0, 120),
-  };
+    ...(agent?.modelProviderId ? { modelProviderId: String(agent.modelProviderId).trim().slice(0, 80) } : {}),
+  });
 
   const clientForAgent = async (agent) => {
     if (!modelProviders) return defaultClient;
@@ -239,7 +241,7 @@ export const createMultiAgentService = ({
       const runtimeClient = await clientForAgent(currentAgent);
       if (currentAgent.threadId) {
         try {
-          await runtimeClient.request("thread/resume", { threadId: currentAgent.threadId, persistExtendedHistory: true });
+          await runtimeClient.request("thread/resume", { threadId: currentAgent.threadId, persistExtendedHistory: true, ...executionPolicy });
         } catch (error) {
           if (!isMissingThreadError(error)) throw error;
           currentAgent = await clearAgentThread(currentAgent);
@@ -257,6 +259,7 @@ export const createMultiAgentService = ({
       const route = routeForAgent(currentAgent);
       const result = await runtimeClient.request("thread/start", {
         cwd: employeeWorkRoots[agent.id] || projectRoot,
+        ...executionPolicy,
         developerInstructions: employeeTurnInstructions(currentAgent.instructions),
         ephemeral: false,
         serviceName: "negus",
@@ -282,10 +285,10 @@ export const createMultiAgentService = ({
     if (!modelProviders && requestedProviderId !== CURRENT_MODEL_PROVIDER_ID) {
       throw Object.assign(new Error("当前群聊运行时未启用外部模型供应商"), { statusCode: 503 });
     }
-    const requestedRoute = modelProviders?.resolveRoute({
+    const requestedRoute = modelProviders ? {
       modelProviderId: requestedProviderId,
       model: String(settings.model || "").trim().slice(0, 120),
-    }) || {
+    } : {
       modelProviderId: CURRENT_MODEL_PROVIDER_ID,
       model: String(settings.model || "").trim().slice(0, 120),
     };
@@ -411,6 +414,7 @@ export const createMultiAgentService = ({
         threadId,
         input: await inputFromAttachments(prompt, inputAttachments, attachmentContent),
         cwd: projectRoot,
+        ...turnExecutionPolicy,
         developerInstructions: employeeTurnInstructions(agent.instructions),
       });
       try {

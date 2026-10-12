@@ -60,7 +60,9 @@ test('group intake keeps sender IDs, routes ordinary messages, @ takes priority,
   complete(turns[3].threadId, turns[3].turn, '根据研究结果汇总');
   await until(() => service.deliveries().length === 4 && service.deliveries().every(item => item.state === 'delivered'));
   assert.equal(room.snapshot().messages.filter(message => message.type === 'human').length, 2);
-  assert.equal(room.snapshot().messages.filter(message => message.type === 'agent').length, 4);
+  assert.equal(room.snapshot().messages.filter(message => message.type === 'agent').length, 3);
+  assert.equal(room.snapshot().messages.some(message => message.text === '来源核查完成'), false,
+    'child results return to the parent employee before publication');
   assert.equal(room.snapshot().agents.length, 2);
   assert.equal(service.hasPendingWork(), false);
 });

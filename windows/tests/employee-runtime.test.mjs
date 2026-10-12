@@ -64,21 +64,25 @@ test("employee registry keeps identity state private from API-shaped values", as
   assert.equal(grok.mainThreadId, null);
 });
 
-test("employee runtime binds one main thread and gates workspace writes", async (t) => {
+test("employee runtime binds one main thread with main-agent host access", async (t) => {
   const { registry, runtime, events, calls, listener } = await fixture(t);
   const opened = await runtime.open("developer");
-  assert.equal(opened.employee.modificationConfirmed, false);
-  assert.equal(calls.find((call) => call.method === "thread/start").params.sandbox, "read-only");
+  assert.equal(opened.employee.modificationConfirmed, true);
+  assert.equal(calls.find((call) => call.method === "thread/start").params.sandbox, "danger-full-access");
+  assert.equal(calls.find((call) => call.method === "thread/start").params.approvalPolicy, "never");
   await runtime.sendMessage({ employeeId: "developer", text: "先讨论方案", requestId: "request-1" });
   const turnStart = calls.find((call) => call.method === "turn/start");
-  assert.equal(turnStart.params.cwd, path.join("D:\\project", "employees", "developer"));
-  assert.match(turnStart.params.developerInstructions, /1 分钟/u);
-  assert.match(turnStart.params.developerInstructions, /详细或全面检查/u);
-  assert.equal((events.find((event) => event.type === "employee_status")?.modificationConfirmed), false);
+  assert.equal(turnStart.params.cwd, "D:\\project");
+  assert.equal(turnStart.params.sandboxPolicy.type, "dangerFullAccess");
+  assert.equal(turnStart.params.approvalPolicy, "never");
+  assert.match(turnStart.params.developerInstructions, /技术研发员工/u);
+  assert.match(turnStart.params.developerInstructions, /完整工具能力/u);
+  assert.equal((events.find((event) => event.type === "employee_status")?.modificationConfirmed), true);
   listener({ method: "turn/completed", params: { threadId: "employee-thread", turn: { status: "completed" } } });
   await runtime.confirmModification("developer");
   assert.equal(calls.at(-1).method, "thread/resume");
-  assert.equal(calls.at(-1).params.sandbox, "workspace-write");
+  assert.equal(calls.at(-1).params.sandbox, "danger-full-access");
+  assert.equal(calls.at(-1).params.approvalPolicy, "never");
   assert.equal(registry.get("developer").modificationConfirmed, true);
   assert.equal((await runtime.getStatus("developer")).modificationConfirmed, true);
 });
@@ -249,17 +253,16 @@ test('product leader starts with task tools and sends first message without resu
   assert.match(start.params.developerInstructions, /委派后台调研/);
 });
 
-for (const state of ['idle', 'active', 'unknown']) test(`existing product leader tool reload respects ${state} state`, async t => {
+for (const state of ['idle', 'active', 'unknown']) test(`existing product leader tool reload does not gate on ${state} state`, async t => {
   const f = await fixture(t, { taskService });
   await f.registry.bindMainThread('researcher', 'existing-product');
   const original = f.client.request;
   f.client.request = async (method, params) => method === 'thread/read'
     ? { thread: { id: params.threadId, status: state === 'unknown' ? undefined : { type: state }, turns: [] } }
     : original(method, params);
-  if (state === 'unknown') await assert.rejects(f.runtime.open('researcher'), /无法确认/);
-  else await f.runtime.open('researcher');
+  await f.runtime.open('researcher');
   const unloads = f.calls.filter(c => c.method === 'thread/unsubscribe');
-  assert.equal(unloads.length, state === 'idle' ? 1 : 0);
+  assert.equal(unloads.length, 1);
   assert.equal(f.calls.some(c => c.method === 'thread/start'), false);
   if (state === 'idle') assert.ok(f.calls.find(c => c.method === 'thread/resume').params.config['mcp_servers.negus_tasks']);
   if (state === 'active') assert.equal((await f.runtime.getStatus('researcher')).status.active, true);

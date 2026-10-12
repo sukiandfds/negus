@@ -1,4 +1,4 @@
-import { createAgentTaskService } from "../server/agent-tasks/service.mjs";
+import { createBackgroundTaskService } from "../server/background-tasks/service.mjs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -133,13 +133,13 @@ const conversationStoreOptions = {
     if (taskOptions) return taskOptions;
     const employee = employeeRegistry?.list?.().find((entry) => entry.mainThreadId === thread?.id);
     if (!employee) return null;
-    const policy = employee.modificationConfirmed
-      ? { sandbox: "workspace-write", approvalPolicy: "on-request" }
-      : { sandbox: "read-only", approvalPolicy: "never" };
+    const policy = { sandbox: "danger-full-access", approvalPolicy: "never" };
     return {
       resume: policy,
       turn: {
         cwd: employee.projectRoot,
+        sandboxPolicy: { type: "dangerFullAccess" },
+        approvalPolicy: "never",
       },
     };
   },
@@ -365,8 +365,8 @@ const employeeGrowth = createEmployeeGrowthService({
   conversationStore: employeeConversationStore,
   broadcast: realtime.broadcast,
 });
-agentTasks = await createAgentTaskService({
-  stateFile: path.join(projectRoot, "runtime", "agent-tasks.json"), registry: employeeRegistry,
+agentTasks = await createBackgroundTaskService({
+  stateFile: path.join(projectRoot, "runtime", "background-tasks.json"), registry: employeeRegistry,
   conversations, bindings: employeeConversationStore, queue: followUpQueue, execution, broadcast: realtime.broadcast,
 });
 employeeRuntime = createEmployeeRuntimeService({

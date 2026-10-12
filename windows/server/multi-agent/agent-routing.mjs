@@ -22,13 +22,23 @@ export const mentionedAgentIds = (text, agents) => {
     .map((match) => match.agentId))];
 };
 
+// These phrases are an explicit broadcast request.  They must be resolved at
+// the routing boundary so every downstream consumer (context, queue, status,
+// and persistence) sees the same target set.
+const broadcastPattern = /(?:^|[\s,@，。！？：；、])(?:@?(?:所有人|全员|各位|每个人|全部员工|所有员工)|大家)(?=$|[\s,@，。！？：；、]|看|都|一起|讨论|检查|先|请|帮|来)/u;
+
+export const isBroadcastRequest = (text) => broadcastPattern.test(String(text || ""));
+
 export const resolveAgentRouting = ({ text = "", requestedAgentIds = [], explicitAgentIds, agents = [], outputRequested = false } = {}) => {
   const explicit = cleanAgentIds(
     Array.isArray(explicitAgentIds) && explicitAgentIds.length ? explicitAgentIds : mentionedAgentIds(text, agents),
     agents,
   );
   const outputAgentId = cleanAgentIds([agentRoleIds.output], agents)[0] || "";
-  let targets = explicit.length ? explicit : cleanAgentIds(requestedAgentIds, agents);
-  if (!explicit.length && outputRequested && outputAgentId) targets = [outputAgentId];
-  return { explicitAgentIds: explicit, targetAgentIds: targets, outputAgentId };
+  const broadcast = !explicit.length && isBroadcastRequest(text);
+  let targets = broadcast
+    ? agents.map((agent) => agent.id)
+    : explicit.length ? explicit : cleanAgentIds(requestedAgentIds, agents);
+  if (!explicit.length && !broadcast && outputRequested && outputAgentId) targets = [outputAgentId];
+  return { explicitAgentIds: explicit, targetAgentIds: [...new Set(targets)], outputAgentId, broadcast };
 };

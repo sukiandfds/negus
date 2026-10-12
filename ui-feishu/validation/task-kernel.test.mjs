@@ -38,6 +38,8 @@ test('routing honors explicit recipients, constrains model selection, and falls 
   assert.deepEqual((await routeMessage({ ...options, select: async () => 'b' })).agentIds, ['b']);
   assert.equal((await routeMessage({ ...options, select: async () => 'outside' })).reason, 'reception');
   assert.equal((await routeMessage({ ...options, select: async () => { throw Error('offline'); } })).reason, 'reception');
+  assert.deepEqual(await routeMessage({ ...options, text: '各位请分别评估', select: () => { throw Error('broadcast must not select'); } }), { agentIds: ['a', 'b'], reason: 'broadcast' });
+  assert.deepEqual(await routeMessage({ ...options, replyAgentId: 'b', select: () => { throw Error('reply must not select'); } }), { agentIds: ['b'], reason: 'reply' });
   await assert.rejects(routeMessage({ ...options, receptionId: 'outside' }), /属于/);
   await assert.rejects(routeMessage({ members: [] }), /没有/);
 });

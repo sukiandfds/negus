@@ -211,7 +211,7 @@ export function useConversationCatalog(
     const hasCachedList = Boolean(initial.sessions.length);
     const hasCachedSession = Boolean(initial.session);
     const initialSessionRequest = initial.selectedId
-      ? selection.loadSession(initial.selectedId, { quiet: hasCachedSession, recovery: initial.sessionIsPartial })
+      ? selection.loadSession(initial.selectedId, { quiet: true, recovery: initial.sessionIsPartial })
       : Promise.resolve(false);
     void Promise.allSettled([
       conversationApi.project(controller.signal).then(setProject),

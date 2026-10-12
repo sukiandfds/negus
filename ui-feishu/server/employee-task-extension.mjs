@@ -4,18 +4,20 @@ import { createTaskKernel, terminalStates } from '../kernel/task-kernel.mjs';
 import { createNativeTaskRuntime } from '../kernel/native-task-runtime.mjs';
 import { createTaskTools } from '../kernel/task-tools.mjs';
 import { employeeTurnInstructions } from '../../windows/server/employee-definitions.mjs';
-import { executionPolicy } from './execution-policy.mjs';
+import { executionPolicy, turnExecutionPolicy } from './execution-policy.mjs';
+import { createEmployeeHierarchy } from '../kernel/employee-hierarchy.mjs';
 
 // Adapts the same kernel to employee conversations and existing task conversations.
 export async function extendEmployeeTasks(original, { stateRoot, registry, modelProviders, appServerClient,
-  bindings, execution, queue, broadcast = () => {} }) {
+  bindings, execution, queue, broadcast = () => {}, employeeHierarchy = null }) {
   let kernel;
   let closing = false;
   const taskProviders = new Map();
+  const hierarchy = createEmployeeHierarchy({ employees: registry.list(), hierarchy: employeeHierarchy });
   const log = event => console.log(JSON.stringify({ scope: 'negus-tasks', channel: 'employee', at: new Date().toISOString(), ...event }));
   const clientFor = employee => modelProviders ? modelProviders.getClient(modelProviders.resolveRoute({ modelProviderId: employee.modelProviderId || 'current', model: employee.model || '' })) : appServerClient;
-  const handoffInstructions = '需要其他员工协助用户已授权的工作时，使用 negus_handoffs.delegate_task，填写员工ID、明确任务和必要背景。工具持久化后立即返回，结果会自动送回来源对话，你不需要等待。收到结果通知后据实际结果回复，不重复外派相同工作。';
-  const instructions = employee => employeeTurnInstructions(employee.instructions, `${handoffInstructions}\n员工名单：${JSON.stringify(registry.list().map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`);
+  const handoffInstructions = '复杂工作先拆分给直属下属；简单工作或没有下属时才直接完成。需要其他员工协助用户已授权的工作时，使用 negus_handoffs.delegate_task，填写员工ID、明确任务和必要背景。工具持久化后立即返回，结果会自动送回来源对话，你不需要等待。收到结果通知后先核验下属结果，再向用户汇报；不重复外派相同工作。';
+  const instructions = employee => employeeTurnInstructions(employee.instructions, `${handoffInstructions}\n你只能向这些直属下属派工：${JSON.stringify(hierarchy.childrenOf(employee.id))}\n员工名单：${JSON.stringify(registry.list().map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`);
   const tools = await createTaskTools({ invoke: async (scope, input) => {
     const employeeScope = scope.startsWith('employee:');
     let source;
@@ -44,6 +46,9 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     if (!source || terminalStates.has(source.state) || source.cancelRequested) throw Object.assign(Error('来源任务已经结束'), { statusCode: 409 });
     if (input.action === 'list') return { tasks: kernel.list().filter(task => task.parentTaskId === source.id || task.agentId === source.agentId) };
     if (input.action !== 'delegate') throw Object.assign(Error('不支持的任务操作'), { statusCode: 400 });
+    // Resolve the actual source owner above, then enforce one downward edge in
+    // the employee DAG at the handoff endpoint.
+    hierarchy.assertCanDelegate(source.agentId, input.agentId);
     registry.require(input.agentId);
     const conversationId = `handoff-${createHash('sha256').update(`${source.id}:${input.requestId}`).digest('hex').slice(0,32)}`;
     return kernel.delegate(source.id, { requestId: input.requestId, agentId: input.agentId, title: input.title, instructions: input.instructions,
@@ -69,7 +74,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     await bindings.bindRuntime({ conversationId: task.conversationId, agentId: employee.id, runtimeKind: 'codex', runtimeSessionId: threadId, conversationKind: 'task', title: task.title });
     await client.request('thread/name/set', { threadId, name: task.title });
     return { client, threadId, input: [{ type: 'text', text: task.instructions, text_elements: [] }],
-      turnOptions: { cwd: employee.projectRoot, developerInstructions: instructions(employee), ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}) } };
+      turnOptions: { cwd: employee.projectRoot, ...turnExecutionPolicy, developerInstructions: instructions(employee), ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}) } };
   } });
   const belongs = thread => kernel?.list().find(task => task.kind !== 'external' && task.runtime.threadId === thread.id);
   const publicTasks = () => kernel.list().filter(task => task.kind !== 'external').map(task => ({ ...task,
@@ -139,7 +144,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
         title: binding.title || '任务对话', instructions: '', runtime: { threadId, turnId }, suppressContinuation: true });
     },
     leaderConfig: employeeId => tools.config(`employee:${employeeId}`),
-    leaderInstructions: () => `${handoffInstructions}\n员工名单：${JSON.stringify(registry.list().map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`,
+    leaderInstructions: employeeId => `${handoffInstructions}\n你只能向这些直属下属派工：${JSON.stringify(hierarchy.childrenOf(employeeId))}\n员工名单：${JSON.stringify(registry.list().map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`,
     runtimeOptions: thread => {
       const task = belongs(thread);
       const binding = bindings.findByRuntimeSession?.('codex', thread.id);
@@ -147,7 +152,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       if (!task && original.ownsThread(thread.id)) return original.runtimeOptions(thread);
       const employee = registry.require(task?.agentId || binding.agentId);
       return { resume: { ...executionPolicy, developerInstructions: instructions(employee), config: tools.config(`conversation:${thread.id}`) },
-        turn: { cwd: employee.projectRoot, developerInstructions: instructions(employee), ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}) } };
+        turn: { cwd: employee.projectRoot, ...turnExecutionPolicy, developerInstructions: instructions(employee), ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}) } };
     },
     ownsThread: threadId => Boolean(belongs({ id: threadId })) || original.ownsThread(threadId)
       || bindings.findByRuntimeSession?.('codex', threadId)?.conversationKind === 'task',

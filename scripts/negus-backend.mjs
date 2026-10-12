@@ -19,13 +19,14 @@ export const checkBackend = async (cfg) => {
   if (alive(cfg.state?.pid)) return { state: "process-alive-not-ready" };
   return { state: "absent" };
 };
-export const startBackend = async (cfg, entryScript) => {
+export const startBackend = async (cfg, entryScript, loaderScript) => {
   const health = await checkBackend(cfg);
   if (health.state === "healthy") return health;
   if (health.state !== "absent") throw new Error("Refusing start: " + health.state);
   await fs.access(path.join(cfg.webRoot, "index.html"));
   const active = await readJson(path.join(runtime, "negus-release-state.json"));
   const entry = entryScript || active?.active?.entryScript || script;
+  const loader = loaderScript || active?.active?.loaderScript || "";
   await fs.access(entry);
   if (!entryScript && active?.active) {
     const { verifyRelease } = await import("./negus-releases.mjs");
@@ -33,11 +34,11 @@ export const startBackend = async (cfg, entryScript) => {
     // Normal recovery preserves the independently published frontend.
     // Version deployment and rollback publish their matching UI in the supervisor.
   }
-  const pid = await detached(entry, ["--port", String(cfg.port), "--observer-port", "9350",
+  const pid = await detached(entry, [...(loader ? ["--import", loader] : []), "--port", String(cfg.port), "--observer-port", "9350",
     "--project", "negus", "--project-root", root, "--web-root", cfg.webRoot,
     "--token", cfg.token, "--device-name", cfg.deviceName], "negus-web-demo.log", { NEGUS_INSTALL_ROOT: root });
   const owner = await identity(pid, entry);
-  const state = { pid, entryScript: entry, port: cfg.port, startedAt: new Date().toISOString(), processStarted: owner?.started,
+  const state = { pid, entryScript: entry, ...(loader ? { loaderScript: loader } : {}), port: cfg.port, startedAt: new Date().toISOString(), processStarted: owner?.started,
     webRoot: cfg.webRoot, deviceName: cfg.deviceName };
   await writeJson(stateFile, state);
   cfg.state = state;

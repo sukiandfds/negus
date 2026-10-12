@@ -3,7 +3,6 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { CalendarClock, Clock3, LoaderCircle, Target } from "lucide-react";
 import { JumpToLatest } from "../../../components/JumpToLatest/JumpToLatest";
 import { useReturnToBottom } from "../../../components/JumpToLatest/useReturnToBottom";
-import { RefreshNotice } from "../../app-update/components/AppUpdateNotice";
 import type { ContentSyncState, SessionDetail, SessionMessage } from "../model/types";
 import { MessageActions } from "./MessageActions";
 import { CollapsedMarkdown, ContentRenderer } from "../rendering/ContentRenderer";
@@ -463,18 +462,8 @@ export function ConversationView({
 
   return (
     <div className={styles.viewport}>
-      {error ? (
-        <RefreshNotice
-          surface="conversation"
-          title="内容暂时未更新"
-          detail="连接长时间没有响应，请刷新网页后重试。"
-          actionLabel="刷新网页"
-          onAction={() => window.location.reload()}
-        />
-      ) : null}
       <div className={styles.scrollArea} ref={scrollRef}>
         <section className={styles.conversation} aria-label="真实项目对话" aria-live="off">
-        {loading && !session ? <div className={styles.loading} role="status" aria-label="正在读取对话"><LoaderCircle aria-hidden="true" /></div> : null}
         {!loading && !error && !session && listAvailable ? <div className={styles.state}>当前项目暂无可显示对话</div> : null}
         {session ? (
           <div className={styles.virtualList} style={{ height: virtualizer.getTotalSize() }}>

@@ -141,7 +141,7 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
           const key = `continuation:${task.id}`;
           if (!data.tasks.some(candidate => candidate.requestKey === key)) {
             data.tasks.push(newTask({ ...task.replyTo, parentTaskId: task.parentTaskId, resultOf: task.id,
-              title: task.title, instructions: `外派任务结果（这是已有任务的反馈）：\n${task.title}\n状态：${task.state}\n${task.error || task.result}`,
+              title: task.title, instructions: `直属下属任务结果（这是已有任务的反馈，请先核验再向用户汇报）：\n${task.title}\n状态：${task.state}\n${task.error || task.result}`,
               attachments: [], kind: 'continuation' }, key));
           }
         }

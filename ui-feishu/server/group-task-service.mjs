@@ -9,11 +9,14 @@ import { mentionedAgentIds } from '../../windows/server/multi-agent/agent-routin
 import { inputFromAttachments } from '../../windows/server/app-server-conversation-store.mjs';
 import { employeeTurnInstructions } from '../../windows/server/employee-definitions.mjs';
 import { buildDiscussionPrompt } from '../../windows/server/multi-agent/discussion-prompt.mjs';
+import { executionPolicy, turnExecutionPolicy } from './execution-policy.mjs';
+import { createEmployeeHierarchy } from '../kernel/employee-hierarchy.mjs';
 
 export async function createGroupTaskService({ stateRoot, room, projectRoot, employeeWorkRoots = {}, modelProviders,
   appServerClient, broadcast = () => {}, attachmentContent, resolveAttachments = () => [], resolveArtifacts = () => [], onContextDelivered = async () => {}, selectAgent, bindings, agentTasks,
-  routingTimeoutMs = 15000 }) {
+  routingTimeoutMs = 15000, employeeHierarchy = null }) {
   const roomId = room.snapshot().room.id;
+  const hierarchy = createEmployeeHierarchy({ employees: room.snapshot().agents, hierarchy: employeeHierarchy });
   const log = event => console.log(JSON.stringify({ scope: 'negus-tasks', roomId, at: new Date().toISOString(), ...event }));
   let kernel;
   const clientFor = async agent => modelProviders
@@ -24,12 +27,15 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
     if (!source || terminalStates.has(source.state) || source.cancelRequested) throw Object.assign(Error('来源任务已经结束'), { statusCode: 409 });
     if (input.action === 'list') return { tasks: kernel.list() };
     if (input.action !== 'delegate') throw Object.assign(Error('不支持的任务操作'), { statusCode: 400 });
+    // Keep authorization at the handoff endpoint: constructing a task payload
+    // cannot bypass the owner -> direct-report relationship.
+    hierarchy.assertCanDelegate(source.agentId, input.agentId);
     const conversationId = `handoff-${createHash('sha256').update(`${sourceId}:${input.requestId}`).digest('hex').slice(0, 32)}`;
     return kernel.delegate(sourceId, { requestId: input.requestId, agentId: input.agentId, title: input.title, instructions: input.instructions,
       conversationId, lane: `${roomId}:${conversationId}:${input.agentId}` });
   } });
   const instructionsFor = agent => employeeTurnInstructions(agent.instructions,
-    `你是${agent.name}，只以自己的身份回复。需要交接用户已授权的工作时，调用 negus_handoffs.delegate_task；仅在文字中 @ 同事不会创建任务。工具确认保存后可立即回复用户，结果会自动回到来源对话。结果通知不是新的委派请求，不要重复派发相同工作。现有员工：${JSON.stringify(room.snapshot().agents.map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`);
+    `你是${agent.name}，只以自己的身份回复。复杂工作先拆给直属下属，收到结果后核验并汇总；只能向以下直属下属派工：${JSON.stringify(hierarchy.childrenOf(agent.id))}。需要交接用户已授权的工作时，调用 negus_handoffs.delegate_task；仅在文字中 @ 同事不会创建任务。工具确认保存后可立即回复用户，结果会自动回到来源对话。结果通知不是新的委派请求，不要重复派发相同工作。现有员工：${JSON.stringify(room.snapshot().agents.map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`);
   const runtime = createNativeTaskRuntime({ log,
     resolve: async (task, controls, { recovering }) => {
       const agent = room.getAgent(task.agentId);
@@ -38,7 +44,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       const client = await clientFor({ ...agent, modelProviderId });
       const independent = task.conversationId !== roomId;
       let threadId = task.runtime.threadId || task.resumeThreadId || (recovering || independent ? '' : agent.threadId);
-      const options = { developerInstructions: instructionsFor(agent), config: tools.config(task.id),
+      const options = { ...executionPolicy, developerInstructions: instructionsFor(agent), config: tools.config(task.id),
         ...(agent.model ? { model: agent.model } : {}) };
       if (recovering) {
         if (threadId) await client.request('thread/resume', { threadId, ...options, persistExtendedHistory: true });
@@ -80,7 +86,9 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
             await room.advanceAgentContext(agent.id, context.throughSequence);
           }
         },
-        turnOptions: { cwd: projectRoot, developerInstructions: instructionsFor(agent), ...(agent.reasoningEffort ? { effort: agent.reasoningEffort } : {}) } };
+        // Group employees are user-visible agents. Keep the same host-level
+        // access on the turn as on the thread, regardless of their cwd.
+        turnOptions: { cwd: projectRoot, ...turnExecutionPolicy, developerInstructions: instructionsFor(agent), ...(agent.reasoningEffort ? { effort: agent.reasoningEffort } : {}) } };
     },
     onEvent: async (task, event) => {
       const { method, params } = event;
@@ -100,7 +108,12 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
     deliver: async ({ id, task }) => {
       const agent = room.getAgent(task.agentId);
       const succeeded = task.state === 'completed' && task.result;
-      const message = await room.addMessage({ type: succeeded ? 'agent' : 'system',
+      // A delegated employee reports to its parent employee first.  Only the
+      // parent continuation is published to the room after it has reviewed the
+      // child result; publishing the child here made one user request produce
+      // competing final answers and bypassed the parent owner.
+      const childDelegation = task.kind === 'delegation' && Boolean(task.parentTaskId);
+      const message = childDelegation ? null : await room.addMessage({ type: succeeded ? 'agent' : 'system',
         authorId: succeeded ? task.agentId : 'system', authorName: succeeded ? agent?.name : '系统',
         agentId: task.agentId, workId: task.id, replyTo: task.source?.messageId ? { id: task.source.messageId } : null,
         text: task.result || `${agent?.name || '员工'}${task.state === 'interrupted' ? '的任务已停止。' : '未能完成回复。'}${task.error || ''}`,
@@ -109,7 +122,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       const another = kernel.list().some(candidate => candidate.id !== task.id && candidate.agentId === task.agentId && !terminalStates.has(candidate.state));
       if (!another) await room.updateAgent(task.agentId, { active: false, phase: task.state, label: task.state === 'completed' ? '已完成' : task.state === 'interrupted' ? '已停止' : '执行失败', detail: task.error || '' });
       tools.release(task.id);
-      return { messageId: message.id };
+      return { ...(message ? { messageId: message.id } : {}), parentTaskId: task.parentTaskId || null, published: Boolean(message) };
     },
   });
   const select = selectAgent || (async ({ text, members, context }) => {
@@ -141,8 +154,15 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
     publish: async entry => (await room.addMessageWithStatus({ ...entry.input.message, clientMessageId: entry.input.requestId })).message,
     dispatch: async (input, message, intake) => {
       const members = room.snapshot().agents;
+      const quoted = message.replyTo?.id
+        ? room.snapshot().messages.find(candidate => candidate.id === String(message.replyTo.id))
+        : null;
+      const replyAgentId = quoted?.type === 'agent'
+        ? String(quoted.agentId || quoted.authorId || '').trim()
+        : '';
       const routing = intake.routing || await routeMessage({ text: message.text, members, explicitIds: mentionedAgentIds(message.text, members),
         requestedIds: input.agentIds, receptionId: members.find(member => member.id === 'negus-assistant')?.id || members[0]?.id,
+        replyAgentId,
         context: room.getAgentContext(members[0]?.id, { assignmentId: message.id }).messages.map(({ authorName, text }) => ({ authorName, text })), select, log });
       if (!intake.routing) await intake.saveRouting(routing);
       log({ event: 'message_routed', messageId: message.id, agentIds: routing.agentIds, reason: routing.reason });

@@ -275,7 +275,7 @@ export function GroupComposer({ agents, members: _members, disabled, busy = fals
           ref={textareaRef}
           value={text}
           rows={2}
-          placeholder="发给项目群。需要员工回答时，用 @ 点名"
+          placeholder="发给项目群。可用 @ 点名，也可以说‘各位/所有人’一起讨论"
           onChange={(event) => {
             setText(event.target.value);
             setPersonnelOpen(false);

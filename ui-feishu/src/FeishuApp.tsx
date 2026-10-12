@@ -6,8 +6,6 @@ import { openAgentConversation } from '../../web-ui/src/features/agent-sharing/n
 import { SettingsPage } from '../../web-ui/src/features/settings/SettingsPage';
 import { ShareConversationDialog } from '../../web-ui/src/features/conversation-sharing/components/ShareConversationDialog';
 import { useUsageMonitor } from '../../web-ui/src/features/usage-monitor/hooks/useUsageMonitor';
-import { fetchJson } from '../../web-ui/src/shared/api/http';
-import type { SessionDetail } from '../../web-ui/src/features/conversations/model/types';
 import { ChatSkin } from './ChatSkin';
 import { AppRail } from './components/AppRail';
 import { ConversationList } from './components/ConversationList';
@@ -17,6 +15,7 @@ import { buildConversationDirectory, byLatest } from './conversationDirectory';
 import { useTaskConversations } from './useTaskConversations';
 import { usePinnedConversations, sortPinned } from './usePinnedConversations';
 import { useGroupChats } from './useGroupChats';
+import { usePageSnapshot } from './usePageSnapshot';
 import { CreateGroupDialog } from './components/CreateGroupDialog';
 import { GroupWorkspace } from './components/GroupWorkspace';
 import type { ChatTab, Conversation, ConversationFilter, Section } from './types';
@@ -24,14 +23,17 @@ import type { ChatTab, Conversation, ConversationFilter, Section } from './types
 export function FeishuApp() {
   const c = useProjectConversations();
   const directory = useProjectDirectory(c.executionStatus);
+  const page = usePageSnapshot(c, directory);
+  const viewC = page.conversations;
+  const viewDirectory = page.directory;
   const usage = useUsageMonitor(c.executionStatus);
   const [section, setSection] = useState<Section>('messages');
   const groups = useGroupChats();
   const pins = usePinnedConversations();
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [roomId, setRoomId] = useState(new URLSearchParams(location.search).get('roomId') || '');
-  const singleChat = useRef(c);
-  if (!roomId) singleChat.current = c;
+  const singleChat = useRef(viewC);
+  if (!roomId) singleChat.current = viewC;
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ConversationFilter>('all');
   const [opening, setOpening] = useState('');
@@ -41,9 +43,8 @@ export function FeishuApp() {
   const [sharing, setSharing] = useState(false);
   const [tab, setTab] = useState<ChatTab>('messages');
   const [mobileChat, setMobileChat] = useState(Boolean(new URLSearchParams(location.search).get('thread') || new URLSearchParams(location.search).get('roomId')));
-  const [previews, setPreviews] = useState<Record<string, string>>({});
   const agentId = new URLSearchParams(location.search).get('agent') || '';
-  const employee = directory.projects.find(p => p.employeeId === agentId);
+  const employee = viewDirectory.projects.find(p => p.employeeId === agentId);
   const selectedName = employee?.name || 'Negus 助手';
   useEffect(() => {
     const navigate = () => { setRoomId(new URLSearchParams(location.search).get('roomId') || ''); setTab('messages'); setDetails(false); setMobileChat(true); };
@@ -61,41 +62,18 @@ export function FeishuApp() {
     window.addEventListener('keydown', search);
     return () => window.removeEventListener('keydown', search);
   }, []);
-  useEffect(() => {
-    if (c.session) setPreviews(prev => ({ ...prev, [c.session!.threadId]: c.session!.latestAssistant || c.session!.latestUser || '' }));
-  }, [c.session?.threadId, c.session?.updatedAt, c.session?.latestAssistant]);
   const roster = useMemo(() => {
-    const base = buildConversationDirectory(directory, c.sessions, c.archivedView);
-    if (c.archivedView) return base;
-    const rooms: Conversation[] = groups.rooms.map(room => ({ id: `group:${room.id}`, kind: 'group', roomId: room.id, name: room.name, subtitle: directory.projects.find(project => project.projectId === room.projectId)?.name || '群聊', projectId: room.projectId, time: room.lastActivityAt }));
+    const base = buildConversationDirectory(viewDirectory, viewC.sessions, viewC.archivedView);
+    if (viewC.archivedView) return base;
+    const rooms: Conversation[] = groups.rooms.map(room => ({ id: `group:${room.id}`, kind: 'group', roomId: room.id, name: room.name, subtitle: viewDirectory.projects.find(project => project.projectId === room.projectId)?.name || '群聊', projectId: room.projectId, time: room.lastActivityAt }));
     return { ...base, all: [...base.all, ...rooms], projects: base.projects.map(project => {
       const children = [...(project.children || []), ...rooms.filter(room => room.projectId === project.projectId)].sort(byLatest);
       return { ...project, time: children[0]?.time || project.time, children };
     }).sort(byLatest) };
-  }, [directory.projects, directory.statusByThread, c.sessions, c.archivedView, groups.rooms]);
-  const previewVersions = useRef(new Map<string, string>());
-  const previewRequests = JSON.stringify(roster.all.filter(item => item.threadId).map(item => ({ threadId: item.threadId!, conversationId: item.conversationId, version: item.time || '' })));
-  useEffect(() => {
-    const controller = new AbortController();
-    const queue = (JSON.parse(previewRequests) as { threadId: string; conversationId?: string; version: string }[]).filter(item => previewVersions.current.get(item.threadId) !== item.version);
-    void Promise.allSettled(Array.from({ length: Math.min(3, queue.length) }, async () => {
-      while (queue.length && !controller.signal.aborted) {
-        const item = queue.shift()!;
-        const params = new URLSearchParams({ threadId: item.threadId, limit: '1' });
-        if (item.conversationId) params.set('conversationId', item.conversationId);
-        try {
-          const session = await fetchJson<SessionDetail>(`/api/session?${params}`, controller.signal);
-          if (controller.signal.aborted) return;
-          previewVersions.current.set(item.threadId, item.version);
-          setPreviews(previous => ({ ...previous, [item.threadId]: session.latestAssistant || session.latestUser || '' }));
-        } catch { /* A missing preview does not prevent entering the real conversation. */ }
-      }
-    }));
-    return () => controller.abort();
-  }, [previewRequests]);
-  const taskConversations = useTaskConversations(directory, roster.all, section === 'tasks');
+  }, [viewDirectory.projects, viewDirectory.statusByThread, viewC.sessions, viewC.archivedView, groups.rooms]);
+  const taskConversations = useTaskConversations(viewDirectory, roster.all, section === 'tasks');
   const visibleRoster = filter === 'employees' ? roster.employees : filter === 'projects' ? roster.projects : sortPinned(roster.all, pins.pinned);
-  const selected = roster.all.find(v => v.threadId === c.selectedId);
+  const selected = roster.all.find(v => v.threadId === viewC.selectedId);
   const open = async (item: Conversation) => {
     if (opening) return;
     if (item.roomId) {
@@ -138,12 +116,12 @@ export function FeishuApp() {
     <AppRail section={section} connected={c.connected}
       onSearch={() => { setSection('messages'); setMobileChat(false); document.getElementById('conversation-search')?.focus(); }}
       onSectionChange={next => { setSection(next); setMobileChat(false); setFilter(next === 'employees' ? 'employees' : 'all'); setOpenError(''); }} onSettings={() => setSettings(true)} />
-    <ConversationList c={c} directory={directory} section={section} query={query} filter={filter}
-      opening={opening} openError={openError} hasRoster={Boolean(roster.all.length)} visibleRoster={visibleRoster} previews={previews}
-      taskSections={taskConversations.sections} taskError={taskConversations.error} tasksLoading={taskConversations.loading}
+    <ConversationList c={viewC} section={section} query={query} filter={filter}
+      opening={opening} openError={openError} hasRoster={Boolean(roster.all.length)} initialReady={page.committed} visibleRoster={visibleRoster}
+      taskSections={taskConversations.sections}
       onQueryChange={setQuery} onFilterChange={next => { setFilter(next); setSection('messages'); setOpenError(''); }} onRefresh={() => { void c.refresh(); void directory.refresh(undefined, true); void groups.refresh(); if (section === 'tasks') taskConversations.refresh(); }}
       onCreate={create} onCreateGroup={() => setCreatingGroup(true)} pinned={pins.pinned} onTogglePin={pins.toggle} selectedRoomId={roomId} onOpen={item => void open(item)} />
-    <div className="chat-surface" style={{ display: roomId ? 'none' : undefined }}><ChatWorkspace c={singleChat.current} usage={usage} tab={tab} setTab={setTab}
+    <div className="chat-surface" style={{ display: roomId ? 'none' : undefined }}><ChatWorkspace c={singleChat.current} usage={usage} initialReady={page.committed} tab={tab} setTab={setTab}
       details={details} setDetails={setDetails} agentId={agentId} selectedName={selectedName} selected={selected}
       onBack={() => setMobileChat(false)} onShare={() => setSharing(true)} /></div>
     {roomId && <GroupWorkspace key={roomId} room={groups.rooms.find(room => room.id === roomId) || { id: roomId, name: '群聊', projectId: '' }} projectName={directory.projects.find(project => project.projectId === groups.rooms.find(room => room.id === roomId)?.projectId)?.name || ''} onBack={() => setMobileChat(false)} />}

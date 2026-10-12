@@ -8,24 +8,16 @@ import '../server/register.mjs';
 const { createAppServerClient } = await import('../../windows/server/app-server-client.mjs');
 const { createEmployeeProjectRegistry } = await import('../../windows/server/employee-project-registry.mjs');
 
-test('one execution policy overrides legacy read-only and approval settings without changing inputs', () => {
+test('one execution policy removes legacy read-only and approval settings without adding gates', () => {
   const params = { sandbox: 'read-only', approvalPolicy: 'on-request', config: {
     'mcp_servers.handoff': { command: 'node', env: { ENDPOINT: 'local' }, tools: { delegate: { approval_mode: 'prompt' } } },
     'mcp_servers.custom.tools.write.approval_mode': 'prompt', model_reasoning_effort: 'low',
   } };
-  const runtime = { mcp_servers: { custom: { tools: { write: { approval_mode: 'prompt', output_token_limit: 100 } } }, image: {}, computer: {} },
-    apps: { connector: { tools: { edit: { approval_mode: 'prompt' } }, default_tools_approval_mode: 'prompt' } } };
   const before = structuredClone(params);
   for (const method of ['thread/start', 'thread/resume', 'thread/fork']) {
-    const result = executionParams(method, params, runtime);
+    const result = executionParams(method, params);
     assert.equal(result.sandbox, 'danger-full-access'); assert.equal(result.approvalPolicy, 'never');
-    for (const name of ['handoff', 'custom', 'image', 'computer']) assert.equal(result.config[`mcp_servers.${name}.default_tools_approval_mode`], 'approve');
-    assert.equal(result.config['mcp_servers.handoff'].command, 'node');
-    assert.deepEqual(result.config['mcp_servers.handoff'].env, { ENDPOINT: 'local' });
-    assert.equal(result.config['mcp_servers.custom.tools.write.approval_mode'], 'approve');
-    assert.equal(result.config['apps.connector.tools.edit.approval_mode'], 'approve');
-    assert.equal(result.config['apps._default.default_tools_approval_mode'], 'approve');
-    assert.equal(result.config.model_reasoning_effort, 'low');
+    assert.deepEqual(result.config, params.config);
   }
   assert.deepEqual(params, before);
   const turn = executionParams('turn/start', { threadId: 't', input: ['original'], sandboxPolicy: { type: 'readOnly' } });

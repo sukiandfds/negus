@@ -28,7 +28,7 @@ export function ModelSelect({
       disabled={disabled || loading || changing || !options.length}
       onChange={(event) => void onChange(event.target.value)}
     >
-      {!currentModel ? <option value="">{loading ? "读取模型" : "选择模型"}</option> : null}
+      {!currentModel ? <option value="">选择模型</option> : null}
       {options.map((entry) => (
         <option key={entry.id} value={entry.model}>{formatModelDisplayName(entry.model, entry.displayName)}</option>
       ))}
