@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 const STATUS_LABELS = {
   planned: "待处理",
@@ -147,7 +148,7 @@ const pageDraftStateFile = (projectRoot) => path.resolve(projectRoot, "runtime",
 
 const readPageDraftState = async (projectRoot) => {
   try {
-    const parsed = JSON.parse(await fs.readFile(pageDraftStateFile(projectRoot), "utf8"));
+    const parsed = await readJsonFile(pageDraftStateFile(projectRoot));
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
@@ -155,11 +156,7 @@ const readPageDraftState = async (projectRoot) => {
 };
 
 const writePageDraftState = async (projectRoot, drafts) => {
-  const file = pageDraftStateFile(projectRoot);
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-  await fs.writeFile(temporary, `${JSON.stringify(drafts, null, 2)}\n`, "utf8");
-  await fs.rename(temporary, file);
+  await writeJsonFileAtomic(pageDraftStateFile(projectRoot), drafts);
 };
 
 const inferPageComponents = (request) => {

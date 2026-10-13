@@ -198,9 +198,9 @@ export function useProjectConversations() {
       return;
     }
     if (requestedId !== currentId) {
-      await selection.adoptSelection(requestedId, false);
+      await selection.adoptSelection(requestedId);
     } else {
-      await selection.loadSession(requestedId, { quiet: true });
+      await selection.loadSession(requestedId);
     }
     await catalog.refreshSessions(false, requestedId, false);
   }, [catalog.archivedView, catalog.refreshSessions, catalog.setArchiveViewMode, selection.adoptSelection, selection.clearSelection, selection.loadSession, selection.selectedIdRef]);
@@ -302,7 +302,7 @@ export function useProjectConversations() {
             deliveryState: result.status === "failed" ? "failed" : undefined,
             ...(result.turnId ? { turnId: result.turnId } : {}),
           });
-          if (result.status === "accepted") await selection.loadSession(threadId, { quiet: true, retry: false, recovery: true, conversationId: scope });
+          if (result.status === "accepted") await selection.loadSession(threadId, { retry: false, recovery: true, conversationId: scope });
           return;
         }
         await new Promise(resolve => window.setTimeout(resolve, 2000));
@@ -368,7 +368,7 @@ export function useProjectConversations() {
         selection.addOptimisticMessage(threadId, optimisticMessage);
       }
       updateDelivery(undefined, attempt.result.turnId);
-      void selection.loadSession(threadId, { quiet: true, retry: false, conversationId: scope });
+      void selection.loadSession(threadId, { retry: false, conversationId: scope });
       return true;
     } catch (error) {
       updateDelivery("failed");
@@ -627,7 +627,7 @@ export function useProjectConversations() {
   const onSessionsChanged = useCallback((threadId?: string) => {
     const selected = selection.selectedIdRef.current;
     if (selected && (!threadId || threadId === selected)) {
-      void selection.loadSession(selected, { quiet: true });
+      void selection.loadSession(selected);
     }
     void catalog.refreshSessions(false, threadId, false);
   }, [catalog.refreshSessions, selection.loadSession, selection.selectedIdRef]);
@@ -658,7 +658,7 @@ export function useProjectConversations() {
   }, [contextManagement.handleEvent, execution.handleEvent, followUpQueue.handleEvent, goal.handleEvent, selection.addOptimisticMessage, selection.selectedIdRef]);
   const recoverRealtime = useCallback((_reason: RealtimeRecoveryReason) => {
     const selected = selection.selectedIdRef.current;
-    if (selected) void selection.loadSession(selected, { quiet: true, retry: false, recovery: true });
+    if (selected) void selection.loadSession(selected, { retry: false, recovery: true });
     if (selected) void goal.refresh();
     void execution.refreshStatus(undefined, true).then(() => {
       onSessionsChanged(selection.selectedIdRef.current || undefined);

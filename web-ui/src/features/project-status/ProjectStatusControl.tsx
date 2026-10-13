@@ -1,6 +1,7 @@
 import { Activity, ChevronDown, MessageSquare, MessagesSquare, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchJson } from "../../shared/api/http";
+import { readValidStorage, writeStorage } from "../../shared/state/storage";
 import styles from "./ProjectStatusControl.module.css";
 import { ModelCheckDialog } from "./ModelCheckDialog";
 
@@ -48,26 +49,19 @@ const validStatus = (value: unknown): value is ProjectStatus => Boolean(
   && Array.isArray((value as ProjectStatus).conversations),
 );
 const readCache = (key: string) => {
-  try {
-    const value: unknown = JSON.parse(window.localStorage.getItem(`${cachePrefix}${key}`) || "null");
-    return validStatus(value) ? value : null;
-  } catch {
-    return null;
-  }
+  return readValidStorage(`${cachePrefix}${key}`, validStatus);
 };
 const writeCache = (key: string, value: ProjectStatus) => {
-  try { window.localStorage.setItem(`${cachePrefix}${key}`, JSON.stringify(value)); } catch {}
+  writeStorage(`${cachePrefix}${key}`, value);
 };
 const readExpanded = (key: string): string[] | null => {
-  try {
-    const value: unknown = JSON.parse(window.localStorage.getItem(`${expandedPrefix}${key}`) || "null");
-    return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : null;
-  } catch {
-    return null;
-  }
+  return readValidStorage(
+    `${expandedPrefix}${key}`,
+    (value): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string"),
+  );
 };
 const writeExpanded = (key: string, value: string[]) => {
-  try { window.localStorage.setItem(`${expandedPrefix}${key}`, JSON.stringify(value)); } catch {}
+  writeStorage(`${expandedPrefix}${key}`, value);
 };
 
 const formatTimestamp = (value: string | null, includeSeconds = false) => {

@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 const clean = (value, maxLength = 160) => String(value || "").trim().slice(0, maxLength);
 
@@ -36,7 +37,7 @@ const normalizeRuntimeSessions = (binding) => {
 
 const readStored = async (stateFile) => {
   try {
-    const stored = JSON.parse(await fs.readFile(stateFile, "utf8"));
+    const stored = await readJsonFile(stateFile, {});
     return Array.isArray(stored?.bindings) ? stored.bindings : [];
   } catch {
     return [];
@@ -126,14 +127,10 @@ export const createAgentConversationStore = async ({ stateFile, groupRoom, roomD
 
   let writeQueue = Promise.resolve();
   const persist = () => {
-    const payload = JSON.stringify({ version: 2, bindings: [...bindings.values()] }, null, 2);
     writeQueue = writeQueue
       .catch(() => {})
       .then(async () => {
-        await fs.mkdir(path.dirname(stateFile), { recursive: true });
-        const temporary = `${stateFile}.${process.pid}.tmp`;
-        await fs.writeFile(temporary, payload, "utf8");
-        await fs.rename(temporary, stateFile);
+        await writeJsonFileAtomic(stateFile, { version: 2, bindings: [...bindings.values()] });
       });
     return writeQueue;
   };

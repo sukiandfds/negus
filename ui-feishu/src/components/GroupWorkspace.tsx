@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Users } from 'lucide-react';
 import { useGroupRoom } from '../../../web-ui/src/features/group-chat/hooks/useGroupRoom';
 import { MessageTimeline } from '../../../web-ui/src/features/group-chat/components/MessageTimeline';
-import { GroupComposer } from '../../../web-ui/src/features/group-chat/components/GroupComposer';
+import { GroupComposer, type GroupComposerCopy } from '../../../web-ui/src/features/group-chat/components/GroupComposer';
 import { MemberDialog } from '../../../web-ui/src/features/group-chat/components/MemberDialog';
 import { MemberProfileDrawer } from '../../../web-ui/src/features/group-chat/components/MemberProfileDrawer';
 import { useArtifacts } from '../../../web-ui/src/features/artifacts/hooks/useArtifacts';
@@ -10,6 +10,17 @@ import type { GroupMessage, GroupProfile } from '../../../web-ui/src/features/gr
 import type { ChatRoom } from '../useGroupChats';
 import { ChatHeader } from './ChatHeader';
 import { TaskPanel } from './TaskPanel';
+
+const feishuGroupComposerCopy: Partial<GroupComposerCopy> = {
+  placeholder: '发送消息，合适的员工会回复；也可以 @ 指定员工',
+  discussionHint: '点名优先交给指定员工；不点名时自动选择合适的员工',
+  contextHint: '群里的完整记录一直保留。员工会结合这次消息和相关记录回复；同一员工的工作按顺序处理，不同员工可以同时工作。外派结果会回到来源对话。',
+  busyReplyHint: () => '已收到点名，会根据各自任务进度回复',
+  orderedReplyHint: names => `已点名：${names.join('、')}`,
+  singleReplyHint: name => `已点名：${name}`,
+  stopLabel: '停止群内全部任务',
+  stopDetail: '终止群内正在运行和排队的任务',
+};
 
 export function GroupWorkspace({ room, projectName, onBack }: { room: ChatRoom; projectName: string; onBack: () => void }) {
   const group = useGroupRoom();
@@ -25,7 +36,7 @@ export function GroupWorkspace({ room, projectName, onBack }: { room: ChatRoom; 
       title={room.name} subtitle={[projectName, `${snapshot?.agents.length || 0} 位员工`].filter(Boolean).join(' · ')} onBack={onBack} />
     <TaskPanel key={room.id} roomId={room.id} />
     {snapshot ? <div className="chat-primary"><div className="chat-messages"><MessageTimeline active={true} roomId={room.id} messages={snapshot.messages} agents={snapshot.agents} members={snapshot.members} currentMemberId={group.member?.id || ''} streaming={group.streaming} artifacts={artifacts.artifacts} artifactLoadErrors={artifacts.loadErrors} reviewingArtifactIds={artifacts.reviewingIds} reviewerName={group.member?.name || '我'} onRetryArtifact={artifacts.loadOne} onReviewArtifact={artifacts.review} onOpenProfile={setProfile} localSendVersion={sent} history={snapshot.history} historyLoading={group.historyLoading} historyNavigation={group.historyNavigation} focusRequest={group.focusRequest} onLoadOlder={group.loadOlder} onLoadNewer={group.loadNewer} onReturnToLatest={group.returnToLatest} onQuote={message => setQuote({ id: message.id, authorName: message.authorName, text: message.text.slice(0, 160), sequence: message.sequence })} onMentionAgent={agent => setMention({ nonce: Date.now(), name: agent.name })} onRevealReply={reply => { void group.revealMessage(reply); }} onRetryAgent={(agentId, replyTo) => { const agent = snapshot.agents.find(item => item.id === agentId); if (agent) void group.send(`@${agent.name} 请重试刚才没有完成的任务。`, [], replyTo || null); }} onRetrySend={message => { void group.retrySend(message); }} retryDisabled={group.sending} unseenLiveCount={group.unseenLiveCount} /></div>
-      <div className="chat-composer"><GroupComposer agents={snapshot.agents} members={snapshot.members} disabled={!group.member || group.sending} busy={snapshot.agents.some(agent => agent.active)} error={group.error} notice={group.notice} quote={quote} mentionRequest={mention} onClearQuote={() => setQuote(null)} onSend={async (text, attachments, replyTo) => { const accepted = await group.send(text, attachments, replyTo); if (accepted) { setSent(version => version + 1); setQuote(null); } return accepted; }} onInterrupt={group.interrupt} /></div>
+      <div className="chat-composer"><GroupComposer agents={snapshot.agents} copy={feishuGroupComposerCopy} disabled={!group.member || group.sending} busy={snapshot.agents.some(agent => agent.active)} error={group.error} notice={group.notice} quote={quote} mentionRequest={mention} onClearQuote={() => setQuote(null)} onSend={async (text, attachments, replyTo) => { const accepted = await group.send(text, attachments, replyTo); if (accepted) { setSent(version => version + 1); setQuote(null); } return accepted; }} onInterrupt={group.interrupt} /></div>
     </div> : <div className="list-empty">{group.error || '正在读取群聊…'}</div>}
     <MemberDialog initialName={group.member?.name || ''} open={!group.member && Boolean(snapshot)} onSubmit={group.join} />
     <MemberProfileDrawer profile={profile} roomId={room.id} onClose={() => setProfile(null)} onAgentUpdated={agent => setProfile({ kind: 'agent', profile: agent })} />

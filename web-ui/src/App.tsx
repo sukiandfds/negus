@@ -23,7 +23,6 @@ import { useDesktopWorkspace } from "./features/desktop/useDesktopWorkspace";
 
 type InteractiveSurface = Exclude<ViewSurface, "progress">;
 type AppSurface = InteractiveSurface | "settings";
-const surfaceStorageKey = "negus:last-surface";
 
 const readSurface = (): AppSurface => {
   const params = new URLSearchParams(window.location.search);
@@ -279,7 +278,6 @@ export function App() {
     if (next === "group") setGroupMounted(true);
     if (surface !== "settings") previousSurface.current = surface;
     setSurface(next);
-    try { window.localStorage.setItem(surfaceStorageKey, next); } catch {}
     if (!pushHistory) return;
     const params = new URLSearchParams(window.location.search);
     params.delete("view");
@@ -293,13 +291,11 @@ export function App() {
       const next = readSurface();
       if (next === "group") setGroupMounted(true);
       setSurface(next);
-      try { window.localStorage.setItem(surfaceStorageKey, next); } catch {}
     };
     const handleInternalNavigation = () => {
       const next = readSurface();
       if (next === "group") setGroupMounted(true);
       setSurface(next);
-      try { window.localStorage.setItem(surfaceStorageKey, next); } catch {}
     };
     window.addEventListener("popstate", handlePopState);
     window.addEventListener("negus:navigate", handleInternalNavigation);

@@ -1,9 +1,8 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { loadEmployeeDefinitions } from "./employee-definitions.mjs";
 import { mentionedAgentIds } from "./multi-agent/agent-routing.mjs";
 import { CURRENT_MODEL_PROVIDER_ID } from "./model-provider-service.mjs";
+import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 const cleanText = (value, maxLength) => String(value || "").trim().slice(0, maxLength);
 const replyExcerpt = (message) => {
@@ -77,7 +76,7 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
   const definitions = agentDefinitions || await loadEmployeeDefinitions();
   let stored = {};
   try {
-    stored = JSON.parse(await fs.readFile(stateFile, "utf8"));
+    stored = await readJsonFile(stateFile, {});
   } catch {}
 
   const projectName = cleanText(project, 160) || "project";
@@ -112,19 +111,18 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
   let writeQueue = Promise.resolve();
 
   const persist = () => {
-    const payload = JSON.stringify({
+    const snapshot = {
       version: 4,
       projectId: linkedProjectId,
       roomId: linkedRoomId,
       messages,
       agents: [...agents.values()].map(({ instructions, ...agent }) => agent),
       agentContextSequences: Object.fromEntries(agentContextSequences),
-    }, null, 2);
+    };
     writeQueue = writeQueue
       .catch(() => {})
       .then(async () => {
-        await fs.mkdir(path.dirname(stateFile), { recursive: true });
-        await fs.writeFile(stateFile, payload, "utf8");
+        await writeJsonFileAtomic(stateFile, snapshot);
       });
     return writeQueue;
   };

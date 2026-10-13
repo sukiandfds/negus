@@ -1,4 +1,5 @@
 import type { SessionDetail, SessionSummary } from "../model/types";
+import { readStorage, writeStorage } from "../../../shared/state/storage";
 
 const storageKey = "negus-conversation-snapshot-v1";
 const legacyStorageKey = "codex-collab-conversation-snapshot-v1";
@@ -65,11 +66,7 @@ const selectNewestSnapshot = (...snapshots: Array<ConversationSnapshot | null>) 
 );
 
 const readLocalSnapshot = (key: string) => {
-  try {
-    return validSnapshot(JSON.parse(window.localStorage.getItem(key) || "null") as ConversationSnapshot | null);
-  } catch {
-    return null;
-  }
+  return validSnapshot(readStorage<ConversationSnapshot>(key));
 };
 
 export const readConversationSnapshot = (): ConversationSnapshot | null => selectNewestSnapshot(
@@ -133,6 +130,6 @@ export const writeConversationSnapshot = ({ selectedId, sessions, session }: {
       snapshot.session.messages = snapshot.session.messages.slice(Math.ceil(snapshot.session.messages.length / 4));
       serialized = JSON.stringify(snapshot);
     }
-    if (serialized.length <= maxSnapshotCharacters) window.localStorage.setItem(storageKey, serialized);
+    if (serialized.length <= maxSnapshotCharacters) writeStorage(storageKey, snapshot);
   } catch {}
 };

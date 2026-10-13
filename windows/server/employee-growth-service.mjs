@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { writeTextFileAtomic } from "./persistence/json-file.mjs";
 
 const clean = (value, max = 2000) => String(value || "").trim().slice(0, max);
 const slugify = (value) => clean(value, 80).toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
@@ -8,13 +9,6 @@ const inside = (root, target) => {
   const resolvedRoot = path.resolve(root);
   const resolvedTarget = path.resolve(target);
   return resolvedTarget === resolvedRoot || resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`);
-};
-
-const atomicWrite = async (file, value) => {
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  const temporary = `${file}.${process.pid}.tmp`;
-  await fs.writeFile(temporary, value, "utf8");
-  await fs.rename(temporary, file);
 };
 
 const managedRules = (rules) => [
@@ -99,13 +93,13 @@ export const createEmployeeGrowthService = ({ registry, store, reviewer, broadca
         const finish = content.indexOf(end);
         if (start >= 0 && finish > start) content = `${content.slice(0, start)}${block}${content.slice(finish + end.length)}`;
         else content = `${content.trimEnd()}${content.trim() ? "\n\n" : ""}${block}\n`;
-        await atomicWrite(file, content);
+        await writeTextFileAtomic(file, content);
       } else if (updated.kind === "skill") {
         const slug = slugify(updated.slug || updated.text);
         if (!slug) throw new Error("Skill slug is invalid.");
         const file = path.join(root, ".agents", "skills", slug, "SKILL.md");
         if (!inside(root, file)) throw new Error("Skill path is outside employee context root.");
-        await atomicWrite(file, `# ${slug}\n\n${clean(updated.text, 4000)}\n`);
+        await writeTextFileAtomic(file, `# ${slug}\n\n${clean(updated.text, 4000)}\n`);
       }
       await store.appendLog(employeeId, { action: "proposal_written", itemId: proposalId, requestId: requestId || null });
       broadcast({ type: "employee_growth_written", employeeId, proposal: { ...updated, writeStatus: "written" } });

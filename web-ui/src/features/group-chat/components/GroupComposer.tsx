@@ -4,7 +4,7 @@ import { AttachmentButton, AttachmentPreviews } from "../../attachments/componen
 import { useAttachmentDraft } from "../../attachments/hooks/useAttachmentDraft";
 import { SlashCommandMenu, type SlashCommandOption } from "../../conversations/components/SlashCommandMenu";
 import { goalCapabilityOptions } from "../../goals/model/capability";
-import type { GroupAgent, GroupMember } from "../model/types";
+import type { GroupAgent } from "../model/types";
 import { mentionedAgentIds } from "../model/agentMentions";
 import type { MediaFile } from "../../../shared/model/media";
 import { MentionMenu, type MentionOption } from "./MentionMenu";
@@ -12,8 +12,30 @@ import styles from "./GroupComposer.module.css";
 
 interface MentionState { start: number; end: number; query: string }
 
-const capabilityOptions: SlashCommandOption[] = [
-  { id: "stop", command: "/stop", group: "会话", label: "停止当前任务", detail: "终止当前群聊正在运行和排队的任务" },
+export interface GroupComposerCopy {
+  placeholder: string;
+  discussionHint: string;
+  contextHint: string;
+  busyReplyHint: (names: string[]) => string;
+  orderedReplyHint: (names: string[]) => string;
+  singleReplyHint: (name: string) => string;
+  stopLabel: string;
+  stopDetail: string;
+}
+
+export const defaultGroupComposerCopy: GroupComposerCopy = {
+  placeholder: "发给项目群。可用 @ 点名，也可以说‘各位/所有人’一起讨论",
+  discussionHint: "被点到的员工按顺序回复，没被点名的不会插话",
+  contextHint: "群里的完整记录一直保留。每次点名是单独一件事，先发的先做，后一条等下一轮。点名后的补充跟着这一条；短的续话接着上一条理解。已经点到的同事会自己回复。",
+  busyReplyHint: (names) => `${names.join("、")}会在当前任务结束后按顺序回复`,
+  orderedReplyHint: (names) => `按顺序回复：${names.join("、")}`,
+  singleReplyHint: (name) => `将叫 ${name} 回复`,
+  stopLabel: "停止当前任务",
+  stopDetail: "终止当前群聊正在运行和排队的任务",
+};
+
+const createCapabilityOptions = (copy: GroupComposerCopy): SlashCommandOption[] => [
+  { id: "stop", command: "/stop", group: "会话", label: copy.stopLabel, detail: copy.stopDetail },
   ...goalCapabilityOptions,
   { id: "file", command: "/file", group: "文件", label: "读取附件", detail: "按问题读取并处理已上传文件" },
   { id: "image", command: "/image", group: "MCP 工具", label: "生成或修改图片", detail: "调用已配置的图片能力" },
@@ -29,19 +51,20 @@ const findMention = (text: string, caret: number): MentionState | null => {
   return atIndex >= 0 ? { start: atIndex, end: caret, query: match[1].trim() } : null;
 };
 
-export function GroupComposer({ agents, members: _members, disabled, busy = false, error, notice = "", quote = null, mentionRequest = null, onClearQuote, onSend, onInterrupt }: {
+export function GroupComposer({ agents, disabled, busy = false, error, notice = "", quote = null, mentionRequest = null, copy: copyOverrides, onClearQuote, onSend, onInterrupt }: {
   agents: GroupAgent[];
-  members: GroupMember[];
   disabled: boolean;
   busy?: boolean;
   error: string;
   notice?: string;
   quote?: { id: string; authorName: string; text: string } | null;
   mentionRequest?: { nonce: number; name: string } | null;
+  copy?: Partial<GroupComposerCopy>;
   onClearQuote?: () => void;
   onSend: (text: string, attachments?: MediaFile[], replyTo?: { id: string; authorName: string; text: string } | null) => Promise<boolean>;
   onInterrupt: () => Promise<boolean>;
 }) {
+  const copy = { ...defaultGroupComposerCopy, ...copyOverrides };
   const [text, setText] = useState("");
   const draft = useAttachmentDraft();
   const [mention, setMention] = useState<MentionState | null>(null);
@@ -63,6 +86,7 @@ export function GroupComposer({ agents, members: _members, disabled, busy = fals
   }, [agents, mention?.query]);
   const selectedAgentIds = useMemo(() => mentionedAgentIds(text, agents), [agents, text]);
   const selectedNames = selectedAgentIds.map((id) => agents.find((agent) => agent.id === id)?.name || "").filter(Boolean);
+  const capabilityOptions = useMemo(() => createCapabilityOptions(copy), [copy.stopDetail, copy.stopLabel]);
   const personnelOptions = useMemo<MentionOption[]>(() => agents
     .filter((agent) => !selectedAgentIds.includes(agent.id))
     .map((agent) => ({
@@ -220,7 +244,7 @@ export function GroupComposer({ agents, members: _members, disabled, busy = fals
           {/* Reserved product entry: selected Agents discuss in rounds, then the manager publishes one consolidated result. */}
           <div className={styles.discussionOption}>
             <MessagesSquare aria-hidden="true" />
-            <span><strong>点名</strong><small>被点到的员工按顺序回复，没被点名的不会插话</small></span>
+            <span><strong>点名</strong><small>{copy.discussionHint}</small></span>
           </div>
           <MentionMenu options={personnelOptions} activeIndex={activeMention} onActiveChange={setActiveMention} onSelect={insertPersonnel} />
         </div>
@@ -230,7 +254,7 @@ export function GroupComposer({ agents, members: _members, disabled, busy = fals
             <MessagesSquare aria-hidden="true" />
             <span>
               <strong>员工看到的上下文</strong>
-              <small>群里的完整记录一直保留。每次点名是单独一件事，先发的先做，后一条等下一轮。点名后的补充跟着这一条；短的续话接着上一条理解。已经点到的同事会自己回复。</small>
+              <small>{copy.contextHint}</small>
             </span>
           </div>
         </div>
@@ -270,12 +294,12 @@ export function GroupComposer({ agents, members: _members, disabled, busy = fals
           <button type="button" aria-label="取消引用" onClick={onClearQuote}>取消</button>
         </div>
       ) : null}
-        {selectedNames.length ? <p className={styles.orderHint}>{busy ? `${selectedNames.join("、")}会在当前任务结束后按顺序回复` : selectedNames.length > 1 ? `按顺序回复：${selectedNames.join("、")}` : `将叫 ${selectedNames[0]} 回复`}</p> : null}
+        {selectedNames.length ? <p className={styles.orderHint}>{busy ? copy.busyReplyHint(selectedNames) : selectedNames.length > 1 ? copy.orderedReplyHint(selectedNames) : copy.singleReplyHint(selectedNames[0])}</p> : null}
         <textarea
           ref={textareaRef}
           value={text}
           rows={2}
-          placeholder="发给项目群。可用 @ 点名，也可以说‘各位/所有人’一起讨论"
+          placeholder={copy.placeholder}
           onChange={(event) => {
             setText(event.target.value);
             setPersonnelOpen(false);
@@ -356,7 +380,7 @@ export function GroupComposer({ agents, members: _members, disabled, busy = fals
               <AtSign aria-hidden="true" />
             </button>
             {busy && (text.trim() || draft.attachments.length) ? (
-              <button className={styles.commandButton} type="button" aria-label="停止当前任务" title="停止当前任务" onClick={() => void onInterrupt()}>
+              <button className={styles.commandButton} type="button" aria-label={copy.stopLabel} title={copy.stopLabel} onClick={() => void onInterrupt()}>
                 <Square className={styles.stopIcon} aria-hidden="true" />
               </button>
             ) : null}
@@ -388,7 +412,7 @@ export function GroupComposer({ agents, members: _members, disabled, busy = fals
               <Square className={styles.stopIcon} aria-hidden="true" />
             </button>
           ) : busy && !text.trim() && !draft.attachments.length ? (
-            <button className={styles.sendButton} type="button" aria-label="停止当前任务" title="停止当前任务" onClick={() => void onInterrupt()}>
+            <button className={styles.sendButton} type="button" aria-label={copy.stopLabel} title={copy.stopLabel} onClick={() => void onInterrupt()}>
               <Square className={styles.stopIcon} aria-hidden="true" />
             </button>
           ) : (
