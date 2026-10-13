@@ -90,6 +90,9 @@ export const createConversationRoutes = ({
     const boundByThread = cleanThreadId
       ? agentConversationStore.findByRuntimeSession?.("codex", cleanThreadId)
       : null;
+    if (!cleanConversationId && boundByThread) {
+      throw Object.assign(new Error("conversationId is required for an Agent conversation"), { statusCode: 409 });
+    }
     if (!cleanConversationId && !boundByThread) return null;
     const binding = cleanConversationId
       ? await agentConversationStore.resolve({ conversationId: cleanConversationId })
@@ -230,6 +233,13 @@ export const createConversationRoutes = ({
     }
     const conversationId = String(body.conversationId || "").trim();
     const binding = await authorizeAgentThread({ threadId, conversationId });
+    const employeeDirect = isEmployeeDirectBinding(binding);
+    const requestedAttachmentIds = Array.isArray(body.attachmentIds)
+      ? body.attachmentIds.map((value) => String(value || "").trim()).filter(Boolean)
+      : [];
+    if (employeeDirect && (attachments.length || requestedAttachmentIds.length)) {
+      throw Object.assign(new Error("员工对话暂不支持附件"), { statusCode: 400 });
+    }
     const submissionId = String(body.submissionId || "").trim().slice(0, 160) || randomUUID();
     const messageId = `optimistic-${submissionId}`;
     const createdAt = new Date().toISOString();
@@ -263,7 +273,7 @@ export const createConversationRoutes = ({
     }
     const run = async () => {
       const status = execution.getStatus(threadId);
-      if (status.active && !status.turnId) {
+      if (!employeeDirect && status.active && !status.turnId) {
         const error = new Error("Codex 正在启动当前任务，请稍后再试");
         error.statusCode = 409;
         throw error;
@@ -279,10 +289,19 @@ export const createConversationRoutes = ({
       });
       let result;
       try {
-        result = status.active
-          ? await conversations.steerMessage(threadId, status.turnId, text, attachments, submissionId)
-          : await conversations.sendMessage(threadId, text, attachments, submissionId);
+        if (employeeDirect) {
+          result = await employeeRuntime.sendMessage({
+            employeeId: binding.agentId,
+            text,
+            requestId: submissionId,
+          });
+        } else {
+          result = status.active
+            ? await conversations.steerMessage(threadId, status.turnId, text, attachments, submissionId)
+            : await conversations.sendMessage(threadId, text, attachments, submissionId);
+        }
       } catch (error) {
+        if (employeeDirect) throw error;
         const recovered = execution.getStatus(threadId);
         if (status.active || !recovered.turnId || recovered.turnId === status.turnId) throw error;
         return {
@@ -293,8 +312,8 @@ export const createConversationRoutes = ({
       return {
         body: {
           threadId: result.threadId || threadId,
-          turnId: status.active ? status.turnId : result.turn?.id || "",
-          status: status.active ? "steered" : result.turn?.status || "inProgress",
+          turnId: employeeDirect ? result.turnId || "" : status.active ? status.turnId : result.turn?.id || "",
+          status: employeeDirect ? result.status || "inProgress" : status.active ? "steered" : result.turn?.status || "inProgress",
           submissionId,
           messageId,
           ...(result.migratedFromThreadId ? { migratedFromThreadId: result.migratedFromThreadId } : {}),
