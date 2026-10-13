@@ -6,6 +6,7 @@ import { previewText } from "./content-blocks.mjs";
 import { createAppServerClient } from "./app-server-client.mjs";
 import { messagesFromTurns, readRecentThreadPage } from "./codex-thread-history.mjs";
 import { loadUserProfilePrompt } from "./user-profile-prompt.mjs";
+import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 const sourceFromThread = (thread) => thread.source === "cli" && thread.cliVersion === "0.122.0" ? "happy" : "codex";
 
@@ -205,9 +206,8 @@ export const createAppServerConversationStore = ({
   const loadAutoTitles = async () => {
     if (autoTitlesLoaded || !autoTitleStateFile) return;
     if (!autoTitlesLoading) {
-      autoTitlesLoading = fs.readFile(autoTitleStateFile, "utf8")
-        .then((text) => JSON.parse(text)?.titles || {})
-        .catch((error) => error?.code === "ENOENT" ? {} : Promise.reject(error))
+      autoTitlesLoading = readJsonFile(autoTitleStateFile, {})
+        .then((state) => state?.titles || {})
         .then((titles) => {
           for (const [threadId, value] of Object.entries(titles)) {
             const title = cleanAutoTitle(value?.title);
@@ -225,10 +225,7 @@ export const createAppServerConversationStore = ({
     autoTitles.set(threadId, { title, updatedAt: new Date().toISOString() });
     if (!autoTitleStateFile) return;
     const state = { version: 1, titles: Object.fromEntries(autoTitles) };
-    await fs.mkdir(path.dirname(autoTitleStateFile), { recursive: true });
-    const temporary = `${autoTitleStateFile}.${process.pid}.tmp`;
-    await fs.writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-    await fs.rename(temporary, autoTitleStateFile);
+    await writeJsonFileAtomic(autoTitleStateFile, state);
   };
 
   const handleProtocolMessage = (message) => {

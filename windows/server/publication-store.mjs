@@ -1,12 +1,11 @@
-import fs from "node:fs/promises";
-import path from "node:path";
+import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 const clean = (value, maxLength = 160) => String(value || "").trim().slice(0, maxLength);
 
 export const createPublicationStore = async ({ stateFile, maxRecords = 2000 }) => {
   let records = new Map();
   try {
-    const stored = JSON.parse(await fs.readFile(stateFile, "utf8"));
+    const stored = await readJsonFile(stateFile, {});
     for (const record of Array.isArray(stored?.publications) ? stored.publications : []) {
       const requestId = clean(record?.requestId, 120);
       if (requestId) records.set(requestId, record);
@@ -16,14 +15,10 @@ export const createPublicationStore = async ({ stateFile, maxRecords = 2000 }) =
   let writeQueue = Promise.resolve();
   const persist = () => {
     const retained = [...records.values()].slice(-maxRecords);
-    const payload = JSON.stringify({ version: 1, publications: retained }, null, 2);
     writeQueue = writeQueue
       .catch(() => {})
       .then(async () => {
-        await fs.mkdir(path.dirname(stateFile), { recursive: true });
-        const temporary = `${stateFile}.${process.pid}.tmp`;
-        await fs.writeFile(temporary, payload, "utf8");
-        await fs.rename(temporary, stateFile);
+        await writeJsonFileAtomic(stateFile, { version: 1, publications: retained }, { trailingNewline: false });
       });
     return writeQueue;
   };

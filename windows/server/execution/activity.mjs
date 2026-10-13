@@ -1,4 +1,4 @@
-export const terminalPhases = new Set(["completed", "failed", "interrupted", "systemError"]);
+export { terminalPhases } from "./protocol.mjs";
 
 const commandDetail = (item) => {
   const actionCommand = Array.isArray(item?.commandActions)

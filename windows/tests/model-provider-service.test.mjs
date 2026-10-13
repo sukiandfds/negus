@@ -195,6 +195,8 @@ test("current API configuration refresh reads supplier models, keeps native IDs 
     assert.equal(current[0].supportedReasoningEfforts[0].reasoningEffort, "high");
     assert.deepEqual(current[1].supportedReasoningEfforts, []);
     assert.equal(service.resolveRoute({ model: "gpt-6.1-sol" }).modelProviderId, "current");
+    assert.equal(service.resolveRoute({ model: "gpt-6.1-sol" }).model, "gpt-6-sol");
+    assert.equal(service.resolveRoute({}).model, "gpt-6-sol");
     fail = true;
     await assert.rejects(service.refreshProviderModels("current"), /目录读取失败/);
     assert.ok((await service.listModels(native)).some(m => m.model === "gpt-6.1-sol"));

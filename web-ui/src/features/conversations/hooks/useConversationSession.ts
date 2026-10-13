@@ -5,7 +5,7 @@ import { mergeMessageList, mergeOlderMessages, mergePendingOptimisticMessages, m
 import { isPendingThread } from "../model/pendingThread";
 import type { ContentSyncState, SessionDelta, SessionDetail, SessionMessage, SessionResponse } from "../model/types";
 
-type LoadOptions = { older?: boolean; quiet?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean; conversationId?: string };
+type LoadOptions = { older?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean; conversationId?: string };
 
 
 const blockSignature = (message: SessionMessage) => (message.blocks || [])
@@ -74,7 +74,6 @@ export function useConversationSession(initial: InitialConversationState) {
 
   const loadSessionOnce = useCallback(async (threadId: string, {
     older = false,
-    quiet = false,
     retry = true,
     recovery = false,
     prefetch = false,
@@ -162,7 +161,7 @@ export function useConversationSession(initial: InitialConversationState) {
           retryTimerRef.current = window.setTimeout(() => {
             if (!isSelected()) return;
             setSyncing(true);
-            void loadSessionRef.current(threadId, { quiet: true, retry: false, recovery: true });
+            void loadSessionRef.current(threadId, { retry: false, recovery: true });
           }, 10000);
         }
         if (!older) setContentSyncState("degraded");
@@ -212,7 +211,7 @@ export function useConversationSession(initial: InitialConversationState) {
       }
       if (pendingRecovery !== undefined && selectedIdRef.current === threadId) {
         window.setTimeout(() => {
-          void loadSessionRef.current(threadId, { quiet: true, retry: false, recovery: pendingRecovery });
+          void loadSessionRef.current(threadId, { retry: false, recovery: pendingRecovery });
         }, 0);
       }
     }).catch(() => {});
@@ -239,13 +238,10 @@ export function useConversationSession(initial: InitialConversationState) {
     params.delete("employeeId");
     params.delete("conversation");
     window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
-    void loadSession(threadId, {
-      quiet: Boolean(cached),
-      recovery: partialSessionIdsRef.current.has(threadId),
-    });
+    void loadSession(threadId, { recovery: partialSessionIdsRef.current.has(threadId) });
   }, [loadSession]);
 
-  const adoptSelection = useCallback(async (threadId: string, quiet: boolean) => {
+  const adoptSelection = useCallback(async (threadId: string) => {
     selectedIdRef.current = threadId;
     setSelectedId(threadId);
     setComposerKey(threadId);
@@ -256,7 +252,7 @@ export function useConversationSession(initial: InitialConversationState) {
     setLoadingOlder(false);
     setSyncing(Boolean(cached));
     setContentSyncState(cached ? "syncing" : "stable");
-    return loadSession(threadId, { quiet });
+    return loadSession(threadId);
   }, [loadSession]);
 
   const clearSelection = useCallback(() => {

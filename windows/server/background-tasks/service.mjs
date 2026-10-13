@@ -1,10 +1,9 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import http from 'node:http';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { readJson, sendJson } from '../http/request-utils.mjs';
 import { basePrompt } from '../base-prompt.mjs';
+import { readJsonFile, writeJsonFileAtomic } from '../persistence/json-file.mjs';
 
 const fail = (message, statusCode = 409) => Object.assign(new Error(message), { statusCode });
 const active = task => ['starting', 'running'].includes(task.state);
@@ -13,8 +12,8 @@ const leaderTaskInstructions = `先判断能否直接回答。需要较长时间
 
 export async function createBackgroundTaskService({ stateFile, registry, conversations, bindings, queue, execution, broadcast = () => {}, enabledEmployees = registry.list().map(employee => employee.id) }) {
   let tasks = [];
-  try { tasks = JSON.parse(await fs.readFile(stateFile, 'utf8')).tasks; }
-  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const stored = await readJsonFile(stateFile, null);
+  if (stored) tasks = stored.tasks;
   if (!Array.isArray(tasks)) throw new Error('后台任务记录格式错误');
   const locks = new Map();
   const starting = new Set();
@@ -23,12 +22,8 @@ export async function createBackgroundTaskService({ stateFile, registry, convers
   let events = Promise.resolve();
   let closed = false;
   const persist = () => {
-    const data = JSON.stringify({ version: 1, tasks });
     writing = writing.catch(() => {}).then(async () => {
-      await fs.mkdir(path.dirname(stateFile), { recursive: true });
-      const temporary = `${stateFile}.tmp`;
-      await fs.writeFile(temporary, data, { mode: 0o600 });
-      await fs.rename(temporary, stateFile);
+      await writeJsonFileAtomic(stateFile, { version: 1, tasks }, { space: 0, trailingNewline: false, mode: 0o600 });
     });
     return writing;
   };

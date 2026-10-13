@@ -2,28 +2,23 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ExecutionStatus } from "../../execution/model/types";
 import { usageApi } from "../data/usageApi";
 import type { FushengUsageSnapshot } from "../model/types";
+import { readStorage, writeStorage } from "../../../shared/state/storage";
 
 const CACHE_KEY = "negus:fusheng-usage";
 const LEGACY_CACHE_KEY = "codex-collab:fusheng-usage";
 const COMPLETION_REFRESH_DELAY_MS = 2_000;
 
 const readCachedSnapshot = (): FushengUsageSnapshot | null => {
-  try {
-    const raw = window.localStorage.getItem(CACHE_KEY)
-      || window.localStorage.getItem(LEGACY_CACHE_KEY);
-    if (!raw) return null;
-    const value = JSON.parse(raw) as Partial<FushengUsageSnapshot>;
-    if (value.provider !== "fusheng"
-      || !value.updatedAt
-      || !value.queryDate
-      || !value.today
-      || !value.account
-      || !value.featuredGroup
-      || !value.groupRatios) return null;
-    return value as FushengUsageSnapshot;
-  } catch {
-    return null;
-  }
+  const value = readStorage<Partial<FushengUsageSnapshot>>(CACHE_KEY)
+    || readStorage<Partial<FushengUsageSnapshot>>(LEGACY_CACHE_KEY);
+  if (value?.provider !== "fusheng"
+    || !value.updatedAt
+    || !value.queryDate
+    || !value.today
+    || !value.account
+    || !value.featuredGroup
+    || !value.groupRatios) return null;
+  return value as FushengUsageSnapshot;
 };
 
 export function useUsageMonitor(executionStatus: ExecutionStatus) {
@@ -44,11 +39,8 @@ export function useUsageMonitor(executionStatus: ExecutionStatus) {
     try {
       const next = await usageApi.read(force, turnId, controller.signal);
       setSnapshot(next);
-      try {
-        window.localStorage.setItem(CACHE_KEY, JSON.stringify(next));
-      } catch {
-        // The live snapshot remains usable when browser storage is unavailable.
-      }
+      // The live snapshot remains usable when browser storage is unavailable.
+      writeStorage(CACHE_KEY, next);
       return true;
     } catch (reason) {
       if (!controller.signal.aborted) {

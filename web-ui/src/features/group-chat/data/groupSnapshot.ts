@@ -1,4 +1,5 @@
 import { createPendingAgentMessage, keepUnacknowledgedMessages, removePendingAgentMessages, upsertGroupMessage } from "./groupMessageState";
+import { readValidStorage, writeStorage } from "../../../shared/state/storage";
 import type { GroupMessage, GroupSnapshot } from "../model/types";
 
 const storageKey = "negus-group-snapshot-v1";
@@ -9,12 +10,15 @@ const storageKeyFor = (roomId: string) => roomId
 const messageLimit = 80;
 const maxBytes = 384 * 1024;
 
-const validSnapshot = (value: GroupSnapshot | null): value is GroupSnapshot => Boolean(
-  value?.room?.id
-  && Array.isArray(value.messages)
-  && Array.isArray(value.agents)
-  && Array.isArray(value.members),
-);
+const validSnapshot = (value: unknown): value is GroupSnapshot => {
+  const snapshot = value as GroupSnapshot | null;
+  return Boolean(
+    snapshot?.room?.id
+    && Array.isArray(snapshot.messages)
+    && Array.isArray(snapshot.agents)
+    && Array.isArray(snapshot.members),
+  );
+};
 
 export const restoreActiveGroupWorks = (snapshot: GroupSnapshot): GroupSnapshot => ({
   ...snapshot,
@@ -54,19 +58,15 @@ export const reconcileGroupSnapshot = (
 };
 
 export const readGroupSnapshot = (roomId = ""): GroupSnapshot | null => {
-  try {
-    const snapshot = JSON.parse(window.localStorage.getItem(storageKeyFor(roomId)) || "null") as GroupSnapshot | null;
-    if (!validSnapshot(snapshot)) return null;
-    return {
-      ...snapshot,
-      messages: removePendingAgentMessages(snapshot.messages),
-      agents: snapshot.agents.map((agent) => ({ ...agent, active: false })),
-      members: [],
-      activeWorks: [],
-    };
-  } catch {
-    return null;
-  }
+  const snapshot = readValidStorage(storageKeyFor(roomId), validSnapshot);
+  if (!snapshot) return null;
+  return {
+    ...snapshot,
+    messages: removePendingAgentMessages(snapshot.messages),
+    agents: snapshot.agents.map((agent) => ({ ...agent, active: false })),
+    members: [],
+    activeWorks: [],
+  };
 };
 
 export const writeGroupSnapshot = (snapshot: GroupSnapshot) => {
@@ -78,7 +78,7 @@ export const writeGroupSnapshot = (snapshot: GroupSnapshot) => {
       activeWorks: [],
     };
     const serialized = JSON.stringify(cached);
-    if (serialized.length <= maxBytes) window.localStorage.setItem(storageKeyFor(snapshot.room.id), serialized);
+    if (serialized.length <= maxBytes) writeStorage(storageKeyFor(snapshot.room.id), cached);
   } catch {
     // Storage may be unavailable in private or restricted mobile browsers.
   }

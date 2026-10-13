@@ -270,6 +270,10 @@ export const createModelProviderService = ({
         currentProvider.sharedConfigId = match?.id?.replace(/^ccswitch_/u, '') || '';
         currentProvider.displayName = match?.displayName || native.name || "当前运行配置";
         currentProvider.baseUrl = native.baseUrl;
+        // The active shared configuration is authoritative. The native Codex
+        // file can retain a model from a previously selected channel.
+        currentProvider.activeModel = match?.defaultModel || "";
+        currentProvider.activeModels = match?.models?.map(model => model.model).filter(Boolean) || [];
         applyCatalog(currentProvider);
       }
       for (const entry of entries) {
@@ -300,6 +304,7 @@ export const createModelProviderService = ({
       const native = id === CURRENT_MODEL_PROVIDER_ID ? await nativeConfiguration : null;
       if (id === CURRENT_MODEL_PROVIDER_ID && !native) return; // OAuth/native-only runtime uses model/list.
       if (native) { await catalogReady; currentProvider.baseUrl = native.baseUrl; applyCatalog(currentProvider); }
+      if (id === CURRENT_MODEL_PROVIDER_ID) await refreshShared({ force: true });
       if (id.startsWith('ccswitch_')) await refreshShared({ force: true });
       else { await catalogReady; for (const entry of providerMap.values()) applyCatalog(entry); }
       const provider = providerMap.get(id);
@@ -352,10 +357,13 @@ export const createModelProviderService = ({
     const requestedProviderId = modelProviderId ? requireProviderId(modelProviderId) : parts.length === 2 ? requireProviderId(parts[0]) : "";
     const requestedProvider = requestedProviderId ? providerMap.get(requestedProviderId) : null;
     if (requestedProviderId && !requestedProvider) throw statusError("Model provider is not registered.", 400);
-    const modelId = requestedModel || requestedProvider?.defaultModel || "";
-    const inferred = modelOwner(modelId);
+    const inferred = modelOwner(requestedModel);
     const provider = requestedProvider || inferred;
     if (!provider) throw statusError("Model provider is not registered.", 400);
+    const activeModel = provider.mode === "current" && provider.activeModel
+      && (!requestedModel || !provider.activeModels.length || !provider.activeModels.includes(requestedModel))
+      ? provider.activeModel : "";
+    const modelId = activeModel || requestedModel || provider.defaultModel || "";
     if (provider.mode !== 'current' && modelId && !provider.models.some((entry) => entry.model === modelId)) {
       throw statusError(`Model ${modelId || "(default)"} does not belong to provider ${provider.id}.`, 400);
     }

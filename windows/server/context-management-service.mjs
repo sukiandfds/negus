@@ -1,5 +1,4 @@
-import fs from "node:fs/promises";
-import path from "node:path";
+import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 const DEFAULT_THRESHOLD = 80;
 const MIN_THRESHOLD = 50;
@@ -29,7 +28,7 @@ export const createContextManagementService = async ({
   let writeChain = Promise.resolve();
 
   try {
-    const stored = JSON.parse(await fs.readFile(stateFile, "utf8"));
+    const stored = await readJsonFile(stateFile, {});
     settings = {
       version: 1,
       defaultThreshold: Number.isInteger(stored.defaultThreshold) ? stored.defaultThreshold : DEFAULT_THRESHOLD,
@@ -59,12 +58,8 @@ export const createContextManagementService = async ({
   };
 
   const persistSettings = () => {
-    const snapshot = JSON.stringify(settings, null, 2);
     writeChain = writeChain.then(async () => {
-      await fs.mkdir(path.dirname(stateFile), { recursive: true });
-      const temporary = `${stateFile}.tmp`;
-      await fs.writeFile(temporary, `${snapshot}\n`, "utf8");
-      await fs.rename(temporary, stateFile);
+      await writeJsonFileAtomic(stateFile, settings);
     });
     return writeChain;
   };

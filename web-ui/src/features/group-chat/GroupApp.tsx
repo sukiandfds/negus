@@ -191,7 +191,6 @@ export function GroupApp({ active = true, onViewChange }: { active?: boolean; on
         composer={snapshot ? (
         <GroupComposer
           agents={agents}
-          members={members}
           disabled={!group.member || group.sending}
           busy={agents.some((agent) => agent.active)}
           error={group.error}

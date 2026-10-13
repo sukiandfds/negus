@@ -1,8 +1,7 @@
 import fs from "node:fs";
-import fsp from "node:fs/promises";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { activityFromItem, detailFromItem, stateFromItem, terminalPhases } from "./execution/activity.mjs";
+import { writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTerminal = () => {} }) => {
   const statuses = new Map();
@@ -46,15 +45,11 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
 
   const persist = () => {
     if (!stateFile) return Promise.resolve();
-    const payload = `${JSON.stringify({
-      version: 1,
-      statuses: [...statuses.values()].slice(-50),
-    }, null, 2)}\n`;
     persistChain = persistChain.catch(() => {}).then(async () => {
-      await fsp.mkdir(path.dirname(stateFile), { recursive: true });
-      const temporary = `${stateFile}.${process.pid}.tmp`;
-      await fsp.writeFile(temporary, payload, "utf8");
-      await fsp.rename(temporary, stateFile);
+      await writeJsonFileAtomic(stateFile, {
+        version: 1,
+        statuses: [...statuses.values()].slice(-50),
+      });
     }).catch((error) => console.warn(`[execution-tracker] state persistence failed: ${error.message}`));
     return persistChain;
   };

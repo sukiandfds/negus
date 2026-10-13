@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Radar, RefreshCw, RotateCcw, X } from "lucide-react";
 import { readIntelligenceEfficiency } from "../data/intelligenceEfficiencyApi";
 import type { IntelligenceEfficiencyPoint, IntelligenceEfficiencySnapshot } from "../model/types";
+import { readStorage, writeStorage } from "../../../shared/state/storage";
 import styles from "./IntelligenceEfficiencyControl.module.css";
 
 let cachedSnapshot: IntelligenceEfficiencySnapshot | null = null;
@@ -24,12 +25,8 @@ const MODEL_TONES: Record<string, string> = {
 type SortKey = "iq" | "average_minutes" | "average_price_usd";
 
 const readStoredModels = () => {
-  try {
-    const value = JSON.parse(localStorage.getItem(FILTER_STORAGE_KEY) || "null");
-    return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : COMMON_MODELS;
-  } catch {
-    return COMMON_MODELS;
-  }
+  const value = readStorage<unknown>(FILTER_STORAGE_KEY);
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : COMMON_MODELS;
 };
 
 const formatUpdatedAt = (value: string) => {
@@ -93,7 +90,7 @@ export function IntelligenceEfficiencyControl() {
 
   const persistModels = (models: string[]) => {
     setSelectedModels(models);
-    try { localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(models)); } catch { /* private mode may block storage */ }
+    writeStorage(FILTER_STORAGE_KEY, models);
   };
   const reset = () => {
     persistModels(availableModels.filter((model) => COMMON_MODELS.includes(model)));

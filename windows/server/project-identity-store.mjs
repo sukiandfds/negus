@@ -1,8 +1,6 @@
-import fs from "node:fs/promises";
-import path from "node:path";
+import { cloneJson, readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 const clean = (value, maxLength = 400) => String(value ?? "").trim().slice(0, maxLength);
-const clone = (value) => JSON.parse(JSON.stringify(value));
 const now = () => new Date().toISOString();
 
 const slug = (value) => clean(value, 120)
@@ -13,7 +11,7 @@ const slug = (value) => clean(value, 120)
 
 const readState = async (stateFile) => {
   try {
-    const value = JSON.parse(await fs.readFile(stateFile, "utf8"));
+    const value = await readJsonFile(stateFile, {});
     return value && typeof value === "object" ? value : {};
   } catch {
     return {};
@@ -84,7 +82,7 @@ const normalizeCapabilities = (value, kind) => {
   // Keep saved extension keys while ensuring the built-in references remain.
   return {
     ...defaults,
-    ...clone(value),
+    ...cloneJson(value),
   };
 };
 
@@ -115,7 +113,7 @@ const normalizeProject = (value = {}) => {
     roots,
     capabilities: normalizeCapabilities(value.capabilities, kind),
     metadata: value.metadata && typeof value.metadata === "object" && !Array.isArray(value.metadata)
-      ? clone(value.metadata)
+      ? cloneJson(value.metadata)
       : {},
     conversation: normalizeConversation(value.conversation || value.mainConversation),
     createdAt: value.createdAt || now(),
@@ -253,12 +251,8 @@ export const createProjectIdentityStore = async ({
   }
   let writeQueue = Promise.resolve();
   const persist = () => {
-    const payload = JSON.stringify({ version: 1, projects: [...projects.values()] }, null, 2);
     writeQueue = writeQueue.catch(() => {}).then(async () => {
-      await fs.mkdir(path.dirname(stateFile), { recursive: true });
-      const temporary = `${stateFile}.${process.pid}.tmp`;
-      await fs.writeFile(temporary, `${payload}\n`, "utf8");
-      await fs.rename(temporary, stateFile);
+      await writeJsonFileAtomic(stateFile, { version: 1, projects: [...projects.values()] });
     });
     return writeQueue;
   };
@@ -292,13 +286,13 @@ export const createProjectIdentityStore = async ({
     const before = [...projects.values()];
     const synced = incoming.map(upsert);
     if (!sameJson(before, [...projects.values()])) await persist();
-    return synced.map(clone);
+    return synced.map(cloneJson);
   };
 
-  const list = () => [...projects.values()].map(clone);
+  const list = () => [...projects.values()].map(cloneJson);
   const get = (projectId) => {
     const value = projects.get(clean(projectId, 200));
-    return value ? clone(value) : null;
+    return value ? cloneJson(value) : null;
   };
   const getForEmployee = (employeeId) => {
     return listForEmployee(employeeId)[0] || null;
@@ -308,11 +302,11 @@ export const createProjectIdentityStore = async ({
     return [...projects.values()]
       .filter((item) => item.kind === "employee"
         && (item.employeeId === id || item.memberEmployeeIds.includes(id)))
-      .map(clone);
+      .map(cloneJson);
   };
   const getByKey = (kind, key) => {
     const value = [...projects.values()].find((item) => item.kind === clean(kind, 40) && item.key === clean(key, 160));
-    return value ? clone(value) : null;
+    return value ? cloneJson(value) : null;
   };
 
   const bindMainConversation = async ({
@@ -345,7 +339,7 @@ export const createProjectIdentityStore = async ({
     next.updatedAt = now();
     projects.set(next.projectId, next);
     await persist();
-    return clone(next);
+    return cloneJson(next);
   };
 
   await sync();

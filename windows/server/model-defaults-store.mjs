@@ -1,13 +1,10 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { readJsonFile, writeJsonFileAtomic } from './persistence/json-file.mjs';
 
 export const createModelDefaultsStore = (file) => {
   let writes = Promise.resolve();
   const read = async () => {
     await writes;
-    try { return JSON.parse(await fs.readFile(file, 'utf8')); }
-    catch (error) { if (error.code === 'ENOENT') return { providerId: '', model: '', effort: '', archivedProviderIds: [] }; throw error; }
+    return readJsonFile(file, { providerId: '', model: '', effort: '', archivedProviderIds: [] });
   };
   const save = (input) => {
     const providerId = String(input.providerId || ''), model = String(input.model || ''), effort = String(input.effort || '');
@@ -15,10 +12,7 @@ export const createModelDefaultsStore = (file) => {
       || (providerId && !model)) throw Object.assign(new Error('设为默认前请选择默认模型'), { statusCode: 400 });
     const value = { providerId, model, effort, archivedProviderIds: [] };
     const task = writes.catch(() => {}).then(async () => {
-      await fs.mkdir(path.dirname(file), { recursive: true });
-      const tmp = file + '.' + randomUUID() + '.tmp';
-      await fs.writeFile(tmp, JSON.stringify(value), { mode: 0o600 });
-      await fs.rename(tmp, file);
+      await writeJsonFileAtomic(file, value, { space: 0, trailingNewline: false, mode: 0o600 });
       return value;
     });
     writes = task.catch(() => {});

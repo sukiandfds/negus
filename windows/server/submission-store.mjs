@@ -1,11 +1,8 @@
 import fs from "node:fs";
-import fsp from "node:fs/promises";
-import path from "node:path";
+import { cloneJson, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 const maxEntries = 500;
 const defaultTtlMs = 24 * 60 * 60 * 1000;
-
-const clone = (value) => (value ? JSON.parse(JSON.stringify(value)) : null);
 
 export const createSubmissionStore = ({ stateFile = "", ttlMs = defaultTtlMs } = {}) => {
   const submissions = new Map();
@@ -40,12 +37,8 @@ export const createSubmissionStore = ({ stateFile = "", ttlMs = defaultTtlMs } =
 
   const persist = () => {
     if (!stateFile) return Promise.resolve();
-    const payload = `${JSON.stringify(snapshot(), null, 2)}\n`;
     persistChain = persistChain.catch(() => {}).then(async () => {
-      await fsp.mkdir(path.dirname(stateFile), { recursive: true });
-      const temporary = `${stateFile}.${process.pid}.tmp`;
-      await fsp.writeFile(temporary, payload, "utf8");
-      await fsp.rename(temporary, stateFile);
+      await writeJsonFileAtomic(stateFile, snapshot());
     }).catch((error) => console.warn(`[submission-store] state persistence failed: ${error.message}`));
     return persistChain;
   };
@@ -59,14 +52,14 @@ export const createSubmissionStore = ({ stateFile = "", ttlMs = defaultTtlMs } =
 
   const get = (submissionId) => {
     removeExpired();
-    return clone(submissions.get(String(submissionId || "")));
+    return cloneJson(submissions.get(String(submissionId || "")));
   };
 
   const begin = (entry) => {
     const submissionId = String(entry?.submissionId || "");
     if (!submissionId) return null;
     const existing = submissions.get(submissionId);
-    if (existing) return clone(existing);
+    if (existing) return cloneJson(existing);
     const createdAt = String(entry.createdAt || new Date().toISOString());
     const next = {
       submissionId,
@@ -80,7 +73,7 @@ export const createSubmissionStore = ({ stateFile = "", ttlMs = defaultTtlMs } =
     submissions.set(submissionId, next);
     while (submissions.size > maxEntries) submissions.delete(submissions.keys().next().value);
     schedulePersist();
-    return clone(next);
+    return cloneJson(next);
   };
 
   const complete = (submissionId, result) => {
@@ -89,7 +82,7 @@ export const createSubmissionStore = ({ stateFile = "", ttlMs = defaultTtlMs } =
     const next = { ...current, state: "accepted", result };
     submissions.set(current.submissionId, next);
     schedulePersist();
-    return clone(next);
+    return cloneJson(next);
   };
 
   const fail = (submissionId, error) => {
@@ -98,7 +91,7 @@ export const createSubmissionStore = ({ stateFile = "", ttlMs = defaultTtlMs } =
     const next = { ...current, state: "failed", error: String(error?.message || error || "指令发送失败") };
     submissions.set(current.submissionId, next);
     schedulePersist();
-    return clone(next);
+    return cloneJson(next);
   };
 
   const close = async () => {

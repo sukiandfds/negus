@@ -11,8 +11,8 @@ import { providerIdOf, readModelDefaults, resolveVisibleModel } from "../../mode
 
 interface ConversationSelection {
   selectedIdRef: MutableRefObject<string>;
-  loadSession: (threadId: string, options?: { older?: boolean; quiet?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean }) => Promise<boolean>;
-  adoptSelection: (threadId: string, quiet: boolean) => Promise<boolean>;
+  loadSession: (threadId: string, options?: { older?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean }) => Promise<boolean>;
+  adoptSelection: (threadId: string) => Promise<boolean>;
   clearSelection: () => void;
   selectSession: (threadId: string) => void;
   setCreatedSession: (detail: SessionDetail, preserveComposer?: boolean) => void;
@@ -112,9 +112,9 @@ export function useConversationCatalog(
       if (agentScoped) {
         const pinnedId = requestedId || currentId;
         if (!pinnedId) return;
-        if (currentId !== pinnedId) await selection.adoptSelection(pinnedId, !initialLoad);
+        if (currentId !== pinnedId) await selection.adoptSelection(pinnedId);
         else if (reloadSelected && (!changedThreadId || changedThreadId === pinnedId)) {
-          await selection.loadSession(pinnedId, { quiet: !initialLoad });
+          await selection.loadSession(pinnedId);
         }
         return;
       }
@@ -126,9 +126,9 @@ export function useConversationCatalog(
         return;
       }
       const selectionChanged = nextId !== currentId;
-      if (selectionChanged) await selection.adoptSelection(nextId, !initialLoad);
+      if (selectionChanged) await selection.adoptSelection(nextId);
       else if (reloadSelected && (!changedThreadId || changedThreadId === nextId)) {
-        await selection.loadSession(nextId, { quiet: !initialLoad });
+        await selection.loadSession(nextId);
       }
     } catch (reason) {
       if (controller.signal.aborted) return;
@@ -163,7 +163,7 @@ export function useConversationCatalog(
       // Warm only a few recent conversations, serially, after the visible one loads.
       for (const entry of sessions.slice(0, 4)) {
         if (cancelled || document.hidden || new URLSearchParams(window.location.search).has("agent") || new URLSearchParams(window.location.search).has("conversation")) break;
-        if (entry.threadId !== selection.selectedIdRef.current) await selection.loadSession(entry.threadId, { prefetch: true, quiet: true, retry: false });
+        if (entry.threadId !== selection.selectedIdRef.current) await selection.loadSession(entry.threadId, { prefetch: true, retry: false });
       }
     }, 800);
     return () => { cancelled = true; window.clearTimeout(timer); };
@@ -209,9 +209,8 @@ export function useConversationCatalog(
     let cancelled = false;
     const controller = new AbortController();
     const hasCachedList = Boolean(initial.sessions.length);
-    const hasCachedSession = Boolean(initial.session);
     const initialSessionRequest = initial.selectedId
-      ? selection.loadSession(initial.selectedId, { quiet: true, recovery: initial.sessionIsPartial })
+      ? selection.loadSession(initial.selectedId, { recovery: initial.sessionIsPartial })
       : Promise.resolve(false);
     void Promise.allSettled([
       conversationApi.project(controller.signal).then(setProject),
@@ -298,7 +297,7 @@ export function useConversationCatalog(
       sessionsRef.current = nextSessions;
       setSessions(nextSessions);
       selection.setCreatedSession(detail, preserveComposer);
-      await selection.loadSession(created.threadId, { quiet: false });
+      await selection.loadSession(created.threadId);
       return true;
     } catch (reason) {
       setListError(reason instanceof Error ? reason.message : String(reason));

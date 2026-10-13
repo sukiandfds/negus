@@ -2,14 +2,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { builtInEmployeesRoot, loadEmployeeDefinitions } from "./employee-definitions.mjs";
 import { CURRENT_MODEL_PROVIDER_ID } from "./model-provider-service.mjs";
+import { cloneJson, readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 const clean = (value, maxLength = 200) => String(value || "").trim().slice(0, maxLength);
 
-const clone = (value) => JSON.parse(JSON.stringify(value));
-
 const readStored = async (stateFile) => {
   try {
-    const stored = JSON.parse(await fs.readFile(stateFile, "utf8"));
+    const stored = await readJsonFile(stateFile, {});
     return Array.isArray(stored?.employees) ? stored.employees : [];
   } catch { return []; }
 };
@@ -44,19 +43,15 @@ export const createEmployeeProjectRegistry = async ({ stateFile, workspaceRoot, 
   ]));
   let writeQueue = Promise.resolve();
   const persist = () => {
-    const payload = JSON.stringify({ version: 1, employees: [...employees.values()] }, null, 2);
     writeQueue = writeQueue.catch(() => {}).then(async () => {
-      await fs.mkdir(path.dirname(stateFile), { recursive: true });
-      const temporary = `${stateFile}.${process.pid}.tmp`;
-      await fs.writeFile(temporary, `${payload}\n`, "utf8");
-      await fs.rename(temporary, stateFile);
+      await writeJsonFileAtomic(stateFile, { version: 1, employees: [...employees.values()] });
     });
     return writeQueue;
   };
   const publicEmployee = (employee) => {
     if (!employee) return null;
     const { instructions, ...publicValue } = employee;
-    return clone(publicValue);
+    return cloneJson(publicValue);
   };
   const requireEmployee = (employeeId) => {
     const employee = employees.get(clean(employeeId, 80));
@@ -79,7 +74,7 @@ export const createEmployeeProjectRegistry = async ({ stateFile, workspaceRoot, 
     list: () => [...employees.values()].map(publicEmployee),
     get: (employeeId) => publicEmployee(employees.get(clean(employeeId, 80))),
     require: requireEmployee,
-    listRuntimeProfiles: () => [...employees.values()].map(clone),
+    listRuntimeProfiles: () => [...employees.values()].map(cloneJson),
     bindMainThread: (employeeId, mainThreadId) => update(employeeId, { mainThreadId: clean(mainThreadId, 120) || null }),
     bindConversation: (employeeId, conversationId) => update(employeeId, { conversationId: clean(conversationId, 120) || null }),
     setModelSettings: (employeeId, settings) => update(employeeId, {

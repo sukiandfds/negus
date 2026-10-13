@@ -1,7 +1,6 @@
 import fs from "node:fs";
-import fsp from "node:fs/promises";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 const maxItemsPerThread = 50;
 const queueStates = new Set(["pending", "dispatching", "failed"]);
@@ -57,12 +56,8 @@ export const createFollowUpQueueStore = ({ stateFile = "" } = {}) => {
 
   const persist = () => {
     if (!stateFile) return Promise.resolve();
-    const payload = `${JSON.stringify(snapshot(), null, 2)}\n`;
     persistChain = persistChain.catch(() => {}).then(async () => {
-      await fsp.mkdir(path.dirname(stateFile), { recursive: true });
-      const temporary = `${stateFile}.${process.pid}.tmp`;
-      await fsp.writeFile(temporary, payload, "utf8");
-      await fsp.rename(temporary, stateFile);
+      await writeJsonFileAtomic(stateFile, snapshot());
     }).catch((error) => { console.warn(`[follow-up-queue] state persistence failed: ${error.message}`); throw error; });
     return persistChain;
   };

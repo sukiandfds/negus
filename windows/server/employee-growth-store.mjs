@@ -1,18 +1,14 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { cloneJson, readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 const clean = (value, max = 300) => String(value || "").trim().slice(0, max);
-const clone = (value) => JSON.parse(JSON.stringify(value));
 const now = () => new Date().toISOString();
 
 const readState = async (stateFile) => {
   try {
-    const value = JSON.parse(await fs.readFile(stateFile, "utf8"));
+    const value = await readJsonFile(stateFile, {});
     return value && typeof value === "object" ? value : {};
-  } catch {
-    return {};
-  }
+  } catch { return {}; }
 };
 
 export const createEmployeeGrowthStore = async ({ stateFile, registry }) => {
@@ -28,15 +24,8 @@ export const createEmployeeGrowthStore = async ({ stateFile, registry }) => {
   }
   let writeQueue = Promise.resolve();
   const persist = () => {
-    const payload = JSON.stringify({
-      version: 1,
-      employees: Object.fromEntries(entries),
-    }, null, 2);
     writeQueue = writeQueue.catch(() => {}).then(async () => {
-      await fs.mkdir(path.dirname(stateFile), { recursive: true });
-      const temp = `${stateFile}.${process.pid}.tmp`;
-      await fs.writeFile(temp, `${payload}\n`, "utf8");
-      await fs.rename(temp, stateFile);
+      await writeJsonFileAtomic(stateFile, { version: 1, employees: Object.fromEntries(entries) });
     });
     return writeQueue;
   };
@@ -52,26 +41,26 @@ export const createEmployeeGrowthStore = async ({ stateFile, registry }) => {
   };
   await persist();
   return {
-    list: () => [...entries.entries()].map(([employeeId, value]) => ({ employeeId, ...clone(value) })),
+    list: () => [...entries.entries()].map(([employeeId, value]) => ({ employeeId, ...cloneJson(value) })),
     get: (employeeId) => {
       const { id, entry } = requireEntry(employeeId);
-      return { employeeId: id, ...clone(entry) };
+      return { employeeId: id, ...cloneJson(entry) };
     },
     addFact: async (employeeId, fact, { requestId = "" } = {}) => {
       const { id, entry } = requireEntry(employeeId);
       const key = clean(requestId, 120);
-      if (key && entry.facts.some((item) => item.requestId === key)) return clone(entry.facts.find((item) => item.requestId === key));
+      if (key && entry.facts.some((item) => item.requestId === key)) return cloneJson(entry.facts.find((item) => item.requestId === key));
       const value = { id: randomUUID(), requestId: key || null, createdAt: now(), status: "saved", ...fact };
       entry.facts.push(value);
       appendLog(entry, { action: "fact_saved", itemId: value.id, requestId: key || null });
       await persist();
-      return clone(value);
+      return cloneJson(value);
     },
     addProposal: async (employeeId, proposal, { requestId = "" } = {}) => {
       const { id, entry } = requireEntry(employeeId);
       const key = clean(requestId, 120);
       const duplicate = key && entry.proposals.find((item) => item.requestId === key);
-      if (duplicate) return clone(duplicate);
+      if (duplicate) return cloneJson(duplicate);
       const value = {
         id: randomUUID(),
         requestId: key || null,
@@ -82,20 +71,20 @@ export const createEmployeeGrowthStore = async ({ stateFile, registry }) => {
       entry.proposals.push(value);
       appendLog(entry, { action: "proposal_pending", itemId: value.id, requestId: key || null });
       await persist();
-      return clone(value);
+      return cloneJson(value);
     },
     decide: async (employeeId, proposalId, decision, { requestId = "" } = {}) => {
       const { id, entry } = requireEntry(employeeId);
       const proposal = entry.proposals.find((item) => item.id === clean(proposalId, 120));
       if (!proposal) throw Object.assign(new Error("Growth proposal does not exist."), { statusCode: 404 });
-      if (proposal.status !== "pending") return clone(proposal);
+      if (proposal.status !== "pending") return cloneJson(proposal);
       proposal.status = decision === "approved" ? "approved" : "rejected";
       delete proposal.error;
       proposal.decidedAt = now();
       proposal.decisionRequestId = clean(requestId, 120) || null;
       appendLog(entry, { action: `proposal_${proposal.status}`, itemId: proposal.id, requestId: proposal.decisionRequestId });
       await persist();
-      return clone(proposal);
+      return cloneJson(proposal);
     },
     requeue: async (employeeId, proposalId, { error = "", requestId = "" } = {}) => {
       const { entry } = requireEntry(employeeId);
@@ -105,7 +94,7 @@ export const createEmployeeGrowthStore = async ({ stateFile, registry }) => {
       proposal.error = clean(error, 500) || null;
       appendLog(entry, { action: "proposal_requeued", itemId: proposal.id, requestId: clean(requestId, 120) || null });
       await persist();
-      return clone(proposal);
+      return cloneJson(proposal);
     },
     appendLog: async (employeeId, log) => {
       const { entry } = requireEntry(employeeId);

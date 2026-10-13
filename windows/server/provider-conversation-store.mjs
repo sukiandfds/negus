@@ -1,21 +1,16 @@
 import { isReasoningEffort } from './reasoning-efforts.mjs';
 import { latestAssistantReplyAtFromRollout } from "./app-server-conversation-store.mjs";
-import fs from "node:fs/promises";
-import path from "node:path";
+import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 // Ordinary project conversations only. Employee runtimes keep their own bindings.
 export const createProviderConversationStore = ({ current, providers, createStore, stateFile }) => {
   const stores = new Map([["current", Promise.resolve(current)]]);
   let routes = {};
-  const ready = fs.readFile(stateFile, "utf8").then((text) => { routes = JSON.parse(text); })
-    .catch((error) => { if (error.code !== "ENOENT") throw error; });
+  const ready = readJsonFile(stateFile, {}).then((stored) => { routes = stored && typeof stored === "object" ? stored : {}; });
   let writing = Promise.resolve();
   const save = () => {
     writing = writing.catch(() => {}).then(async () => {
-      await fs.mkdir(path.dirname(stateFile), { recursive: true });
-      const temporary = `${stateFile}.tmp`;
-      await fs.writeFile(temporary, JSON.stringify(routes), "utf8");
-      await fs.rename(temporary, stateFile);
+      await writeJsonFileAtomic(stateFile, routes, { space: 0, trailingNewline: false });
     });
     return writing;
   };
@@ -101,6 +96,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
     "respondToUserInput"]) {
     service[method] = async (id, ...args) => {
       await ready;
+      if (method === 'sendMessage') await providers.refreshShared?.().catch(() => {});
       if (switching.has(id)) await switching.get(id);
       await ensureRestored(id);
       if (method === 'sendMessage') {
@@ -113,7 +109,13 @@ export const createProviderConversationStore = ({ current, providers, createStor
           reasoningEffort: route.reasoningEffort ?? runtime.reasoningEffort ?? "",
         };
         const resolved = providers.resolveRoute({ model: route.attemptSettings.model });
-        args[3] = { ...route.attemptSettings, model: resolved.model || route.attemptSettings.model };
+        const effectiveModel = resolved.model || route.attemptSettings.model;
+        args[3] = { ...route.attemptSettings, model: effectiveModel };
+        if (effectiveModel !== route.attemptSettings.model && resolved.modelProviderId === owner(id)) {
+          route.model = effectiveModel;
+          route.runtimeModel = effectiveModel;
+          route.activeModel = effectiveModel;
+        }
         await save();
       }
       if ((method === 'sendMessage' || (method === 'setGoal' && (args[0]?.objective !== undefined || args[0]?.status === 'active'))) && routes[id]?.pendingProviderId) {
@@ -210,8 +212,11 @@ export const createProviderConversationStore = ({ current, providers, createStor
     await ready;
     await providers.refreshShared?.().catch((error) => { if (model.includes('::')) throw error; });
     const route = providers.resolveRoute({ model, modelProviderId });
-    const session = await (await storeFor(route.modelProviderId)).createSession(route.model || model, cwd, options);
-    routes[session.threadId] = { providerId: route.modelProviderId, model, summary: session, lastSuccessfulSettings: null };
+    const effectiveModel = route.model || model;
+    const session = await (await storeFor(route.modelProviderId)).createSession(effectiveModel, cwd, options);
+    routes[session.threadId] = { providerId: route.modelProviderId,
+      model: route.modelProviderId === 'current' ? effectiveModel : model,
+      summary: session, lastSuccessfulSettings: null };
     await save();
     return decorate(session);
   };

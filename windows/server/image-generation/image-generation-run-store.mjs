@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { readJsonFile, writeJsonFileAtomic } from "../persistence/json-file.mjs";
 
 const fileVersion = 1;
 const unfinishedStatuses = new Set(["queued", "submitting", "generating", "running", "provider_ready", "saving"]);
@@ -102,11 +103,7 @@ export const createImageGenerationRunStore = ({ stateFile = "", media }) => {
 
   const persist = async () => {
     if (!stateFile) return;
-    await fs.mkdir(path.dirname(stateFile), { recursive: true });
-    const temporary = `${stateFile}.${process.pid}.tmp`;
-    const payload = `${JSON.stringify({ version: fileVersion, runs: [...records.values()] }, null, 2)}\n`;
-    await fs.writeFile(temporary, payload, "utf8");
-    await fs.rename(temporary, stateFile);
+    await writeJsonFileAtomic(stateFile, { version: fileVersion, runs: [...records.values()] });
   };
 
   const load = async () => {
@@ -114,7 +111,7 @@ export const createImageGenerationRunStore = ({ stateFile = "", media }) => {
     loaded = true;
     if (!stateFile) return;
     try {
-      const stored = JSON.parse(await fs.readFile(stateFile, "utf8"));
+      const stored = await readJsonFile(stateFile, {});
       if (stored?.version !== fileVersion || !Array.isArray(stored.runs)) return;
       let normalized = false;
       records = new Map(stored.runs.filter((run) => run?.runId && run?.threadId).map((run) => {

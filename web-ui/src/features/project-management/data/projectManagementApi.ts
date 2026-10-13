@@ -1,4 +1,5 @@
 import { fetchJson, postJson } from "../../../shared/api/http";
+import { readStorage, writeStorage } from "../../../shared/state/storage";
 import type { ProjectManagementDocument, ProjectManagementEntryDetail, ProjectPageDraft } from "../model/types";
 
 const CACHE_MAX_AGE_MS = 30_000;
@@ -13,23 +14,14 @@ interface CacheEnvelope<T> {
 }
 
 const readCache = <T,>(key: string, legacyKey?: string) => {
-  try {
-    const raw = window.sessionStorage.getItem(key)
-      || (legacyKey ? window.sessionStorage.getItem(legacyKey) : null);
-    if (!raw) return null;
-    const envelope = JSON.parse(raw) as CacheEnvelope<T>;
-    return envelope.savedAt && envelope.value ? envelope : null;
-  } catch {
-    return null;
-  }
+  const envelope = readStorage<CacheEnvelope<T>>(key, "session")
+    || (legacyKey ? readStorage<CacheEnvelope<T>>(legacyKey, "session") : null);
+  return envelope?.savedAt && envelope.value ? envelope : null;
 };
 
 const writeCache = <T,>(key: string, value: T) => {
-  try {
-    window.sessionStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value } satisfies CacheEnvelope<T>));
-  } catch {
-    // Storage may be unavailable in private browsing; the network path remains valid.
-  }
+  // Storage may be unavailable in private browsing; the network path remains valid.
+  writeStorage<CacheEnvelope<T>>(key, { savedAt: Date.now(), value }, "session");
 };
 
 export const readProjectManagementCache = () => readCache<ProjectManagementDocument>(
