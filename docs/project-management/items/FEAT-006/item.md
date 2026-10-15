@@ -6,7 +6,7 @@ category: maintenance
 priority: null
 status: in_progress
 updated_at: 2026-08-06 23:35 +08:00
-source: docs/feature-development/features/FEAT-006-stable-remote-access.md
+source: docs/negus-knowledge/features/feature-records/FEAT-006-stable-remote-access.md
 related: [FEAT-004, FEAT-009]
 ---
 
@@ -46,4 +46,4 @@ related: [FEAT-004, FEAT-009]
 
 ## 当前证据
 
-- `docs/feature-development/features/FEAT-006-stable-remote-access.md`
+- `docs/negus-knowledge/features/feature-records/FEAT-006-stable-remote-access.md`

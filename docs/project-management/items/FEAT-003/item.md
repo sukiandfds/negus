@@ -6,7 +6,7 @@ category: development
 priority: P6
 status: pending_review
 updated_at: 2026-07-25 22:49 +08:00
-source: docs/feature-development/features/FEAT-003-attachments-content-rendering.md
+source: docs/negus-knowledge/features/feature-records/FEAT-003-attachments-content-rendering.md
 related: [FEAT-001, FEAT-002]
 ---
 
@@ -46,4 +46,4 @@ related: [FEAT-001, FEAT-002]
 
 ## 当前证据
 
-- `docs/feature-development/features/FEAT-003-attachments-content-rendering.md`
+- `docs/negus-knowledge/features/feature-records/FEAT-003-attachments-content-rendering.md`

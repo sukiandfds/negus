@@ -170,9 +170,9 @@ const readFeature = async (projectRoot, row, indexMarkdown, priorityMap) => {
   const recordValue = String(row["记录"] || "");
   const recordMatch = recordValue.match(/(?:features[\\/])?([^\\/]+\.md)$/i);
   const recordName = recordMatch?.[1] || `${id}.md`;
-  const relativeRecordPath = recordName.includes("/") ? recordName : `features/${recordName}`;
-  const featurePath = path.resolve(projectRoot, "docs", "feature-development", relativeRecordPath);
-  const featureRoot = path.resolve(projectRoot, "docs", "feature-development");
+  const relativeRecordPath = recordName.includes("/") ? recordName : `feature-records/${recordName}`;
+  const featurePath = path.resolve(projectRoot, "docs", "negus-knowledge", "features", relativeRecordPath);
+  const featureRoot = path.resolve(projectRoot, "docs", "negus-knowledge", "features");
   const safePath = featurePath.toLowerCase().startsWith(`${featureRoot.toLowerCase()}${path.sep}`) ? featurePath : null;
   let markdown = "";
   if (safePath) {
@@ -247,7 +247,7 @@ export const readProjectProgress = async ({ project, projectRoot, progressFile }
     project,
     markdown,
     updatedAt: stat.mtime.toISOString(),
-    source: "docs/feature-development/FEATURE_STATUS_INDEX.md",
+    source: "docs/negus-knowledge/features/FEATURE_STATUS_INDEX.md",
     plan,
     inProgress,
     categories,

@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
-import ts from "../../web-ui/node_modules/typescript/lib/typescript.js";
+import ts from "../../ui-feishu/node_modules/typescript/lib/typescript.js";
 
-const source = await fs.readFile(new URL("../../web-ui/src/features/desktop/currentTasks.ts", import.meta.url), "utf8");
+const source = await fs.readFile(new URL("../../ui-feishu/shared/features/desktop/currentTasks.ts", import.meta.url), "utf8");
 const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
 const { collectCurrentTasks, taskPreview } = await import(`data:text/javascript;base64,${Buffer.from(output).toString("base64")}`);
 const project = (entries) => [{ id: "p", name: "业务项目", conversations: entries.map(([id, phase, active = false]) => ({ id, threadId: id, title: id, status: { phase, active, updatedAt: "2026-09-20T04:00:00Z" } })) }];

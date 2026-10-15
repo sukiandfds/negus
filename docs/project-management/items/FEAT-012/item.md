@@ -6,7 +6,7 @@ category: development
 priority: P2
 status: pending_review
 updated_at: 2026-08-06
-source: docs/feature-development/features/FEAT-012-conversation-copy.md
+source: docs/negus-knowledge/features/feature-records/FEAT-012-conversation-copy.md
 related: [FEAT-001]
 ---
 
@@ -44,5 +44,5 @@ related: [FEAT-001]
 
 ## 当前证据
 
-- `docs/feature-development/features/FEAT-012-conversation-copy.md`
+- `docs/negus-knowledge/features/feature-records/FEAT-012-conversation-copy.md`
 - `web-ui/src/features/conversations/components/MessageActions.tsx`

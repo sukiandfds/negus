@@ -4,12 +4,12 @@ import { createRequire } from 'node:module';
 
 // Bundle the actual UI helpers without mounting React or making API requests.
 globalThis.window = { location: { search: '' }, localStorage: { getItem: () => null } };
-const require = createRequire(realpathSync(new URL('../../web-ui/node_modules/vite/package.json', import.meta.url)));
+const require = createRequire(realpathSync(new URL('../../ui-feishu/node_modules/vite/package.json', import.meta.url)));
 const { build } = require('esbuild');
 const resultModule = await build({
   stdin: { contents: "export { buildConversationDirectory } from './conversationDirectory'; export { buildTaskSections } from './useTaskConversations'; export { sortPinned, pinKey } from './usePinnedConversations';", resolveDir: new URL('../src/', import.meta.url).pathname, loader: 'ts' },
   bundle: true, platform: 'node', format: 'esm', write: false, loader: { '.css': 'empty', '.module.css': 'empty' },
-  alias: Object.fromEntries(['react', 'react-dom', 'lucide-react'].map(name => [name, realpathSync(new URL(`../../web-ui/node_modules/${name}`, import.meta.url))])),
+  alias: Object.fromEntries(['react', 'react-dom', 'lucide-react'].map(name => [name, realpathSync(new URL(`../../ui-feishu/node_modules/${name}`, import.meta.url))])),
 });
 const { buildConversationDirectory, buildTaskSections, sortPinned, pinKey } = await import(`data:text/javascript;base64,${Buffer.from(resultModule.outputFiles[0].text).toString('base64')}`);
   const time = hour => `2026-10-06T${hour}:00:00Z`;

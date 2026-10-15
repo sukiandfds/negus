@@ -6,7 +6,7 @@ category: delivery
 priority: P6
 status: pending_review
 updated_at: 2026-08-06
-source: docs/feature-development/features/FEAT-007-agent-artifacts.md
+source: docs/negus-knowledge/features/feature-records/FEAT-007-agent-artifacts.md
 related: [FEAT-008]
 ---
 
@@ -46,4 +46,4 @@ related: [FEAT-008]
 
 ## 当前证据
 
-- `docs/feature-development/features/FEAT-007-agent-artifacts.md`
+- `docs/negus-knowledge/features/feature-records/FEAT-007-agent-artifacts.md`

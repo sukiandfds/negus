@@ -55,7 +55,7 @@ const observerPort = Number(getArg("--observer-port", "9350"));
 const project = getArg("--project", "negus");
 const projectRoot = path.resolve(getArg("--project-root", process.cwd()));
 const employeesRoot = path.join(projectRoot, "employees");
-const webRoot = path.resolve(getArg("--web-root", path.join(process.cwd(), "web-ui", "dist")));
+const webRoot = path.resolve(getArg("--web-root", path.join(process.cwd(), "ui-feishu", "dist")));
 const token = getArg("--token", randomBytes(12).toString("hex"));
 const deviceName = String(getArg("--device-name", os.hostname())).trim() || os.hostname();
 const device = { name: deviceName, startedAt: new Date().toISOString() };
@@ -178,19 +178,34 @@ const conversations = createConversationService({
 followUpQueue = createFollowUpQueueService({
   stateFile: path.join(projectRoot, "runtime", "follow-up-queues.json"),
   execution,
-  conversations: { ...conversations, steerMessage: async (...args) => {
-    if (employeeRuntime?.ownsThread(args[0])) throw new Error("员工转发消息需等待当前任务完成");
-    return conversations.steerMessage(...args);
-  }, sendMessage: async (threadId, text, attachments, requestId) => {
-    const employee = employeeRegistry?.list().find(e => e.mainThreadId === threadId);
-    if (employee) {
-      if (attachments?.length) throw new Error("员工队列暂不支持附件");
-      return employeeRuntime.sendMessage({ employeeId: employee.id, text, requestId });
-    }
-    const session = await conversations.findSession(threadId, "all", { limit: 1 });
-    if (!session || session.archived) throw new Error("目标对话已归档或不可用");
-    return conversations.sendMessage(threadId, text, attachments, requestId);
-  } },
+  conversations: {
+    ...conversations,
+    steerMessage: async (threadId, _turnId, text, attachments, requestId) => {
+      const employee = employeeRegistry?.list().find(e => e.mainThreadId === threadId);
+      return employee
+        ? employeeRuntime.sendMessage({ employeeId: employee.id, text, attachments, requestId })
+        : conversations.steerMessage(threadId, _turnId, text, attachments, requestId);
+    },
+    sendMessage: async (threadId, text, attachments, requestId) => {
+      const employee = employeeRegistry?.list().find(e => e.mainThreadId === threadId);
+      if (employee) return employeeRuntime.sendMessage({ employeeId: employee.id, text, attachments, requestId });
+      const session = await conversations.findSession(threadId, "all", { limit: 1 });
+      if (!session || session.archived) throw new Error("目标对话已归档或不可用");
+      return conversations.sendMessage(threadId, text, attachments, requestId);
+    },
+    updateModel: async (threadId, model, settings = {}) => {
+      const employee = employeeRegistry?.list().find(e => e.mainThreadId === threadId);
+      return employee
+        ? employeeRuntime.updateModelSettings(employee.id, { model, reasoningEffort: settings.reasoningEffort })
+        : conversations.updateModel(threadId, model, settings);
+    },
+    updateReasoningEffort: async (threadId, reasoningEffort) => {
+      const employee = employeeRegistry?.list().find(e => e.mainThreadId === threadId);
+      return employee
+        ? employeeRuntime.updateModelSettings(employee.id, { reasoningEffort })
+        : conversations.updateReasoningEffort(threadId, reasoningEffort);
+    },
+  },
   media,
   publishThreadEvent: execution.publishThreadEvent,
 });
@@ -379,6 +394,7 @@ employeeRuntime = createEmployeeRuntimeService({
   onTurnCompleted: event => followUpQueue.handleTurnTerminal(event),
   growthService: employeeGrowth,
   contextProvider: employeeGrowth.getContext,
+  attachmentContent,
   client: appServerClient,
   modelProviders,
 });
@@ -513,6 +529,4 @@ server.listen(port, "0.0.0.0", () => {
   console.log(`[remote-room-demo] ${projectRoot}`);
   console.log(`[remote-room-demo] device: ${deviceName}`);
   console.log(`[remote-room-demo] http://127.0.0.1:${port}/?token=${token}`);
-  console.log(`[remote-room-demo] http://127.0.0.1:${port}/group.html?token=${token}`);
-  console.log(`[remote-room-demo] http://127.0.0.1:${port}/employee.html?token=${token}`);
 });

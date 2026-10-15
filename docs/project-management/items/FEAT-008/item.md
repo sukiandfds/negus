@@ -6,7 +6,7 @@ category: delivery
 priority: P6
 status: pending_review
 updated_at: 2026-08-06
-source: docs/feature-development/features/FEAT-008-html-page-pdf-generation.md
+source: docs/negus-knowledge/features/feature-records/FEAT-008-html-page-pdf-generation.md
 related: [FEAT-007]
 ---
 
@@ -46,4 +46,4 @@ related: [FEAT-007]
 
 ## 当前证据
 
-- `docs/feature-development/features/FEAT-008-html-page-pdf-generation.md`
+- `docs/negus-knowledge/features/feature-records/FEAT-008-html-page-pdf-generation.md`

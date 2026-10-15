@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import ts from '../../web-ui/node_modules/typescript/lib/typescript.js';
+import ts from '../../ui-feishu/node_modules/typescript/lib/typescript.js';
 const compile = (source) => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
 const url = (source) => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
-const layout = url(compile(await fs.readFile('web-ui/src/features/desktop/desktopLayout.ts', 'utf8')));
-const shapes = compile(await fs.readFile('web-ui/src/features/desktop/desktopShapes.ts', 'utf8')).replace('"./desktopLayout"', JSON.stringify(layout));
+const layout = url(compile(await fs.readFile('ui-feishu/shared/features/desktop/desktopLayout.ts', 'utf8')));
+const shapes = compile(await fs.readFile('ui-feishu/shared/features/desktop/desktopShapes.ts', 'utf8')).replace('"./desktopLayout"', JSON.stringify(layout));
 const { recognizeStroke, shapeRect } = await import(url(shapes));
 const ellipse = (rx=70, ry=60) => Array.from({length:81}, (_, i) => ({ x: 100 + rx * Math.cos(i * Math.PI / 40), y: 100 + ry * Math.sin(i * Math.PI / 40) }));
 const rectangle = [];

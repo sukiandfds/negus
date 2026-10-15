@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
-import ts from "../../web-ui/node_modules/typescript/lib/typescript.js";
-const source = await fs.readFile(new URL("../../web-ui/src/features/desktop/desktopLayout.ts", import.meta.url), "utf8");
+import ts from "../../ui-feishu/node_modules/typescript/lib/typescript.js";
+const source = await fs.readFile(new URL("../../ui-feishu/shared/features/desktop/desktopLayout.ts", import.meta.url), "utf8");
 const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
 const { clampRect, placeTile, overlaps, rectFromPoints, validTiles, replyForTile, defaultTiles, migrateDesktopTiles } = await import(`data:text/javascript;base64,${Buffer.from(output).toString("base64")}`);
 test("selection maps to same logical cells on phone and large screen, including reverse drag", () => {

@@ -19,6 +19,6 @@ status: in_progress
 Codex原生cua_repl首次getState实测可列应用，但浏览器清单失败：Codex auth token is unavailable。未绕过认证。后台浏览器与可见桌面的点击输入尚未验收。当前系统7892代理无监听，GitHub网页直连超时但API成功；Cloudflare CLI凭据及隧道有效，不等于浏览器控制台可用。
 
 
-2026-10-03进度快照：正式版本1790959880810-8092ecde已通过权限、截图与GitHub API检查。自建输入工具实测返回成功但页面没有文字；本机原生工具已完成输入、点击和页面回执，独立渠道原生MCP复用已加入源码，但仍有调用兼容错误，尚未发布或完成正式验收。代理曾因lsof无输出被误判未监听，后续真实代理请求及netstat证实可用；GitHub网页经代理HTTP200。详细过程见docs/records/NEGUS_DEMO_PROGRESS_2026-10-03.md。
+2026-10-03进度快照：正式版本1790959880810-8092ecde已通过权限、截图与GitHub API检查。自建输入工具实测返回成功但页面没有文字；本机原生工具已完成输入、点击和页面回执，独立渠道原生MCP复用已加入源码，但仍有调用兼容错误，尚未发布或完成正式验收。代理曾因lsof无输出被误判未监听，后续真实代理请求及netstat证实可用；GitHub网页经代理HTTP200。详细过程见docs/negus-knowledge/records/NEGUS_DEMO_PROGRESS_2026-10-03.md。
 
 用户要求先推送一版GitHub，按当前项目源码保存进度快照，包含此前工作区已有修改，排除work临时资料与runtime。前端TypeScript检查及Vite构建成功；本次相关测试28通过。扩大到windows/tests全部测试：354项，343通过、10失败、1跳过；失败集中在会话/群聊加载测试的data URL相对导入，以及heartbeat-message测试缺依赖。此快照不标记为稳定发布或电脑操控验收完成。

@@ -54,7 +54,7 @@ test('failed file navigation never receives cached Negus desktop; app offline fa
   const handlers = {};
   const context = { self: { location: { href: 'https://local/sw.js', origin: 'https://local' }, addEventListener: (event, fn) => { handlers[event] = fn; } }, URL,
     fetch: async () => ({ ok: false, status: 404 }), caches: { match: async (pathname) => pathname } };
-  vm.runInNewContext(await fs.readFile('web-ui/public/sw.js', 'utf8'), context);
+  vm.runInNewContext(await fs.readFile('ui-feishu/public/sw.js', 'utf8'), context);
   for (const pathname of ['/Users/me/file.md', '/docs/file.md', '/api/session/file']) {
     let intercepted = false;
     handlers.fetch({ request: { method: 'GET', mode: 'navigate', url: 'https://local' + pathname }, respondWith: () => { intercepted = true; } });

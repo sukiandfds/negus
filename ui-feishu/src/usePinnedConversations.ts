@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { readLocalCache, writeLocalCache } from '../../web-ui/src/shared/state/localCache';
+import { readLocalCache, writeLocalCache } from '../shared/shared/state/localCache';
 import { byLatest, conversationKey } from './conversationDirectory';
 import type { Conversation } from './types';
 

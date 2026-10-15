@@ -6,14 +6,14 @@
 
 ## 当前方向与证据
 
-当前正式方向以 [产品定义](../PRODUCT_DEFINITION.md) 为准。判断顺序：本次用户明确确认 > 可定位的用户原话和决定 > 助手摘要；同一事项优先核对较新的表达及实际提交差异。较晚提交可能只是批量归档，不能让未经确认的建议自动覆盖旧决定。
+当前正式方向以 [产品定义](negus-knowledge/product/PRODUCT_DEFINITION.md) 为准。判断顺序：本次用户明确确认 > 可定位的用户原话和决定 > 助手摘要；同一事项优先核对较新的表达及实际提交差异。较晚提交可能只是批量归档，不能让未经确认的建议自动覆盖旧决定。
 
 | 来源 | Git 提交日期 / 提交 | 可支持的结论 | 不应推导的结论 |
 | --- | --- | --- | --- |
-| [9 月 24 日愿景及原话](records/NEGUS_PRODUCT_VISION_DISCUSSION_2026-09-24.md) | 9 月 24 日 / `0a2d232` | Negus 主工作台、桌面入口、总助理、前台聊天与后台办事、自定义功能及复用 | 固定两名助手、多级分派一定更快、模板默认跨用户收集 |
-| [9 月 28 日方向讨论](records/NEGUS_PRODUCT_DIRECTION_DISCUSSION_2026-09-28.md) | 9 月 28 日 / `c8c7b66` | 延续上述方向；专业咨询、后台委派与需求判断值得继续设计 | 三人公司和主管层级已经定案、Jev 方案已验证 |
-| [9 月 25 日模型配置原话](records/NEGUS_MODEL_CONFIG_DISCUSSION_2026-09-25.md) | 9 月 25 日 / `d356f1d` | 配置、模型和思考强度以输入框显示选择发送；失败不擅自换选择 | 记录中被撤回的恢复逻辑已经获得重新开发授权 |
-| [9 月 23 日协作原则](project-management/NEGUS_PRODUCT_TECHNICAL_COLLABORATION_PRINCIPLES.md) | 9 月 23 日 / `4aad91b` | 轻量、高效、复用、互通；产品经理负责体验，助手承担技术工作 | 以测试通过代替真实体验验收 |
+| [9 月 24 日愿景及原话](negus-knowledge/decisions/NEGUS_PRODUCT_VISION_DISCUSSION_2026-09-24.md) | 9 月 24 日 / `0a2d232` | Negus 主工作台、桌面入口、总助理、前台聊天与后台办事、自定义功能及复用 | 固定两名助手、多级分派一定更快、模板默认跨用户收集 |
+| [9 月 28 日方向讨论](negus-knowledge/decisions/NEGUS_PRODUCT_DIRECTION_DISCUSSION_2026-09-28.md) | 9 月 28 日 / `c8c7b66` | 延续上述方向；专业咨询、后台委派与需求判断值得继续设计 | 三人公司和主管层级已经定案、Jev 方案已验证 |
+| [9 月 25 日模型配置原话](negus-knowledge/decisions/NEGUS_MODEL_CONFIG_DISCUSSION_2026-09-25.md) | 9 月 25 日 / `d356f1d` | 配置、模型和思考强度以输入框显示选择发送；失败不擅自换选择 | 记录中被撤回的恢复逻辑已经获得重新开发授权 |
+| [9 月 23 日协作原则](negus-knowledge/product/NEGUS_PRODUCT_TECHNICAL_COLLABORATION_PRINCIPLES.md) | 9 月 23 日 / `4aad91b` | 轻量、高效、复用、互通；产品经理负责体验，助手承担技术工作 | 以测试通过代替真实体验验收 |
 | [本次确认与整理](project-management/items/PM-003/item.md) | 当前会话，尚未提交 | 正式方向确认；旧功能重新评估；历史资料转为有来源的记忆；规则精简；换肤逐步退出 | 批量删除历史证据或立即删除换肤代码 |
 
 9 月 28 日记录部分来自前序交接摘要，可信度不等同于完整原话。所有来源保持原样，正文中的“当前”只代表其记录时点。
@@ -22,12 +22,12 @@
 
 | 需要回答的问题 | 主来源 | 什么时候再看历史 |
 | --- | --- | --- |
-| 产品现在朝哪里发展 | [产品定义](../PRODUCT_DEFINITION.md) | 有方向争议时查上表原话 |
+| 产品现在朝哪里发展 | [产品定义](negus-knowledge/product/PRODUCT_DEFINITION.md) | 有方向争议时查上表原话 |
 | 用户长期偏好与工作边界 | [用户画像](../USER_PROFILE.md)、[助手规则](../AI_ASSISTANT_WORK_RULES.md) | 需要解释原则时查协作原则及事故 |
-| 某功能具体怎样工作 | [功能索引](feature-development/FEATURE_STATUS_INDEX.md) → 对应 FEAT 档案 | 需要验证来源或被替代行为时看版本记录 |
+| 某功能具体怎样工作 | [功能索引](negus-knowledge/features/FEATURE_STATUS_INDEX.md) → 对应 FEAT 档案 | 需要验证来源或被替代行为时看版本记录 |
 | 代码在哪、如何运行 | [项目说明](../PROJECT.md)、[架构索引](architecture/README.md) | 审计、调研只作当时快照 |
 | 当前登记工作处于什么状态 | [项目管理索引](project-management/INDEX.md) → item.md | 变化看 updates.md，弯路看 process.md |
-| 怎样避免重复犯错 | [常见错误](feature-development/DEVELOPMENT_COMMON_MISTAKES.md) | 按具体问题查事故原文 |
+| 怎样避免重复犯错 | [常见错误](negus-knowledge/features/DEVELOPMENT_COMMON_MISTAKES.md) | 按具体问题查事故原文 |
 
 ## 仍待设计，不能自动变成待办
 
@@ -54,12 +54,12 @@
 
 | 资料 | 用法 |
 | --- | --- |
-| [records/](records/README.md) | 原话、决策形成过程、验证和事故原文；按需查证，不默认全读 |
-| [research/](research/) | 提取仍适用的事实、方案取舍和未验证问题，保留调研日期；外部能力需重新核实才用于新决策 |
-| [planning/](planning/) | 区分已经确认的交互与未确认设想，桌面 PRD 不等于全部功能已实现 |
-| [system-audit/](system-audit/README.md)、[架构审计](architecture/audits/) | 复用问题定位和边界分析，按其代码基线理解；不把旧问题直接判为今天仍存在 |
-| [战略与多角色评审](../项目战略与多角色评审/00-调研文档索引与推荐阅读顺序.md) | 保留产品起源、被否定路线、竞品和组织探索；不再作为首次阅读顺序 |
-| [换肤项目记录](CODEX_DREAM_SKIN_PROJECT_NOTES.md)、[平台说明](platforms.md)、背景提示词 | 历史素材与换肤维护依据，待依赖核对后逐步退出 |
-| [资料库索引](../资料库/资料索引.md)、[旧精简报告](TIDY_UP_PLAN_2026-08-10.md) | 外部素材来源、当时清理边界；旧磁盘统计不是当前统计 |
+| [records/](negus-knowledge/records/README.md) | 原话、决策形成过程、验证和事故原文；按需查证，不默认全读 |
+| [research/](negus-knowledge/research) | 提取仍适用的事实、方案取舍和未验证问题，保留调研日期；外部能力需重新核实才用于新决策 |
+| [planning/](negus-knowledge/planning) | 区分已经确认的交互与未确认设想，桌面 PRD 不等于全部功能已实现 |
+| [system-audit/](negus-knowledge/audits/system/README.md)、[架构审计](negus-knowledge/audits/architecture) | 复用问题定位和边界分析，按其代码基线理解；不把旧问题直接判为今天仍存在 |
+| [战略与多角色评审](negus-knowledge/strategy/00-调研文档索引与推荐阅读顺序.md) | 保留产品起源、被否定路线、竞品和组织探索；不再作为首次阅读顺序 |
+| [换肤项目记录](negus-knowledge/reference/CODEX_DREAM_SKIN_PROJECT_NOTES.md)、[平台说明](platforms.md)、背景提示词 | 历史素材与换肤维护依据，待依赖核对后逐步退出 |
+| [资料库索引](../资料库/资料索引.md)、[旧精简报告](negus-knowledge/records/TIDY_UP_PLAN_2026-08-10.md) | 外部素材来源、当时清理边界；旧磁盘统计不是当前统计 |
 
-精简的是日常读取路径和重复正文。用户原话、重要决策原因和真实验证证据保留；历史文件本轮不移动、不删除。
+精简的是日常读取路径和重复正文。用户原话、重要决策原因和真实验证证据保留；相关资料已集中到 `docs/negus-knowledge/`，文件内容不因迁移而重写成新结论。

@@ -2,7 +2,7 @@
 export function realtimeIntegration(streamModule) {
   return { name: 'negus-shared-project-events', enforce: 'pre', transform(source, id) {
     const file = id.split('?')[0];
-    if (!file.includes('/web-ui/src/')) return null;
+    if (!file.includes('/ui-feishu/shared/')) return null;
     const owner = file.endsWith('/conversations/realtime/useConversationEvents.ts');
     if (owner) {
       for (const kind of ['open', 'error', 'message']) {

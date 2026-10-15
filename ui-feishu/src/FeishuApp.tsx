@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { useProjectConversations } from '../../web-ui/src/features/conversations/hooks/useProjectConversations';
-import { useProjectDirectory } from '../../web-ui/src/features/project-directory/hooks/useProjectDirectory';
-import { UserInputDialog } from '../../web-ui/src/features/conversations/components/UserInputDialog';
-import { openAgentConversation } from '../../web-ui/src/features/agent-sharing/navigation/openAgentConversation';
-import { SettingsPage } from '../../web-ui/src/features/settings/SettingsPage';
-import { ShareConversationDialog } from '../../web-ui/src/features/conversation-sharing/components/ShareConversationDialog';
-import { useUsageMonitor } from '../../web-ui/src/features/usage-monitor/hooks/useUsageMonitor';
+import { useProjectConversations } from '../shared/features/conversations/hooks/useProjectConversations';
+import { useProjectDirectory } from '../shared/features/project-directory/hooks/useProjectDirectory';
+import { UserInputDialog } from '../shared/features/conversations/components/UserInputDialog';
+import { openAgentConversation } from '../shared/features/agent-sharing/navigation/openAgentConversation';
+import { SettingsPage } from '../shared/features/settings/SettingsPage';
+import { ShareConversationDialog } from '../shared/features/conversation-sharing/components/ShareConversationDialog';
+import { useUsageMonitor } from '../shared/features/usage-monitor/hooks/useUsageMonitor';
+import { useDeviceInfo } from '../shared/features/device/hooks/useDeviceInfo';
 import { ChatSkin } from './ChatSkin';
 import { AppRail } from './components/AppRail';
 import { ConversationList } from './components/ConversationList';
@@ -20,18 +21,33 @@ import { CreateGroupDialog } from './components/CreateGroupDialog';
 import { GroupWorkspace } from './components/GroupWorkspace';
 import type { ChatTab, Conversation, ConversationFilter, Section } from './types';
 
+function readRoute() {
+  const params = new URLSearchParams(location.search);
+  return {
+    view: params.get('view') || '',
+    roomId: params.get('roomId') || '',
+    agentId: params.get('agent') || params.get('employeeId') || '',
+    hasChat: Boolean(params.get('thread') || params.get('roomId') || params.get('conversation') || params.get('agent') || params.get('employeeId')),
+  };
+}
+
 export function FeishuApp() {
+  const initialRoute = readRoute();
+  const initialView = initialRoute.view;
   const c = useProjectConversations();
   const directory = useProjectDirectory(c.executionStatus);
   const page = usePageSnapshot(c, directory);
   const viewC = page.conversations;
   const viewDirectory = page.directory;
   const usage = useUsageMonitor(c.executionStatus);
-  const [section, setSection] = useState<Section>('messages');
+  const device = useDeviceInfo(c.connected);
+  const [section, setSection] = useState<Section>(initialView === 'employees' ? 'employees' : initialView === 'tasks' ? 'tasks' : 'messages');
   const groups = useGroupChats();
   const pins = usePinnedConversations();
   const [creatingGroup, setCreatingGroup] = useState(false);
-  const [roomId, setRoomId] = useState(new URLSearchParams(location.search).get('roomId') || '');
+  const [roomId, setRoomId] = useState(initialRoute.roomId);
+  const [agentId, setAgentId] = useState(initialRoute.agentId);
+  const [legacyGroup, setLegacyGroup] = useState(initialView === 'group');
   const singleChat = useRef(viewC);
   if (!roomId) singleChat.current = viewC;
   const [query, setQuery] = useState('');
@@ -39,19 +55,58 @@ export function FeishuApp() {
   const [opening, setOpening] = useState('');
   const [openError, setOpenError] = useState('');
   const [details, setDetails] = useState(false);
-  const [settings, setSettings] = useState(false);
+  const [settings, setSettings] = useState(initialView === 'settings');
   const [sharing, setSharing] = useState(false);
   const [tab, setTab] = useState<ChatTab>('messages');
-  const [mobileChat, setMobileChat] = useState(Boolean(new URLSearchParams(location.search).get('thread') || new URLSearchParams(location.search).get('roomId')));
-  const agentId = new URLSearchParams(location.search).get('agent') || '';
+  const [mobileChat, setMobileChat] = useState(initialRoute.hasChat);
   const employee = viewDirectory.projects.find(p => p.employeeId === agentId);
+  const autoOpenedAgent = useRef('');
   const selectedName = employee?.name || 'Negus 助手';
+  const closeSettings = () => {
+    const url = new URL(location.href);
+    if (url.searchParams.get('view') === 'settings') {
+      url.searchParams.delete('settings');
+      url.searchParams.set('view', 'conversation');
+      history.replaceState({}, '', `${url.pathname}${url.search}`);
+    }
+    setSettings(false);
+  };
   useEffect(() => {
-    const navigate = () => { setRoomId(new URLSearchParams(location.search).get('roomId') || ''); setTab('messages'); setDetails(false); setMobileChat(true); };
+    const navigate = () => {
+      const next = readRoute();
+      setRoomId(next.roomId);
+      setAgentId(next.agentId);
+      setLegacyGroup(next.view === 'group');
+      setSettings(next.view === 'settings');
+      if (next.view === 'employees') setSection('employees');
+      else if (next.view === 'tasks') setSection('tasks');
+      else if (next.view === 'group' || next.view === 'conversation' || next.agentId) setSection('messages');
+      setTab('messages'); setDetails(false); setMobileChat(next.hasChat || next.view === 'group');
+    };
     window.addEventListener('negus:navigate', navigate);
     window.addEventListener('popstate', navigate);
     return () => { window.removeEventListener('negus:navigate', navigate); window.removeEventListener('popstate', navigate); };
   }, []);
+  useEffect(() => {
+    if (!legacyGroup || roomId || !groups.rooms.length) return;
+    const fallback = groups.rooms[0];
+    setRoomId(fallback.id);
+    const url = new URL(location.href);
+    url.searchParams.set('view', 'group');
+    url.searchParams.set('roomId', fallback.id);
+    history.replaceState({}, '', `${url.pathname}${url.search}`);
+  }, [groups.rooms, legacyGroup, roomId]);
+  useEffect(() => {
+    if (!agentId || new URLSearchParams(location.search).get('thread') || autoOpenedAgent.current === agentId) return;
+    const target = viewDirectory.projects.find(project => project.employeeId === agentId);
+    if (!target) return;
+    autoOpenedAgent.current = agentId;
+    void openAgentConversation({
+      agentId,
+      threadId: target.mainThreadId || '',
+      conversationId: target.mainConversationId || '',
+    }).catch(() => { autoOpenedAgent.current = ''; });
+  }, [agentId, viewDirectory.projects]);
   useEffect(() => {
     const search = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
@@ -128,6 +183,6 @@ export function FeishuApp() {
     {creatingGroup && <CreateGroupDialog directory={directory} onClose={() => setCreatingGroup(false)} onCreated={room => { setCreatingGroup(false); void groups.refresh(); setSection('messages'); setFilter('all'); void open({ id: `group:${room.id}`, name: room.name, subtitle: '群聊', kind: 'group', roomId: room.id }); }} />}
     <ShareConversationDialog open={sharing} title={c.session?.title || selectedName} onClose={() => setSharing(false)} />
     <UserInputDialog request={c.userInputRequest} busy={c.userInputBusy} error={c.userInputError} onSubmit={c.answerUserInput} />
-    {settings && <div className="settings-overlay"><SettingsPage onClose={() => setSettings(false)} /></div>}
+    {settings && <div className="settings-overlay"><SettingsPage onClose={closeSettings} connected={c.connected} device={device} projectId={directory.projects.find(project => project.kind === 'personal')?.projectId || ''} projectRoot={c.project?.root || ''} /></div>}
   </div>;
 }

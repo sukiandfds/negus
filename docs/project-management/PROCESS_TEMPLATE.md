@@ -14,7 +14,7 @@ audience: ai_assistants_and_maintainers
 - `item.md` 记录当前快照、用户原话、助手初步理解和预计效果。
 - `updates.md` 记录状态、版本和用户可见变化的时间线。
 - `process.md` 记录这个条目独有的弯路、阻塞、决策和效率损失。
-- 能指导其他功能的经验必须升级到 `docs/feature-development/DEVELOPMENT_COMMON_MISTAKES.md`，使用 `PROC-*`；条目内只保留本条目影响和链接。
+- 能指导其他功能的经验必须升级到 `docs/negus-knowledge/features/DEVELOPMENT_COMMON_MISTAKES.md`，使用 `PROC-*`；条目内只保留本条目影响和链接。
 - 未验证的根因必须写“待验证”，不能用推测替代证据。
 
 ## 文件头

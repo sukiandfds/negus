@@ -1,15 +1,29 @@
 {
-  "extends": "../web-ui/tsconfig.app.json",
   "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "react": ["../web-ui/node_modules/@types/react"],
-      "react/*": ["../web-ui/node_modules/@types/react/*"],
-      "react-dom/*": ["../web-ui/node_modules/@types/react-dom/*"],
-      "react-dom": ["../web-ui/node_modules/@types/react-dom"],
-      "lucide-react": ["../web-ui/node_modules/lucide-react"],
-      "vite/client": ["../web-ui/node_modules/vite/client.d.ts"]
+      "react": ["node_modules/@types/react"],
+      "react/*": ["node_modules/@types/react/*"],
+      "react-dom/*": ["node_modules/@types/react-dom/*"],
+      "react-dom": ["node_modules/@types/react-dom"],
+      "lucide-react": ["node_modules/lucide-react"],
+      "vite/client": ["node_modules/vite/client.d.ts"]
     }
   },
-  "include": ["src", "../web-ui/src/vite-env.d.ts"]
+  "include": ["src", "shared"]
 }

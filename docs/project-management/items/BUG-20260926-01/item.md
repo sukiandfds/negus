@@ -6,4 +6,4 @@
 基线：a3dd3f779649db3cb86bbf864d3c0d25f44c3488
 分支：codex/publish-current-panel
 结果：8个产品代码文件净增23行，无新依赖；10项测试、构建和两尺寸隔离浏览器检查通过。真实设备与供应商验收待完成，未重启、提交或推送。
-记录：[调用关系与证据](../../../records/SHARED_CACHE_2026-09-26.md)。
+记录：[调用关系与证据](../../../negus-knowledge/records/SHARED_CACHE_2026-09-26.md)。

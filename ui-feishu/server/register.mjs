@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
 
-// Additive preview integration; existing source files remain unchanged on disk.
+// Mainline service integration; existing source files remain unchanged on disk.
 const extension = new URL('./group-extension.mjs', import.meta.url).href;
 const taskRoutes = new URL('./task-routes.mjs', import.meta.url).href;
 const employeeTasks = new URL('./employee-task-extension.mjs', import.meta.url).href;

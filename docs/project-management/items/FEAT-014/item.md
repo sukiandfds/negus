@@ -6,7 +6,7 @@ category: development
 priority: P2
 status: pending_review
 updated_at: 2026-08-06
-source: docs/feature-development/features/FEAT-014-conversation-archive.md
+source: docs/negus-knowledge/features/feature-records/FEAT-014-conversation-archive.md
 related: [FEAT-001]
 ---
 
@@ -44,6 +44,6 @@ related: [FEAT-001]
 
 ## 当前证据
 
-- `docs/feature-development/features/FEAT-014-conversation-archive.md`
+- `docs/negus-knowledge/features/feature-records/FEAT-014-conversation-archive.md`
 - `windows/server/jsonl-conversation-store.mjs`
 - `web-ui/src/features/conversations/hooks/useConversationCatalog.ts`

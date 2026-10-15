@@ -5,7 +5,7 @@
 ## 1. 任务与阅读
 
 - 先判断是讨论、只读查询、研究、修改还是故障处理；用户要求“先不改”“先统计”时只检查和报告。
-- 用户偏好以 [USER_PROFILE.md](USER_PROFILE.md) 为准；方向与有效行为看 [PRODUCT_DEFINITION.md](PRODUCT_DEFINITION.md)。根据任务再读相关 FEAT、源码、运行状态及 PROC，不默认扫描全部历史。
+- 用户偏好以 [USER_PROFILE.md](USER_PROFILE.md) 为准；方向与有效行为看 [PRODUCT_DEFINITION.md](docs/negus-knowledge/product/PRODUCT_DEFINITION.md)。根据任务再读相关 FEAT、源码、运行状态及 PROC，不默认扫描全部历史。
 - 代码入口看 [PROJECT.md](PROJECT.md)，最新决定及其原话、开放问题看 [docs/README.md](docs/README.md)。
 - 同一事项优先核对最近明确表达及提交差异；文件提交日期不代表整篇内容得到重新确认。历史授权不自动适用于新任务。
 - 修改、研究、测试或提交前明确任务编号、范围和产品基线 SHA。普通讨论和只读查询不建任务。
@@ -34,7 +34,7 @@
 
 | 信息发生变化 | 更新位置 | 其他位置怎么处理 |
 | --- | --- | --- |
-| 用户认可的产品行为或归属边界 | PRODUCT_DEFINITION.md 对应章节 | 功能档案引用，不重复总原则 |
+| 用户认可的产品行为或归属边界 | docs/negus-knowledge/product/PRODUCT_DEFINITION.md 对应章节 | 功能档案引用，不重复总原则 |
 | 功能细节、实现、验证及变化 | 对应 FEAT 档案 | 索引只更新必要摘要、版本与冲突提示 |
 | 当前工作状态 | 对应 item.md | 索引只定位，不复制长正文 |
 | 状态变化与交接 | updates.md | 简短变化与证据链接，不复制功能日志 |

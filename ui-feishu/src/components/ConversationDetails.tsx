@@ -1,8 +1,8 @@
 import { Activity, Archive, MessageCircle, X } from 'lucide-react';
-import { EmployeeCapabilityPanel } from '../../../web-ui/src/features/employee-capabilities/components/EmployeeCapabilityPanel';
-import { EmployeeGrowthPanel } from '../../../web-ui/src/features/employee-growth/components/EmployeeGrowthPanel';
-import { UsageSummaryControl } from '../../../web-ui/src/features/usage-monitor/components/UsageSummaryControl';
-import { IntelligenceEfficiencyControl } from '../../../web-ui/src/features/intelligence-efficiency/components/IntelligenceEfficiencyControl';
+import { EmployeeCapabilityPanel } from '../../shared/features/employee-capabilities/components/EmployeeCapabilityPanel';
+import { EmployeeGrowthPanel } from '../../shared/features/employee-growth/components/EmployeeGrowthPanel';
+import { UsageSummaryControl } from '../../shared/features/usage-monitor/components/UsageSummaryControl';
+import { IntelligenceEfficiencyControl } from '../../shared/features/intelligence-efficiency/components/IntelligenceEfficiencyControl';
 import { Avatar } from './Avatar';
 import type { ConversationState, UsageState } from '../types';
 

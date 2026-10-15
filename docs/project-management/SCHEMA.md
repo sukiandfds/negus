@@ -49,7 +49,7 @@ related: [FEAT-005]
 
 ## `process.md` 记录格式
 
-`process.md` 不是每日开发日志，也不是 `updates.md` 的重复版本。只有该条目独有的弯路、阻塞、决策或效率问题才写入；如果经验可以跨功能复用，必须在 `docs/feature-development/DEVELOPMENT_COMMON_MISTAKES.md` 建立 `PROC-*`，本文件只回链。
+`process.md` 不是每日开发日志，也不是 `updates.md` 的重复版本。只有该条目独有的弯路、阻塞、决策或效率问题才写入；如果经验可以跨功能复用，必须在 `docs/negus-knowledge/features/DEVELOPMENT_COMMON_MISTAKES.md` 建立 `PROC-*`，本文件只回链。
 
 推荐 frontmatter：
 
@@ -75,4 +75,4 @@ last_updated: 2026-08-02 18:00 +08:00
 | `prevention_trigger` | 下次遇到什么信号时先做什么检查 |
 | `evidence` | 功能文档、通用问题编号、日志或提交；未知事实标为“待验证” |
 
-详细模板见 [`PROCESS_TEMPLATE.md`](./PROCESS_TEMPLATE.md)。
+详细模板见 [`PROCESS_TEMPLATE.md`](PROCESS_TEMPLATE.md)。

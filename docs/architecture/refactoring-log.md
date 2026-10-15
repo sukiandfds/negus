@@ -177,3 +177,102 @@
 - web-ui 与 ui-feishu TypeScript 编译、双前端生产构建、受影响 Node 模块语法检查和 `git diff --check` 均通过。
 - 本轮针对执行追踪、模型路由、项目管理、对话转发和员工成长运行 43 项测试，41 项通过；2 项仍是当前分支已有的员工定义数量断言（实际多出 `negus-assistant`），不涉及本轮修改路径。
 - 已按 `windows/server/AGENTS.md` 调用 supervisor 受控重启。作业完成后 supervisor 报告 `Backend health/ownership uncertain; production was not stopped.`，因此当前服务未被强制停止，待 supervisor 环境恢复后再重试受控重启。
+
+## 2026-10-15：旧入口与统一导航状态
+
+### 用户操作链
+
+- 用户从旧书签 `/group.html`、项目记忆里的“打开群聊”链接或 `/employee.html?employeeId=...` 进入页面；页面应沿用当前 Feishu 单入口，并打开对应群聊或员工工作伙伴上下文。
+- 用户在普通对话、员工对话、群聊和设置之间切换时，浏览器前进/后退或应用内部导航应同步更新当前页面状态。
+
+### 原有逻辑与风险
+
+- 静态入口只把旧路径重定向到新入口，`FeishuApp` 只读取 `agent` 和带 `roomId` 的群聊参数；`employeeId` 会丢失，`view=group` 没有房间号时也会退回普通消息页。
+- URL 变化后只更新房间号，员工、设置和页面区段状态可能保留旧值，跨设备打开稳定链接时会出现地址与界面不一致。
+
+### 本次改动
+
+- `FeishuApp` 新增集中路由解析：兼容 `agent`/`employeeId`，同步群聊、员工、设置和消息区段状态，并在旧群聊链接缺少 `roomId` 时使用已加载群聊的首个房间补全稳定链接。
+- `static-files.mjs` 为旧员工入口把 `employeeId` 映射为统一的 `agent` 参数，同时保留原有查询参数和缓存策略。
+- 群聊、普通对话和员工对话继续共用现有工作区组件；本次只收敛导航状态，不改变消息、执行或持久化逻辑。
+
+### 后续入口
+
+- 统一路由解析与旧入口兼容：`ui-feishu/src/FeishuApp.tsx`、`windows/server/static-files.mjs`。
+- 修改页面切换时，先更新 URL，再派发 `negus:navigate`，避免新增独立页面状态。
+
+## 2026-10-15：发布回退指针兼容前端目录迁移
+
+### 用户操作链
+
+- 用户要求把当前工作区的最新界面和后端一次切换到公网；supervisor 需要先准备可验证的候选版本，并在失败时保留可启动回退版本。
+
+### 原有逻辑与风险
+
+- 旧 release 仍记录迁移前的 `web-ui/dist`，当前发布器验证的是 `ui-feishu/dist`。准备阶段直接验证旧指针会在生成候选版本前失败，公网只能继续使用旧进程或验证快照。
+
+### 本次改动
+
+- `scripts/negus-supervisor.mjs` 在发现旧 release 无法通过当前目录结构验证时，先从当前工作区生成并 smoke-check 一个新的 fallback，再生成 candidate；仍保留其它验证错误的快速失败行为。
+- 不手工把旧 `web-ui/dist` 冒充新前端，候选和回退副本都由同一发布器构建并校验。
+
+### 后续入口
+
+- 发布准备与迁移兼容：`scripts/negus-supervisor.mjs` 的 `prepare`。
+- release 完整性和前端目录约束：`scripts/negus-releases.mjs`。
+
+## 2026-10-15：对话与群聊弹层关闭行为收敛
+
+### 用户操作链
+
+- 用户在员工单聊、普通项目对话或群聊输入框中打开命令/点名菜单，或在会话列表打开更多操作菜单；点击菜单外部或按 Escape 后，界面应关闭当前临时层并在适用时把焦点还给触发按钮。
+
+### 原有逻辑与风险
+
+- 普通对话输入框、群聊输入框、会话操作菜单和通用下拉菜单分别注册了相同的 `pointerdown`/`keydown` 监听。各处的关闭条件略有分叉，后续修复容易只覆盖其中一条 UI 路径。
+
+### 本次改动
+
+- 新增 `ui-feishu/shared/shared/hooks/useDismissibleLayer.ts`，统一临时层的外部点击、Escape 和可选焦点恢复协议。
+- `ConversationComposer`、`GroupComposer`、`ConversationActions` 与 `DropdownMenu` 改用该 hook；通过各自的命中谓词保留菜单触发器、portal 内容和群聊多菜单的原有关闭范围。
+- 消息发送、群聊路由、设置保存和 API 行为保持不变，仅收敛 UI 事件监听的实现。
+
+### 后续入口
+
+- 临时菜单/弹层需要外部点击或 Escape 行为时，优先复用 `useDismissibleLayer`，只在关闭范围确实不同的情况下提供自定义谓词。
+
+## 2026-10-15：员工直聊复用普通会话能力
+
+### 用户操作链
+
+- 用户在普通对话或员工主对话中发送文字、图片、音频、文档，排队后继续发送，切换模型/推理强度，重命名、审查、复制分支、归档和恢复；这些操作使用同一套会话 API 和消息区。
+
+### 原有逻辑与风险
+
+- 员工消息路由曾直接拒绝附件；队列分发也再次拒绝附件。
+- 员工的重命名、审查、分支、归档和恢复路由虽然先做了绑定校验，却随后固定调用普通 `conversations` 存储，导致员工 Thread 走错运行时或直接失败。
+- 员工主对话标题和归档状态没有持久化入口，目录始终显示固定“主对话”。
+
+### 本次改动
+
+- 员工运行时复用普通会话的 `inputFromAttachments`，因此附件转换、正文提取和图片/音频输入只有一份实现；主消息和排队消息都走同一条输入链。
+- 会话路由按已解析绑定选择员工运行时或普通存储；两者共用同一组 `/api/session/*` 入口，员工只保留 Thread 身份和管理状态差异。
+- 员工运行时增加原生 Thread 的重命名、审查、分支、归档和恢复适配；标题与归档标记写入员工注册表，目录和归档视图读取同一状态。
+- 归档员工在归档视图仍可见并可恢复；发送到已归档员工会先恢复其 Thread，避免隐藏状态阻断正常输入。
+
+### 后续入口
+
+- 员工与普通会话操作路由：`windows/server/routes/conversation-routes.mjs`。
+- 员工 Thread 适配与附件输入：`windows/server/employee-runtime-service.mjs`。
+- 员工持久化身份和标题/归档状态：`windows/server/employee-project-registry.mjs`、`windows/server/employee-project-directory.mjs`。
+- 普通与员工共用的附件输入转换：`windows/server/app-server-conversation-store.mjs` 的 `inputFromAttachments`。
+
+### 统计说明与本次收敛
+
+- 本批看起来有大量新增，主要是把原 `web-ui` 文件移动到 `ui-feishu/shared`、把原前端锁文件移动到 `ui-feishu/pnpm-lock.yaml`，属于路径迁移，不是重复实现。
+- 迁移前 `web-ui` 与 `ui-feishu` 的前端代码约 24,736 行；迁移后的当前前端代码约 21,386 行，净减少约 3,350 行。员工能力适配是本批真正增加的主要运行时代码，已通过 `requestThread` 合并重复 Thread 请求。
+- 后续新增功能必须先复用现有 `sessionSource`、`inputFromAttachments` 和共享 UI hook；只有运行时身份、供应商路由或持久化状态确实不同才允许增加适配。
+
+### 验证结果
+
+- 已完成 Node 语法检查和 `git diff --check`；前端 TypeScript、生产构建及运行时受控切换在本批模块完成后统一执行。

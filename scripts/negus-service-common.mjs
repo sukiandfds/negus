@@ -39,7 +39,7 @@ export const config = async () => {
   if (!token || /[\r\n]/u.test(token)) throw new Error("Missing valid runtime/access-token; refusing demo-token fallback.");
   const port = Number(process.env.NEGUS_PORT || state?.port || 9360);
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Invalid service port.");
-  return { port, token, state, webRoot: state?.webRoot || path.join(root, "web-ui", "dist"),
+  return { port, token, state, webRoot: state?.webRoot || path.join(root, "ui-feishu", "dist"),
     deviceName: state?.deviceName || process.env.NEGUS_DEVICE_NAME || (await import("node:os")).hostname() };
 };
 export const http = async (cfg, pathname, { method = "GET", key = "", origin, timeout = 5000 } = {}) => {

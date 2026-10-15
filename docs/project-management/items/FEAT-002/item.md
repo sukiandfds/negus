@@ -6,7 +6,7 @@ category: development
 priority: P1
 status: handoff_pending
 updated_at: "2026-10-04 17:31 +08:00"
-source: docs/feature-development/features/FEAT-002-group-multi-agent.md
+source: docs/negus-knowledge/features/feature-records/FEAT-002-group-multi-agent.md
 related: [FEAT-001, FEAT-003, FEAT-005, FEAT-007, FEAT-010]
 product_base_commit: b90664a750b94f88c4c08068d3550c49cfcf4bd0
 product_commit: pending
@@ -533,9 +533,9 @@ taskId + artifactId
 
 ## 当前证据
 
-- `docs/feature-development/features/FEAT-002-group-multi-agent.md`
+- `docs/negus-knowledge/features/feature-records/FEAT-002-group-multi-agent.md`
 - `windows/server/group-room-store.mjs`
 - `windows/server/multi-agent-service.mjs`
-- `docs/feature-development/DEVELOPMENT_COMMON_MISTAKES.md`
-- `docs/feature-development/P0_INCIDENT_REVIEW_2026-07-29_ORCA_ROUTE2_SCOPE.md`（Orca 范围事故与停止原则）
+- `docs/negus-knowledge/features/DEVELOPMENT_COMMON_MISTAKES.md`
+- `docs/negus-knowledge/records/P0_INCIDENT_REVIEW_2026-07-29_ORCA_ROUTE2_SCOPE.md`（Orca 范围事故与停止原则）
 - `AI_ASSISTANT_WORK_RULES.md`

@@ -6,7 +6,7 @@ category: research
 priority: P1
 status: completed
 updated_at: 2026-08-03
-source: docs/research/PROJECT_FILE_ARCHITECTURE_RESEARCH_2026-08-03.md
+source: docs/negus-knowledge/research/PROJECT_FILE_ARCHITECTURE_RESEARCH_2026-08-03.md
 related: [PM-001]
 ---
 
@@ -30,7 +30,7 @@ related: [PM-001]
 
 调研结果正文保存在：
 
-`docs/research/PROJECT_FILE_ARCHITECTURE_RESEARCH_2026-08-03.md`
+`docs/negus-knowledge/research/PROJECT_FILE_ARCHITECTURE_RESEARCH_2026-08-03.md`
 
 正文包含目录分组、后端文件关系、前端文件关系、HTTP 路径、实时事件链路、群聊链路和测试文件对应关系。
 
@@ -48,6 +48,6 @@ related: [PM-001]
 
 ## 当前证据
 
-- `docs/research/PROJECT_FILE_ARCHITECTURE_RESEARCH_2026-08-03.md`
+- `docs/negus-knowledge/research/PROJECT_FILE_ARCHITECTURE_RESEARCH_2026-08-03.md`
 - `docs/architecture/MODULE_BOUNDARIES.md`
 - `ad79225 refactor: separate UI and feature module boundaries`

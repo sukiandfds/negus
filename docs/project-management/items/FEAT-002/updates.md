@@ -2,7 +2,7 @@
 
 ### 2026-10-04 17:31 +08:00 | 产品员工后台调研代码完成，待体验验收
 
-- 沿用现有员工与会话目录，接入独立任务、直接补充／停止、主对话空闲后回报。实现和验证统一见 [功能档案](../../../feature-development/features/FEAT-002-group-multi-agent.md#2026-10-04-v045产品员工后台调研试点)。
+- 沿用现有员工与会话目录，接入独立任务、直接补充／停止、主对话空闲后回报。实现和验证统一见 [功能档案](../../../negus-knowledge/features/feature-records/FEAT-002-group-multi-agent.md#2026-10-04-v045产品员工后台调研试点)。
 - 对照 OpenMausBot、nanobot 源码和 OpenClaw 文档，补齐持久化后立即接单、后台初始化。77 项相关自动化测试、1 项本机原生工具加载验证、TypeScript 和隔离前端构建通过；未重启部署、未提交推送，真实供应商与浏览器体验未验收。
 
 ### 2026-08-17 11:10 +08:00 | 员工项目群聊会话产品定义
@@ -100,7 +100,7 @@
 - 计划调整：M0 目标基线；M1 消息可靠性；M2 Task/AgentRun/ActivityEvent；M3 项目经理路由；M4 `@Agent`；M5 Worker 任务包与群内汇报；M6 项目经理汇总与冲突；M7 继续/停止/重试/审批；M8 Runtime/Provider 扩展；M9 真实场景验收与文档交付。
 - 用户影响：初版完成后，用户不需要自己判断应该调用哪个模型；普通消息由项目经理判断，明确点名时直接找到对应 Agent；任务、进度、结果和交付物都能在原群聊中追踪，刷新或重连不应造成重复、乱序或任务消失。
 - 主要风险：当前原型的执行队列仍主要在内存中，Agent 调度仍以有限轮次讨论为主，尚无正式 Task/AgentRun 账本；服务重启恢复、重复事件幂等、统一汇报和高风险审批尚未实现。当前计划已将这些列为正式阶段门。
-- 证据：`windows/server/group-room-store.mjs`、`windows/server/multi-agent-service.mjs`、`docs/feature-development/features/FEAT-002-group-multi-agent.md`、`docs/feature-development/P0_INCIDENT_REVIEW_2026-07-29_ORCA_ROUTE2_SCOPE.md`。
+- 证据：`windows/server/group-room-store.mjs`、`windows/server/multi-agent-service.mjs`、`docs/negus-knowledge/features/feature-records/FEAT-002-group-multi-agent.md`、`docs/negus-knowledge/records/P0_INCIDENT_REVIEW_2026-07-29_ORCA_ROUTE2_SCOPE.md`。
 - 基线：`product_base_commit=d5b39e8be1e6273299d3606eef3d1153ba001f3e`；本次只更新项目管理记录，尚未产生产品代码提交或审计提交。
 - 下一步：等待用户确认本计划后，建立 FEAT-002 实施基线，先做 M1 消息可靠性与 M2 任务账本，不先增加 Agent 数量、不先接入 Orca 或多电脑调度。
 
@@ -118,14 +118,14 @@
 - 本次更新：确认“高能力项目经理 + 低成本专业 Worker + 按需审查”的分层 Agent 方向；上下文使用任务摘要和关键证据，不默认复制完整群聊。
 - 用户影响：后续群聊可按任务难度调用不同 Agent，用户主要与项目经理对接，同时能够旁观、介入和中止 Worker 协作。
 - 待确认：截图中的 `gpt-5.6-luna` 未在本机当前配置中找到，但不能据此判断不存在；实施前核对当前 Codex Agent schema、模型来源与真实调用。
-- 证据：`docs/feature-development/features/FEAT-002-group-multi-agent.md` 的 `FEAT-002-I08` 与 v0.4.1 时间线。
+- 证据：`docs/negus-knowledge/features/feature-records/FEAT-002-group-multi-agent.md` 的 `FEAT-002-I08` 与 v0.4.1 时间线。
 
 ### 2026-07-28 15:47 +08:00
 
 - 状态：pending_review
 - 本次更新：保留真实群聊和四个 Agent，后续先对齐单人 Codex 的可靠消息、过程、恢复和失败反馈。
 - 用户影响：群聊仍处于基础体验完善阶段，多 Agent 讨论规则暂不扩展。
-- 证据：`docs/feature-development/features/FEAT-002-group-multi-agent.md`
+- 证据：`docs/negus-knowledge/features/feature-records/FEAT-002-group-multi-agent.md`
 
 ### 2026-08-09 12:21 +08:00
 

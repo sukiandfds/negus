@@ -7,8 +7,8 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
-const esbuild = require("../../web-ui/node_modules/esbuild/lib/main.js");
-const entry = fileURLToPath(new URL("../../web-ui/src/features/conversations/rendering/heartbeatMessage.ts", import.meta.url));
+const esbuild = require("../../ui-feishu/node_modules/esbuild/lib/main.js");
+const entry = fileURLToPath(new URL("../../ui-feishu/shared/features/conversations/rendering/heartbeatMessage.ts", import.meta.url));
 const built = esbuild.buildSync({
   entryPoints: [entry],
   bundle: true,

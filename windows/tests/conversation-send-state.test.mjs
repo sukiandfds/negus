@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import ts from '../../web-ui/node_modules/typescript/lib/typescript.js';
+import ts from '../../ui-feishu/node_modules/typescript/lib/typescript.js';
 
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 async function harness(file, dependencies) {
@@ -14,7 +14,7 @@ async function harness(file, dependencies) {
   };
   const key = `__conversationState${Math.random().toString(36).slice(2)}`;
   globalThis[key] = { ...hooks, ...dependencies };
-  const source = ts.transpileModule(await fs.readFile(new URL(`../../web-ui/src/${file}`, import.meta.url), 'utf8'), {
+  const source = ts.transpileModule(await fs.readFile(new URL(`../../ui-feishu/shared/${file}`, import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
   }).outputText.replace(/import \{([^}]+)\} from "[^"]+";/g, (_, names) => `const {${names}} = globalThis.${key};`);
   const module = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);

@@ -1,7 +1,7 @@
-import type { useProjectConversations } from '../../web-ui/src/features/conversations/hooks/useProjectConversations';
-import type { useProjectDirectory } from '../../web-ui/src/features/project-directory/hooks/useProjectDirectory';
-import type { useUsageMonitor } from '../../web-ui/src/features/usage-monitor/hooks/useUsageMonitor';
-import type { SessionSummary } from '../../web-ui/src/features/conversations/model/types';
+import type { useProjectConversations } from '../shared/features/conversations/hooks/useProjectConversations';
+import type { useProjectDirectory } from '../shared/features/project-directory/hooks/useProjectDirectory';
+import type { useUsageMonitor } from '../shared/features/usage-monitor/hooks/useUsageMonitor';
+import type { SessionSummary } from '../shared/features/conversations/model/types';
 
 export type ConversationState = ReturnType<typeof useProjectConversations>;
 export type DirectoryState = ReturnType<typeof useProjectDirectory>;

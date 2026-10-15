@@ -1,4 +1,4 @@
-import type { DirectoryConversation, DirectoryProject } from '../../web-ui/src/features/project-directory/model/types';
+import type { DirectoryConversation, DirectoryProject } from '../shared/features/project-directory/model/types';
 import type { Conversation, ConversationState, DirectoryState } from './types';
 
 type Entry = DirectoryConversation & { role?: string; targetProjectId?: string | null };
@@ -30,12 +30,13 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
     const available = entries.filter(entry => entry.role !== 'project' && Boolean(entry.archived) === archived);
     const rows = available.map(entry => toConversation(project, entry));
     if (project.kind === 'employee') {
-      if (archived) continue;
-      const main = rows.find(row => row.main) || toConversation(project, {
+      if (archived && !rows.length) continue;
+      const main = rows.find(row => row.main) || (!archived ? toConversation(project, {
         id: `${project.id}:main`, title: project.name, main: true,
         threadId: project.mainThreadId, conversationId: project.mainConversationId,
         pendingOpen: !project.mainThreadId, status: project.status,
-      });
+      }) : null);
+      if (!main) continue;
       employees.push({ ...main, time: project.lastActivityAt || main.time, children: uniqueConversations(rows.filter(row => !row.main)) });
       all.push(...rows);
       if (!rows.some(row => conversationKey(row) === conversationKey(main)) && main.threadId) all.push(main);

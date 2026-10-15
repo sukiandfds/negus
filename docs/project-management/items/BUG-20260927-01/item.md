@@ -5,4 +5,4 @@
 基线：a3dd3f779649db3cb86bbf864d3c0d25f44c3488
 分支：codex/publish-current-panel
 2026-09-27 10:12 +08:00：三处产品文件修改、构建及两尺寸隔离浏览器检查通过。保留原有未提交工作；未重启、提交或推送。真实手机和公网未验收。
-[完整记录](../../../records/SHARED_CACHE_2026-09-26.md)。
+[完整记录](../../../negus-knowledge/records/SHARED_CACHE_2026-09-26.md)。

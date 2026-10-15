@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
-import ts from "../../web-ui/node_modules/typescript/lib/typescript.js";
-const source = await fs.readFile(new URL("../../web-ui/src/features/goals/model/completedGoal.ts", import.meta.url), "utf8");
+import ts from "../../ui-feishu/node_modules/typescript/lib/typescript.js";
+const source = await fs.readFile(new URL("../../ui-feishu/shared/features/goals/model/completedGoal.ts", import.meta.url), "utf8");
 const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
 const { completedGoalMessageId } = await import("data:text/javascript;base64," + Buffer.from(output).toString("base64"));
 const goal = { status: "complete", updatedAt: 20 };

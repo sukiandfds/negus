@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
-import ts from "../../web-ui/node_modules/typescript/lib/typescript.js";
+import ts from "../../ui-feishu/node_modules/typescript/lib/typescript.js";
 
 const compile = (source) => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
 const moduleUrl = (source) => `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
-const mergeUrl = moduleUrl(compile(await fs.readFile(new URL("../../web-ui/src/features/conversations/state/conversationMerge.ts", import.meta.url), "utf8")));
-const source = compile(await fs.readFile(new URL("../../web-ui/src/features/conversations/hooks/useConversationSession.ts", import.meta.url), "utf8"));
+const mergeUrl = moduleUrl(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/conversations/state/conversationMerge.ts", import.meta.url), "utf8")));
+const source = compile(await fs.readFile(new URL("../../ui-feishu/shared/features/conversations/hooks/useConversationSession.ts", import.meta.url), "utf8"));
 const detail = (threadId) => ({ threadId, messages: [{ id: `${threadId}-message`, role: "user", text: threadId }], contentVersion: 1 });
 
 async function harness(cachedSessions = [], partialSessionIds = []) {
@@ -86,9 +86,9 @@ test("selecting an in-flight prefetch immediately clears previous error and show
   h.pending[1].resolve(detail("b")); await prefetch;
 });
 
-const groupSource = compile(await fs.readFile(new URL("../../web-ui/src/features/group-chat/hooks/useGroupRoom.ts", import.meta.url), "utf8"));
-const groupMessageUrl = moduleUrl(compile(await fs.readFile(new URL("../../web-ui/src/features/group-chat/data/groupMessageState.ts", import.meta.url), "utf8")));
-const groupSnapshotUrl = moduleUrl(compile(await fs.readFile(new URL("../../web-ui/src/features/group-chat/data/groupSnapshot.ts", import.meta.url), "utf8"))
+const groupSource = compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/hooks/useGroupRoom.ts", import.meta.url), "utf8"));
+const groupMessageUrl = moduleUrl(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/data/groupMessageState.ts", import.meta.url), "utf8")));
+const groupSnapshotUrl = moduleUrl(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/data/groupSnapshot.ts", import.meta.url), "utf8"))
   .replace('"./groupMessageState"', JSON.stringify(groupMessageUrl)));
 const groupSnapshot = (id, text = id) => ({ room: { id }, messages: [{ id: `${id}-message`, text, sequence: 1 }], agents: [], members: [] });
 const groupPage = (text) => ({ messages: [{ id: text, text, sequence: 1 }], found: true, hasOlder: false, hasNewer: false, oldestSequence: 1, newestSequence: 1 });
@@ -164,7 +164,7 @@ test("quick group switches preserve a just-loaded snapshot before debounce persi
 });
 
 test("group switch cancels the old frame and new-room deltas still paint; closed sources cannot mutate state", async () => {
-  const source = compile(await fs.readFile(new URL("../../web-ui/src/features/group-chat/realtime/useGroupEvents.ts", import.meta.url), "utf8"));
+  const source = compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/realtime/useGroupEvents.ts", import.meta.url), "utf8"));
   const slots = []; let cursor = 0; let effect; let cleanup; let frameId = 0;
   const frames = new Map(); const sources = [];
   const hooks = {

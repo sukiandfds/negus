@@ -42,4 +42,4 @@
 
 ## 验证
 
-见 `../validation/TASK_KERNEL_RESULTS.md`。该文件区分自动测试、真实模型调用和界面检查。早期竞品研究的 62 条候选验收是更广的产品调研范围，不代表本次全部实施或通过。
+见 `../../docs/negus-knowledge/records/TASK_KERNEL_RESULTS.md`。该文件区分自动测试、真实模型调用和界面检查。早期竞品研究的 62 条候选验收是更广的产品调研范围，不代表本次全部实施或通过。

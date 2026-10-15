@@ -1,9 +1,10 @@
 import { Archive, ArchiveRestore, Copy, Forward, MoreHorizontal, Pencil, Pin, PinOff, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { fetchJson, postJson } from "../../../web-ui/src/shared/api/http";
-import type { SessionSummary } from "../../../web-ui/src/features/conversations/model/types";
-import styles from "../../../web-ui/src/features/conversations/components/ConversationActions.module.css";
+import { fetchJson, postJson } from "../../shared/shared/api/http";
+import { useDismissibleLayer } from "../../shared/shared/hooks/useDismissibleLayer";
+import type { SessionSummary } from "../../shared/features/conversations/model/types";
+import styles from "../../shared/features/conversations/components/ConversationActions.module.css";
 
 type Target = { threadId: string; title: string; projectName: string; employeeId: string; conversationId: string };
 type Props = { session: SessionSummary; archived: boolean; disabled: boolean; onArchive: () => void; className: string; pinned?: boolean; onTogglePin?: () => void; pinOnly?: boolean };
@@ -20,17 +21,13 @@ export function ConversationActions({ session, archived, disabled, onArchive, cl
   const menuElement = useRef<HTMLDivElement>(null);
   const dialogElement = useRef<HTMLDialogElement>(null);
   const request = useRef<{ target: string; id: string } | undefined>(undefined);
-  useEffect(() => {
-    if (!menu) return;
-    menuElement.current?.querySelector("button")?.focus();
-    const close = (e: PointerEvent) => {
-      if (!menuElement.current?.contains(e.target as Node) && !button.current?.contains(e.target as Node)) setMenu(false);
-    };
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") { setMenu(false); button.current?.focus(); } };
-    document.addEventListener("pointerdown", close);
-    document.addEventListener("keydown", key);
-    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", key); };
-  }, [menu]);
+  useEffect(() => { if (menu) menuElement.current?.querySelector("button")?.focus(); }, [menu]);
+  useDismissibleLayer({
+    active: menu,
+    onDismiss: () => setMenu(false),
+    isInside: target => target instanceof Node && Boolean(menuElement.current?.contains(target) || button.current?.contains(target)),
+    restoreFocus: () => button.current?.focus(),
+  });
   useEffect(() => {
     if (dialog) dialogElement.current?.showModal();
     else dialogElement.current?.close();

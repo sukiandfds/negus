@@ -6,7 +6,7 @@ category: research
 priority: P1
 status: completed
 updated_at: 2026-10-06 17:46 +08:00
-source: docs/research/NEGUS_SYSTEM_LOGGING_RESEARCH_2026-10-06.md
+source: docs/negus-knowledge/research/NEGUS_SYSTEM_LOGGING_RESEARCH_2026-10-06.md
 related: [FEAT-001, FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-007, FEAT-015]
 product_base_commit: 427a708fa85f4564822caeac97c6601bd97b4745
 ---
@@ -27,7 +27,7 @@ product_base_commit: 427a708fa85f4564822caeac97c6601bd97b4745
 
 ## 具体内容
 
-见 [调研报告](../../../research/NEGUS_SYSTEM_LOGGING_RESEARCH_2026-10-06.md)。覆盖单聊、桌面、群聊、员工、配置、附件、成果、生图、独立 Lynn 应用及维护流程，区分当前代码、未上线实验和待验证运行状态。
+见 [调研报告](../../../negus-knowledge/research/NEGUS_SYSTEM_LOGGING_RESEARCH_2026-10-06.md)。覆盖单聊、桌面、群聊、员工、配置、附件、成果、生图、独立 Lynn 应用及维护流程，区分当前代码、未上线实验和待验证运行状态。
 
 ## 预计效果
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { fetchJson, postJson } from '../../web-ui/src/shared/api/http';
+import { fetchJson, postJson } from '../shared/shared/api/http';
 
 export type TaskRun = { id: string; title: string; state: string; kind?: string; agentId: string; agentName: string;
   roomId?: string; roomName?: string; conversationId: string; parentTaskId?: string; resultOf?: string;

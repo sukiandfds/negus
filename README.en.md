@@ -6,13 +6,13 @@ The desktop shows the information users care about. A general assistant handles 
 
 ## Start here
 
-- [Product definition](PRODUCT_DEFINITION.md): current direction, behavior and open decisions.
+- [Product definition](docs/negus-knowledge/product/PRODUCT_DEFINITION.md): current direction, behavior and open decisions.
 - [Project guide](PROJECT.md): existing capabilities, code and runtime entry points.
 - [Documentation and project memory](docs/README.md): decisions, sources, open questions and reading paths.
-- [Feature index](docs/feature-development/FEATURE_STATUS_INDEX.md): all 23 feature records.
+- [Feature index](docs/negus-knowledge/features/FEATURE_STATUS_INDEX.md): all 23 feature records.
 - [Assistant rules](AI_ASSISTANT_WORK_RULES.md) and [user profile](USER_PROFILE.md).
 
-The React/TypeScript frontend lives in `web-ui/`; Node.js services live in `windows/server/`. Cross-platform commands are provided by `scripts/negus.mjs`. `runtime/` contains local operational data.
+The single React/TypeScript frontend lives in `ui-feishu/`; Node.js services live in `windows/server/`. Cross-platform commands are provided by `scripts/negus.mjs`. `runtime/` contains local operational data.
 
 Real Codex conversations, group collaboration, desktop components, provider configuration, attachments and deliverables have implementation foundations. Arbitrary business-component generation and publishing, the complete assistant organization, and seamless Desktop/Web continuity remain subject to design and acceptance.
 

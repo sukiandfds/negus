@@ -6,17 +6,17 @@
 
 ## 从这里开始
 
-- [产品定义](PRODUCT_DEFINITION.md)：当前方向、有效行为和待定边界。
+- [产品定义](docs/negus-knowledge/product/PRODUCT_DEFINITION.md)：当前方向、有效行为和待定边界。
 - [项目说明](PROJECT.md)：现有能力、代码与运行入口。
 - [文档导航与项目记忆](docs/README.md)：最新决定、历史依据、开放问题和按需阅读路径。
-- [功能状态索引](docs/feature-development/FEATURE_STATUS_INDEX.md)：23 个功能的入口与记录边界。
+- [功能状态索引](docs/negus-knowledge/features/FEATURE_STATUS_INDEX.md)：23 个功能的入口与记录边界。
 - [助手工作规则](AI_ASSISTANT_WORK_RULES.md)：开发前阅读；用户偏好见 [用户画像](USER_PROFILE.md)。
 
 ## 代码入口
 
 | 路径 | 用途 |
 | --- | --- |
-| `web-ui/` | React / TypeScript / Vite 页面 |
+| `ui-feishu/` | 唯一 React / TypeScript / Vite 页面与共享功能 |
 | `windows/server/` | Node.js API、SSE、会话与业务服务 |
 | `scripts/negus.mjs` | 跨平台构建、启动和状态入口 |
 | `runtime/` | 本机运行数据，不作为可随意清理的源码残留 |

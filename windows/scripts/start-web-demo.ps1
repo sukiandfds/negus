@@ -10,9 +10,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$webRoot = Join-Path $projectRoot "web-ui\dist"
+$webRoot = Join-Path $projectRoot "ui-feishu\dist"
 $serverScript = Join-Path $PSScriptRoot "remote-room-demo.mjs"
-$buildScript = Join-Path $PSScriptRoot "build-web-ui.ps1"
+$buildScript = Join-Path $PSScriptRoot "build-ui-feishu.ps1"
 $bundledNode = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
 $node = $null
 

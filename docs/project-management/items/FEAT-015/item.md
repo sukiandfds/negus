@@ -6,7 +6,7 @@ category: development
 priority: P2
 status: handoff_pending
 updated_at: 2026-09-30
-source: docs/feature-development/features/FEAT-015-image-generation-and-automation-workbench.md
+source: docs/negus-knowledge/features/feature-records/FEAT-015-image-generation-and-automation-workbench.md
 related: [FEAT-001, FEAT-002, FEAT-003, FEAT-007, FEAT-008]
 owner: product_and_runtime
 product_base_commit: c8c7b66d686fb3a896c4c939fe6dec9bb2d8d8d4
@@ -90,8 +90,8 @@ last_user_visible_change: 网页生图已进入真实 Codex Thread/Turn；2.35�
 
 ## 当前证据
 
-- `docs/feature-development/features/FEAT-015-image-generation-and-automation-workbench.md`
-- `docs/research/IMAGE_GENERATION_CAPABILITY_AND_AUTOMATION_WORKBENCH_RESEARCH_2026-08-04.md`
+- `docs/negus-knowledge/features/feature-records/FEAT-015-image-generation-and-automation-workbench.md`
+- `docs/negus-knowledge/research/IMAGE_GENERATION_CAPABILITY_AND_AUTOMATION_WORKBENCH_RESEARCH_2026-08-04.md`
 - `.codex/config.toml`
 - `windows/server/image-generation/happyevering-client.mjs`
 - `windows/server/image-generation/image-contract.mjs`

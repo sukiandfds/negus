@@ -5,7 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 const { chromium } = await import(pathToFileURL(process.env.NEGUS_PLAYWRIGHT_MODULE).href);
 const browser = await chromium.launch({ channel: "msedge", headless: true });
-const dist = path.resolve("web-ui/dist");
+const dist = path.resolve("ui-feishu/dist");
 const deferred = () => { let resolve; const promise = new Promise((yes) => { resolve = yes; }); return { promise, resolve }; };
 const root = "D:/cache-fixture", threadId = "cache-fixture";
 const messages = Array.from({ length: 36 }, (_, i) => ({ id: "m" + i, role: i % 2 ? "assistant" : "user", text: "Message " + i + "\n\n" + "Stable historical content. ".repeat(12), turnId: "turn" + Math.floor(i / 2), turnStatus: "completed", createdAt: new Date(1760000000000 + i * 1000).toISOString() }));

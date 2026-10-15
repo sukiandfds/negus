@@ -6,7 +6,7 @@ category: development
 priority: P2
 status: pending_review
 updated_at: 2026-08-03 00:22 +08:00
-source: docs/feature-development/features/FEAT-011-fusheng-usage-monitor.md
+source: docs/negus-knowledge/features/feature-records/FEAT-011-fusheng-usage-monitor.md
 related: [FEAT-001]
 ---
 
@@ -46,7 +46,7 @@ related: [FEAT-001]
 
 ## 当前证据
 
-- `docs/feature-development/features/FEAT-011-fusheng-usage-monitor.md`
+- `docs/negus-knowledge/features/feature-records/FEAT-011-fusheng-usage-monitor.md`
 - `web-ui/src/features/usage-monitor/`
 - `windows/server/fusheng-usage-service.mjs`
 - `windows/tests/fusheng-usage-service.test.mjs`

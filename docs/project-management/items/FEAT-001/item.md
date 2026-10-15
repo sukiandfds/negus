@@ -6,7 +6,7 @@ category: development
 priority: P1
 status: pending_review
 updated_at: 2026-08-10
-source: docs/feature-development/features/FEAT-001-single-codex-web.md
+source: docs/negus-knowledge/features/feature-records/FEAT-001-single-codex-web.md
 related: [FEAT-005]
 ---
 
@@ -14,7 +14,7 @@ related: [FEAT-005]
 
 ## 用户原话
 
-2026-08-04 P0 回归的用户原文已逐字保存在 [`process.md` 的 `FEAT-001-P05`](./process.md#2026-08-04--feat-001-p05--regression--p0--active)，并关联用户提供的手机截图。不得用助手概括替换该原文。
+2026-08-04 P0 回归的用户原文已逐字保存在 [`process.md` 的 `FEAT-001-P05`](process.md#2026-08-04--feat-001-p05--regression--p0--active)，并关联用户提供的手机截图。不得用助手概括替换该原文。
 
 ## 助手初步理解
 
@@ -46,11 +46,11 @@ related: [FEAT-005]
 
 ## 当前证据
 
-- `docs/feature-development/features/FEAT-001-single-codex-web.md`
-- `docs/feature-development/FEATURE_STATUS_INDEX.md`
+- `docs/negus-knowledge/features/feature-records/FEAT-001-single-codex-web.md`
+- `docs/negus-knowledge/features/FEATURE_STATUS_INDEX.md`
 - 远程分支 `codex/remote-work-web-reliability` 提交 `deaa5c5999d96c0e3a01cd53669a315ba663823b`
-- `docs/architecture/audits/REALTIME_CONVERSATION_ARCHITECTURE_AUDIT_2026-08-03.md`
-- `docs/architecture/audits/CODEX_NATIVE_READ_AND_REGRESSION_REVIEW_2026-08-03.md`
+- `docs/negus-knowledge/audits/architecture/REALTIME_CONVERSATION_ARCHITECTURE_AUDIT_2026-08-03.md`
+- `docs/negus-knowledge/audits/architecture/CODEX_NATIVE_READ_AND_REGRESSION_REVIEW_2026-08-03.md`
 - `docs/project-management/items/FEAT-001/process.md#2026-08-04--feat-001-p05--regression--p0--active`
 - `runtime/uploads/61c5a17451b53379c463a09f0e7845646c989efd0333fe762b9b661fde337782__Screenshot_2026-08-04-09-12-11-142_com.microsoft.emmx.jpg`
 - `web-ui/src/features/conversations/hooks/useConversationSession.ts`

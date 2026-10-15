@@ -20,7 +20,7 @@ let conversationId = "";
 const token = process.env.NEGUS_GOAL_TEST_TOKEN || randomBytes(24).toString("hex");
 const externalOrigin = process.env.NEGUS_GOAL_TEST_ORIGIN || "";
 const origin = externalOrigin || "http://127.0.0.1:" + port;
-const child = externalOrigin ? null : spawn(process.execPath, [path.resolve("windows/scripts/remote-room-demo.mjs"), "--port", String(port), "--project-root", root, "--web-root", path.resolve("web-ui/dist"), "--token", token], {
+const child = externalOrigin ? null : spawn(process.execPath, [path.resolve("windows/scripts/remote-room-demo.mjs"), "--port", String(port), "--project-root", root, "--web-root", path.resolve("ui-feishu/dist"), "--token", token], {
   cwd: process.cwd(), windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
   env: { ...process.env, CODEX_HOME: path.resolve("runtime/model-providers/ccswitch_default/codex-home"), CODEX_SESSION_DIR: path.join(root, "sessions") },
 });

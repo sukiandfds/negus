@@ -25,6 +25,8 @@ const normalize = (definition, saved = {}, workspaceRoot) => ({
   reasoningEffort: clean(saved.reasoningEffort, 40) || clean(definition.reasoningEffort, 40) || "",
   mainThreadId: clean(saved.mainThreadId, 120) || null,
   conversationId: clean(saved.conversationId, 120) || null,
+  conversationTitle: clean(saved.conversationTitle, 240) || null,
+  conversationArchived: saved.conversationArchived === true,
   // User-visible employees inherit the main Agent's host-level authorization;
   // the legacy confirmation flag is retained for API compatibility only.
   modificationConfirmed: true,
@@ -77,6 +79,8 @@ export const createEmployeeProjectRegistry = async ({ stateFile, workspaceRoot, 
     listRuntimeProfiles: () => [...employees.values()].map(cloneJson),
     bindMainThread: (employeeId, mainThreadId) => update(employeeId, { mainThreadId: clean(mainThreadId, 120) || null }),
     bindConversation: (employeeId, conversationId) => update(employeeId, { conversationId: clean(conversationId, 120) || null }),
+    setConversationTitle: (employeeId, conversationTitle) => update(employeeId, { conversationTitle: clean(conversationTitle, 240) || null }),
+    setConversationArchived: (employeeId, conversationArchived) => update(employeeId, { conversationArchived: conversationArchived === true }),
     setModelSettings: (employeeId, settings) => update(employeeId, {
       modelProviderId: clean(settings?.modelProviderId, 80) || CURRENT_MODEL_PROVIDER_ID,
       model: clean(settings?.model, 120),

@@ -87,7 +87,7 @@ test("recovery never restarts busy/unhealthy/auth/foreign states; missing servic
 test("isolated backend starts, detached restart waits for work, recovers exit and refuses foreign/auth services",
   { skip: process.platform !== "darwin", timeout: 45000 }, async (t) => {
   const dir = await temp(t);
-  for (const sub of ["scripts", "windows/scripts", "windows/server/http", "runtime", "web-ui/dist"]) {
+  for (const sub of ["scripts", "windows/scripts", "windows/server/http", "runtime", "ui-feishu/dist"]) {
     await fs.mkdir(path.join(dir, sub), { recursive: true });
   }
   for (const file of ["scripts/negus-service-common.mjs", "scripts/negus-backend.mjs",
@@ -97,7 +97,7 @@ test("isolated backend starts, detached restart waits for work, recovers exit an
   }
   await fs.writeFile(path.join(dir, "runtime/access-token"), "fixture-secret");
   await fs.writeFile(path.join(dir, "runtime/busy"), "busy");
-  await makeBuild(path.join(dir, "web-ui/dist"), "fixture");
+  await makeBuild(path.join(dir, "ui-feishu/dist"), "fixture");
   const fixture = `import http from "node:http";import fs from "node:fs";import path from "node:path";
 import {createMaintenanceGate} from "../server/http/maintenance-gate.mjs";
 const args=process.argv.slice(2),get=k=>args[args.indexOf(k)+1],root=get("--project-root"),port=Number(get("--port"));
@@ -143,7 +143,7 @@ server.listen(port,"127.0.0.1");process.on("SIGTERM",()=>{server.close();server.
   // Snapshot A is the backend recovery source; publish frontend B independently.
   const releaseDir = path.join(dir, "runtime/releases/A");
   await fs.cp(path.join(dir, "windows"), path.join(releaseDir, "windows"), { recursive: true });
-  await makeBuild(path.join(releaseDir, "web-ui/dist"), "A");
+  await makeBuild(path.join(releaseDir, "ui-feishu/dist"), "A");
   const hash = createHash("sha256");
   const digest = async (relative = "") => {
     for (const name of (await fs.readdir(path.join(releaseDir, relative))).sort()) {
@@ -160,7 +160,7 @@ server.listen(port,"127.0.0.1");process.on("SIGTERM",()=>{server.close();server.
   } }));
   const frontendB = path.join(dir, "frontend-B");
   await makeBuild(frontendB, "B");
-  await publishBuild(frontendB, path.join(dir, "web-ui/dist"));
+  await publishBuild(frontendB, path.join(dir, "ui-feishu/dist"));
 
   process.kill(second, "SIGTERM");
   await sleep(500);
@@ -168,7 +168,7 @@ server.listen(port,"127.0.0.1");process.on("SIGTERM",()=>{server.close();server.
   const third = (await state()).pid; owned.add(third);
   assert.notEqual(third, second);
   assert.equal((await state()).entryScript, path.join(releaseDir, "windows/scripts/remote-room-demo.mjs"));
-  assert.equal((await validateBuild(path.join(dir, "web-ui/dist"))).buildId, "B", "normal backend recovery must retain separately published frontend B");
+  assert.equal((await validateBuild(path.join(dir, "ui-feishu/dist"))).buildId, "B", "normal backend recovery must retain separately published frontend B");
   await command("check");
   const wrong = await exec(process.execPath, [path.join(dir, "scripts/negus-backend.mjs"), "recover"],
     { env: { ...env, NEGUS_TOKEN: "wrong-secret" } }).then(() => null, (e) => e);

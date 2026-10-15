@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Check, Files, PanelRight, Pencil, Share2, X } from 'lucide-react';
-import { ConversationView } from '../../../web-ui/src/features/conversations/components/ConversationView';
-import { ConversationComposer } from '../../../web-ui/src/features/conversations/components/ConversationComposer';
-import { ContentRenderer } from '../../../web-ui/src/features/conversations/rendering/ContentRenderer';
+import { ConversationView } from '../../shared/features/conversations/components/ConversationView';
+import { ConversationComposer } from '../../shared/features/conversations/components/ConversationComposer';
+import { ContentRenderer } from '../../shared/features/conversations/rendering/ContentRenderer';
 import { ChatHeader } from './ChatHeader';
 import { Avatar } from './Avatar';
 import { ConversationDetails } from './ConversationDetails';

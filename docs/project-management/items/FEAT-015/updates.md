@@ -71,4 +71,4 @@
 - 用户影响：当前产品行为没有变化；需求已进入项目管理和项目进度，后续开发可以沿同一编号追踪。
 - 当前方案：Luna 5.6 负责自然语言理解，项目建立模型无关的 Capability 执行层；对话、工作台、定时任务和外部 Agent Runtime 复用同一个生图能力。
 - 未执行：没有修改产品代码，没有调用生图 API，没有增加 UI，没有启动服务或测试。
-- 证据：`docs/feature-development/features/FEAT-015-image-generation-and-automation-workbench.md`；`docs/research/IMAGE_GENERATION_CAPABILITY_AND_AUTOMATION_WORKBENCH_RESEARCH_2026-08-04.md`。
+- 证据：`docs/negus-knowledge/features/feature-records/FEAT-015-image-generation-and-automation-workbench.md`；`docs/negus-knowledge/research/IMAGE_GENERATION_CAPABILITY_AND_AUTOMATION_WORKBENCH_RESEARCH_2026-08-04.md`。

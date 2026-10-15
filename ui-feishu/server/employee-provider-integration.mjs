@@ -51,7 +51,7 @@ export function adaptEmployeeProviderSource(source) {
   const startThread = async (employee) => {`);
   replace('      if (hadExistingThread) {\n        const authoritative', '      if (hadExistingThread) {\n        const beforeRead = statusFor(employee.id);\n        const authoritative');
   replace('if (authoritative.known && authoritative.active) {', 'if (authoritative.known && authoritative.active && statusFor(employee.id) === beforeRead) {');
-  replace('  const sendMessage = async ({ employeeId, text, requestId = "" }) => {', '  const sendMessage = async ({ employeeId, text, requestId = "" }) => {\n    await modelChanges.get(employeeId);\n    await reconcileEmployeeIdle(employeeId);');
+  replace('  const sendMessage = async ({ employeeId, text, attachments = [], requestId = "" }) => {', '  const sendMessage = async ({ employeeId, text, attachments = [], requestId = "" }) => {\n    await modelChanges.get(employeeId);\n    await reconcileEmployeeIdle(employeeId);');
   replace('  const updateModelSettings = async (employeeId, settings = {}) => {', `  const updateModelSettings = (employeeId, settings = {}) => {
     const previous = modelChanges.get(employeeId);
     const task = (async () => {

@@ -9,7 +9,7 @@
 
 ## 项目定位
 
-当前方向：**以个人助理为主要沟通入口、可以持续自定义的工作空间**。桌面展示真实工作内容，总助理处理快速请求，专业 Agent 支持咨询与后台执行。正式行为与未定边界见 [产品定义](PRODUCT_DEFINITION.md)，来源见 [文档导航](docs/README.md)。
+当前方向：**以个人助理为主要沟通入口、可以持续自定义的工作空间**。桌面展示真实工作内容，总助理处理快速请求，专业 Agent 支持咨询与后台执行。正式行为与未定边界见 [产品定义](docs/negus-knowledge/product/PRODUCT_DEFINITION.md)，来源见 [文档导航](docs/README.md)。
 
 本文件的能力介绍保留原静态核对基线，不将历史测试结果视为本次验收。当前入口源码默认进入桌面；后端仍在 `windows/server/`，目录名称不等于仅支持 Windows。
 
@@ -23,7 +23,7 @@ Codex Dream Skin 是历史来源，已确定逐步退出；本轮未删除代码
 
 消息支持复制、重新编辑、失败重试，以及从已完成 Turn 分叉继续；会话支持活动/归档列表和恢复。分叉、归档、审查等操作依赖所选 Codex 运行时支持，归档不是删除。
 
-代码依据：[会话页面](./web-ui/src/App.tsx)、[会话路由](./windows/server/routes/conversation-routes.mjs)、[会话服务](./windows/server/conversation-service.mjs)。
+代码依据：[会话页面](ui-feishu/src/FeishuApp.tsx)、[会话路由](windows/server/routes/conversation-routes.mjs)、[会话服务](windows/server/conversation-service.mjs)。
 
 ### 2. 后续指令队列、模型、上下文与 Goal
 
@@ -31,7 +31,7 @@ Codex Dream Skin 是历史来源，已确定逐步退出；本轮未删除代码
 - 支持模型和思考强度切换；运行中的会话禁止通过对应接口直接切换。上下文支持状态读取、自动压缩阈值设置及主动压缩。
 - 已接入原生审查 `review/start`。Goal 不仅有能力菜单，还提供目标状态、用时和 Token 展示，以及暂停、继续、完成和清除操作；后端直接转发 `thread/goal/get`、`set`、`clear`，不维护第二套目标生命周期。实际可用性取决于本机 Codex 版本，本轮未探测运行时。
 
-代码依据：[输入区](./web-ui/src/features/conversations/components/ConversationComposer.tsx)、[后续指令路由](./windows/server/routes/follow-up-queue-routes.mjs)、[队列服务](./windows/server/follow-up-queue-service.mjs)、[Goal 控件](./web-ui/src/features/goals/components/GoalControl.tsx)、[原生协议适配](./windows/server/app-server-conversation-store.mjs)。
+代码依据：[输入区](ui-feishu/shared/features/conversations/components/ConversationComposer.tsx)、[后续指令路由](windows/server/routes/follow-up-queue-routes.mjs)、[队列服务](windows/server/follow-up-queue-service.mjs)、[Goal 控件](ui-feishu/shared/features/goals/components/GoalControl.tsx)、[原生协议适配](windows/server/app-server-conversation-store.mjs)。
 
 ### 3. 多项目目录、员工与群聊
 
@@ -39,7 +39,7 @@ Codex Dream Skin 是历史来源，已确定逐步退出；本轮未删除代码
 
 产品规定员工直属单聊及其参与各群聊的会话归员工自己的项目，工作项目保留公共群聊记录。现有 Desktop 仍可能把仓库内员工子目录的 Thread 聚合到 negus 主项目；此问题已明确暂缓，不应介绍成归类完全隔离。群聊的历史、流式过程、队列和模型/上下文体验也不能宣称已全部与单聊一致。
 
-代码依据：[项目目录](./web-ui/src/features/project-directory/components/ProjectDirectory.tsx)、[员工接口](./windows/server/routes/employee-routes.mjs)、[群聊界面](./web-ui/src/features/group-chat/GroupApp.tsx)、[结果发布接口](./windows/server/routes/agent-publication-routes.mjs)、[服务组装与会话归属](./windows/scripts/remote-room-demo.mjs)。
+代码依据：[项目目录](ui-feishu/shared/features/project-directory/hooks/useProjectDirectory.ts)、[员工接口](windows/server/routes/employee-routes.mjs)、[群聊界面](ui-feishu/src/components/GroupWorkspace.tsx)、[结果发布接口](windows/server/routes/agent-publication-routes.mjs)、[服务组装与会话归属](windows/scripts/remote-room-demo.mjs)。
 
 ### 4. 附件、富文本与自然语言生图
 
@@ -47,19 +47,19 @@ Codex Dream Skin 是历史来源，已确定逐步退出；本轮未删除代码
 
 生图入口已进入真实 Codex Thread/Turn，并有 image MCP、生成记录和图片输出处理，支持自然语言生图及同会话继续改图的代码链路。供应商、认证及运行时能力必须可用；专门生图工作台、批量模板和定时自动化仍是后续范围。
 
-代码依据：[内容渲染](./web-ui/src/features/conversations/rendering/ContentRenderer.tsx)、[媒体服务](./windows/server/media-service.mjs)、[图片 MCP](./windows/server/image-generation/mcp-server.mjs)、[图片输出](./windows/server/image-generation/image-output.mjs)。
+代码依据：[内容渲染](ui-feishu/shared/features/conversations/rendering/ContentRenderer.tsx)、[媒体服务](windows/server/media-service.mjs)、[图片 MCP](windows/server/image-generation/mcp-server.mjs)、[图片输出](windows/server/image-generation/image-output.mjs)。
 
 ### 5. 成果预览、版本与审核
 
 Agent 成果可以登记为 Artifact，查询版本、预览、下载并提交审核结果。已有静态 HTML 生成、通过 Edge 输出 PDF、安全打开网页和群聊发布链路。PDF 生成依赖本机浏览器和运行环境；整体交付体验仍待验证，不等同于完整网页编辑器或 Office 文档平台。
 
-代码依据：[成果路由](./windows/server/routes/artifact-routes.mjs)、[成果服务](./windows/server/artifact-service.mjs)、[HTML/PDF 服务](./windows/server/web-output-service.mjs)。
+代码依据：[成果路由](windows/server/routes/artifact-routes.mjs)、[成果服务](windows/server/artifact-service.mjs)、[HTML/PDF 服务](windows/server/web-output-service.mjs)。
 
 ### 6. 移动端、用量和项目管理
 
 已有移动端布局、PWA 安装资源、设备身份和新版本刷新提示。用量控件提供浮生云算摘要与详情；模型智能/效率控件支持筛选和排序，内容依赖对应数据源，不能视为本次实测。项目管理页面从仓库条目文件读取摘要和更新记录，项目目录也有活动状态接口。
 
-代码依据：[用量控件](./web-ui/src/features/usage-monitor/components/UsageSummaryControl.tsx)、[模型比较控件](./web-ui/src/features/intelligence-efficiency/components/IntelligenceEfficiencyControl.tsx)、[项目管理页面](./web-ui/src/features/project-management/ProjectManagementApp.tsx)、[项目状态接口](./windows/server/routes/project-review-routes.mjs)、[PWA](./web-ui/src/pwa/)。
+代码依据：[用量控件](ui-feishu/shared/features/usage-monitor/components/UsageSummaryControl.tsx)、[模型比较控件](ui-feishu/shared/features/intelligence-efficiency/components/IntelligenceEfficiencyControl.tsx)、[项目管理页面](ui-feishu/shared/features/project-management/ProjectManagementApp.tsx)、[项目状态接口](windows/server/routes/project-review-routes.mjs)、[PWA](ui-feishu/shared/pwa)。
 
 ### 7. 员工成长：已有基础设施，自动学习尚未接通
 
@@ -67,15 +67,15 @@ Agent 成果可以登记为 Artifact，查询版本、预览、下载并提交�
 
 但当前启动入口使用无模型注入的默认评审器，返回空的 facts、rules、skills。因而只能确认审核与落盘基础设施存在，不能说员工每次任务后会自动提炼经验、生成技能或完成每日压缩。长期经验和自动学习的产品范围仍以产品定义为准。
 
-代码依据：[成长服务](./windows/server/employee-growth-service.mjs)、[默认评审器](./windows/server/employee-growth-reviewer.mjs)、[成长接口](./windows/server/routes/employee-growth-routes.mjs)、[成长面板](./web-ui/src/features/employee-growth/components/EmployeeGrowthPanel.tsx)。
+代码依据：[成长服务](windows/server/employee-growth-service.mjs)、[默认评审器](windows/server/employee-growth-reviewer.mjs)、[成长接口](windows/server/routes/employee-growth-routes.mjs)、[成长面板](ui-feishu/shared/features/employee-growth/components/EmployeeGrowthPanel.tsx)。
 
-功能验收状态仍以 [功能状态索引](./docs/feature-development/FEATURE_STATUS_INDEX.md) 和对应档案为准；索引中的历史测试数量及部署结论不是本次检查结果。
+功能验收状态仍以 [功能状态索引](docs/negus-knowledge/features/FEATURE_STATUS_INDEX.md) 和对应档案为准；索引中的历史测试数量及部署结论不是本次检查结果。
 
 ## 产品定义入口
 
-当前产品行为、用户流程、归属关系和不可违反的边界统一写在 [`PRODUCT_DEFINITION.md`](./PRODUCT_DEFINITION.md)。本文件提供带代码依据的实现概览，不重新定义产品行为；历史计划和逐版本记录仍放在功能档案中。
+当前产品行为、用户流程、归属关系和不可违反的边界统一写在 [`PRODUCT_DEFINITION.md`](docs/negus-knowledge/product/PRODUCT_DEFINITION.md)。本文件提供带代码依据的实现概览，不重新定义产品行为；历史计划和逐版本记录仍放在功能档案中。
 
-固定阅读顺序：`PROJECT.md` -> `PRODUCT_DEFINITION.md` -> 本次涉及的 `FEAT-*.md`。
+固定阅读顺序：`PROJECT.md` -> `docs/negus-knowledge/product/PRODUCT_DEFINITION.md` -> 本次涉及的 `FEAT-*.md`。
 
 其中群聊和员工的核心原则是：工作项目拥有项目文件和公共群聊记录；员工自己的项目始终拥有该员工的直属单聊和参与各项目群聊的长期会话。员工可以操作目标工作项目，但不得在目标工作项目的普通会话列表中创建或留下员工会话。
 
@@ -83,8 +83,8 @@ Agent 成果可以登记为 Artifact，查询版本、预览、下载并提交�
 
 | 路径 | 内容 |
 | --- | --- |
-| `web-ui/src/features/` | React 前端功能模块 |
-| `web-ui/src/components/`、`web-ui/src/shared/` | 跨页面 UI、API 和模型共用代码 |
+| `ui-feishu/shared/features/` | React 前端功能模块 |
+| `ui-feishu/src/`、`ui-feishu/shared/` | 跨页面 UI、API 和模型共用代码 |
 | `windows/server/` | Web API、SSE、会话、群聊、Artifact 和生图服务 |
 | `windows/server/routes/` | HTTP 路由入口 |
 | `windows/scripts/remote-room-demo.mjs` | Web 服务组装和启动入口 |
@@ -98,14 +98,14 @@ Agent 成果可以登记为 Artifact，查询版本、预览、下载并提交�
 
 | 要修改的模块 | 先读的文档 | 主要代码位置 |
 | --- | --- | --- |
-| 单人 Web 对话、执行、历史 | `docs/feature-development/features/FEAT-001-single-codex-web.md` | `web-ui/src/features/conversations/`、`execution/`、`context-management/`；`windows/server/conversation-service.mjs`、`app-server-conversation-store.mjs`、`execution-tracker.mjs` |
-| 多业务项目与会话归类 | `docs/feature-development/features/FEAT-017-multiple-business-projects.md` | `web-ui/src/features/project-directory/`；`windows/server/business-project-config.mjs`、`project-identity-store.mjs`、`employee-project-directory.mjs` |
-| 项目群聊和多 Agent | `docs/feature-development/features/FEAT-002-group-multi-agent.md` | `web-ui/src/features/group-chat/`；`windows/server/group-room-store.mjs`、`multi-agent-service.mjs` |
-| 附件和内容渲染 | `docs/feature-development/features/FEAT-003-attachments-content-rendering.md` | `web-ui/src/features/attachments/`、`conversations/rendering/`；`windows/server/content-blocks.mjs`、`media-service.mjs` |
-| PWA、设备和移动端入口 | `docs/feature-development/features/FEAT-004-pwa-device-identity.md` | `web-ui/src/pwa/`、`features/device/`、`features/app-update/`；`web-ui/public/`、`windows/server/request-handler.mjs` |
-| Desktop/Web 连续性和实时事件 | `docs/feature-development/features/FEAT-005-desktop-web-continuity.md` | `windows/server/app-server-client.mjs`、`app-server-conversation-store.mjs`、`execution-tracker.mjs`、`realtime-hub.mjs` |
-| Artifact、HTML 和 PDF | `docs/feature-development/features/FEAT-007-agent-artifacts.md`、`FEAT-008-html-page-pdf-generation.md` | `web-ui/src/features/artifacts/`；`windows/server/artifact-service.mjs`、`web-output-service.mjs`、`request-handler.mjs` |
-| 自然语言生图 | `docs/feature-development/features/FEAT-015-image-generation-and-automation-workbench.md` | `web-ui/src/features/` 相关生图入口；`windows/server/image-generation/`、`conversation-routes.mjs` |
+| 单人 Web 对话、执行、历史 | `docs/negus-knowledge/features/feature-records/FEAT-001-single-codex-web.md` | `ui-feishu/shared/features/conversations/`、`execution/`、`context-management/`；`windows/server/conversation-service.mjs`、`app-server-conversation-store.mjs`、`execution-tracker.mjs` |
+| 多业务项目与会话归类 | `docs/negus-knowledge/features/feature-records/FEAT-017-multiple-business-projects.md` | `ui-feishu/shared/features/project-directory/`、`ui-feishu/src/conversationDirectory.ts`；`windows/server/business-project-config.mjs`、`project-identity-store.mjs`、`employee-project-directory.mjs` |
+| 项目群聊和多 Agent | `docs/negus-knowledge/features/feature-records/FEAT-002-group-multi-agent.md` | `ui-feishu/src/components/GroupWorkspace.tsx`、`ui-feishu/shared/features/group-chat/`；`windows/server/group-room-store.mjs`、`multi-agent-service.mjs` |
+| 附件和内容渲染 | `docs/negus-knowledge/features/feature-records/FEAT-003-attachments-content-rendering.md` | `ui-feishu/shared/features/attachments/`、`conversations/rendering/`；`windows/server/content-blocks.mjs`、`media-service.mjs` |
+| PWA、设备和移动端入口 | `docs/negus-knowledge/features/feature-records/FEAT-004-pwa-device-identity.md` | `ui-feishu/shared/pwa/`、`features/device/`、`features/app-update/`；`ui-feishu/public/`、`windows/server/request-handler.mjs` |
+| Desktop/Web 连续性和实时事件 | `docs/negus-knowledge/features/feature-records/FEAT-005-desktop-web-continuity.md` | `windows/server/app-server-client.mjs`、`app-server-conversation-store.mjs`、`execution-tracker.mjs`、`realtime-hub.mjs` |
+| Artifact、HTML 和 PDF | `docs/negus-knowledge/features/feature-records/FEAT-007-agent-artifacts.md`、`FEAT-008-html-page-pdf-generation.md` | `ui-feishu/shared/features/artifacts/`；`windows/server/artifact-service.mjs`、`web-output-service.mjs`、`request-handler.mjs` |
+| 自然语言生图 | `docs/negus-knowledge/features/feature-records/FEAT-015-image-generation-and-automation-workbench.md` | `ui-feishu/shared/features/` 相关生图入口；`windows/server/image-generation/`、`conversation-routes.mjs` |
 | macOS 换肤 | `macos/README.md`、`macos/SKILL.md` | `macos/` |
 | Windows 换肤 | `windows/README.md`、`windows/SKILL.md` | `windows/assets/`、`windows/scripts/*dream-skin*`、`windows/scripts/injector.mjs` |
 
@@ -123,10 +123,11 @@ app-server 是主要数据源。本地 Codex JSONL 是降级数据源。
 
 主要页面：
 
-- /：默认桌面；/?view=conversation：单人对话
-- /group.html：项目群聊
-- /progress.html：项目进度
-- /project-management.html：项目管理兼容入口
+- /：唯一前端入口；/?view=conversation：单人对话
+- /?view=group：群聊
+- /?view=settings&settings=progress：项目进度
+- /?view=settings&settings=management：项目管理
+- 旧的 `/group.html`、`/progress`、`/project-management` 地址只做跳转，不再加载独立页面
 
 构建和运行：
 
@@ -151,10 +152,10 @@ app-server 是主要数据源。本地 Codex JSONL 是降级数据源。
 
 - 方向证据、开放问题与历史利用：[文档导航](docs/README.md)
 - 助手工作规则：`AI_ASSISTANT_WORK_RULES.md`
-- 功能状态：`docs/feature-development/FEATURE_STATUS_INDEX.md`
-- 功能详情：`docs/feature-development/features/`
-- 开发常见错误：`docs/feature-development/DEVELOPMENT_COMMON_MISTAKES.md`
+- 功能状态：`docs/negus-knowledge/features/FEATURE_STATUS_INDEX.md`
+- 功能详情：`docs/negus-knowledge/features/feature-records/`
+- 开发常见错误：`docs/negus-knowledge/features/DEVELOPMENT_COMMON_MISTAKES.md`
 - 架构职责：docs/architecture/
 - 项目管理：docs/project-management/
-- 研究和证据：docs/research/、docs/records/
-- 产品愿景和历史讨论：docs/records/VISION_NOTES.md、项目战略与多角色评审/
+- 研究和证据：docs/negus-knowledge/research/、docs/negus-knowledge/records/
+- 产品愿景和历史讨论：docs/negus-knowledge/decisions/VISION_NOTES.md、docs/negus-knowledge/strategy/

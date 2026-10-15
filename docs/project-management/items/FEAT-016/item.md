@@ -6,7 +6,7 @@ category: maintenance
 priority: P1
 status: implemented_pending_review
 updated_at: 2026-08-05 09:28 +08:00
-source: docs/feature-development/features/FEAT-016-project-identity-negus.md
+source: docs/negus-knowledge/features/feature-records/FEAT-016-project-identity-negus.md
 related: [FEAT-004, FEAT-006]
 owner: product_and_runtime
 product_base_commit: f1ac9774927c11a6ace7692b0c4766052776032c

@@ -13,7 +13,7 @@ const installRoot = path.resolve(import.meta.dirname, "..");
 const runtimeRoot = path.join(installRoot, "runtime");
 const stateFile = path.join(runtimeRoot, "negus-web-demo.json");
 const serverScript = path.join(installRoot, "windows", "scripts", "remote-room-demo.mjs");
-const webRoot = path.join(installRoot, "web-ui", "dist");
+const webRoot = path.join(installRoot, "ui-feishu", "dist");
 const port = Number(process.env.NEGUS_PORT || "9360");
 const token = process.env.NEGUS_TOKEN || (await fs.readFile(path.join(runtimeRoot, "access-token"), "utf8").catch(() => "")).trim();
 const deviceName = process.env.NEGUS_DEVICE_NAME || os.hostname();
@@ -58,7 +58,7 @@ const request = async () => {
 const pnpmCommand = () => process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 
 const initialize = async () => {
-  const required = [serverScript, path.join(projectRoot, "web-ui", "package.json"), path.join(projectRoot, "employees")];
+  const required = [serverScript, path.join(projectRoot, "ui-feishu", "package.json"), path.join(projectRoot, "employees")];
   const missing = [];
   for (const entry of required) {
     if (!await fs.stat(entry).then(() => true).catch(() => false)) missing.push(path.relative(projectRoot, entry));
@@ -123,7 +123,7 @@ const diagnose = async () => {
     diagnosticCheck("Frontend build", async () => {
       const file = path.join(webRoot, "index.html");
       const stats = await fs.stat(file);
-      if (!stats.isFile()) throw new Error("web-ui/dist/index.html is not a file");
+      if (!stats.isFile()) throw new Error("ui-feishu/dist/index.html is not a file");
       return `index.html present (${stats.size} bytes)`;
     }),
     diagnosticCheck("Node service", checkServer),
@@ -135,7 +135,7 @@ const diagnose = async () => {
 };
 
 const build = () => {
-  const result = spawnSync(pnpmCommand(), ["--dir", path.join(projectRoot, "web-ui"), "build"], { cwd: projectRoot, stdio: "inherit" });
+  const result = spawnSync(pnpmCommand(), ["--dir", path.join(projectRoot, "ui-feishu"), "build"], { cwd: projectRoot, stdio: "inherit" });
   if (result.error) throw new Error(`pnpm is required to build the UI: ${result.error.message}`);
   if (result.status !== 0) process.exit(result.status || 1);
 };

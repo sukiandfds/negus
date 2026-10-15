@@ -144,9 +144,9 @@ test("serves project-management data through its separate API", async () => {
   }
 });
 
-test("maps the clean progress path to the independent page", async () => {
+test("maps the clean progress path to the settings section in the single frontend", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "codex-project-management-static-"));
-  await fs.writeFile(path.join(root, "project-management.html"), "project-management-page", "utf8");
+  await fs.writeFile(path.join(root, "index.html"), "single-frontend", "utf8");
   const staticServer = createStaticFileServer(root);
   const server = http.createServer((request, response) => staticServer(
     new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`),
@@ -155,9 +155,9 @@ test("maps the clean progress path to the independent page", async () => {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
     const address = server.address();
-    const response = await fetch(`http://127.0.0.1:${address.port}/progress?token=test-token`);
-    assert.equal(response.status, 200);
-    assert.equal(await response.text(), "project-management-page");
+    const response = await fetch(`http://127.0.0.1:${address.port}/progress?token=test-token`, { redirect: "manual" });
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get("location"), "/?view=settings&settings=progress&token=test-token");
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(root, { recursive: true, force: true });

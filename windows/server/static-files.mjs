@@ -9,16 +9,34 @@ const mimeTypes = new Map([
   [".jpeg", "image/jpeg"], [".webp", "image/webp"],
 ]);
 
-const pageAliases = new Map([
-  ["/progress", "project-management.html"],
-  ["/progress/", "project-management.html"],
-  ["/project-management", "project-management.html"],
-  ["/project-management/", "project-management.html"],
+// There is one frontend build now. Keep old bookmarks usable by routing them
+// into the matching settings section instead of serving another HTML app.
+const legacyRedirects = new Map([
+  ["/group.html", "/?view=group"],
+  ["/employee.html", "/?view=employees"],
+  ["/progress.html", "/?view=settings&settings=progress"],
+  ["/progress", "/?view=settings&settings=progress"],
+  ["/progress/", "/?view=settings&settings=progress"],
+  ["/project-management.html", "/?view=settings&settings=management"],
+  ["/project-management", "/?view=settings&settings=management"],
+  ["/project-management/", "/?view=settings&settings=management"],
 ]);
 
 export const createStaticFileServer = (webRoot) => async (url, response) => {
-  const relative = pageAliases.get(url.pathname)
-    || (url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname).replace(/^\/+/, ""));
+  const legacyTarget = legacyRedirects.get(url.pathname);
+  if (legacyTarget) {
+    const location = new URL(legacyTarget, url.origin);
+    for (const [key, value] of url.searchParams) {
+      if (!location.searchParams.has(key)) location.searchParams.set(key, value);
+    }
+    if (url.pathname === "/employee.html" && url.searchParams.get("employeeId") && !location.searchParams.has("agent")) {
+      location.searchParams.set("agent", url.searchParams.get("employeeId"));
+    }
+    response.writeHead(302, { Location: `${location.pathname}${location.search}`, "Cache-Control": "no-store" });
+    response.end();
+    return;
+  }
+  const relative = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname).replace(/^\/+/, "");
   const file = path.resolve(webRoot, relative);
   if (file !== webRoot && !file.startsWith(`${webRoot}${path.sep}`)) {
     response.writeHead(403);

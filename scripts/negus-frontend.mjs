@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { root, sourceRoot, runtime, config, http, readJson, writeJson, run, withLock, detached, report } from "./negus-service-common.mjs";
 
-const required = ["index.html", "group.html", "progress.html", "project-management.html", "version.json"];
+const required = ["index.html", "version.json"];
 export const validateBuild = async (directory) => {
   for (const name of required) await fs.access(path.join(directory, name));
   const version = await readJson(path.join(directory, "version.json"));
@@ -68,11 +68,11 @@ export const main = async (args = process.argv.slice(2)) => {
         return;
       }
       const stage = path.join(runtime, "frontend-build-" + Date.now());
-      await run(process.execPath, [path.join(sourceRoot, "web-ui/node_modules/typescript/bin/tsc"), "-b"],
-        { cwd: path.join(sourceRoot, "web-ui") });
-      await run(process.execPath, [path.join(sourceRoot, "web-ui/node_modules/vite/bin/vite.js"),
+      await run(process.execPath, [path.join(sourceRoot, "ui-feishu/node_modules/typescript/bin/tsc"), "-b"],
+        { cwd: path.join(sourceRoot, "ui-feishu") });
+      await run(process.execPath, [path.join(sourceRoot, "ui-feishu/node_modules/vite/bin/vite.js"),
         "build", "--config", "vite.config.ts", "--outDir", stage, "--emptyOutDir"],
-        { cwd: path.join(sourceRoot, "web-ui") });
+        { cwd: path.join(sourceRoot, "ui-feishu") });
       const version = await validateBuild(stage);
       await validateBuild(cfg.webRoot); // Preserve a known complete recovery copy.
       previous = path.join(runtime, "frontend-backups", String(Date.now()));

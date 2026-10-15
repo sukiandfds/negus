@@ -6,7 +6,7 @@ category: development
 priority: P5
 status: handoff_pending
 updated_at: 2026-09-30 09:02 +08:00
-source: docs/feature-development/features/FEAT-009-remote-development-host.md
+source: docs/negus-knowledge/features/feature-records/FEAT-009-remote-development-host.md
 related: [FEAT-001, FEAT-006]
 ---
 
@@ -50,6 +50,6 @@ handoff_pending；定向测试、隔离构建和真实只读检查通过。正�
 
 ## 当前证据
 
-- `docs/feature-development/features/FEAT-009-remote-development-host.md`
+- `docs/negus-knowledge/features/feature-records/FEAT-009-remote-development-host.md`
 
 - `docs/operations/NEGUS_SERVICE_CONTROL.md`

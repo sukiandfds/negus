@@ -6,7 +6,7 @@ category: research
 priority: P1
 status: completed
 updated_at: 2026-09-25 23:53 +08:00
-source: docs/research/GROK_BOT_AGENT_MANAGEMENT_RESEARCH_2026-09-25.md
+source: docs/negus-knowledge/research/GROK_BOT_AGENT_MANAGEMENT_RESEARCH_2026-09-25.md
 related: [FEAT-002, FEAT-017, FEAT-023]
 product_base_commit: a3dd3f779649db3cb86bbf864d3c0d25f44c3488
 sync_status: synced
@@ -30,7 +30,7 @@ last_user_visible_change: 新增详细调研文档，未修改产品行为
 
 ## 具体内容
 
-正文见[调研文档](../../../research/GROK_BOT_AGENT_MANAGEMENT_RESEARCH_2026-09-25.md)。不重复维护完整正文。
+正文见[调研文档](../../../negus-knowledge/research/GROK_BOT_AGENT_MANAGEMENT_RESEARCH_2026-09-25.md)。不重复维护完整正文。
 
 ## 预计效果
 

@@ -20,8 +20,8 @@ last_updated: 2026-08-05 09:20:00 +08:00
 
 ```text
 docs/project-management/       当前项目管理面板的数据源
-docs/feature-development/      既有功能开发档案和历史资料
-web-ui/src/features/project-management/  当前项目管理前端功能
+docs/negus-knowledge/features/      既有功能开发档案和历史资料
+ui-feishu/shared/features/project-management/  当前项目管理前端功能
 windows/server/project-management-store.mjs  项目管理数据读取器
 ```
 
@@ -32,12 +32,12 @@ windows/server/project-management-store.mjs  项目管理数据读取器
 ```text
 AI_ASSISTANT_WORK_RULES.md                          助手工作规则、开发、测试、提交和交付要求
 根目录 PROJECT.md                                    negus 项目事实、能力、结构和当前限制
-docs/feature-development/DEVELOPMENT_COMMON_MISTAKES.md          已发生的跨功能错误案例和防复发动作（PROC-*）
-docs/feature-development/features/FEAT-*.md        功能目标、架构、问题和版本时间线（FEAT-*）
+docs/negus-knowledge/features/DEVELOPMENT_COMMON_MISTAKES.md          已发生的跨功能错误案例和防复发动作（PROC-*）
+docs/negus-knowledge/features/feature-records/FEAT-*.md        功能目标、架构、问题和版本时间线（FEAT-*）
 docs/architecture/                                   技术架构职责、依赖边界和架构审计
-docs/research/                                       日期化技术研究和证据记录
-项目战略与多角色评审/                                 产品、竞品、Orca 和外部评估历史资料
-docs/records/                                        新的开发日志、验证记录和事故复盘
+docs/negus-knowledge/research/                                       日期化技术研究和证据记录
+docs/negus-knowledge/strategy/                                 产品、竞品、Orca 和外部评估历史资料
+docs/negus-knowledge/records/                                        新的开发日志、验证记录和事故复盘
 docs/project-management/items/<ITEM-ID>/item.md   条目当前摘要、用户原话和预计效果
 docs/project-management/items/<ITEM-ID>/updates.md 条目状态与版本更新
 docs/project-management/items/<ITEM-ID>/process.md 条目专属弯路、阻塞、决策和效率复盘
@@ -51,4 +51,4 @@ docs/project-management/items/<ITEM-ID>/process.md 条目专属弯路、阻塞�
 - Linear：以项目、里程碑、工作项和带时间的 Project Updates 组织进度快照。
 - OpenProject：以项目层级、Work Package、状态、责任和可追踪记录组织工作。
 
-完整调研记录见 [`docs/feature-development/PROJECT_PROGRESS_MANAGEMENT_RESEARCH_2026-08-02.md`](../feature-development/PROJECT_PROGRESS_MANAGEMENT_RESEARCH_2026-08-02.md)。
+完整调研记录见 [`docs/negus-knowledge/features/PROJECT_PROGRESS_MANAGEMENT_RESEARCH_2026-08-02.md`](../negus-knowledge/research/PROJECT_PROGRESS_MANAGEMENT_RESEARCH_2026-08-02.md)。

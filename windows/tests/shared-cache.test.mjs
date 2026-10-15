@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
-import ts from "../../web-ui/node_modules/typescript/lib/typescript.js";
+import ts from "../../ui-feishu/node_modules/typescript/lib/typescript.js";
 
-const source = await fs.readFile(new URL("../../web-ui/src/shared/state/localCache.ts", import.meta.url), "utf8");
+const source = await fs.readFile(new URL("../../ui-feishu/shared/shared/state/localCache.ts", import.meta.url), "utf8");
 const moduleUrl = (text) => "data:text/javascript;base64," + Buffer.from(ts.transpileModule(text, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText).toString("base64");
@@ -116,7 +116,7 @@ test("resource merge policy preserves partial data but permits confirmed deletio
 });
 
 test("model catalogs isolate employee scopes and never reuse ambiguous legacy data", async () => {
-  const text = (await fs.readFile(new URL("../../web-ui/src/features/models/data/modelCatalogCache.ts", import.meta.url), "utf8"))
+  const text = (await fs.readFile(new URL("../../ui-feishu/shared/features/models/data/modelCatalogCache.ts", import.meta.url), "utf8"))
     .replace('"../../../shared/state/localCache"', JSON.stringify(cacheUrl))
     .replace('import { currentConversationId } from "../../../shared/api/conversationScope";', 'const currentConversationId = () => "";');
   const { modelCatalogFor } = await import(moduleUrl(text));

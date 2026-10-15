@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
-import { postJson } from '../../../web-ui/src/shared/api/http';
-import styles from '../../../web-ui/src/features/conversations/components/ConversationActions.module.css';
+import { postJson } from '../../shared/shared/api/http';
+import styles from '../../shared/features/conversations/components/ConversationActions.module.css';
 import type { DirectoryState } from '../types';
 import type { ChatRoom } from '../useGroupChats';
 

@@ -20,7 +20,7 @@ last_updated: 2026-08-02 18:00 +08:00
 - 正确路径/决策：先建立 `docs/project-management/` 数据源、条目目录和字段规范，再由读取器和 React 功能模块消费；不把旧功能档案混入新目录。
 - 防再犯触发器：需求出现“真正系统”“方便维护”“不要和原文件混在一起”时，先检查数据源、文件归属和维护入口，再改页面。
 - 归属判断：条目专属；目录边界规则同时受 `PROC-001` 约束。
-- 证据：`docs/project-management/PROJECT.md`、`SCHEMA.md`、`docs/feature-development/PROJECT_PROGRESS_DEVELOPMENT_PLAN_2026-08-02.md`。
+- 证据：`docs/project-management/PROJECT.md`、`SCHEMA.md`、`docs/negus-knowledge/planning/PROJECT_PROGRESS_DEVELOPMENT_PLAN_2026-08-02.md`。
 - 关联：`PROC-001`、`updates.md`。
 
 ### 2026-08-02 | PM-001-P02 | decision | P1 | mitigated
@@ -48,5 +48,5 @@ last_updated: 2026-08-02 18:00 +08:00
 - 正确路径/决策：分别测量 API、会话列表和导航；接口约 95ms、会话列表约 162ms 时，优先使用导航缓存优先、后台更新和 `sessionStorage` 摘要缓存，让旧摘要先显示再静默更新。
 - 防再犯触发器：用户描述“页面慢”时，先拆分导航、接口、解析和渲染四段计时；没有测量前不引入数据库或后台索引服务。
 - 归属判断：条目专属优化；“先测量再改性能”关联 `PROC-006`、`PROC-010`。
-- 证据：`docs/feature-development/DEVELOPMENT_EXPERIENCE_2026-08-02.md#EXP-004`、`web-ui/public/sw.js`、`web-ui/src/features/project-management/data/projectManagementApi.ts`。
+- 证据：`docs/negus-knowledge/records/DEVELOPMENT_EXPERIENCE_2026-08-02.md#EXP-004`、`web-ui/public/sw.js`、`web-ui/src/features/project-management/data/projectManagementApi.ts`。
 - 关联：`PROC-006`、`PROC-010`、`updates.md`。

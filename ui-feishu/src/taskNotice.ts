@@ -1,4 +1,4 @@
-import type { SessionMessage } from '../../web-ui/src/features/conversations/model/types';
+import type { SessionMessage } from '../shared/features/conversations/model/types';
 
 // Presentation only; the original source message and native history remain intact.
 export function taskNotice(message: SessionMessage): SessionMessage {

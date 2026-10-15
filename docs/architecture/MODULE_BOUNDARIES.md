@@ -7,22 +7,21 @@
 ## 前端目录
 
 ```text
-web-ui/src/
-  App.tsx                 单人页面组装，不实现具体业务
-  components/             跨功能纯 UI 与应用外壳
-  features/<feature>/     一个功能的组件、状态、接口和类型
+ui-feishu/
+  src/                    飞书布局入口、页面组装和应用外壳
+  shared/features/<feature>/ 一个功能的组件、状态、接口和类型
     components/
     data/
     hooks/
     model/
     realtime/             需要实时事件时使用
     state/                需要独立状态辅助时使用
-  shared/
+  shared/shared/
     api/                  跨功能 HTTP、鉴权等基础设施
     model/                跨功能稳定类型
 ```
 
-依赖方向：`App -> features -> shared`。`components/` 可以被功能使用，但不能调用功能 API、持有业务状态或依赖某个功能的类型。
+依赖方向：`src -> shared/features -> shared/shared`。`src/components/` 可以被功能使用，但不能调用功能 API、持有业务状态或依赖某个功能的类型。
 
 ## 后端目录
 

@@ -5,4 +5,4 @@
 - 状态：completed（仅研究）。
 - 本次更新：完成操作覆盖、前端与异步链路缺口、原文来源与修订、最小共享方案和验收矩阵。
 - 用户影响：可审阅开发范围；页面和运行服务没有变化。
-- 证据：[完整调研](../../../research/NEGUS_SYSTEM_LOGGING_RESEARCH_2026-10-06.md)。
+- 证据：[完整调研](../../../negus-knowledge/research/NEGUS_SYSTEM_LOGGING_RESEARCH_2026-10-06.md)。

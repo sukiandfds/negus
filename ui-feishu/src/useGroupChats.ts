@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { observeProjectStream } from './projectEvents';
-import { groupApi } from '../../web-ui/src/features/group-chat/data/groupApi';
-import type { GroupRoom } from '../../web-ui/src/features/group-chat/model/types';
+import { groupApi } from '../shared/features/group-chat/data/groupApi';
+import type { GroupRoom } from '../shared/features/group-chat/model/types';
 
 export type ChatRoom = GroupRoom & { lastActivityAt?: string };
 export function useGroupChats() {

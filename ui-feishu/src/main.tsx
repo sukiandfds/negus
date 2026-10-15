@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { FeishuApp } from './FeishuApp';
-import '../../web-ui/src/styles/tokens.css';
-import '../../web-ui/src/styles/global.css';
+import '../shared/styles/tokens.css';
+import '../shared/styles/global.css';
 import './style.css';
 
 let viewportFrame = 0;

@@ -6,7 +6,7 @@ category: development
 priority: P1
 status: pending_review
 updated_at: 2026-08-06
-source: docs/feature-development/PROJECT_PROGRESS_DEVELOPMENT_PLAN_2026-08-02.md
+source: docs/negus-knowledge/planning/PROJECT_PROGRESS_DEVELOPMENT_PLAN_2026-08-02.md
 related: []
 ---
 

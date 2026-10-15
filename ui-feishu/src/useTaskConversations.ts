@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { CurrentTask } from '../../web-ui/src/features/desktop/currentTasks';
-import { useCurrentTasks } from '../../web-ui/src/features/desktop/useCurrentTasks';
-import { scheduleLabel } from '../../web-ui/src/features/desktop/AutomationsWidget';
-import { goalStatusLabels } from '../../web-ui/src/features/goals/model/types';
-import { fetchJson } from '../../web-ui/src/shared/api/http';
+import type { CurrentTask } from '../shared/features/desktop/currentTasks';
+import { useCurrentTasks } from '../shared/features/desktop/useCurrentTasks';
+import { scheduleLabel } from '../shared/features/desktop/AutomationsWidget';
+import { goalStatusLabels } from '../shared/features/goals/model/types';
+import { fetchJson } from '../shared/shared/api/http';
 import { byLatest } from './conversationDirectory';
 import type { Conversation, DirectoryState } from './types';
 import { useTaskRuns, taskFinished, taskStateLabels, type TaskRun } from './useTaskRuns';

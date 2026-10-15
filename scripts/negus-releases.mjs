@@ -10,7 +10,7 @@ import { validateBuild } from "./negus-frontend.mjs";
 const exec = promisify(execFile);
 export const releaseStateFile = path.join(runtime, "negus-release-state.json");
 export const releasesRoot = path.join(runtime, "releases");
-const codeDirectories = ["windows/server", "windows/scripts", "scripts", "ui-feishu/server", "ui-feishu/kernel", "ui-feishu/employees"];
+const codeDirectories = ["windows/server", "windows/scripts", "scripts", "ui-feishu/server", "ui-feishu/kernel"];
 const digestTree = async (directory) => {
   const hash = createHash("sha256");
   const walk = async (relative = "") => {
@@ -37,7 +37,7 @@ export const verifyRelease = async (release) => {
   if (release.entryScript !== path.join(release.directory, "windows/scripts/remote-room-demo.mjs")) throw new Error("Invalid release entry.");
   if (release.loaderScript && release.loaderScript !== path.join(release.directory, "ui-feishu/server/register.mjs")) throw new Error("Invalid release loader.");
   if (release.loaderScript) await fs.access(release.loaderScript);
-  await validateBuild(path.join(release.directory, "web-ui/dist"));
+  await validateBuild(path.join(release.directory, "ui-feishu/dist"));
   return manifest;
 };
 const freePort = async () => {
@@ -61,7 +61,7 @@ export const smokeRelease = async (release) => {
     await fs.mkdir(path.join(directory, "sessions"), { recursive: true });
     const port = await freePort(), token = randomBytes(24).toString("hex");
     child = spawn(process.execPath, [...(release.loaderScript ? ["--import", release.loaderScript] : []), release.entryScript, "--project-root", directory, "--port", String(port),
-      "--web-root", path.join(release.directory, "web-ui/dist"), "--token", token], {
+      "--web-root", path.join(release.directory, "ui-feishu/dist"), "--token", token], {
       cwd: directory, stdio: ["ignore", log.fd, log.fd],
       env: { ...process.env, NEGUS_INSTALL_ROOT: root, NEGUS_UI_STATE_ROOT: path.join(directory, "runtime/ui-feishu"), CODEX_HOME: path.join(directory, "codex"), CODEX_SESSION_DIR: path.join(directory, "sessions") },
     });
@@ -74,7 +74,7 @@ export const smokeRelease = async (release) => {
       const api = await http(cfg, "/api/project", { timeout: 1000 });
       const ui = await http(cfg, "/", { timeout: 1000 });
       const version = await http(cfg, "/api/version", { timeout: 1000 });
-      const expected = await validateBuild(path.join(release.directory, "web-ui/dist"));
+      const expected = await validateBuild(path.join(release.directory, "ui-feishu/dist"));
       if (api.status === 200 && api.body?.root === directory && ui.status === 200 && version.body?.buildId === expected.buildId) { healthy = true; break; }
       await delay(250);
     }
@@ -103,7 +103,7 @@ export const snapshotRelease = async ({ revision, build = false } = {}) => {
     if (!/^[a-f0-9]{40,64}$/u.test(sha)) throw new Error("Invalid baseline revision.");
     // This fallback is validated against installed dependencies; no dependency changes during restart.
     const archive = path.join(directory, "source.tar");
-    await exec(git, ["archive", "--format=tar", "--output=" + archive, sha, "windows/server", "windows/scripts", "scripts", "package.json"], { cwd: sourceRoot });
+    await exec(git, ["archive", "--format=tar", "--output=" + archive, sha, "windows/server", "windows/scripts", "scripts", "package.json", "ui-feishu"], { cwd: sourceRoot });
     await exec("/usr/bin/tar", ["-xf", archive, "-C", directory]);
     await fs.rm(archive);
     revision = sha;
@@ -112,12 +112,12 @@ export const snapshotRelease = async ({ revision, build = false } = {}) => {
     await fs.copyFile(path.join(sourceRoot, "package.json"), path.join(directory, "package.json"));
   }
   await fs.cp(path.join(sourceRoot, "node_modules"), path.join(directory, "node_modules"), { recursive: true, verbatimSymlinks: true });
-  const webRoot = path.join(directory, "web-ui/dist");
+  const webRoot = path.join(directory, "ui-feishu/dist");
   if (build) {
-    await run(process.execPath, [path.join(sourceRoot, "web-ui/node_modules/typescript/bin/tsc"), "-b"], { cwd: path.join(sourceRoot, "web-ui") });
-    await run(process.execPath, [path.join(sourceRoot, "web-ui/node_modules/vite/bin/vite.js"), "build", "--config", "vite.config.ts", "--outDir", webRoot, "--emptyOutDir"], { cwd: path.join(sourceRoot, "web-ui") });
+    await run(process.execPath, [path.join(sourceRoot, "ui-feishu/node_modules/typescript/bin/tsc"), "-b"], { cwd: path.join(sourceRoot, "ui-feishu") });
+    await run(process.execPath, [path.join(sourceRoot, "ui-feishu/node_modules/vite/bin/vite.js"), "build", "--config", "vite.config.ts", "--outDir", webRoot, "--emptyOutDir"], { cwd: path.join(sourceRoot, "ui-feishu") });
   } else {
-    await fs.cp(path.join(sourceRoot, "web-ui/dist"), webRoot, { recursive: true, verbatimSymlinks: true });
+    await fs.cp(path.join(sourceRoot, "ui-feishu/dist"), webRoot, { recursive: true, verbatimSymlinks: true });
   }
   await validateBuild(webRoot);
   const release = { id, directory, entryScript: path.join(directory, "windows/scripts/remote-room-demo.mjs"), loaderScript: path.join(directory, "ui-feishu/server/register.mjs") };

@@ -36,7 +36,18 @@ export const restartWithRecovery = async ({ stop, launch, cleanFailed, publish, 
 const prepare = async (revision) => withLock("negus-service-operation", async () => {
   const state = await readJson(releaseStateFile, {});
   let fallback = state.active;
-  if (fallback) await verifyRelease(fallback);
+  if (fallback) {
+    try {
+      await verifyRelease(fallback);
+    } catch (error) {
+      // Releases created before the web-ui -> ui-feishu migration cannot be
+      // verified by the current publisher. Preserve the upgrade boundary by
+      // making a fresh, smoke-tested working-copy fallback before preparing
+      // the candidate instead of carrying an unverifiable pointer forward.
+      if (!/ui-feishu\/dist|Missing|Release missing verification/u.test(String(error?.message || error))) throw error;
+      fallback = await snapshotRelease({ build: true });
+    }
+  }
   else {
     if (!revision) throw new Error("First upgrade requires prepare --fallback-revision <commit>; an old in-memory process is not a recoverable release.");
     const previous = await readJson(preparedFile);
@@ -76,10 +87,10 @@ const runJob = async (job) => withLock("negus-service-operation", async () => {
     candidate: job.candidate, fallback: job.fallback,
     stop: () => stopWhenIdle(cfg, { handoff: job.handoff }),
     cleanFailed: () => stopOwnedBackend(cfg),
-    publish: (release) => publishBuild(path.join(release.directory, "web-ui/dist"), cfg.webRoot),
+    publish: (release) => publishBuild(path.join(release.directory, "ui-feishu/dist"), cfg.webRoot),
     launch: async (release) => {
       const started = await startBackend(cfg, release.entryScript, release.loaderScript);
-      const version = await validateBuild(path.join(release.directory, "web-ui/dist"));
+      const version = await validateBuild(path.join(release.directory, "ui-feishu/dist"));
       // Require stable health and the expected frontend, not just one HTTP 200.
       for (let i = 0; i < 5; i++) {
         const status = await checkBackend(cfg);

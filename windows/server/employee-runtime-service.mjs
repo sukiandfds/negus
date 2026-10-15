@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { materializeGoalObjective, expandGoalObjective } from "./thread-goal-objective.mjs";
 import { createAppServerClient } from "./app-server-client.mjs";
+import { inputFromAttachments } from "./app-server-conversation-store.mjs";
 import { messagesFromTurns } from "./codex-thread-history.mjs";
 import { employeeTurnInstructions } from "./employee-definitions.mjs";
 import { CURRENT_MODEL_PROVIDER_ID } from "./model-provider-service.mjs";
@@ -45,6 +46,7 @@ export const createEmployeeRuntimeService = ({
   broadcast = () => {},
   growthService = null,
   contextProvider = null,
+  attachmentContent = null,
   taskService = null,
   execution = null,
   onTurnCompleted = null,
@@ -252,7 +254,7 @@ export const createEmployeeRuntimeService = ({
       if (threadId) {
         rememberThread(employee.id, threadId);
         try {
-          await resumeThread(threadId, employee);
+          if (!employee.conversationArchived) await resumeThread(threadId, employee);
         } catch (error) {
           if (!/thread.*not found|not found.*thread|会话不存在/iu.test(String(error?.message || error))) throw error;
           threadId = "";
@@ -334,12 +336,12 @@ export const createEmployeeRuntimeService = ({
     return {
       threadId: session.conversation.threadId,
       source: "codex",
-      title: `${session.employee.name} · 主对话`,
+      title: session.employee.conversationTitle || `${session.employee.name} · 主对话`,
       updatedAt: latest?.createdAt || session.employee.updatedAt || "",
       messageCount: allMessages.length,
       latestUser: [...allMessages].reverse().find((message) => message.role === "user")?.text || "",
       latestAssistant: [...allMessages].reverse().find((message) => message.role === "assistant")?.text || "",
-      archived: false,
+      archived: session.employee.conversationArchived === true,
       conversationKind: "direct",
       messages,
       hasMore: start > 0,
@@ -347,6 +349,66 @@ export const createEmployeeRuntimeService = ({
       nextCursor: null,
       conversationId: session.conversation.id,
     };
+  };
+
+  const withEmployeeThread = async (employeeId, operation) => {
+    const { threadId, employee } = await ensureOpen(employeeId);
+    return operation({ threadId, employee, runtimeClient: await clientForThread(threadId, employee) });
+  };
+  const requestThread = (employeeId, method, params = {}) => withEmployeeThread(
+    employeeId,
+    ({ threadId, runtimeClient }) => runtimeClient.request(method, { threadId, ...params }),
+  );
+
+  const renameSession = async (employeeId, name) => {
+    const normalized = clean(name, 240);
+    if (!normalized) throw statusError("对话名称不能为空", 400);
+    await requestThread(employeeId, "thread/name/set", { name: normalized });
+    await registry.setConversationTitle(employeeId, normalized);
+    return readSession(employeeId, { limit: 0 });
+  };
+
+  const archiveSession = async (employeeId) => {
+    await requestThread(employeeId, "thread/archive");
+    const threadId = registry.require(employeeId).mainThreadId;
+    await registry.setConversationArchived(employeeId, true);
+    return { threadId, archived: true };
+  };
+
+  const unarchiveSession = async (employeeId) => {
+    await requestThread(employeeId, "thread/unarchive");
+    await registry.setConversationArchived(employeeId, false);
+    return readSession(employeeId, { limit: 0 });
+  };
+
+  const reviewSession = (employeeId) => requestThread(employeeId, "review/start");
+
+  const forkSession = async (employeeId, lastTurnId) => {
+    if (!clean(lastTurnId, 160)) throw statusError("请选择一个已完成的对话位置再继续", 400);
+    return withEmployeeThread(employeeId, async ({ threadId, employee, runtimeClient }) => {
+      const result = await runtimeClient.request("thread/fork", {
+        threadId,
+        lastTurnId: clean(lastTurnId, 160),
+        cwd: clean(employee.projectRoot, 400) || projectRoot,
+      });
+      const fork = result?.thread;
+      if (!fork?.id) throw new Error("Codex 未返回新的分支会话");
+      return {
+        threadId: clean(fork.id, 120),
+        source: "codex",
+        title: clean(fork.name, 240) || `${employee.name} · 分支`,
+        updatedAt: new Date().toISOString(),
+        messageCount: null,
+        latestUser: "",
+        latestAssistant: "",
+        archived: false,
+        archivable: true,
+        conversationKind: "standard",
+        readOnly: false,
+        forkedFromId: threadId,
+        cwd: fork.cwd || employee.projectRoot,
+      };
+    });
   };
 
   const handleProtocolMessage = (message) => {
@@ -463,7 +525,7 @@ export const createEmployeeRuntimeService = ({
 
   subscribeClient(defaultClient);
 
-  const sendMessage = async ({ employeeId, text, requestId = "" }) => {
+  const sendMessage = async ({ employeeId, text, attachments = [], requestId = "" }) => {
     const employee = registry.require(employeeId);
     const cleanText = String(text || "").trim();
     if (!cleanText) throw statusError("消息不能为空", 400);
@@ -472,6 +534,7 @@ export const createEmployeeRuntimeService = ({
     if (sendLocks.has(employee.id)) throw statusError("员工消息正在提交", 409);
     const sending = (async () => {
       const { binding, threadId } = await ensureOpen(employee.id);
+      if (registry.require(employee.id).conversationArchived) await unarchiveSession(employee.id);
       const current = statusFor(employee.id);
       publishStatus(employee.id, {
         phase: "submitted",
@@ -484,7 +547,7 @@ export const createEmployeeRuntimeService = ({
         await resumeThread(threadId, registry.require(employee.id));
         const context = await contextProvider?.(employee.id);
         const runtimeClient = await clientForThread(threadId, registry.require(employee.id));
-        const input = [{ type: "text", text: cleanText, text_elements: [] }];
+        const input = await inputFromAttachments(cleanText, attachments, attachmentContent);
         const requestMethod = current.active && current.turnId ? "turn/steer" : "turn/start";
         const result = await runtimeClient.request(requestMethod, {
           threadId,
@@ -728,6 +791,11 @@ export const createEmployeeRuntimeService = ({
     hasPendingWork: () => openPromises.size > 0 || sendLocks.size > 0 || [...statuses.values()].some((status) => status.active),
     open: sessionFor,
     readSession,
+    renameSession,
+    forkSession,
+    archiveSession,
+    unarchiveSession,
+    reviewSession,
     sendMessage,
     confirmModification,
     getStatus,

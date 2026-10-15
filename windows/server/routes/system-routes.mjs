@@ -28,7 +28,7 @@ export const createSystemRoutes = ({ token, project, projectRoot, device, observ
   const probe = modelProviders?.sharedConfig?.resolveDraft
     ? createProviderProbe({ resolveDraft: modelProviders.sharedConfig.resolveDraft }) : null;
   const readObserverStatus = createObserverReader(observerPort);
-  const progressFile = path.join(projectRoot, "docs", "feature-development", "FEATURE_STATUS_INDEX.md");
+  const progressFile = path.join(projectRoot, "docs", "negus-knowledge", "features", "FEATURE_STATUS_INDEX.md");
   return async (request, response, url) => {
     if (url.pathname === '/api/model-defaults') {
       response.setHeader('Cache-Control', 'no-store');

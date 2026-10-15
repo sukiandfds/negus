@@ -1,7 +1,7 @@
-import messages from '../../web-ui/src/features/conversations/components/ConversationView.module.css';
-import composer from '../../web-ui/src/features/conversations/components/ConversationComposer.module.css';
-import groupComposer from '../../web-ui/src/features/group-chat/components/GroupComposer.module.css';
-import group from '../../web-ui/src/features/group-chat/components/MessageTimeline.module.css';
+import messages from '../shared/features/conversations/components/ConversationView.module.css';
+import composer from '../shared/features/conversations/components/ConversationComposer.module.css';
+import groupComposer from '../shared/features/group-chat/components/GroupComposer.module.css';
+import group from '../shared/features/group-chat/components/MessageTimeline.module.css';
 
 // Presentation only: the original components retain all message and execution behavior.
 export function ChatSkin() {

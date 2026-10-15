@@ -113,6 +113,7 @@ export const createConversationRoutes = ({
       && employeeRuntime?.supportsEmployee?.(binding.agentId)
       && employeeRuntime?.ownsConversation?.(binding),
   );
+  const sessionSource = (binding) => isEmployeeDirectBinding(binding) ? employeeRuntime : conversations;
 
   const readGroupAgentSession = async (binding, source, pagination = {}) => {
     const session = await conversations.findSession(binding.runtimeSessionId, source, pagination);
@@ -149,9 +150,7 @@ export const createConversationRoutes = ({
       return true;
     }
     const binding = await authorizeAgentThread({ threadId, conversationId });
-    const pending = isEmployeeDirectBinding(binding)
-      ? await employeeRuntime.getPendingUserInput(threadId)
-      : await conversations.getPendingUserInput(threadId);
+    const pending = await sessionSource(binding).getPendingUserInput(threadId);
     sendJson(response, { request: publicUserInputRequest(pending) });
     return true;
   }
@@ -165,7 +164,7 @@ export const createConversationRoutes = ({
       return true;
     }
     const binding = await authorizeAgentThread({ threadId, conversationId });
-    const source = isEmployeeDirectBinding(binding) ? employeeRuntime : conversations;
+    const source = sessionSource(binding);
     const pending = await source.getPendingUserInput(threadId);
     const publicRequest = publicUserInputRequest(pending);
     if (!publicRequest || String(publicRequest.requestId) !== String(requestId)) {
@@ -234,12 +233,6 @@ export const createConversationRoutes = ({
     const conversationId = String(body.conversationId || "").trim();
     const binding = await authorizeAgentThread({ threadId, conversationId });
     const employeeDirect = isEmployeeDirectBinding(binding);
-    const requestedAttachmentIds = Array.isArray(body.attachmentIds)
-      ? body.attachmentIds.map((value) => String(value || "").trim()).filter(Boolean)
-      : [];
-    if (employeeDirect && (attachments.length || requestedAttachmentIds.length)) {
-      throw Object.assign(new Error("员工对话暂不支持附件"), { statusCode: 400 });
-    }
     const submissionId = String(body.submissionId || "").trim().slice(0, 160) || randomUUID();
     const messageId = `optimistic-${submissionId}`;
     const createdAt = new Date().toISOString();
@@ -293,6 +286,7 @@ export const createConversationRoutes = ({
           result = await employeeRuntime.sendMessage({
             employeeId: binding.agentId,
             text,
+            attachments,
             requestId: submissionId,
           });
         } else {
@@ -382,12 +376,14 @@ export const createConversationRoutes = ({
       sendJson(response, { error: "threadId and name are required" }, 400);
       return true;
     }
-    await authorizeAgentThread({ threadId, conversationId });
+    const binding = await authorizeAgentThread({ threadId, conversationId });
     if (name.length > 120) {
       sendJson(response, { error: "name is too long" }, 413);
       return true;
     }
-    const session = await conversations.renameSession(threadId, name);
+    const session = isEmployeeDirectBinding(binding)
+      ? await employeeRuntime.renameSession(binding.agentId, name)
+      : await conversations.renameSession(threadId, name);
     publishThreadEvent(threadId, { type: "sessions_changed", threadId });
     sendJson(response, session, 202);
     return true;
@@ -454,7 +450,7 @@ export const createConversationRoutes = ({
       sendJson(response, { error: "threadId is required" }, 400);
       return true;
     }
-    const goalSource = isEmployeeDirectBinding(binding) ? employeeRuntime : conversations;
+    const goalSource = sessionSource(binding);
     let pausedGoal = false;
     let pauseError = null;
     try {
@@ -488,7 +484,8 @@ export const createConversationRoutes = ({
       sendJson(response, { error: "当前任务完成后才能开始审查" }, 409);
       return true;
     }
-    await conversations.reviewSession(threadId);
+    if (isEmployeeDirectBinding(binding)) await employeeRuntime.reviewSession(binding.agentId);
+    else await conversations.reviewSession(threadId);
     publishThreadEvent(threadId, { type: "sessions_changed", threadId });
     sendJson(response, { threadId, status: "started" }, 202);
     return true;
@@ -501,7 +498,7 @@ export const createConversationRoutes = ({
       return true;
     }
     const binding = await authorizeAgentThread({ threadId, conversationId });
-    const source = isEmployeeDirectBinding(binding) ? employeeRuntime : conversations;
+    const source = sessionSource(binding);
     sendJson(response, await source.getGoal(threadId));
     return true;
   }
@@ -514,7 +511,7 @@ export const createConversationRoutes = ({
       return true;
     }
     const binding = await authorizeAgentThread({ threadId, conversationId });
-    const source = isEmployeeDirectBinding(binding) ? employeeRuntime : conversations;
+    const source = sessionSource(binding);
     const goalAttachments = media.resolveMany(body.attachmentIds);
     if (Array.isArray(body.attachmentIds) && goalAttachments.length !== new Set(body.attachmentIds).size) {
       sendJson(response, { error: "目标附件已失效，请重新上传" }, 400);
@@ -555,7 +552,7 @@ export const createConversationRoutes = ({
       return true;
     }
     const binding = await authorizeAgentThread({ threadId, conversationId });
-    const source = isEmployeeDirectBinding(binding) ? employeeRuntime : conversations;
+    const source = sessionSource(binding);
     await source.clearGoal(threadId);
     sendJson(response, { threadId, goal: null });
     return true;
@@ -581,7 +578,9 @@ export const createConversationRoutes = ({
       lastTurnId = source.messages?.at(-1)?.turnId || "";
       if (!lastTurnId) throw Object.assign(new Error("对话尚无可创建分支的消息"), { statusCode: 409 });
     }
-    const session = await conversations.forkSession(threadId, lastTurnId);
+    const session = isEmployeeDirectBinding(binding)
+      ? await employeeRuntime.forkSession(binding.agentId, lastTurnId)
+      : await conversations.forkSession(threadId, lastTurnId);
     sendJson(response, {
       session,
       sourceThreadId: threadId,
@@ -597,12 +596,14 @@ export const createConversationRoutes = ({
       sendJson(response, { error: "threadId is required" }, 400);
       return true;
     }
-    await authorizeAgentThread({ threadId, conversationId });
+    const binding = await authorizeAgentThread({ threadId, conversationId });
     if (execution.getStatus(threadId).active) {
       sendJson(response, { error: "当前任务运行中，请完成后再归档" }, 409);
       return true;
     }
-    const result = await conversations.archiveSession(threadId);
+    const result = isEmployeeDirectBinding(binding)
+      ? await employeeRuntime.archiveSession(binding.agentId)
+      : await conversations.archiveSession(threadId);
     publishThreadEvent(threadId, { type: "sessions_changed", threadId });
     sendJson(response, result, 202);
     return true;
@@ -616,7 +617,9 @@ export const createConversationRoutes = ({
       return true;
     }
     const binding = await authorizeAgentThread({ threadId, conversationId });
-    const result = await conversations.unarchiveSession(threadId);
+    const result = isEmployeeDirectBinding(binding)
+      ? await employeeRuntime.unarchiveSession(binding.agentId)
+      : await conversations.unarchiveSession(threadId);
     publishThreadEvent(threadId, { type: "sessions_changed", threadId });
     sendJson(response, result, 202);
     return true;
@@ -668,9 +671,7 @@ export const createConversationRoutes = ({
     const current = execution.getStatus(threadId);
     if (current.active && url.searchParams.get("reconcile") === "1") {
       try {
-        execution.reconcile(threadId, isEmployeeDirectBinding(binding)
-          ? await employeeRuntime.getThreadStatus(threadId)
-          : await conversations.getThreadStatus(threadId));
+        execution.reconcile(threadId, await sessionSource(binding).getThreadStatus(threadId));
       } catch {
         execution.reconcile(threadId, null);
       }

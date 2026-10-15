@@ -24,9 +24,9 @@ node_modules/
 .playwright-mcp/
 .playwright-cli/
 output/playwright/
-web-ui/node_modules/
-web-ui/dist/
-web-ui/*.tsbuildinfo
-web-ui/vite.config.js
-web-ui/vite.config.d.ts
-web-ui/package-lock.json
+ui-feishu/node_modules/
+ui-feishu/dist/
+ui-feishu/*.tsbuildinfo
+ui-feishu/vite.config.js
+ui-feishu/vite.config.d.ts
+ui-feishu/package-lock.json

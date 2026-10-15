@@ -5,7 +5,7 @@
 - 状态：in_progress
 - 本次更新：完成无 UAC 的只读环境检查器；原开发电脑真实开发链路和独立紧急启动入口仍待验证。
 - 用户影响：向日葵继续作为远程恢复兜底。
-- 证据：`docs/feature-development/features/FEAT-009-remote-development-host.md`
+- 证据：`docs/negus-knowledge/features/feature-records/FEAT-009-remote-development-host.md`
 
 ### 2026-09-30 09:02 +08:00
 
