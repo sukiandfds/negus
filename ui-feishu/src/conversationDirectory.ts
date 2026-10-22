@@ -1,3 +1,4 @@
+import { conversationStatus } from './presentation';
 import type { DirectoryConversation, DirectoryProject } from '../shared/features/project-directory/model/types';
 import type { Conversation, ConversationState, DirectoryState } from './types';
 
@@ -7,7 +8,7 @@ export const conversationKey = (item: Conversation) => item.roomId ? `group:${it
 export const uniqueConversations = (items: Conversation[]) => [...new Map(items.map(item => [conversationKey(item), item])).values()].sort(byLatest);
 
 // Every view points to the same conversation identity and existing navigation route.
-export function buildConversationDirectory(directory: DirectoryState, sessions: ConversationState['sessions'], archived: boolean) {
+export function buildConversationDirectory(directory: DirectoryState, sessions: ConversationState['sessions'], archived: boolean, projectRoot = '') {
   const summaries = new Map(sessions.map(s => [s.threadId, s]));
   const toConversation = (project: DirectoryProject, entry: Entry): Conversation => {
     const session = summaries.get(entry.threadId || '');
@@ -18,7 +19,7 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
       conversationId: entry.conversationId, main: entry.main, pending: entry.pendingOpen,
       projectId: entry.targetProjectId || project.projectId || project.id,
       time: entry.lastActivityAt || entry.updatedAt || session?.updatedAt,
-      active: Boolean(status?.active), label: status?.label, session,
+      active: Boolean(status?.active), label: conversationStatus(status, directory.contextByThread[entry.threadId || ''], session?.cwd || project.root || projectRoot), session,
     };
   };
   const all: Conversation[] = [];
@@ -53,7 +54,8 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
     if (session.conversationKind === 'group' || all.some(row => row.threadId === session.threadId)) continue;
     all.push({ id: session.threadId, name: session.title || '未命名对话', subtitle: '项目对话',
       threadId: session.threadId, time: session.updatedAt, session,
-      active: Boolean(directory.statusByThread[session.threadId]?.active) });
+      active: Boolean(directory.statusByThread[session.threadId]?.active),
+      label: conversationStatus(directory.statusByThread[session.threadId], directory.contextByThread[session.threadId], session.cwd || projectRoot) });
   }
   // Only explicit project bindings establish membership; employee membership alone is insufficient.
   for (const project of projects) {

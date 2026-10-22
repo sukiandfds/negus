@@ -26,10 +26,13 @@ const sameStatus = (left?: ProjectRuntimeStatus, right?: ProjectRuntimeStatus) =
   && left?.updatedAt === right?.updatedAt && left?.label === right?.label
 );
 
-export function useProjectDirectory(currentStatus?: ExecutionStatus) {
+export function useProjectDirectory(currentStatus?: ExecutionStatus, currentContext?: { threadId: string; phase: string }) {
+  const currentStatusRef = useRef(currentStatus);
+  currentStatusRef.current = currentStatus;
   const cached = useSyncExternalStore(projectDirectoryResource.subscribe, projectDirectoryResource.getSnapshot);
   const projects = cached.data ?? emptyProjects;
   const [statusByThread, setStatusByThread] = useState<StatusByThread>({});
+  const [contextByThread, setContextByThread] = useState<Record<string, string>>({});
   const [goalByThread, setGoalByThread] = useState<Record<string, ThreadGoal | null>>({});
   const [goalRecovery, setGoalRecovery] = useState(0);
   const loading = cached.data === null && !cached.error;
@@ -40,8 +43,9 @@ export function useProjectDirectory(currentStatus?: ExecutionStatus) {
 
   const cacheStatus = useCallback((threadId: string, status?: ProjectRuntimeStatus | null) => {
     if (!threadId || !status) return;
+    if (currentStatusRef.current?.threadId === threadId && status !== currentStatusRef.current) return;
     setStatusByThread((current) => sameStatus(current[threadId], status)
-      || (Date.parse(current[threadId]?.updatedAt || "") > Date.parse(status.updatedAt || ""))
+      || (threadId !== currentStatusRef.current?.threadId && Date.parse(current[threadId]?.updatedAt || "") > Date.parse(status.updatedAt || ""))
       ? current
       : { ...current, [threadId]: status });
   }, []);
@@ -66,6 +70,10 @@ export function useProjectDirectory(currentStatus?: ExecutionStatus) {
   }, [cacheStatus, currentStatus]);
 
   useEffect(() => {
+    if (currentContext?.threadId) setContextByThread(current => current[currentContext.threadId] === currentContext.phase ? current : { ...current, [currentContext.threadId]: currentContext.phase });
+  }, [currentContext?.threadId, currentContext?.phase]);
+
+  useEffect(() => {
     const controller = new AbortController();
     void refresh(controller.signal);
     if (!hasAccessToken || typeof EventSource === "undefined") return () => controller.abort();
@@ -80,6 +88,10 @@ export function useProjectDirectory(currentStatus?: ExecutionStatus) {
         const payload = JSON.parse(event.data) as DirectoryEvent;
         if (payload.type === "goal_status" && payload.threadId) {
           setGoalByThread((current) => ({ ...current, [payload.threadId!]: payload.goal || null }));
+          return;
+        }
+        if (payload.type === "context_status" && payload.threadId && payload.phase) {
+          setContextByThread(current => current[payload.threadId!] === payload.phase ? current : { ...current, [payload.threadId!]: payload.phase! });
           return;
         }
         if (payload.type === "execution_status" && payload.threadId) {
@@ -110,5 +122,5 @@ export function useProjectDirectory(currentStatus?: ExecutionStatus) {
     };
   }, [cacheStatus, refresh]);
 
-  return { projects, statusByThread, goalByThread, goalRecovery, loading, error, refresh };
+  return { projects, statusByThread, contextByThread, goalByThread, goalRecovery, loading, error, refresh };
 }

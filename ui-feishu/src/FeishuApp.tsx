@@ -34,7 +34,7 @@ export function FeishuApp() {
   const initialRoute = readRoute();
   const initialView = initialRoute.view;
   const c = useProjectConversations();
-  const directory = useProjectDirectory(c.executionStatus);
+  const directory = useProjectDirectory(c.executionStatus, c.contextStatus);
   const page = usePageSnapshot(c, directory);
   const viewC = page.conversations;
   const viewDirectory = page.directory;
@@ -117,14 +117,14 @@ export function FeishuApp() {
     return () => window.removeEventListener('keydown', search);
   }, []);
   const roster = useMemo(() => {
-    const base = buildConversationDirectory(viewDirectory, viewC.sessions, viewC.archivedView);
+    const base = buildConversationDirectory(viewDirectory, viewC.sessions, viewC.archivedView, viewC.project?.root);
     if (viewC.archivedView) return base;
     const rooms: Conversation[] = groups.rooms.map(room => ({ id: `group:${room.id}`, kind: 'group', roomId: room.id, name: room.name, subtitle: viewDirectory.projects.find(project => project.projectId === room.projectId)?.name || '群聊', projectId: room.projectId, time: room.lastActivityAt }));
     return { ...base, all: [...base.all, ...rooms], projects: base.projects.map(project => {
       const children = [...(project.children || []), ...rooms.filter(room => room.projectId === project.projectId)].sort(byLatest);
       return { ...project, time: children[0]?.time || project.time, children };
     }).sort(byLatest) };
-  }, [viewDirectory.projects, viewDirectory.statusByThread, viewC.sessions, viewC.archivedView, groups.rooms]);
+  }, [viewDirectory.projects, viewDirectory.statusByThread, viewDirectory.contextByThread, viewC.sessions, viewC.archivedView, viewC.project?.root, groups.rooms]);
   const visibleRoster = filter === 'employees' ? roster.employees : filter === 'projects' ? roster.projects : sortPinned(roster.all, pins.pinned);
   const selected = roster.all.find(v => v.threadId === viewC.selectedId);
   const open = async (item: Conversation) => {

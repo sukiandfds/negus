@@ -6,7 +6,7 @@ import { ContentRenderer } from '../../shared/features/conversations/rendering/C
 import { ChatHeader } from './ChatHeader';
 import { Avatar } from './Avatar';
 import { ConversationDetails } from './ConversationDetails';
-import { compactTime } from '../presentation';
+import { compactTime, conversationStatus } from '../presentation';
 import { taskNotice } from '../taskNotice';
 import type { ChatTab, Conversation, ConversationState, UsageState } from '../types';
 
@@ -22,6 +22,7 @@ type Props = {
 export function ChatWorkspace({ c, usage, initialReady, tab, setTab, details, setDetails, agentId, selectedName, selected, onBack, onShare }: Props) {
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
+  const projectRoot = c.session?.cwd || selected?.session?.cwd || c.project?.root;
   const displaySession = useMemo(() => c.session ? {
     ...c.session, messages: c.session.messages.map(taskNotice).map(m => ({ ...m, authorName: m.authorName || (m.role === 'user' ? '我' : selectedName) })),
   } : null, [c.session, selectedName]);
@@ -30,9 +31,9 @@ export function ChatWorkspace({ c, usage, initialReady, tab, setTab, details, se
     if (await c.renameSession(renameDraft.trim())) setRenaming(false);
   };
   return <section className="chat-workspace" aria-label="聊天工作区">
-      <ChatHeader avatar={<Avatar name={selectedName} agentId={agentId} active={c.executionStatus.active} size="small" />}
+      <ChatHeader avatar={<Avatar name={selectedName} projectRoot={projectRoot} agentId={agentId} active={c.executionStatus.active} size="small" />}
         title={agentId ? selectedName : c.session?.title || selectedName}
-        subtitle={`${agentId ? '工作伙伴' : '项目对话'}${selected?.agentId && !selected.main ? ` · ${selected.name}` : ''}`}
+        subtitle={selected?.label ?? conversationStatus(c.executionStatus, c.contextStatus.threadId === c.selectedId ? c.contextStatus.phase : undefined, projectRoot)}
         onBack={onBack} tab={tab} onTabChange={setTab} fileCount={files.length}
         actions={<>
           <button className="icon-button" title="分享当前对话" aria-label="分享当前对话" disabled={!c.session} onClick={onShare}><Share2 size={17} /></button>
