@@ -5,7 +5,8 @@
 .virtualList { position: relative; width: 100%; }
 .virtualRow { position: absolute; top: 0; left: 0; width: 100%; }
 .message { padding-bottom: 34px; }
-.body { color: var(--color-text); }
+.body { position: relative; color: var(--color-text); }
+.sending { position: absolute; left: -22px; top: 12px; width: 14px; height: 14px; color: var(--color-text-muted); animation: loading-spin .8s linear infinite; }
 .priorReply { margin: 0 0 6px; color: var(--color-text-muted); font-size: 12px; line-height: 1.4; }
 .deliveryState { display: inline-flex; margin-left: 6px; color: var(--color-text-muted); vertical-align: middle; }
 .deliveryState svg { width: 14px; height: 14px; }

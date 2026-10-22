@@ -163,6 +163,8 @@ export const advanceLiveTranscript = (memory: LiveTranscriptMemory, input: LiveT
       message.createdAt || "",
       message.turnItemIndex ?? "",
       message.text.length,
+      message.deliveryState || "",
+      message.deliveryError || "",
     ].join("|")).join("\n"),
   ].join("\n");
   if (memory.signature === signature && memory.view) return memory.view;

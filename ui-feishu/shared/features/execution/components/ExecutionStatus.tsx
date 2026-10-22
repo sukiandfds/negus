@@ -16,6 +16,7 @@ export function ExecutionStatus({ connected, status, contextStatus, sendingSlow 
   if (sendingSlow && !status.active) {
     return <span className={styles.status} title="正在确认消息是否已经送达"><CircleDot aria-hidden="true" />网络较慢</span>;
   }
+  if (status.phase === "submitted") return null;
 
   const failed = status.phase === "failed" || status.phase === "systemError";
   const completed = status.phase === "completed";

@@ -88,9 +88,10 @@ function Message({
         </div>
       ) : null}
       {!executionPlaceholder ? <div className={styles.body}>
-        {message.turnStatus === "interrupted" ? <small>已中断</small> : null}
+        {message.deliveryState === "sending" ? <LoaderCircle className={styles.sending} role="status" aria-label="发送中" /> : null}
+        {message.role === "assistant" && message.turnStatus === "interrupted" ? <small>已中断</small> : null}
         {streaming ? <div className={styles.streamingText}>{assistantText ?? message.text}<i className={styles.cursor} /></div> : heartbeatUser ? <CollapsedMarkdown text={heartbeatUser.instructions} /> : <>{showPriorReply ? <div className={styles.priorReply}>追加指令前的回复</div> : null}<ContentRenderer message={shown} threadId={threadId} /></>}
-        {message.deliveryState === "failed" ? <small>发送失败</small> : null}
+        {message.deliveryState === "occupied" ? <small>Codex 占用中，未发送</small> : message.deliveryState === "failed" ? <small>{message.deliveryError || "发送失败"}</small> : null}
         {message.deliveryState === "pending" ? (
           <span className={styles.deliveryState} title="正在确认指令是否已送达" aria-label="正在确认指令是否已送达">
             <Clock3 aria-hidden="true" />
@@ -464,6 +465,7 @@ export function ConversationView({
     <div className={styles.viewport}>
       <div className={styles.scrollArea} ref={scrollRef}>
         <section className={styles.conversation} aria-label="真实项目对话" aria-live="off">
+        {error ? <div className={styles.state} role="alert">{error}</div> : null}
         {!loading && !error && !session && listAvailable ? <div className={styles.state}>当前项目暂无可显示对话</div> : null}
         {session ? (
           <div className={styles.virtualList} style={{ height: virtualizer.getTotalSize() }}>

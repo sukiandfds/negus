@@ -17,7 +17,7 @@ import { useConversationEvents } from "../realtime/useConversationEvents";
 import { createOptimisticMessage, createSubmissionId } from "../state/optimisticMessage";
 import { readInitialConversationState } from "../state/initialConversation";
 import { useConversationCatalog } from "./useConversationCatalog";
-import { useConversationSession } from "./useConversationSession";
+import { presentConversationError, useConversationSession } from "./useConversationSession";
 import { useFollowUpQueue } from "./useFollowUpQueue";
 import { useThreadGoal } from "../../goals/hooks/useThreadGoal";
 import type { SessionMessage, SessionSummary } from "../model/types";
@@ -286,7 +286,7 @@ export function useProjectConversations() {
       void catalog.refreshSessions(false, threadId, false);
       return true;
     } catch (error) {
-      if (selection.selectedIdRef.current === threadId) selection.setSessionError(error instanceof Error ? error.message : String(error));
+      if (selection.selectedIdRef.current === threadId) selection.setSessionError(presentConversationError(error));
       return false;
     }
   }, [waitForThread, selection.selectedIdRef, selection.addOptimisticMessage, selection.setSessionError, execution.status.active, stageUnrecordedModel, modelManager.applyPending, goal.update, catalog.refreshSessions]);
@@ -300,6 +300,7 @@ export function useProjectConversations() {
         if (result?.status === "accepted" || result?.status === "failed") {
           selection.updateOptimisticMessage(threadId, messageId, {
             deliveryState: result.status === "failed" ? "failed" : undefined,
+            ...(result.error ? { deliveryError: result.error, deliveryState: /active writer/iu.test(result.error) ? "occupied" : "failed" } : {}),
             ...(result.turnId ? { turnId: result.turnId } : {}),
           });
           if (result.status === "accepted") await selection.loadSession(threadId, { retry: false, recovery: true, conversationId: scope });
@@ -329,8 +330,8 @@ export function useProjectConversations() {
     reconciledSubmissionsRef.current.delete(submissionId);
     selection.addOptimisticMessage(threadId, optimisticMessage);
     setLocalSendVersion(value => value + 1);
-    const updateDelivery = (deliveryState: "pending" | "failed" | undefined, turnId?: string) => {
-      selection.updateOptimisticMessage(threadId, optimisticMessage.id, { deliveryState, ...(turnId ? { turnId } : {}) });
+    const updateDelivery = (deliveryState: "pending" | "failed" | "occupied" | undefined, turnId?: string, deliveryError?: string) => {
+      selection.updateOptimisticMessage(threadId, optimisticMessage.id, { deliveryState, deliveryError, ...(turnId ? { turnId } : {}) });
     };
     try {
       modelManager.clearPending(requestedThreadId);
@@ -356,7 +357,11 @@ export function useProjectConversations() {
         contextManagement.markSubmitted(threadId, settings);
       }
       const attempt = await execution.sendMessage(messageText, attachments.map(file => file.id), submissionId, threadId, scope);
-      if (!attempt || attempt.outcome === "failed") { updateDelivery("failed"); return true; }
+      if (!attempt || attempt.outcome === "failed") {
+        const reason = attempt?.error || "发送失败";
+        updateDelivery(/already has an active writer/iu.test(reason) ? "occupied" : "failed", undefined, reason);
+        return true;
+      }
       if (attempt.outcome === "uncertain") {
         updateDelivery("pending");
         void reconcileMessage(threadId, optimisticMessage.id, submissionId, scope);
@@ -371,20 +376,21 @@ export function useProjectConversations() {
       void selection.loadSession(threadId, { retry: false, conversationId: scope });
       return true;
     } catch (error) {
-      updateDelivery("failed");
+      const reason = error instanceof Error ? error.message : String(error);
+      updateDelivery(/already has an active writer/iu.test(reason) ? "occupied" : "failed", undefined, reason);
       return true;
     } finally {
       submittingThreads.current.delete(requestedThreadId);
       submittingThreads.current.delete(threadId);
     }
   }, [selection.selectedId, visibleModel, visibleEffort, conversationScope, waitForThread, execution.status.active, execution.sendMessage,
-    selection.addOptimisticMessage, selection.removeOptimisticMessage, selection.updateCurrentSession, selection.selectSession, selection.loadSession, selection.updateOptimisticMessage, contextManagement.markSubmitted, modelManager.clearPending, reconcileMessage]);
+    selection.addOptimisticMessage, selection.removeOptimisticMessage, selection.updateCurrentSession, selection.selectSession, selection.loadSession, selection.updateOptimisticMessage, selection.setSessionError, contextManagement.markSubmitted, modelManager.clearPending, reconcileMessage]);
 
   useEffect(() => {
     const threadId = selection.selectedId;
     if (!threadId || isPendingThread(threadId)) return;
     for (const message of selection.session?.messages || []) {
-      if (message.id.startsWith("optimistic-") && message.submissionId && message.deliveryState !== "sending" && message.deliveryState !== "failed") {
+      if (message.id.startsWith("optimistic-") && message.submissionId && (!message.deliveryState || message.deliveryState === "pending")) {
         void reconcileMessage(threadId, message.id, message.submissionId, conversationScope);
       }
     }
@@ -785,7 +791,7 @@ export function useProjectConversations() {
           }
           if (selection.selectedIdRef.current !== threadId) return false;
         } catch (error) {
-          if (selection.selectedIdRef.current === threadId) selection.setSessionError(error instanceof Error ? error.message : String(error));
+          if (selection.selectedIdRef.current === threadId) selection.setSessionError(presentConversationError(error));
           return false;
         }
       }

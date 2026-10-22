@@ -7,6 +7,11 @@ import type { ContentSyncState, SessionDelta, SessionDetail, SessionMessage, Ses
 
 type LoadOptions = { older?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean; conversationId?: string };
 
+export const presentConversationError = (reason: unknown) => {
+  const detail = reason instanceof Error ? reason.message : String(reason);
+  if (/thread not loaded|no rollout found|session not found|rollout path missing/i.test(detail)) return "会话记录暂时无法读取，请稍后重试";
+  return detail.includes("同步超时") ? "同步较慢，正在重试" : detail;
+};
 
 const blockSignature = (message: SessionMessage) => (message.blocks || [])
   .map((block) => `${block.type}:${block.id}:${"text" in block ? block.text.length : ""}:${"source" in block ? block.source : ""}`)
@@ -36,6 +41,7 @@ const sameVisibleSession = (left: SessionDetail, right: SessionDetail) => {
       && message.turnItemIndex === other.turnItemIndex
       && message.turnStatus === other.turnStatus
       && message.deliveryState === other.deliveryState
+      && message.deliveryError === other.deliveryError
       && message.superseded === other.superseded
       && message.submissionId === other.submissionId
       && blockSignature(message) === blockSignature(other);
@@ -154,8 +160,7 @@ export function useConversationSession(initial: InitialConversationState) {
       return true;
     } catch (reason) {
       if (!controller.signal.aborted && isSelected()) {
-        const detail = reason instanceof Error ? reason.message : String(reason);
-        setSessionError(detail.includes("同步超时") ? "同步较慢，正在重试" : detail);
+        setSessionError(presentConversationError(reason));
         if (!older && retry) {
           window.clearTimeout(retryTimerRef.current);
           retryTimerRef.current = window.setTimeout(() => {

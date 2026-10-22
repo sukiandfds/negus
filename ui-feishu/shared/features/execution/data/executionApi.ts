@@ -21,7 +21,7 @@ export interface SubmissionStatusResult {
 export type SendMessageAttempt =
   | { outcome: "accepted"; result: SendMessageResult }
   | { outcome: "uncertain"; result: null }
-  | { outcome: "failed"; result: null };
+  | { outcome: "failed"; result: null; error?: string };
 
 interface InterruptResult {
   threadId: string;

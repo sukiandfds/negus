@@ -13,7 +13,6 @@ import { ConversationList } from './components/ConversationList';
 import { ChatWorkspace } from './components/ChatWorkspace';
 import { avatarColor } from './presentation';
 import { buildConversationDirectory, byLatest } from './conversationDirectory';
-import { useTaskConversations } from './useTaskConversations';
 import { usePinnedConversations, sortPinned } from './usePinnedConversations';
 import { useGroupChats } from './useGroupChats';
 import { usePageSnapshot } from './usePageSnapshot';
@@ -126,7 +125,6 @@ export function FeishuApp() {
       return { ...project, time: children[0]?.time || project.time, children };
     }).sort(byLatest) };
   }, [viewDirectory.projects, viewDirectory.statusByThread, viewC.sessions, viewC.archivedView, groups.rooms]);
-  const taskConversations = useTaskConversations(viewDirectory, roster.all, section === 'tasks');
   const visibleRoster = filter === 'employees' ? roster.employees : filter === 'projects' ? roster.projects : sortPinned(roster.all, pins.pinned);
   const selected = roster.all.find(v => v.threadId === viewC.selectedId);
   const open = async (item: Conversation) => {
@@ -173,8 +171,7 @@ export function FeishuApp() {
       onSectionChange={next => { setSection(next); setMobileChat(false); setFilter(next === 'employees' ? 'employees' : 'all'); setOpenError(''); }} onSettings={() => setSettings(true)} />
     <ConversationList c={viewC} section={section} query={query} filter={filter}
       opening={opening} openError={openError} hasRoster={Boolean(roster.all.length)} initialReady={page.committed} visibleRoster={visibleRoster}
-      taskSections={taskConversations.sections}
-      onQueryChange={setQuery} onFilterChange={next => { setFilter(next); setSection('messages'); setOpenError(''); }} onRefresh={() => { void c.refresh(); void directory.refresh(undefined, true); void groups.refresh(); if (section === 'tasks') taskConversations.refresh(); }}
+      onQueryChange={setQuery} onFilterChange={next => { setFilter(next); setSection('messages'); setOpenError(''); }} onRefresh={() => { void c.refresh(); void directory.refresh(undefined, true); void groups.refresh(); }}
       onCreate={create} onCreateGroup={() => setCreatingGroup(true)} pinned={pins.pinned} onTogglePin={pins.toggle} selectedRoomId={roomId} onOpen={item => void open(item)} />
     <div className="chat-surface" style={{ display: roomId ? 'none' : undefined }}><ChatWorkspace c={singleChat.current} usage={usage} initialReady={page.committed} tab={tab} setTab={setTab}
       details={details} setDetails={setDetails} agentId={agentId} selectedName={selectedName} selected={selected}

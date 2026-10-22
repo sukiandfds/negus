@@ -22,7 +22,8 @@ export interface SessionMessage {
   id: string;
   role: MessageRole;
   text: string;
-  deliveryState?: "sending" | "pending" | "failed";
+  deliveryState?: "sending" | "pending" | "failed" | "occupied";
+  deliveryError?: string;
   submissionId?: string;
   blocks?: ContentBlock[];
   createdAt?: string;

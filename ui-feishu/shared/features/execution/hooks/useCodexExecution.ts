@@ -331,12 +331,11 @@ export function useCodexExecution(threadId: string) {
     } catch (reason) {
       const receipt = await executionApi.submissionStatus(targetThreadId, acceptedSubmissionId, undefined, conversationId).catch(() => null);
       if (receipt?.status === "accepted") return { outcome: "accepted", result: { threadId: receipt.threadId, turnId: receipt.turnId || "", status: "accepted" } };
-      if (receipt?.status === "failed") return { outcome: "failed", result: null };
       if (!isCurrent()) return { outcome: "uncertain", result: null };
-      const uncertain = receipt?.status === "pending" || controller.signal.aborted || reason instanceof TypeError;
+      const uncertain = receipt?.status !== "failed" && (receipt?.status === "pending" || controller.signal.aborted || reason instanceof TypeError);
       const detail = uncertain
         ? "发送确认超时，未重复提交；请确认任务状态后重试"
-        : reason instanceof Error ? reason.message : String(reason);
+        : receipt?.error || (reason instanceof Error ? reason.message : String(reason));
       if (steering) {
         setStatus((current) => uncertain
           ? { ...current, phase: "unknown", label: "正在确认指令是否已送达", detail }
@@ -350,7 +349,7 @@ export function useCodexExecution(threadId: string) {
           updatedAt: new Date().toISOString(),
         });
       }
-      return { outcome: uncertain ? "uncertain" : "failed", result: null };
+      return uncertain ? { outcome: "uncertain", result: null } : { outcome: "failed", result: null, error: detail };
     } finally {
       sendingThreads.delete(targetThreadId);
       window.clearTimeout(timeout);

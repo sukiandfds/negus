@@ -8,7 +8,6 @@ import { Avatar } from './Avatar';
 import { ConversationDetails } from './ConversationDetails';
 import { compactTime } from '../presentation';
 import { taskNotice } from '../taskNotice';
-import { TaskPanel } from './TaskPanel';
 import type { ChatTab, Conversation, ConversationState, UsageState } from '../types';
 
 type Props = {
@@ -41,7 +40,6 @@ export function ChatWorkspace({ c, usage, initialReady, tab, setTab, details, se
           <button className={`icon-button ${details ? 'pressed' : ''}`} title="对话详情" aria-label="对话详情" aria-expanded={details} onClick={() => setDetails(!details)}><PanelRight size={17} /></button>
         </>} />
       {renaming && <form className="rename-bar" onSubmit={e => { e.preventDefault(); void saveName(); }}><input aria-label="对话名称" value={renameDraft} maxLength={120} onChange={e => setRenameDraft(e.target.value)} autoFocus /><button className="icon-button" aria-label="保存对话名称" disabled={!renameDraft.trim() || c.renaming}><Check size={17} /></button><button type="button" className="icon-button" aria-label="取消重命名" onClick={() => setRenaming(false)}><X size={17} /></button></form>}
-      <TaskPanel key={c.selectedId || ''} threadId={c.selectedId || undefined} />
       <div className="chat-content-row">
         <div className="chat-primary">
           <div className="chat-messages" style={{ display: tab === 'messages' ? undefined : 'none' }}>
