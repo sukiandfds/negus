@@ -52,6 +52,14 @@ const rememberStatus = (status: ExecutionStatus) => {
   return status;
 };
 
+export const preloadExecutionStatus = async (threadId: string, signal?: AbortSignal, conversationId?: string) => {
+  const previous = statusCache.get(threadId);
+  try {
+    const next = await executionApi.status(threadId, signal, false, conversationId);
+    if (!signal?.aborted && next.threadId === threadId && statusCache.get(threadId) === previous) rememberStatus(next);
+  } catch { /* Keep the last known status; opening the conversation retries. */ }
+};
+
 export function useCodexExecution(threadId: string) {
   const scopeRef = useRef({ threadId, generation: 0 });
   if (scopeRef.current.threadId !== threadId) {

@@ -509,14 +509,14 @@ export function useProjectConversations() {
 
   const forkFromMessage = useCallback(async (message: SessionMessage) => {
     const threadId = selection.selectedIdRef.current;
-    if (!threadId || !message.turnId || execution.status.active || selection.session?.archived) return false;
+    if (!threadId || !message.turnId || (execution.status.active && (!execution.status.turnId || message.turnId === execution.status.turnId)) || selection.session?.archived) return false;
     setForkingMessageId(message.id);
     try {
       return await catalog.forkSession(threadId, message.turnId);
     } finally {
       setForkingMessageId("");
     }
-  }, [catalog.forkSession, execution.status.active, selection.selectedIdRef, selection.session?.archived]);
+  }, [catalog.forkSession, execution.status.active, execution.status.turnId, selection.selectedIdRef, selection.session?.archived]);
 
   const queueMessage = useCallback(async (text: string, attachments: MediaFile[] = []) => {
     const messageText = text.trim();
@@ -729,6 +729,7 @@ export function useProjectConversations() {
     streamingText: execution.streamingText,
     commentaryText: execution.commentaryText,
     contextStatus: contextManagement.status,
+    contextReady: contextManagement.ready,
     visibleModel,
     usageModel,
     visibleEffort,

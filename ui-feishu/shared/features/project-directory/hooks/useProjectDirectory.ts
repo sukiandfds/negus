@@ -4,6 +4,7 @@ import type { ExecutionStatus } from "../../execution/model/types";
 import type { ThreadGoal } from "../../goals/model/types";
 import { projectDirectoryApi, projectDirectoryResource } from "../data/projectDirectoryApi";
 import type { DirectoryProject, ProjectRuntimeStatus } from "../model/types";
+import { readCachedContextPhases } from "../../context-management/hooks/useContextManagement";
 
 type StatusByThread = Record<string, ProjectRuntimeStatus>;
 const emptyProjects: DirectoryProject[] = [];
@@ -32,7 +33,7 @@ export function useProjectDirectory(currentStatus?: ExecutionStatus, currentCont
   const cached = useSyncExternalStore(projectDirectoryResource.subscribe, projectDirectoryResource.getSnapshot);
   const projects = cached.data ?? emptyProjects;
   const [statusByThread, setStatusByThread] = useState<StatusByThread>({});
-  const [contextByThread, setContextByThread] = useState<Record<string, string>>({});
+  const [contextByThread, setContextByThread] = useState<Record<string, string>>(readCachedContextPhases);
   const [goalByThread, setGoalByThread] = useState<Record<string, ThreadGoal | null>>({});
   const [goalRecovery, setGoalRecovery] = useState(0);
   const loading = cached.data === null && !cached.error;
@@ -122,5 +123,5 @@ export function useProjectDirectory(currentStatus?: ExecutionStatus, currentCont
     };
   }, [cacheStatus, refresh]);
 
-  return { projects, statusByThread, contextByThread, goalByThread, goalRecovery, loading, error, refresh };
+  return { projects, statusByThread, contextByThread: currentContext?.threadId ? { ...contextByThread, [currentContext.threadId]: currentContext.phase } : contextByThread, goalByThread, goalRecovery, loading, error, refresh };
 }

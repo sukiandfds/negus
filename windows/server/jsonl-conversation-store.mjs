@@ -2,7 +2,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { blocksFromContent, messageFromItem, previewText } from "./content-blocks.mjs";
+import { blocksFromContent, messageFromItem, messagePreview, previewText } from "./content-blocks.mjs";
 
 const walkJsonl = async (directory) => {
   let entries = [];
@@ -247,6 +247,7 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
       messageCount: state.messages.length,
       latestUser: previewText(latestUser, 260),
       latestAssistant: previewText(latestAssistant, 260),
+      latestMessage: messagePreview(state.messages.at(-1)),
       archived: Boolean(header.archived),
       cwd: header.cwd || null,
       messages: state.messages,

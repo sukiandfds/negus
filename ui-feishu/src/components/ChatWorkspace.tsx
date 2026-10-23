@@ -34,7 +34,7 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
   return <section className="chat-workspace" aria-label="聊天工作区">
       <ChatHeader avatar={<Avatar name={selectedName} projectRoot={projectRoot} agentId={agentId} active={c.executionStatus.active} size="small" />}
         title={agentId ? selectedName : selected?.name || c.session?.title || selectedName}
-        subtitle={selected?.label ?? conversationStatus(c.executionStatus, c.contextStatus.threadId === c.selectedId ? c.contextStatus.phase : undefined, projectRoot)}
+        subtitle={selected?.label || conversationStatus(c.executionStatus, c.contextStatus.threadId === c.selectedId ? c.contextStatus.phase : undefined, projectRoot || '未关联')}
         onBack={onBack} tab={tab} onTabChange={setTab} fileCount={files.length}
         actions={<>
           <button className="icon-button" title="分享当前对话" aria-label="分享当前对话" disabled={!c.session} onClick={onShare}><Share2 size={17} /></button>

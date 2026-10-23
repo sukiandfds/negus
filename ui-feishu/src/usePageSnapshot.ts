@@ -14,13 +14,16 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
     projects: directory.projects,
     statusByThread: directory.statusByThread,
     goalByThread: directory.goalByThread,
+    contextByThread: directory.contextByThread,
+    contextStatus: conversations.contextStatus,
+    executionStatus: conversations.executionStatus,
   });
   const [committed, setCommitted] = useState(false);
 
   useEffect(() => {
     const modelsReady = !conversations.modelsLoading || conversations.models.length > 0;
-    if (!committed && conversations.initialSyncReady && !directory.loading && modelsReady) setCommitted(true);
-  }, [committed, conversations.initialSyncReady, conversations.models, conversations.modelsLoading, directory.loading]);
+    if (!committed && conversations.initialSyncReady && conversations.contextReady && !directory.loading && modelsReady) setCommitted(true);
+  }, [committed, conversations.contextReady, conversations.initialSyncReady, conversations.models, conversations.modelsLoading, directory.loading]);
 
   const snapshot = committed ? {
     sessions: conversations.sessions,
@@ -29,6 +32,9 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
     projects: directory.projects,
     statusByThread: directory.statusByThread,
     goalByThread: directory.goalByThread,
+    contextByThread: directory.contextByThread,
+    contextStatus: conversations.contextStatus,
+    executionStatus: conversations.executionStatus,
   } : initial.current;
 
   const displayConversations = useMemo<ConversationState>(() => {
@@ -38,6 +44,8 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
       sessions: snapshot.sessions,
       session: snapshot.session,
       selectedId: snapshot.selectedId,
+      contextStatus: snapshot.contextStatus,
+      executionStatus: snapshot.executionStatus,
       loadingList: false,
       loadingSession: false,
       syncing: false,
@@ -47,7 +55,7 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
       modelsLoading: false,
       modelError: '',
     };
-  }, [committed, conversations, snapshot.selectedId, snapshot.session, snapshot.sessions]);
+  }, [committed, conversations, snapshot.selectedId, snapshot.session, snapshot.sessions, snapshot.contextStatus, snapshot.executionStatus]);
 
   const displayDirectory = useMemo<DirectoryState>(() => {
     if (committed) return directory;
@@ -56,10 +64,11 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
       projects: snapshot.projects,
       statusByThread: snapshot.statusByThread,
       goalByThread: snapshot.goalByThread,
+      contextByThread: snapshot.contextByThread,
       loading: false,
       error: '',
     };
-  }, [committed, directory, snapshot.goalByThread, snapshot.projects, snapshot.statusByThread]);
+  }, [committed, directory, snapshot.contextByThread, snapshot.goalByThread, snapshot.projects, snapshot.statusByThread]);
 
   return { committed, conversations: displayConversations, directory: displayDirectory };
 }

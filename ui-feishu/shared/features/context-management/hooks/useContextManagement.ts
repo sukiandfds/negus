@@ -60,10 +60,15 @@ const keepUncommittedChoice = (current: ContextStatus, next: ContextStatus): Con
 const cachedStatus = (threadId: string) => {
   const cached = statusCache.get(threadId) || persistedStatuses[threadId];
   if (!cached) return emptyStatus(threadId);
-  return { ...cached, phase: "idle" as const, message: "" };
+  return cached;
 };
 
+export const readCachedContextPhases = () => Object.fromEntries(
+  Object.entries({ ...persistedStatuses, ...Object.fromEntries(statusCache) }).map(([id, status]) => [id, status.phase]),
+);
+
 export function useContextManagement(threadId: string) {
+  const [settledThread, setSettledThread] = useState("");
   const refreshVersion = useRef(0);
   const activeThread = useRef(threadId);
   activeThread.current = threadId;
@@ -108,10 +113,13 @@ export function useContextManagement(threadId: string) {
         }));
       }
       return null;
+    } finally {
+      if (!signal?.aborted && version === refreshVersion.current && activeThread.current === threadId) setSettledThread(threadId);
     }
   }, [threadId]);
 
   useEffect(() => {
+    setSettledThread("");
     setStatus(cachedStatus(threadId));
     if (!threadId) return;
     const controller = new AbortController();
@@ -188,5 +196,5 @@ export function useContextManagement(threadId: string) {
     submittedChoices.delete(id);
     if (activeThread.current === id) void refresh();
   }, [refresh]);
-  return { status, handleEvent, compact, setThreshold, refresh, applyModelSettings, markSubmitted, completeSettings };
+  return { status, ready: !threadId || settledThread === threadId, handleEvent, compact, setThreshold, refresh, applyModelSettings, markSubmitted, completeSettings };
 }

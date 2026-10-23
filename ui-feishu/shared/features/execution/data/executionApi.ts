@@ -29,11 +29,24 @@ interface InterruptResult {
   status: string;
 }
 
+const statusRequests = new Map<string, Promise<ExecutionStatus>>();
+
 export const executionApi = {
-  status: (threadId: string, signal?: AbortSignal, reconcile = false) => fetchJson<ExecutionStatus>(
-    `/api/execution-status?threadId=${encodeURIComponent(threadId)}${conversationQuery()}${reconcile ? "&reconcile=1" : ""}`,
-    signal,
-  ),
+  status: (threadId: string, signal?: AbortSignal, reconcile = false, conversationId = currentConversationId()) => {
+    const url = `/api/execution-status?threadId=${encodeURIComponent(threadId)}${conversationQuery(conversationId)}${reconcile ? "&reconcile=1" : ""}`;
+    if (reconcile) return fetchJson<ExecutionStatus>(url, signal);
+    if (signal?.aborted) return Promise.reject(signal.reason);
+    let request = statusRequests.get(url);
+    if (!request) {
+      request = fetchJson<ExecutionStatus>(url, AbortSignal.timeout(10000)).finally(() => statusRequests.delete(url));
+      statusRequests.set(url, request);
+    }
+    return new Promise<ExecutionStatus>((resolve, reject) => {
+      const abort = () => reject(signal?.reason);
+      signal?.addEventListener("abort", abort, { once: true });
+      request.then(value => { signal?.removeEventListener("abort", abort); resolve(value); }, error => { signal?.removeEventListener("abort", abort); reject(error); });
+    });
+  },
   sendMessage: (threadId: string, text: string, attachmentIds: string[] = [], submissionId = "", signal?: AbortSignal, conversationId = currentConversationId()) => postJson<SendMessageResult>(
     "/api/session/message",
     withConversation({ threadId, text, attachmentIds, submissionId }, conversationId),

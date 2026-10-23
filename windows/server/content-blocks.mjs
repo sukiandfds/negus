@@ -274,6 +274,9 @@ export const messageFromItem = (item, registerMedia) => {
 
 export const previewText = (value, limit = 180) => cleanText(value).replace(/\s+/g, " ").slice(0, limit);
 
+export const messagePreview = (message) => message?.text
+  ? previewText(`${message.authorName || (message.role === "user" ? "用户" : "助手")}：${message.text}`, 260) : "";
+
 const markdownImagePattern = /!\[([^\]]*)\]\((<[^>]+>|[^)\n]+)\)/gu;
 
 export const dedupeAssistantMediaMessages = (messages, seen = new Set()) => (Array.isArray(messages) ? messages : [])

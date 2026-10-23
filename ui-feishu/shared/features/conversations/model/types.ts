@@ -49,6 +49,7 @@ export interface SessionSummary {
   messageCount: number | null;
   latestUser: string;
   latestAssistant: string;
+  latestMessage?: string;
   archived?: boolean;
   archivable?: boolean;
   conversationKind?: string;

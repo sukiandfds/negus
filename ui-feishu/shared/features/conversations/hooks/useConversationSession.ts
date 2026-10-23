@@ -3,6 +3,7 @@ import type { InitialConversationState } from "../state/initialConversation";
 import { conversationApi } from "../data/conversationApi";
 import { mergeMessageList, mergeOlderMessages, mergePendingOptimisticMessages, mergeSessionDelta, mergeSessionRefresh } from "../state/conversationMerge";
 import { isPendingThread } from "../model/pendingThread";
+import { preloadExecutionStatus } from "../../execution/hooks/useCodexExecution";
 import type { ContentSyncState, SessionDelta, SessionDetail, SessionMessage, SessionResponse } from "../model/types";
 
 type LoadOptions = { older?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean; conversationId?: string };
@@ -108,14 +109,14 @@ export function useConversationSession(initial: InitialConversationState) {
     }
     let loadSucceeded = false;
     try {
-      const response = await conversationApi.session(threadId, older ? {
+      const [response] = await Promise.all([conversationApi.session(threadId, older ? {
         before: cached?.nextCursor ? undefined : cached?.nextBefore ?? undefined,
         cursor: cached?.nextCursor ?? undefined,
       } : {
         // Recovery must receive a fresh page. A partial local snapshot must
         // never be allowed to turn into an "unchanged" delta.
         ...(recovery ? {} : { contentVersion: cached?.contentVersion }),
-      }, controller.signal, conversationId);
+      }, controller.signal, conversationId), older ? null : preloadExecutionStatus(threadId, controller.signal, conversationId)]);
       if (controller.signal.aborted) return false;
       const latest = sessionCache.current.get(threadId);
       const pendingOptimistic = pendingOptimisticMessagesRef.current.get(threadId) || [];
@@ -192,7 +193,6 @@ export function useConversationSession(initial: InitialConversationState) {
   const loadSession = useCallback((threadId: string, options: LoadOptions = {}) => {
     if (isPendingThread(threadId)) return Promise.resolve(false);
     options = { ...options, recovery: options.recovery || partialSessionIdsRef.current.has(threadId) };
-    if (options.prefetch && sessionCache.current.has(threadId)) return Promise.resolve(true);
     if (options.older) return loadSessionOnce(threadId, options);
     const inFlight = sessionLoadsRef.current.get(threadId);
     if (inFlight) {

@@ -567,7 +567,8 @@ export const createConversationRoutes = ({
       return true;
     }
     const binding = await authorizeAgentThread({ threadId, conversationId });
-    if (execution.getStatus(threadId).active) {
+    const status = execution.getStatus(threadId);
+    if (status.active && (body.latest === true || !status.turnId || lastTurnId === status.turnId)) {
       sendJson(response, { error: "当前任务运行中，请完成后再从这里继续" }, 409);
       return true;
     }

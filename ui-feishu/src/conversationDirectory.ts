@@ -18,8 +18,8 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
       subtitle: project.name, agentId: project.employeeId, threadId: entry.threadId,
       conversationId: entry.conversationId, main: entry.main, pending: entry.pendingOpen,
       projectId: entry.targetProjectId || project.projectId || project.id,
-      time: entry.lastActivityAt || entry.updatedAt || session?.updatedAt,
-      active: Boolean(status?.active), label: conversationStatus(status, directory.contextByThread[entry.threadId || ''], session?.cwd || project.root || projectRoot), session,
+      time: session?.updatedAt || entry.lastActivityAt || entry.updatedAt,
+      active: Boolean(status?.active), label: conversationStatus(status, directory.contextByThread[entry.threadId || '']), preview: session?.latestMessage, session,
     };
   };
   const all: Conversation[] = [];
@@ -55,7 +55,7 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
     all.push({ id: session.threadId, name: session.title || '未命名对话', subtitle: '项目对话',
       threadId: session.threadId, time: session.updatedAt, session,
       active: Boolean(directory.statusByThread[session.threadId]?.active),
-      label: conversationStatus(directory.statusByThread[session.threadId], directory.contextByThread[session.threadId], session.cwd || projectRoot) });
+      label: conversationStatus(directory.statusByThread[session.threadId], directory.contextByThread[session.threadId]), preview: session.latestMessage });
   }
   // Only explicit project bindings establish membership; employee membership alone is insufficient.
   for (const project of projects) {

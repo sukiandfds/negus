@@ -493,7 +493,7 @@ export function ConversationView({
                           && !item.local
                           && Boolean(item.message.turnId)
                           && !session?.archived}
-                        forkDisabled={executionStatus.active}
+                        forkDisabled={executionStatus.active && (!executionStatus.turnId || item.message.turnId === executionStatus.turnId)}
                         forking={forkingMessageId === item.message.id}
                         onFork={() => onForkMessage(item.message)}
                         editable={item.message.role === "user"

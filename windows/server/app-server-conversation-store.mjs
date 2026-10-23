@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { materializeGoalObjective, expandGoalObjective } from "./thread-goal-objective.mjs";
-import { previewText } from "./content-blocks.mjs";
+import { messageFromItem, messagePreview, previewText } from "./content-blocks.mjs";
 import { createAppServerClient } from "./app-server-client.mjs";
 import { messagesFromTurns, readRecentThreadPage } from "./codex-thread-history.mjs";
 import { loadUserProfilePrompt } from "./user-profile-prompt.mjs";
@@ -52,7 +52,7 @@ const isConversationMessageRecord = (item) => isAssistantReplyRecord(item)
   || (item?.type === "response_item" && item.payload?.type === "message"
     && ["user", "assistant"].includes(item.payload?.role));
 
-export const latestAssistantReplyAtFromRollout = async (file, readSettings = false) => {
+export const latestAssistantReplyAtFromRollout = async (file, readSettings = false, includeMessage = false) => {
   if (!file || typeof file !== "string") return "";
   let handle;
   try {
@@ -87,10 +87,12 @@ export const latestAssistantReplyAtFromRollout = async (file, readSettings = fal
           continue;
         }
         if (!isConversationMessageRecord(item)) continue;
+        const message = includeMessage ? messageFromItem(item, () => null) : null;
+        if (includeMessage && !message) continue;
         const parsed = Date.parse(item.timestamp || "");
         if (!Number.isFinite(parsed) || parsed < latestMs) continue;
         latestMs = parsed;
-        latest = new Date(parsed).toISOString();
+        latest = includeMessage ? { updatedAt: new Date(parsed).toISOString(), latestMessage: messagePreview(message) } : new Date(parsed).toISOString();
       }
       if (latest) return latest;
     }
@@ -378,8 +380,8 @@ export const createAppServerConversationStore = ({
       .filter((thread) => source === "all" || sourceFromThread(thread) === source)
       .map(async (thread) => {
         const summary = summaryFromThread(thread, archived);
-        const assistantAt = await latestAssistantReplyAtFromRollout(thread.path);
-        if (assistantAt) summary.updatedAt = assistantAt;
+        const latest = await latestAssistantReplyAtFromRollout(thread.path, false, true);
+        if (latest) Object.assign(summary, latest);
         return summary;
       }));
     return summaries.sort((left, right) => sessionTime(right.updatedAt) - sessionTime(left.updatedAt));

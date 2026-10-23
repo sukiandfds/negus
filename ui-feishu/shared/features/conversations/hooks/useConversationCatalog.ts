@@ -39,6 +39,7 @@ const sameSessionSummary = (left: SessionSummary, right: SessionSummary) => (
   && left.messageCount === right.messageCount
   && left.latestUser === right.latestUser
   && left.latestAssistant === right.latestAssistant
+  && left.latestMessage === right.latestMessage
   && left.archived === right.archived
   && left.archivable === right.archivable
   && left.conversationKind === right.conversationKind
@@ -87,9 +88,18 @@ export function useConversationCatalog(
     if (initialLoad) setLoadingList(true);
     setListError("");
     try {
-      const serverSessions = (await conversationApi.sessions(requestedArchivedView, controller.signal))
+      let serverSessions = (await conversationApi.sessions(requestedArchivedView, controller.signal))
         .filter((item) => !archiveBusyIdsRef.current.has(item.threadId));
       if (requestId !== listRequestRef.current || requestedArchivedView !== archivedViewRef.current) return;
+      if (!requestedArchivedView) {
+        const previous = new Map(sessionsRef.current.map(item => [item.threadId, item]));
+        serverSessions = (await Promise.all(serverSessions.map(async item => {
+          const cached = previous.get(item.threadId);
+          if (cached && sameSessionSummary(cached, item)) return item;
+          return await selection.loadSession(item.threadId, { prefetch: true, retry: false }) ? item : cached;
+        }))).filter((item): item is SessionSummary => Boolean(item));
+        if (requestId !== listRequestRef.current || requestedArchivedView !== archivedViewRef.current) return;
+      }
 
       const serverIds = new Set(serverSessions.map((item) => item.threadId));
       for (const threadId of serverIds) transientSessionsRef.current.delete(threadId);
@@ -155,19 +165,6 @@ export function useConversationCatalog(
     [refreshSessionsOnce],
   );
   refreshSessionsRef.current = refreshSessions;
-
-  useEffect(() => {
-    if (!initialSyncReady || archivedView || new URLSearchParams(window.location.search).has("agent")) return;
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      // Warm only a few recent conversations, serially, after the visible one loads.
-      for (const entry of sessions.slice(0, 4)) {
-        if (cancelled || document.hidden || new URLSearchParams(window.location.search).has("agent") || new URLSearchParams(window.location.search).has("conversation")) break;
-        if (entry.threadId !== selection.selectedIdRef.current) await selection.loadSession(entry.threadId, { prefetch: true, retry: false });
-      }
-    }, 800);
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [initialSyncReady, archivedView, sessions, selection.loadSession, selection.selectedIdRef]);
 
   const updateArchiveQuery = useCallback((archived: boolean) => {
     const params = new URLSearchParams(window.location.search);

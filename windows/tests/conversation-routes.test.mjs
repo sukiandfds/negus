@@ -496,13 +496,17 @@ test("copy latest delegates to the same native fork and retains explicit message
  const route=createConversationRoutes({conversations:{
   findSession:async()=>({messages:[{turnId:"last-turn"}]}),
   forkSession:async(...args)=>{calls.push(args);return {threadId:"branch"};}
- },execution:{getStatus:()=>({active})}});
+ },execution:{getStatus:()=>({active,turnId:"last-turn"})}});
  for(const body of [{threadId:"source",latest:true},{threadId:"source",lastTurnId:"older-turn"}]){
   const run=invokePost(route,"/api/session/fork",body);await run.promise;assert.equal(run.response.status,201);
  }
  assert.deepEqual(calls,[["source","last-turn"],["source","older-turn"]]);
- active=true;const run=invokePost(route,"/api/session/fork",{threadId:"source",latest:true});
- await run.promise;assert.equal(run.response.status,409);assert.equal(calls.length,2);
+ active=true;
+ for(const body of [{threadId:"source",latest:true},{threadId:"source",lastTurnId:"last-turn"}]){
+  const run=invokePost(route,"/api/session/fork",body);await run.promise;assert.equal(run.response.status,409);
+ }
+ const run=invokePost(route,"/api/session/fork",{threadId:"source",lastTurnId:"older-turn"});
+ await run.promise;assert.equal(run.response.status,201);assert.equal(calls.length,3);
 });
 
 test('task binding opens, steers and stops its own thread while leader is busy', async () => {
