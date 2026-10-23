@@ -183,20 +183,11 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
     broadcast(status);
   };
 
-  const addCommentaryActivity = (threadId, itemId, text) => {
+  const updateCommentary = (threadId, text) => {
     const previous = statuses.get(threadId);
     if (!previous) return;
     const now = new Date().toISOString();
-    const activity = {
-      id: itemId || `commentary-${Date.now()}`,
-      phase: "working",
-      label: text,
-      detail: "",
-      completed: true,
-      updatedAt: now,
-    };
-    const activities = [...previous.activities.filter((value) => value.id !== activity.id), activity];
-    const status = { ...previous, commentary: text, activities, updatedAt: now, ...nextEventMetadata(threadId) };
+    const status = { ...previous, commentary: text, updatedAt: now, ...nextEventMetadata(threadId) };
     statuses.set(threadId, status);
     schedulePersist();
     broadcast(status);
@@ -323,7 +314,7 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
       if (params.item?.type === "agentMessage" && params.item.phase === "commentary") {
         const text = String(params.item.text || "").trim();
         if (text) {
-          addCommentaryActivity(threadId, params.item.id || "", text);
+          updateCommentary(threadId, text);
           const current = statuses.get(threadId);
           broadcastThreadEvent(threadId, {
             type: "assistant_commentary",

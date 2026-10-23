@@ -11,6 +11,7 @@ import { taskNotice } from '../taskNotice';
 import type { ChatTab, Conversation, ConversationState, UsageState } from '../types';
 
 type Props = {
+  visible: boolean;
   c: ConversationState; usage: UsageState;
   initialReady: boolean;
   tab: ChatTab; setTab: (tab: ChatTab) => void;
@@ -19,7 +20,7 @@ type Props = {
   onBack: () => void; onShare: () => void;
 };
 
-export function ChatWorkspace({ c, usage, initialReady, tab, setTab, details, setDetails, agentId, selectedName, selected, onBack, onShare }: Props) {
+export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, details, setDetails, agentId, selectedName, selected, onBack, onShare }: Props) {
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
   const projectRoot = c.session?.cwd || selected?.session?.cwd || c.project?.root;
@@ -32,7 +33,7 @@ export function ChatWorkspace({ c, usage, initialReady, tab, setTab, details, se
   };
   return <section className="chat-workspace" aria-label="聊天工作区">
       <ChatHeader avatar={<Avatar name={selectedName} projectRoot={projectRoot} agentId={agentId} active={c.executionStatus.active} size="small" />}
-        title={agentId ? selectedName : c.session?.title || selectedName}
+        title={agentId ? selectedName : selected?.name || c.session?.title || selectedName}
         subtitle={selected?.label ?? conversationStatus(c.executionStatus, c.contextStatus.threadId === c.selectedId ? c.contextStatus.phase : undefined, projectRoot)}
         onBack={onBack} tab={tab} onTabChange={setTab} fileCount={files.length}
         actions={<>
@@ -44,7 +45,7 @@ export function ChatWorkspace({ c, usage, initialReady, tab, setTab, details, se
       <div className="chat-content-row">
         <div className="chat-primary">
           <div className="chat-messages" style={{ display: tab === 'messages' ? undefined : 'none' }}>
-            <ConversationView session={displaySession} key={c.composerKey || 'conversation'} active={tab === 'messages'}
+            <ConversationView session={displaySession} key={c.composerKey || 'conversation'} active={visible && tab === 'messages'}
               completedGoal={c.goal?.status === 'complete' ? c.goal : null}
               loading={c.loadingSession} contentSyncState={c.contentSyncState} loadingOlder={c.loadingOlder}
               error={c.sessionError} listAvailable={initialReady && !c.listError} streamingText={c.streamingText}

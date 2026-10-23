@@ -298,6 +298,9 @@ export function ConversationView({
   }), completedGoal);
   const virtualizer = useVirtualizer({
     count: visibleItems.length,
+    enabled: active,
+    initialOffset: Number.MAX_SAFE_INTEGER,
+    initialRect: { width: window.innerWidth, height: window.innerHeight },
     getScrollElement: () => scrollRef.current,
     estimateSize: (index) => visibleItems[index]?.message.role === "user" ? 84 : 160,
     overscan: 6,

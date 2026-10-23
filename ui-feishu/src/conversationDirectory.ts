@@ -14,7 +14,7 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
     const session = summaries.get(entry.threadId || '');
     const status = directory.statusByThread[entry.threadId || ''] || entry.status;
     return {
-      id: entry.id, name: entry.main && project.employeeId ? project.name : entry.title,
+      id: entry.id, name: entry.main && project.employeeId ? project.name : session?.title || entry.title,
       subtitle: project.name, agentId: project.employeeId, threadId: entry.threadId,
       conversationId: entry.conversationId, main: entry.main, pending: entry.pendingOpen,
       projectId: entry.targetProjectId || project.projectId || project.id,

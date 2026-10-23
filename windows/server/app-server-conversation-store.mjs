@@ -584,7 +584,15 @@ export const createAppServerConversationStore = ({
     if (freshThreadRuntime.has(threadId) && threadCache.has(threadId)) {
       return detailFromMessages(threadCache.get(threadId), [], { messageCount: 0 });
     }
-    try { return await readNativeSession(threadId, source, options); }
+    try {
+      const session = await readNativeSession(threadId, source, options);
+      if (historyFallback && session?.messages.some((message) => message.phase === "commentary" && !message.createdAt)) {
+        const history = await historyFallback(threadId, source).catch(() => null);
+        const times = new Map((history?.messages || []).filter((message) => message.itemId && message.createdAt).map((message) => [message.itemId, message.createdAt]));
+        session.messages = session.messages.map((message) => message.phase !== "commentary" || message.createdAt ? message : { ...message, createdAt: times.get(message.itemId) });
+      }
+      return session;
+    }
     catch (error) {
       if (!historyFallback || options.cursor !== undefined) throw error;
       const fallback = await historyFallback(threadId, source, options);

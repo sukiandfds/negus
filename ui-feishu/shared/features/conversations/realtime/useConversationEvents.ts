@@ -158,7 +158,7 @@ export function useConversationEvents(
           }
           if (isConversationProgressEvent(payload, threadIdRef.current)) lastProgressAt = Date.now();
           onEventRef.current(payload);
-          if (payload.type === "sessions_changed") {
+          if (payload.type === "sessions_changed" || payload.type === "assistant_commentary") {
             if (payload.threadId) pendingSessionIds.add(payload.threadId);
             else pendingAllSessions = true;
             window.clearTimeout(eventTimer);

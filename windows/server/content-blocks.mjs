@@ -244,7 +244,7 @@ export const messageFromItem = (item, registerMedia) => {
     role = "assistant";
     content = payload.message ?? payload.content ?? payload;
   } else if (item?.type === "response_item" && payload?.type === "message" && ["user", "assistant"].includes(payload.role)) {
-    if (payload.role === "assistant" && payload.phase && payload.phase !== "final_answer") return null;
+    if (payload.role === "assistant" && payload.phase && !["final_answer", "commentary"].includes(payload.phase)) return null;
     role = payload.role;
     content = payload.content;
   } else if (item?.type === "response_item" && payload?.type === "image_view") {
@@ -266,6 +266,7 @@ export const messageFromItem = (item, registerMedia) => {
     role,
     text,
     blocks,
+    ...(role === "assistant" && payload.phase ? { phase: payload.phase } : {}),
     ...(itemId ? { itemId } : {}),
     ...(metadata.turn_id || item.turnId ? { turnId: metadata.turn_id || item.turnId } : {}),
   };
@@ -314,10 +315,10 @@ export const messageFromThreadItem = (item, registerMedia) => {
     };
   }
   if (item?.type === "agentMessage") {
-    if (item.phase && item.phase !== "final_answer") return null;
+    if (item.phase && !["final_answer", "commentary"].includes(item.phase)) return null;
     const blocks = blocksFromContent(item.text, registerMedia);
     const text = visibleText(blocks);
-    return blocks.length ? { id: item.id || blockId("message", item.text), role: "assistant", text, blocks } : null;
+    return blocks.length ? { id: item.id || blockId("message", item.text), role: "assistant", text, blocks, phase: item.phase } : null;
   }
   if (item?.type === "imageGeneration" && (item.savedPath || item.result)) {
     const content = item.savedPath

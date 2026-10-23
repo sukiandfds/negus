@@ -36,7 +36,7 @@ test("streams final answers but keeps commentary updates complete", () => {
   assert.equal(events.some((event) => event.type === "assistant_delta" && event.itemId === "answer-1"), true);
   assert.equal(tracker.getStatus("thread-1").streamingText, "最终回复");
   assert.equal(tracker.getStatus("thread-1").commentary, "已经完成分析");
-  assert.equal(tracker.getStatus("thread-1").activities.at(-1).label, "已经完成分析");
+  assert.equal(tracker.getStatus("thread-1").activities.length, 0);
 });
 
 test("publishes Codex user-input requests for the web conversation", () => {

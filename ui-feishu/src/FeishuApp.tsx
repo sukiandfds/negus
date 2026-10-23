@@ -173,7 +173,7 @@ export function FeishuApp() {
       opening={opening} openError={openError} hasRoster={Boolean(roster.all.length)} initialReady={page.committed} visibleRoster={visibleRoster}
       onQueryChange={setQuery} onFilterChange={next => { setFilter(next); setSection('messages'); setOpenError(''); }} onRefresh={() => { void c.refresh(); void directory.refresh(undefined, true); void groups.refresh(); }}
       onCreate={create} onCreateGroup={() => setCreatingGroup(true)} pinned={pins.pinned} onTogglePin={pins.toggle} selectedRoomId={roomId} onOpen={item => void open(item)} />
-    <div className="chat-surface" style={{ display: roomId ? 'none' : undefined }}><ChatWorkspace c={singleChat.current} usage={usage} initialReady={page.committed} tab={tab} setTab={setTab}
+    <div className="chat-surface" style={{ display: roomId ? 'none' : undefined }}><ChatWorkspace visible={mobileChat || window.innerWidth > 760} c={singleChat.current} usage={usage} initialReady={page.committed} tab={tab} setTab={setTab}
       details={details} setDetails={setDetails} agentId={agentId} selectedName={selectedName} selected={selected}
       onBack={() => setMobileChat(false)} onShare={() => setSharing(true)} /></div>
     {roomId && <GroupWorkspace key={roomId} room={groups.rooms.find(room => room.id === roomId) || { id: roomId, name: '群聊', projectId: '' }} projectName={directory.projects.find(project => project.projectId === groups.rooms.find(room => room.id === roomId)?.projectId)?.name || ''} onBack={() => setMobileChat(false)} />}
