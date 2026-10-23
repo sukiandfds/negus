@@ -303,7 +303,10 @@ export function useProjectConversations() {
             ...(result.error ? { deliveryError: result.error, deliveryState: /active writer/iu.test(result.error) ? "occupied" : "failed" } : {}),
             ...(result.turnId ? { turnId: result.turnId } : {}),
           });
-          if (result.status === "accepted") await selection.loadSession(threadId, { retry: false, recovery: true, conversationId: scope });
+          if (result.status === "accepted") {
+            catalog.updateSessionSummary({ threadId, updatedAt: new Date().toISOString() });
+            await selection.loadSession(threadId, { retry: false, recovery: true, conversationId: scope });
+          }
           return;
         }
         await new Promise(resolve => window.setTimeout(resolve, 2000));
@@ -314,7 +317,7 @@ export function useProjectConversations() {
       reconciledSubmissionsRef.current.add(submissionId);
       reconcilingSubmissionsRef.current.delete(submissionId);
     }
-  }, [selection.updateCurrentSession, selection.updateOptimisticMessage, selection.loadSession]);
+  }, [selection.updateCurrentSession, selection.updateOptimisticMessage, selection.loadSession, catalog.updateSessionSummary]);
 
   const sendDirectMessage = useCallback(async (text: string, attachments: MediaFile[] = [], existingSubmissionId = "", replacingMessageId = "") => {
     const messageText = text.trim();
@@ -373,6 +376,7 @@ export function useProjectConversations() {
         selection.addOptimisticMessage(threadId, optimisticMessage);
       }
       updateDelivery(undefined, attempt.result.turnId);
+      catalog.updateSessionSummary({ threadId, updatedAt: new Date().toISOString() });
       void selection.loadSession(threadId, { retry: false, conversationId: scope });
       return true;
     } catch (error) {
@@ -384,7 +388,7 @@ export function useProjectConversations() {
       submittingThreads.current.delete(threadId);
     }
   }, [selection.selectedId, visibleModel, visibleEffort, conversationScope, waitForThread, execution.status.active, execution.sendMessage,
-    selection.addOptimisticMessage, selection.removeOptimisticMessage, selection.updateCurrentSession, selection.selectSession, selection.loadSession, selection.updateOptimisticMessage, selection.setSessionError, contextManagement.markSubmitted, modelManager.clearPending, reconcileMessage]);
+    selection.addOptimisticMessage, selection.removeOptimisticMessage, selection.updateCurrentSession, selection.selectSession, selection.loadSession, selection.updateOptimisticMessage, selection.setSessionError, contextManagement.markSubmitted, modelManager.clearPending, reconcileMessage, catalog.updateSessionSummary]);
 
   useEffect(() => {
     const threadId = selection.selectedId;
@@ -746,7 +750,6 @@ export function useProjectConversations() {
     queueLoading: followUpQueue.loading,
     queueBusy: followUpQueue.busy,
     queueError: followUpQueue.error,
-    editQueueItem: followUpQueue.edit,
     removeQueueItem: followUpQueue.remove,
     moveQueueItem: followUpQueue.move,
     retryQueueItem: followUpQueue.retry,

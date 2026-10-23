@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { prepareAttachmentForUpload, uploadAttachment } from "../data/attachmentApi";
+import { withAccessToken } from "../../../shared/api/http";
 import type { MediaFile } from "../../../shared/model/media";
 
 export interface DraftAttachment {
   id: string;
-  file: File;
+  file: File | MediaFile;
   previewUrl: string;
 }
 
@@ -53,6 +54,13 @@ export function useAttachmentDraft() {
     setAttachments(next);
   }, []);
 
+  const restoreFiles = useCallback((files: MediaFile[]) => {
+    const next = files.map(file => ({ id: file.id, file, previewUrl: file.mimeType.startsWith("image/") ? withAccessToken(file.url) : "" }));
+    attachmentsRef.current = next;
+    setAttachments(next);
+    setError("");
+  }, []);
+
   const removeFile = useCallback((id: string) => {
     if (uploadPromiseRef.current) return;
     const current = attachmentsRef.current;
@@ -84,6 +92,7 @@ export function useAttachmentDraft() {
     setError("");
     uploadSlowTimerRef.current = window.setTimeout(() => setUploadSlow(true), 10000);
     const operation = Promise.all(attachmentsRef.current.map(async (attachment) => {
+        if (!(attachment.file instanceof File)) return attachment.file;
         const uploaded = uploadedRef.current.get(attachment.id);
         if (uploaded) return uploaded;
         const prepared = await prepareAttachmentForUpload(attachment.file, controller.signal);
@@ -112,6 +121,6 @@ export function useAttachmentDraft() {
 
   return {
     attachments, error, uploading, uploadSlow,
-    addFiles, removeFile, clear, uploadAll, cancelUpload,
+    addFiles, restoreFiles, removeFile, clear, uploadAll, cancelUpload, setError,
   };
 }

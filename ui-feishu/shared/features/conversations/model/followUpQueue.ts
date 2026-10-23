@@ -6,6 +6,7 @@ export interface FollowUpQueueItem {
   id: string;
   threadId: string;
   submissionId: string;
+  dispatchSubmissionId?: string;
   text: string;
   attachmentIds: string[];
   attachments: MediaFile[];

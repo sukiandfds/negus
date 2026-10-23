@@ -60,11 +60,6 @@ export function useFollowUpQueue(threadId: string) {
     ));
   }, [run, threadId, conversationId]);
 
-  const edit = useCallback((itemId: string, text: string) => {
-    if (!threadId) return Promise.resolve(false);
-    return run(threadId, () => followUpQueueApi.action(threadId, "edit", itemId, { text: text.trim() }));
-  }, [run, threadId]);
-
   const remove = useCallback((itemId: string) => {
     if (!threadId) return Promise.resolve(false);
     return run(threadId, () => followUpQueueApi.action(threadId, "remove", itemId));
@@ -92,5 +87,5 @@ export function useFollowUpQueue(threadId: string) {
     setError("");
   }, [threadId]);
 
-  return { items: snapshot.threadId === threadId ? snapshot.items : [], loading, busy, error, enqueue, edit, remove, move, retry, sendNow, refresh, handleEvent };
+  return { items: snapshot.threadId === threadId ? snapshot.items : [], loading, busy, error, enqueue, remove, move, retry, sendNow, refresh, handleEvent };
 }

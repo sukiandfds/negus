@@ -49,7 +49,7 @@ export function ChatSkin() {
       .feishu-app .${messages.message}, .feishu-app .${group.message} { padding-left: 40px; padding-bottom: 18px; }
       .feishu-app .${messages.message}::before, .feishu-app .${group.messageAvatar} { width: 30px; height: 30px; font-size: 12px; }
       .feishu-app .${messages.user}, .feishu-app .${group.message}:has(.${group.ownMessageBubble}) { padding-left: 0; padding-right: 40px; }
-      .feishu-app .${messages.assistant} .${messages.body}, .feishu-app .${messages.user} .${messages.body}, .feishu-app .${group.messageBubble}:not(.${group.ownMessageBubble}), .feishu-app .${group.ownMessageBubble} { max-width: 100%; padding: 10px 12px; overflow-wrap: anywhere; }
+      .feishu-app .${messages.assistant} .${messages.body}, .feishu-app .${messages.user} .${messages.body}, .feishu-app .${group.messageBubble}:not(.${group.ownMessageBubble}), .feishu-app .${group.ownMessageBubble} { max-width: calc(100% - 40px); padding: 10px 12px; overflow-wrap: anywhere; }
       .feishu-app .${messages.actionRow} button, .feishu-app .${group.copyButton} { min-width: 36px; min-height: 36px; }
       .feishu-app :is(.${composer.positioner}, .${groupComposer.composerArea}) { padding: 6px 10px max(8px, env(safe-area-inset-bottom)); }
       .feishu-app :is(.${composer.composer}, .${groupComposer.composer}) { min-height: 0; border-radius: 14px; }

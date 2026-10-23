@@ -52,7 +52,7 @@ export function AttachmentPreviews({
               {attachment.previewUrl
                 ? <img src={attachment.previewUrl} alt="" />
                 : <span className={styles.fileIcon}><FileText aria-hidden="true" /></span>}
-              <span className={styles.meta}><strong>{attachment.file.name}</strong><small>{formatFileSize(attachment.file.size)}</small></span>
+              <span className={styles.meta}><strong>{attachment.file.name}</strong>{"size" in attachment.file ? <small>{formatFileSize(attachment.file.size)}</small> : null}</span>
               <button type="button" aria-label={`移除 ${attachment.file.name}`} title="移除附件" disabled={uploading} onClick={() => onRemove(attachment.id)}><X aria-hidden="true" /></button>
             </div>
           ))}

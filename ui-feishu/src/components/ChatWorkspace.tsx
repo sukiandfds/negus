@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Check, Files, PanelRight, Pencil, Share2, X } from 'lucide-react';
+import { FollowUpQueue } from '../../shared/features/conversations/components/FollowUpQueue';
 import { ConversationView } from '../../shared/features/conversations/components/ConversationView';
-import { ConversationComposer } from '../../shared/features/conversations/components/ConversationComposer';
+import { ConversationComposer, type ConversationComposerHandle } from '../../shared/features/conversations/components/ConversationComposer';
 import { ContentRenderer } from '../../shared/features/conversations/rendering/ContentRenderer';
 import { ChatHeader } from './ChatHeader';
 import { Avatar } from './Avatar';
@@ -21,12 +22,13 @@ type Props = {
 };
 
 export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, details, setDetails, agentId, selectedName, selected, onBack, onShare }: Props) {
+  const composerRef = useRef<ConversationComposerHandle>(null);
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
   const projectRoot = c.session?.cwd || selected?.session?.cwd || c.project?.root;
   const displaySession = useMemo(() => c.session ? {
-    ...c.session, messages: c.session.messages.map(taskNotice).map(m => ({ ...m, authorName: m.authorName || (m.role === 'user' ? '我' : selectedName) })),
-  } : null, [c.session, selectedName]);
+    ...c.session, messages: c.session.messages.filter(m => !m.submissionId || !c.queueItems.some(item => m.submissionId === item.submissionId || m.submissionId === item.dispatchSubmissionId)).map(taskNotice).map(m => ({ ...m, authorName: m.authorName || (m.role === 'user' ? '我' : selectedName) })),
+  } : null, [c.session, c.queueItems, selectedName]);
   const files = c.session?.messages.filter(m => m.blocks?.some(b => b.type !== 'markdown' && b.type !== 'options')) || [];
   const saveName = async () => {
     if (await c.renameSession(renameDraft.trim())) setRenaming(false);
@@ -45,7 +47,8 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
       <div className="chat-content-row">
         <div className="chat-primary">
           <div className="chat-messages" style={{ display: tab === 'messages' ? undefined : 'none' }}>
-            <ConversationView session={displaySession} key={c.composerKey || 'conversation'} active={visible && tab === 'messages'}
+            <ConversationView queue={c.queueItems.length || c.queueError ? <FollowUpQueue items={c.queueItems} busy={c.queueBusy} error={c.queueError}
+              onEdit={item => composerRef.current?.editQueuedMessage(item, c.removeQueueItem) ?? Promise.resolve(false)} onRemove={c.removeQueueItem} onMove={c.moveQueueItem} onRetry={c.retryQueueItem} onSendNow={c.sendQueueItem} /> : null} session={displaySession} key={c.composerKey || 'conversation'} active={visible && tab === 'messages'}
               completedGoal={c.goal?.status === 'complete' ? c.goal : null}
               loading={c.loadingSession} contentSyncState={c.contentSyncState} loadingOlder={c.loadingOlder}
               error={c.sessionError} listAvailable={initialReady && !c.listError} streamingText={c.streamingText}
@@ -55,11 +58,10 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
           </div>
           {tab === 'files' && <div className="content-panel"><div className="panel-title"><Files size={22} /><h2>对话文件</h2></div>{files.length ? files.map(m => <div className="file-row" key={m.id}><small>{compactTime(m.createdAt)}</small><ContentRenderer threadId={c.selectedId} message={{ ...m, blocks: m.blocks?.filter(b => b.type !== 'markdown' && b.type !== 'options') }} /></div>) : <div className="files-empty"><Files size={40} /><strong>此对话暂无附件</strong><span>聊天中发送或生成的文件会显示在这里</span></div>}</div>}
           <div className="chat-composer" style={{ display: tab === 'messages' ? undefined : 'none' }}>
-            {!c.session?.readOnly && <ConversationComposer key={c.composerKey} connected={c.connected} selected={Boolean(c.selectedId)} archived={Boolean(c.session?.archived)}
-              sending={c.sending} sendingSlow={c.sendingSlow} status={c.executionStatus} commentary={c.commentaryText} contextStatus={c.contextStatus}
+            {!c.session?.readOnly && <ConversationComposer ref={composerRef} key={c.composerKey} connected={c.connected} selected={Boolean(c.selectedId)} archived={Boolean(c.session?.archived)}
+              status={c.executionStatus} contextStatus={c.contextStatus}
               shownModel={c.visibleModel} shownEffort={c.visibleEffort} models={c.models} modelsLoading={c.modelsLoading} modelChanging={c.modelChanging} modelError={c.modelError}
-              onSend={c.sendMessage} onQueue={c.queueMessage} queueing={c.queueBusy} queueItems={c.queueItems} queueError={c.queueError}
-              onEditQueueItem={c.editQueueItem} onRemoveQueueItem={c.removeQueueItem} onMoveQueueItem={c.moveQueueItem} onRetryQueueItem={c.retryQueueItem} onSendQueueItem={c.sendQueueItem}
+              onSend={c.sendMessage} onQueue={c.queueMessage} queueing={c.queueBusy}
               editingMessage={c.editingMessage} onCancelEdit={c.cancelEditMessage} onInterrupt={c.interrupt} onReview={c.review}
               goal={c.goal} goalBusy={c.goalBusy} goalError={c.goalError} goalResumePrompt={c.goalResumePrompt} onDismissGoalResumePrompt={c.dismissGoalResumePrompt}
               onChangeGoalStatus={c.changeGoalStatus} onClearGoal={c.clearGoal} onSetGoal={c.setGoal} onEditGoal={c.editGoal}

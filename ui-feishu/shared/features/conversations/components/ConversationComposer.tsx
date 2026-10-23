@@ -1,16 +1,14 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
 import { Send, Sparkles, Square, X } from "lucide-react";
-import { FollowUpQueue } from "./FollowUpQueue";
-import type { FollowUpQueueItem } from "../model/followUpQueue";
 import { AttachmentButton, AttachmentPreviews } from "../../attachments/components/AttachmentDraft";
 import { useAttachmentDraft } from "../../attachments/hooks/useAttachmentDraft";
 import { ContextControl } from "../../context-management/components/ContextControl";
 import type { ContextStatus } from "../../context-management/model/types";
-import { ExecutionStatus } from "../../execution/components/ExecutionStatus";
 import type { ExecutionStatus as ExecutionStatusValue } from "../../execution/model/types";
 import { ModelSettingsControl } from "../../models/components/ModelSettingsControl";
 import type { CodexModel } from "../../models/model/types";
 import type { MediaFile } from "../../../shared/model/media";
+import type { FollowUpQueueItem } from "../model/followUpQueue";
 import type { SessionMessage } from "../model/types";
 import { heartbeatAssistantText, parseHeartbeatUser } from "../rendering/heartbeatMessage";
 import { GoalConfirmation } from "../../goals/components/GoalConfirmation";
@@ -44,15 +42,17 @@ const findSlash = (value: string, caret: number): SlashState | null => {
   return start >= 0 ? { start, end: caret, query: match[1] || "" } : null;
 };
 
+export interface ConversationComposerHandle {
+  editQueuedMessage: (item: FollowUpQueueItem, remove: (id: string) => Promise<boolean>) => Promise<boolean>;
+}
+
 interface ConversationComposerProps {
+  ref?: Ref<ConversationComposerHandle>;
   desktopContext?: ReactNode;
   connected: boolean;
   selected: boolean;
   archived: boolean;
-  sending: boolean;
-  sendingSlow: boolean;
   status: ExecutionStatusValue;
-  commentary: string;
   contextStatus: ContextStatus;
   shownModel: string;
   shownEffort: string;
@@ -63,13 +63,6 @@ interface ConversationComposerProps {
   onSend: (text: string, attachments?: MediaFile[]) => Promise<boolean>;
   onQueue: (text: string, attachments?: MediaFile[]) => Promise<boolean>;
   queueing: boolean;
-  queueItems: FollowUpQueueItem[];
-  queueError: string;
-  onEditQueueItem: (itemId: string, text: string) => Promise<boolean>;
-  onRemoveQueueItem: (itemId: string) => Promise<boolean>;
-  onMoveQueueItem: (itemId: string, direction: "up" | "down") => Promise<boolean>;
-  onRetryQueueItem: (itemId: string) => Promise<boolean>;
-  onSendQueueItem: (itemId: string) => Promise<boolean>;
   editingMessage: SessionMessage | null;
   onCancelEdit: () => void;
   onInterrupt: () => Promise<boolean>;
@@ -90,12 +83,12 @@ interface ConversationComposerProps {
 }
 
 export function ConversationComposer({
+  ref,
   desktopContext,
-  connected, selected, archived, sending, sendingSlow, status, commentary, contextStatus,
+  connected, selected, archived, status, contextStatus,
   shownModel, shownEffort,
   models, modelsLoading, modelChanging, modelError,
-  onSend, onQueue, queueing, queueItems, queueError, onEditQueueItem, onRemoveQueueItem, onMoveQueueItem, onRetryQueueItem,
-  onSendQueueItem,
+  onSend, onQueue, queueing,
   editingMessage, onCancelEdit,
   onInterrupt, onReview, goal, goalBusy, goalError, goalResumePrompt, onDismissGoalResumePrompt, onChangeGoalStatus, onClearGoal, onSetGoal, onEditGoal,
   onCompactContext, onAutoCompactThresholdChange, onModelChange,
@@ -109,13 +102,37 @@ export function ConversationComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submittingRef = useRef(false);
   const draft = useAttachmentDraft();
-  const inputDisabled = !selected || archived || sending || queueing || draft.uploading
+  const [withdrawing, setWithdrawing] = useState(false);
+  const inputDisabled = withdrawing || !selected || archived || queueing || draft.uploading
     || goalBusy || status.phase === "recovering" || status.phase === "unknown";
   const editing = Boolean(editingMessage);
   const inheritedAttachments = editingMessage?.blocks?.flatMap((block) => (
     "file" in block && block.file ? [block.file] : []
   )) || [];
   const hasContent = Boolean(text.trim() || draft.attachments.length || inheritedAttachments.length);
+  useImperativeHandle(ref, () => ({
+    editQueuedMessage: async (item, remove) => {
+      if (inputDisabled || submittingRef.current) return false;
+      if (editing || hasContent) {
+        draft.setError("请先处理输入框中的草稿，再编辑等待消息");
+        textareaRef.current?.focus();
+        return false;
+      }
+      submittingRef.current = true;
+      setWithdrawing(true);
+      try {
+        if (!await remove(item.id)) return false;
+        setText(item.text);
+        draft.restoreFiles(item.attachments);
+        setSlash(null);
+        requestAnimationFrame(() => textareaRef.current?.focus());
+        return true;
+      } finally {
+        submittingRef.current = false;
+        setWithdrawing(false);
+      }
+    },
+  }));
   const slashOptions = slash
     ? slashCommands.filter((option) => option.command.slice(1).startsWith(slash.query.toLocaleLowerCase()))
     : [];
@@ -251,16 +268,6 @@ export function ConversationComposer({
           kind={goalConfirmation} objective={goalConfirmation === "replace" ? text.replace(/^\s*\/goal\s*/iu, "") : goal?.displayObjective || goal?.objective || ""}
           onCancel={() => setGoalConfirmation(null)}
           onConfirm={() => { setGoalConfirmation(null); void submit(true); }} /> : null}
-      <FollowUpQueue
-        items={queueItems}
-        busy={queueing}
-        error={queueError}
-        onEdit={onEditQueueItem}
-        onRemove={onRemoveQueueItem}
-        onMove={onMoveQueueItem}
-        onRetry={onRetryQueueItem}
-        onSendNow={onSendQueueItem}
-      />
       <div
         className={styles.composer}
         aria-label="Codex 对话输入"
@@ -364,7 +371,6 @@ export function ConversationComposer({
             >
               <Sparkles aria-hidden="true" />
             </button>
-            <ExecutionStatus connected={connected} status={status} contextStatus={contextStatus} commentary={commentary} sendingSlow={sendingSlow} />
           </div>
           <span className={styles.spacer} />
           <div className={styles.settingsControls}>

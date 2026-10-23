@@ -12,4 +12,4 @@ export const compactTime = (value?: string | null) => {
 export const conversationStatus = (status?: ProjectRuntimeStatus, contextPhase?: string, projectRoot = '') =>
   status?.phase === 'waitingOnApproval' || status?.phase === 'waitingOnUserInput' ? '等待用户确认...'
     : contextPhase === 'compacting' ? '正在压缩对话...'
-    : status?.active && status.phase !== 'submitted' ? '助手正在运行...' : projectRoot ? `所属项目:${projectRoot.split(/[\\/]/).filter(Boolean).at(-1) || '未关联'}` : '';
+    : status?.active && !['submitted', 'unknown'].includes(status.phase || '') ? '助手正在运行...' : projectRoot ? `所属项目:${projectRoot.split(/[\\/]/).filter(Boolean).at(-1) || '未关联'}` : '';

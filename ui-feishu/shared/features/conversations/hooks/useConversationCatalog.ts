@@ -413,14 +413,14 @@ export function useConversationCatalog(
     if (latest) selection.selectSession(latest.threadId);
   }, [selection.selectSession, setArchiveViewMode]);
 
-  const updateSessionSummary = useCallback((summary: SessionSummary) => {
+  const updateSessionSummary = useCallback((summary: Pick<SessionSummary, "threadId"> & Partial<SessionSummary>) => {
     listAbortControllerRef.current?.abort();
     ++listRequestRef.current;
     setLoadingList(false);
     const update = (items: SessionSummary[]) => items.map(item => item.threadId === summary.threadId ? { ...item, ...summary } : item);
     sessionsRef.current = update(sessionsRef.current);
     setSessions(sessionsRef.current);
-    if (transientSessionsRef.current.has(summary.threadId)) transientSessionsRef.current.set(summary.threadId, summary);
+    if (transientSessionsRef.current.has(summary.threadId)) transientSessionsRef.current.set(summary.threadId, { ...transientSessionsRef.current.get(summary.threadId)!, ...summary });
     for (const [key, items] of viewCacheRef.current) viewCacheRef.current.set(key, update(items));
   }, []);
 

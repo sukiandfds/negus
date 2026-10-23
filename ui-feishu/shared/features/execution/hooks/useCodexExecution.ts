@@ -254,7 +254,7 @@ export function useCodexExecution(threadId: string) {
       else streamingBuffer.current += event.delta;
       streamingItemId.current = event.itemId;
       setStatus((current) => current.turnId === event.turnId
-        ? { ...current, streamingItemId: event.itemId, updatedAt: new Date().toISOString() }
+        ? { ...current, streamingItemId: event.itemId, streamingText: current.streamingItemId !== event.itemId ? streamingBuffer.current : current.streamingText, updatedAt: new Date().toISOString() }
         : current);
       if (!streamingTimer.current) {
         streamingTimer.current = window.setTimeout(() => {
