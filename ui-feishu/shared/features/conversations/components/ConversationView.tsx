@@ -1,8 +1,6 @@
-import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CalendarClock, Clock3, LoaderCircle, Target } from "lucide-react";
 import { JumpToLatest } from "../../../components/JumpToLatest/JumpToLatest";
-import { useReturnToBottom } from "../../../components/JumpToLatest/useReturnToBottom";
 import type { ContentSyncState, SessionDetail, SessionMessage } from "../model/types";
 import { MessageActions } from "./MessageActions";
 import { CollapsedMarkdown, ContentRenderer } from "../rendering/ContentRenderer";
@@ -98,9 +96,9 @@ export function Message({
         {streaming ? <><ContentRenderer message={shown} threadId={threadId} /><i className={styles.cursor} /></> : heartbeatUser ? <CollapsedMarkdown text={heartbeatUser.instructions} /> : <>{showPriorReply ? <div className={styles.priorReply}>追加指令前的回复</div> : null}<ContentRenderer message={shown} threadId={threadId} /></>}
         {message.deliveryState === "occupied" ? <small>Codex 占用中，未发送</small> : message.deliveryState === "failed" ? <small>{message.deliveryError || "发送失败"}</small> : null}
       </div> : null}
-      {!executionPlaceholder && !streaming ? (
+      {!executionPlaceholder ? (
         <div className={styles.actionRow}>
-          {actions ?? (!streaming ? <MessageActions
+          {actions ?? <MessageActions
             text={copyText}
             forkable={forkable}
             forkDisabled={forkDisabled}
@@ -115,7 +113,7 @@ export function Message({
             shareable={shareable}
             threadId={threadId}
             messageId={message.id}
-          /> : null)}
+          />}
           {completedGoal ? <span className={styles.goalAchieved} aria-label="目标达成结果"><Target aria-hidden="true" />已在 {Math.floor(completedGoal.timeUsedSeconds)} 秒内达成目标</span> : null}
         </div>
       ) : null}
@@ -147,7 +145,6 @@ interface ConversationViewProps {
   editingMessageId: string;
   onRetryMessage: (message: SessionMessage) => Promise<boolean>;
   retryingMessageId: string;
-  localSendVersion: number;
 }
 
 type ConversationItem = {
@@ -211,13 +208,12 @@ export function ConversationView({
   editingMessageId,
   onRetryMessage,
   retryingMessageId,
-  localSendVersion,
   }: ConversationViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const scrollPositionRef = useRef(Number.MAX_SAFE_INTEGER);
+  const openedThreadRef = useRef("");
+  const [returnButtonThread, setReturnButtonThread] = useState("");
   const loadingOlderThreadsRef = useRef(new Set<string>());
   const olderLoadTimersRef = useRef(new Map<string, number>());
-  const positionedThreadIdRef = useRef("");
   const transcriptMemoryRef = useRef(createLiveTranscriptMemory());
   const messages = session?.messages || [];
   const currentSessionRef = useRef(session);
@@ -253,7 +249,6 @@ export function ConversationView({
     showExecution,
     now: new Date().toISOString(),
   });
-  const isAnswerStreaming = transcript.answerStreaming;
   const executionOn = (message: SessionMessage) => showExecution && message.id === transcript.executionMessageId;
   const visibleItems = orderVisibleItems([
     ...transcript.persisted.map((message) => ({
@@ -297,76 +292,19 @@ export function ConversationView({
       ? { ...message, turnStatus: "completed", turnStartedAtMs: message.turnStartedAtMs ?? Date.parse(executionStatus.startedAt || "") }
       : message;
   }), completedGoal);
-  // 用户约定（2026-10-24）：首次定位、底部跟随、阅读位置恢复及列表测量，后续修改必须先获用户本人明确同意。
-  const virtualizer = useVirtualizer({
-    count: visibleItems.length + (queue ? 1 : 0),
-    useCachedMeasurements: !active,
-    initialOffset: () => scrollPositionRef.current,
-    initialRect: { width: window.innerWidth, height: window.innerHeight },
-    getScrollElement: () => active ? scrollRef.current : null,
-    estimateSize: (index) => visibleItems[index]?.message.role === "user" ? 84 : 160,
-    overscan: 6,
-    getItemKey: (index) => visibleItems[index]?.id || "follow-up-queue",
-    anchorTo: "end",
-    scrollEndThreshold: 120,
-  });
-  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => item.end < (instance.scrollOffset ?? 0);
-  const totalSize = virtualizer.getTotalSize();
-  const pinToEnd = (offset?: number) => {
-    const root = scrollRef.current;
-    if (!active || !root || root.clientHeight <= 0) return false;
-    // 主动定位统一到当前偏移，不持续追踪末条消息，避免把正在翻历史的用户拉回。
-    virtualizer.scrollToOffset(offset ?? root.scrollHeight);
-    return root.scrollHeight - root.scrollTop - root.clientHeight <= 1;
-  };
-  const pinToEndRef = useRef(pinToEnd);
-  pinToEndRef.current = pinToEnd;
-  const scrollToBottom = useCallback(() => { pinToEndRef.current(); }, []);
-
-  const getScrollElement = useCallback(() => scrollRef.current, []);
-  const {
-    visible: showReturnToBottom,
-    stickToBottomRef,
-    onScroll: updateReturnToBottom,
-    returnToBottom,
-    reset: resetReturnToBottom,
-  } = useReturnToBottom({
-    active,
-    isStreaming: isAnswerStreaming,
-    localSendVersion,
-    getScrollElement,
-    scrollToBottom,
-  });
-
+  // 用户授权：每次打开只定位一次底部，不跟随更新或补偿阅读位置；后续修改须获用户明确同意。
   useLayoutEffect(() => {
-    if (!active) return;
-    const threadId = session?.threadId || "";
-    if (!threadId || loading || !scrollRef.current) {
-      if (!threadId) positionedThreadIdRef.current = "";
+    if (!active) {
+      openedThreadRef.current = "";
       return;
     }
-    if (positionedThreadIdRef.current === threadId) {
-      if (!stickToBottomRef.current) pinToEndRef.current(scrollPositionRef.current);
-      return;
-    }
-    resetReturnToBottom(true);
-    if (pinToEndRef.current()) positionedThreadIdRef.current = threadId;
-  }, [active, loading, resetReturnToBottom, session?.threadId]);
-
-  useLayoutEffect(() => {
-    if (active && stickToBottomRef.current) pinToEndRef.current();
-  }, [active, totalSize]);
-
-  useEffect(() => {
-    if (!active) return undefined;
+    const threadId = session?.threadId;
     const root = scrollRef.current;
-    if (!root || typeof ResizeObserver === "undefined") return undefined;
-    const observer = new ResizeObserver(() => {
-      if (stickToBottomRef.current) pinToEndRef.current();
-    });
-    observer.observe(root);
-    return () => observer.disconnect();
-  }, [active]);
+    if (!threadId || loading || !root || openedThreadRef.current === threadId) return;
+    root.scrollTop = root.scrollHeight;
+    openedThreadRef.current = threadId;
+    setReturnButtonThread("");
+  }, [active, loading, session?.threadId]);
 
   useEffect(() => {
     if (!active) return undefined;
@@ -376,8 +314,6 @@ export function ConversationView({
     const onScroll = () => {
       const currentSession = currentSessionRef.current;
       const threadId = currentSession?.threadId || "";
-      updateReturnToBottom(root);
-      scrollPositionRef.current = root.scrollTop;
       const pendingTimer = threadId ? olderLoadTimersRef.current.get(threadId) : undefined;
       if (pendingTimer !== undefined && root.scrollTop > 140) {
         window.clearTimeout(pendingTimer);
@@ -420,38 +356,27 @@ export function ConversationView({
         loadingOlderThreadsRef.current.delete(threadId);
       }
     };
-  }, [active, updateReturnToBottom]);
+  }, [active]);
 
   return (
     <div className={styles.viewport}>
-      <div className={styles.scrollArea} ref={scrollRef}>
+      <div className={styles.scrollArea} ref={scrollRef} onScroll={(event) => {
+        const root = event.currentTarget;
+        setReturnButtonThread(root.scrollHeight - root.scrollTop - root.clientHeight > 120 ? session?.threadId || "" : "");
+      }}>
         <section className={styles.conversation} aria-label="真实项目对话" aria-live="off">
         {error ? <div className={styles.state} role="alert">{error}</div> : null}
         {!loading && !error && !session && listAvailable ? <div className={styles.state}>当前项目暂无可显示对话</div> : null}
         {session ? (
-          <div className={styles.virtualList} style={{ height: virtualizer.getTotalSize() }}>
-            {virtualizer.getVirtualItems().map((virtualRow) => {
-              const item = visibleItems[virtualRow.index];
-              return (
-                <div
-                  className={styles.virtualRow}
-                  data-index={virtualRow.index}
-                    data-message-id={item?.message.id}
-                  key={virtualRow.key}
-                  ref={(element) => {
-                    virtualizer.measureElement(element);
-                  }}
-                  style={{ transform: `translateY(${virtualRow.start}px)` }}
-                >
-                  {!item ? queue : <Message
+          <>
+            {visibleItems.map((item, index) => (
+                <div data-message-id={item.message.id} key={item.id}>
+                  <Message
                         message={item.message}
                         completedGoal={item.message.id === goalMessageId ? completedGoal : null}
                         streaming={item.streaming}
                         forkable={item.message.role === "assistant"
-                          && !item.local
-                          && Boolean(item.message.turnId)
                           && !session?.archived}
-                        forkDisabled={executionStatus.active && (!executionStatus.turnId || item.message.turnId === executionStatus.turnId)}
                         forking={forkingMessageId === item.message.id}
                         onFork={() => onForkMessage(item.message)}
                         editable={item.message.role === "user"
@@ -474,18 +399,22 @@ export function ConversationView({
                         executionStatus={item.execution ? executionStatus : undefined}
                         contextStatus={item.execution ? contextStatus : undefined}
                         executionPlaceholder={item.executionPlaceholder}
-                        showPriorReply={Boolean(item.message.superseded) && !visibleItems[virtualRow.index - 1]?.message.superseded}
-                      />}
+                        showPriorReply={Boolean(item.message.superseded) && !visibleItems[index - 1]?.message.superseded}
+                      />
                 </div>
-              );
-            })}
-          </div>
+            ))}
+            {queue}
+          </>
         ) : null}
         {completedGoal && !executionStatus.active && !goalMessageId && !visibleItems.some(item => item.message.turnId) ? <div className={styles.actionRow}><span className={styles.goalAchieved} aria-label="目标达成结果"><Target aria-hidden="true" />已在 {Math.floor(completedGoal.timeUsedSeconds)} 秒内达成目标</span></div> : null}
         </section>
       </div>
       {loadingOlder ? <div className={styles.older} role="status" aria-label="正在加载更早消息"><LoaderCircle aria-hidden="true" /></div> : null}
-      <JumpToLatest visible={showReturnToBottom} className={styles.jumpToLatest} onClick={returnToBottom} />
+      <JumpToLatest visible={Boolean(session?.threadId && returnButtonThread === session.threadId)} className={styles.jumpToLatest} onClick={() => {
+        const root = scrollRef.current;
+        if (root) root.scrollTop = root.scrollHeight;
+        setReturnButtonThread("");
+      }} />
     </div>
   );
 }

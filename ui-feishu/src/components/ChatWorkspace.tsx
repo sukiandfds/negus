@@ -54,7 +54,7 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
               error={c.sessionError} listAvailable={initialReady && !c.listError} streamingText={c.streamingText}
               executionStatus={c.executionStatus} contextStatus={c.contextStatus} onLoadOlder={c.loadOlder}
               onForkMessage={c.forkFromMessage} forkingMessageId={c.forkingMessageId} onEditMessage={c.beginEditMessage}
-              editingMessageId={c.editingMessageId} onRetryMessage={c.retryPendingMessage} retryingMessageId={c.retryingMessageId} localSendVersion={c.localSendVersion} />
+              editingMessageId={c.editingMessageId} onRetryMessage={c.retryPendingMessage} retryingMessageId={c.retryingMessageId} />
           </div>
           {tab === 'files' && <div className="content-panel"><div className="panel-title"><Files size={22} /><h2>对话文件</h2></div>{files.length ? files.map(m => <div className="file-row" key={m.id}><small>{compactTime(m.createdAt)}</small><ContentRenderer threadId={c.selectedId} message={{ ...m, blocks: m.blocks?.filter(b => b.type !== 'markdown' && b.type !== 'options') }} /></div>) : <div className="files-empty"><Files size={40} /><strong>此对话暂无附件</strong><span>聊天中发送或生成的文件会显示在这里</span></div>}</div>}
           <div className="chat-composer" style={{ display: tab === 'messages' ? undefined : 'none' }}>
