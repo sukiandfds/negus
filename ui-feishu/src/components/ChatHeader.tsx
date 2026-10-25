@@ -3,7 +3,7 @@ import { ArrowLeft, FileText, Files, MessageCircle, Plus } from 'lucide-react';
 import type { ChatTab } from '../types';
 
 export function ChatHeader({ avatar, title, subtitle, actions, onBack, tab = 'messages', onTabChange, fileCount = 0 }: {
-  avatar: ReactNode; title: string; subtitle: string; actions?: ReactNode;
+  avatar: ReactNode; title: ReactNode; subtitle: string; actions?: ReactNode;
   onBack: () => void; tab?: ChatTab; onTabChange?: (tab: ChatTab) => void; fileCount?: number;
 }) {
   return <header className="chat-header">

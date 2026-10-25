@@ -11,7 +11,6 @@ import type { ProjectEvent, UserInputRequest } from "../../execution/model/types
 import { useModels } from "../../models/hooks/useModels";
 import { readModelCatalog } from "../../models/data/modelCatalogCache";
 import { providerIdOf, readModelDefaults, resolveVisibleEffort, resolveVisibleModel, useModelDefaults } from "../../models/model/modelDefaults";
-import { writeConversationSnapshot } from "../data/conversationSnapshot";
 import { conversationApi } from "../data/conversationApi";
 import { useConversationEvents } from "../realtime/useConversationEvents";
 import { createOptimisticMessage, createSubmissionId } from "../state/optimisticMessage";
@@ -76,6 +75,7 @@ export function useProjectConversations() {
   const draftNames = useRef(new Map<string, string>());
   const contextManagement = useContextManagement(serverThreadId);
   const catalog = useConversationCatalog(initial, {
+    cachedSessions: selection.cachedSessions,
     selectedIdRef: selection.selectedIdRef,
     loadSession: selection.loadSession,
     adoptSelection: selection.adoptSelection,
@@ -223,18 +223,6 @@ export function useProjectConversations() {
       window.removeEventListener("negus:navigate", handleNavigation);
     };
   }, []);
-
-  useEffect(() => {
-    if (!selection.selectedId || !selection.session || isPendingThread(selection.selectedId)) return;
-    const timer = window.setTimeout(() => {
-      writeConversationSnapshot({
-        selectedId: selection.selectedId,
-        sessions: catalog.sessions,
-        session: selection.session!,
-      });
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [catalog.sessions, selection.selectedId, selection.session]);
 
   useEffect(() => {
     editingMessageRef.current = editingMessage;
@@ -699,6 +687,7 @@ export function useProjectConversations() {
     selectedId: selection.selectedId,
     composerKey: selection.composerKey,
     session: selection.session,
+    cachedSessions: selection.cachedSessions,
     loadingList: catalog.loadingList,
     initialSyncReady: catalog.initialSyncReady,
     loadingSession: selection.loadingSession,

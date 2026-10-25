@@ -378,7 +378,7 @@ export function ConversationComposer({
           }}
         />
         <div className={styles.footer}>
-          <div className={styles.leadingControls}>
+          <div className={styles.leadingControls} onPointerDown={() => textareaRef.current?.blur()}>
             <AttachmentButton disabled={inputDisabled} onFiles={draft.addFiles} />
             <button
               className={styles.commandButton}

@@ -5,6 +5,7 @@ import { ConversationView } from '../../shared/features/conversations/components
 import { ConversationComposer, type ConversationComposerHandle } from '../../shared/features/conversations/components/ConversationComposer';
 import { ContentRenderer } from '../../shared/features/conversations/rendering/ContentRenderer';
 import { ChatHeader } from './ChatHeader';
+import { ConversationOrigin } from './ConversationOrigin';
 import { Avatar } from './Avatar';
 import { ConversationDetails } from './ConversationDetails';
 import { compactTime, conversationStatus } from '../presentation';
@@ -35,7 +36,7 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
   };
   return <section className="chat-workspace" aria-label="聊天工作区">
       <ChatHeader avatar={<Avatar name={selectedName} projectRoot={projectRoot} agentId={agentId} active={c.executionStatus.active} size="small" />}
-        title={agentId ? selectedName : selected?.name || c.session?.title || selectedName}
+        title={<><ConversationOrigin origin={selected?.origin} /><span>{agentId ? selectedName : selected?.name || c.session?.title || selectedName}</span></>}
         subtitle={selected?.label || conversationStatus(c.executionStatus, c.contextStatus.threadId === c.selectedId ? c.contextStatus.phase : undefined, projectRoot || '未关联')}
         onBack={onBack} tab={tab} onTabChange={setTab} fileCount={files.length}
         actions={<>

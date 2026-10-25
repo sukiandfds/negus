@@ -1,0 +1,26 @@
+[
+  {
+    "at": "2026-10-22T16:51:49.524Z",
+    "path": "/api/session",
+    "status": 201,
+    "body": "{\"threadId\":\"01a16486-aa4c-7342-8587-81c4eaade4dc\",\"source\":\"codex\",\"title\":\"新对话 · ade4dc\",\"updatedAt\":\"2026-10-22T16:51:49.000Z\",\"messageCount\":null,\"latestUser\":\"\",\"latestAssistant\":\"\",\"archived\":false,\"forkedFromId\":null,\"cwd\":\"/Users/hans/myproject/negus\",\"model\":\"gpt-6.1-sol\",\"modelProviderId\":\"current\"}"
+  },
+  {
+    "at": "2026-10-22T16:51:49.533Z",
+    "path": "/api/session/model",
+    "status": 200,
+    "body": "{\"model\":\"gpt-6-sol\",\"modelProvider\":\"custom\",\"reasoningEffort\":\"high\"}"
+  },
+  {
+    "at": "2026-10-22T16:51:49.540Z",
+    "path": "/api/session/reasoning-effort",
+    "status": 200,
+    "body": "{\"model\":\"gpt-6.1-sol\",\"modelProvider\":\"custom\",\"reasoningEffort\":\"high\"}"
+  },
+  {
+    "at": "2026-10-22T16:51:49.552Z",
+    "path": "/api/session/message",
+    "status": 202,
+    "body": "{\"threadId\":\"01a16486-aa4c-7342-8587-81c4eaade4dc\",\"turnId\":\"01a16486-aaa7-79d0-9215-979ac03abba6\",\"status\":\"inProgress\",\"submissionId\":\"msg-mvjs3fpk-d39f38e3-9af4-41fa-a646-62f098e61889\",\"messageId\":\"optimistic-msg-mvjs3fpk-d39f38e3-9af4-41fa-a646-62f098e61889\"}"
+  }
+]

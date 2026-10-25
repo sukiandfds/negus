@@ -10,6 +10,7 @@ import { readModelCatalog } from "../../models/data/modelCatalogCache";
 import { providerIdOf, readModelDefaults, resolveVisibleModel } from "../../models/model/modelDefaults";
 
 interface ConversationSelection {
+  cachedSessions: ReadonlyMap<string, SessionDetail>;
   selectedIdRef: MutableRefObject<string>;
   loadSession: (threadId: string, options?: { older?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean }) => Promise<boolean>;
   adoptSelection: (threadId: string) => Promise<boolean>;
@@ -43,6 +44,7 @@ const sameSessionSummary = (left: SessionSummary, right: SessionSummary) => (
   && left.archived === right.archived
   && left.archivable === right.archivable
   && left.conversationKind === right.conversationKind
+  && left.createdBy === right.createdBy
   && left.readOnly === right.readOnly
   && left.forkedFromId === right.forkedFromId
   && left.cwd === right.cwd
@@ -95,7 +97,7 @@ export function useConversationCatalog(
         const previous = new Map(sessionsRef.current.map(item => [item.threadId, item]));
         serverSessions = (await Promise.all(serverSessions.map(async item => {
           const cached = previous.get(item.threadId);
-          if (cached && sameSessionSummary(cached, item)) return item;
+          if (cached && sameSessionSummary(cached, item) && selection.cachedSessions.get(item.threadId)?.updatedAt === item.updatedAt) return item;
           return await selection.loadSession(item.threadId, { prefetch: true, retry: false }) ? item : cached;
         }))).filter((item): item is SessionSummary => Boolean(item));
         if (requestId !== listRequestRef.current || requestedArchivedView !== archivedViewRef.current) return;

@@ -53,6 +53,7 @@ export interface SessionSummary {
   archived?: boolean;
   archivable?: boolean;
   conversationKind?: string;
+  createdBy?: 'user' | 'assistant';
   readOnly?: boolean;
   forkedFromId?: string | null;
   cwd?: string | null;

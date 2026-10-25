@@ -721,6 +721,7 @@ export const createConversationRoutes = ({
       String(body.model || "").trim(),
       String(body.projectRoot || "").trim(),
       String(body.modelProviderId || "").trim(),
+      { createdBy: body.createdBy },
     ), 201);
     return true;
   }

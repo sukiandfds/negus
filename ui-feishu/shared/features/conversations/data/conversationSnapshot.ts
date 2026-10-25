@@ -74,10 +74,11 @@ export const readConversationSnapshot = (): ConversationSnapshot | null => selec
   readLocalSnapshot(legacyStorageKey),
 );
 
-export const writeConversationSnapshot = ({ selectedId, sessions, session }: {
+export const writeConversationSnapshot = ({ selectedId, sessions, session, cachedSessions }: {
   selectedId: string;
   sessions: SessionSummary[];
   session: SessionDetail | null;
+  cachedSessions?: ReadonlyMap<string, SessionDetail>;
 }) => {
   try {
     const previous = readConversationSnapshot();
@@ -101,7 +102,11 @@ export const writeConversationSnapshot = ({ selectedId, sessions, session }: {
       if (threadId === selectedId || seen.has(threadId)) return false;
       seen.add(threadId);
       return true;
-    }).slice(0, maxCachedConversations - 1);
+    }).slice(0, maxCachedConversations - 1).map(entry => {
+      const latest = cachedSessions?.get(entry.session.threadId);
+      return latest ? { savedAt, isPartial: Boolean(entry.isPartial || latest.hasMore || latest.messages.length > maxCachedMessages),
+        session: { ...latest, messages: latest.messages.slice(-maxCachedMessages) } } : entry;
+    });
     const snapshot: ConversationSnapshot = {
       version: 1,
       savedAt,

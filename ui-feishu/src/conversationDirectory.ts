@@ -17,6 +17,7 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
       id: entry.id, name: entry.main && project.employeeId ? project.name : session?.title || entry.title,
       subtitle: project.name, agentId: project.employeeId, threadId: entry.threadId,
       conversationId: entry.conversationId, main: entry.main, pending: entry.pendingOpen,
+      origin: session?.createdBy || (/^(task|handoff)-/.test(entry.conversationId || '') ? 'assistant' : undefined),
       projectId: entry.targetProjectId || project.projectId || project.id,
       time: session?.updatedAt || entry.lastActivityAt || entry.updatedAt,
       active: Boolean(status?.active), label: conversationStatus(status, directory.contextByThread[entry.threadId || '']), preview: session?.latestMessage, session,
@@ -54,6 +55,7 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
     if (session.conversationKind === 'group' || all.some(row => row.threadId === session.threadId)) continue;
     all.push({ id: session.threadId, name: session.title || '未命名对话', subtitle: '项目对话',
       threadId: session.threadId, time: session.updatedAt, session,
+      origin: session.createdBy,
       active: Boolean(directory.statusByThread[session.threadId]?.active),
       label: conversationStatus(directory.statusByThread[session.threadId], directory.contextByThread[session.threadId]), preview: session.latestMessage });
   }

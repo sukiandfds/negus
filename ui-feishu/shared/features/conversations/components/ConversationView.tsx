@@ -217,6 +217,7 @@ export function ConversationView({
   const scrollRef = useRef<HTMLDivElement>(null);
   const followBottomRef = useRef(true);
   const previousScrollTopRef = useRef(0);
+  const previousScrollSizeRef = useRef("");
   const openedThreadRef = useRef("");
   const [returnButtonThread, setReturnButtonThread] = useState("");
   const loadingOlderThreadsRef = useRef(new Set<string>());
@@ -382,9 +383,11 @@ export function ConversationView({
     <div className={styles.viewport}>
       <div className={styles.scrollArea} ref={scrollRef} onScroll={(event) => {
         const root = event.currentTarget;
+        const size = `${root.scrollHeight}:${root.clientHeight}`;
         if (root.scrollHeight - root.scrollTop - root.clientHeight <= 2) followBottomRef.current = true;
-        else if (root.scrollTop < previousScrollTopRef.current) followBottomRef.current = false;
+        else if (size === previousScrollSizeRef.current && root.scrollTop < previousScrollTopRef.current) followBottomRef.current = false;
         previousScrollTopRef.current = root.scrollTop;
+        previousScrollSizeRef.current = size;
         setReturnButtonThread(root.scrollHeight - root.scrollTop - root.clientHeight > 120 ? session?.threadId || "" : "");
       }}>
         <section className={styles.conversation} aria-label="真实项目对话" aria-live="off">

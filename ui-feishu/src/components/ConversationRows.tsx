@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ChevronDown, ChevronRight, Folder, Clock3, Pin, Users } from 'lucide-react';
 import { ConversationActions } from './ConversationActions';
 import { Avatar } from './Avatar';
+import { ConversationOrigin } from './ConversationOrigin';
 import { compactTime } from '../presentation';
 import { conversationKey } from '../conversationDirectory';
 import { pinKey } from '../usePinnedConversations';
@@ -22,7 +23,7 @@ export function ConversationRows({ items, c, opening, query, onOpen, pinned, onT
       <div className={`contact-row ${expandable ? 'expandable' : ''} ${(item.roomId ? item.roomId === selectedRoomId : !selectedRoomId && item.threadId && item.threadId === c.selectedId) ? 'current' : ''}`}>
         <button className="contact-main" disabled={Boolean(opening)} onClick={() => onOpen(item)} aria-label={`打开${item.name}${item.main ? '单聊' : ''}`} aria-current={item.threadId && item.threadId === c.selectedId ? 'true' : undefined}>
           {item.kind ? <span className="avatar" aria-hidden="true" style={{ background: item.kind === 'project' ? '#54778b' : '#7465a6' }}>{item.kind === 'project' ? <Folder size={21} /> : item.kind === 'group' ? <Users size={21} /> : <Clock3 size={21} />}</span> : <Avatar name={item.name} projectRoot={item.session?.cwd || c.project?.root} agentId={item.agentId} active={item.active} />}
-          <span className="contact-text"><span className="contact-top"><strong>{item.name}</strong>{item.main && <em>Agent</em>}{pinned?.has(pinKey(item)) && <Pin size={12} aria-label="已置顶" />}<time>{compactTime(item.time)}</time></span>
+          <span className="contact-text"><span className="contact-top"><ConversationOrigin origin={item.origin} /><strong>{item.name}</strong>{item.main && <em>Agent</em>}{pinned?.has(pinKey(item)) && <Pin size={12} aria-label="已置顶" />}<time>{compactTime(item.time)}</time></span>
             <span className="contact-preview">{opening === item.id ? '正在进入…' : item.label || item.preview || item.session?.latestAssistant || item.session?.latestUser || (item.main ? '点击开始交流' : item.subtitle)}</span>
           </span>
         </button>

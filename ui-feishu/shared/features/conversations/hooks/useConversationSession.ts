@@ -373,7 +373,7 @@ export function useConversationSession(initial: InitialConversationState) {
   }, []);
 
   return {
-    selectedId, selectedIdRef, session, loadingSession, loadingOlder, syncing, contentSyncState, sessionError, composerKey,
+    selectedId, selectedIdRef, session, cachedSessions: sessionCache.current, loadingSession, loadingOlder, syncing, contentSyncState, sessionError, composerKey,
     setSyncing: markSyncing, loadSession, selectSession, adoptSelection, clearSelection, setCreatedSession, setSessionError,
     cacheCreatedSession, updateOptimisticMessage, updateCurrentSession, addOptimisticMessage, removeOptimisticMessage, invalidate, loadOlder,
   };

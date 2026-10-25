@@ -24,6 +24,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
   };
   const owner = (id) => routes[id]?.providerId || "current";
   const decorate = (session) => session && ({ ...session,
+    createdBy: routes[session.threadId]?.createdBy || session.createdBy,
     ...(routes[session.threadId]?.manualTitle ? { title: routes[session.threadId].manualTitle } : {}),
     model: routes[session.threadId]?.model || session.model || "",
     modelProviderId: routes[session.threadId]?.pendingProviderId || owner(session.threadId),
@@ -215,6 +216,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
     const effectiveModel = route.model || model;
     const session = await (await storeFor(route.modelProviderId)).createSession(effectiveModel, cwd, options);
     routes[session.threadId] = { providerId: route.modelProviderId,
+      createdBy: ['user', 'assistant'].includes(options.createdBy) ? options.createdBy : undefined,
       model: route.modelProviderId === 'current' ? effectiveModel : model,
       summary: session, lastSuccessfulSettings: null };
     await save();
@@ -250,10 +252,10 @@ export const createProviderConversationStore = ({ current, providers, createStor
         const targetStore = await storeFor(target.modelProviderId);
         const created = await targetStore.createSession(target.model || model, routes[id]?.summary?.cwd || "");
         await source.releaseSession?.(id);
-        const manualTitle = routes[id]?.manualTitle;
+        const { manualTitle, createdBy } = routes[id] || {};
         if (manualTitle) await targetStore.renameSession(created.threadId, manualTitle);
         delete routes[id];
-        routes[created.threadId] = { manualTitle, providerId: target.modelProviderId, model, summary: created, lastSuccessfulSettings: null };
+        routes[created.threadId] = { manualTitle, createdBy, providerId: target.modelProviderId, model, summary: created, lastSuccessfulSettings: null };
         await save();
         return { threadId: created.threadId, model, modelProvider: target.modelProviderId, reasoningEffort };
       }

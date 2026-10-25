@@ -1,74 +1,47 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import type { ConversationState, DirectoryState } from './types';
+import { conversationReads } from '../shared/shared/state/conversationReads';
+import { writeConversationSnapshot } from '../shared/features/conversations/data/conversationSnapshot';
+import { mergeMessageList } from '../shared/features/conversations/state/conversationMerge';
+import { isPendingThread } from '../shared/features/conversations/model/pendingThread';
 
-/**
- * Commits the first server read as one UI snapshot. Cached values remain
- * visible while that read is in flight; an uncached page stays empty until
- * the first snapshot is ready.
- */
+const conversationKeys = ['project', 'sessions', 'session', 'executionStatus', 'contextStatus', 'visibleModel', 'visibleEffort',
+  'usageModel', 'models', 'goal', 'queueItems', 'userInputRequest'] as const;
+const directoryKeys = ['projects', 'statusByThread', 'contextByThread', 'goalByThread'] as const;
+const pick = <T, K extends keyof T>(value: T, keys: readonly K[]) =>
+  Object.fromEntries(keys.map(key => [key, value[key]])) as Pick<T, K>;
+
+// Keep each conversation's cached view until its existing reads have all settled.
 export function usePageSnapshot(conversations: ConversationState, directory: DirectoryState) {
-  const initial = useRef({
-    sessions: conversations.sessions,
-    session: conversations.session,
-    selectedId: conversations.selectedId,
-    projects: directory.projects,
-    statusByThread: directory.statusByThread,
-    goalByThread: directory.goalByThread,
-    contextByThread: directory.contextByThread,
-    contextStatus: conversations.contextStatus,
-    executionStatus: conversations.executionStatus,
+  useSyncExternalStore(conversationReads.subscribe, conversationReads.getSnapshot);
+  const ready = conversations.initialSyncReady && conversations.contextReady && !conversationReads.pending()
+    && !conversations.syncing && !conversations.loadingSession && !conversations.modelsLoading && !directory.loading;
+  const committed = useRef(false);
+  const cached = useRef({ id: conversations.selectedId, data: pick(conversations, conversationKeys) });
+  const cachedDirectory = useRef(pick(directory, directoryKeys));
+  const current = pick(conversations, conversationKeys);
+  const shown = ready || cached.current.id !== conversations.selectedId ? current : cached.current.data;
+  useLayoutEffect(() => {
+    if (ready || cached.current.id !== conversations.selectedId) cached.current = { id: conversations.selectedId, data: shown };
+    if (ready) { committed.current = true; cachedDirectory.current = pick(directory, directoryKeys); }
   });
-  const [committed, setCommitted] = useState(false);
 
   useEffect(() => {
-    const modelsReady = !conversations.modelsLoading || conversations.models.length > 0;
-    if (!committed && conversations.initialSyncReady && conversations.contextReady && !directory.loading && modelsReady) setCommitted(true);
-  }, [committed, conversations.contextReady, conversations.initialSyncReady, conversations.models, conversations.modelsLoading, directory.loading]);
+    if (!ready || !conversations.selectedId || !shown.session || isPendingThread(conversations.selectedId)) return;
+    const timer = window.setTimeout(() => writeConversationSnapshot({
+      selectedId: conversations.selectedId, sessions: shown.sessions, session: shown.session,
+      cachedSessions: conversations.cachedSessions,
+    }), 250);
+    return () => window.clearTimeout(timer);
+  }, [ready, conversations.selectedId, shown.sessions, shown.session, conversations.cachedSessions]);
 
-  const snapshot = committed ? {
-    sessions: conversations.sessions,
-    session: conversations.session,
-    selectedId: conversations.selectedId,
-    projects: directory.projects,
-    statusByThread: directory.statusByThread,
-    goalByThread: directory.goalByThread,
-    contextByThread: directory.contextByThread,
-    contextStatus: conversations.contextStatus,
-    executionStatus: conversations.executionStatus,
-  } : initial.current;
-
-  const displayConversations = useMemo<ConversationState>(() => {
-    if (committed) return conversations;
-    return {
-      ...conversations,
-      sessions: snapshot.sessions,
-      session: snapshot.session,
-      selectedId: snapshot.selectedId,
-      contextStatus: snapshot.contextStatus,
-      executionStatus: snapshot.executionStatus,
-      loadingList: false,
-      loadingSession: false,
-      syncing: false,
-      contentSyncState: 'stable',
-      listError: '',
-      sessionError: '',
-      modelsLoading: false,
-      modelError: '',
-    };
-  }, [committed, conversations, snapshot.selectedId, snapshot.session, snapshot.sessions, snapshot.contextStatus, snapshot.executionStatus]);
-
-  const displayDirectory = useMemo<DirectoryState>(() => {
-    if (committed) return directory;
-    return {
-      ...directory,
-      projects: snapshot.projects,
-      statusByThread: snapshot.statusByThread,
-      goalByThread: snapshot.goalByThread,
-      contextByThread: snapshot.contextByThread,
-      loading: false,
-      error: '',
-    };
-  }, [committed, directory, snapshot.contextByThread, snapshot.goalByThread, snapshot.projects, snapshot.statusByThread]);
-
-  return { committed, conversations: displayConversations, directory: displayDirectory };
+  // Local sends remain immediate while a background read is in flight.
+  const optimistic = conversations.session?.messages.filter(message => message.id.startsWith('optimistic-')) || [];
+  const session = shown.session && shown.session !== conversations.session && optimistic.length
+    ? { ...shown.session, messages: mergeMessageList(shown.session.messages, optimistic) } : shown.session;
+  return {
+    committed: committed.current || ready,
+    conversations: { ...conversations, ...shown, session },
+    directory: { ...directory, ...(ready ? pick(directory, directoryKeys) : cachedDirectory.current) },
+  };
 }

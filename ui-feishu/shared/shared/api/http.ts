@@ -1,3 +1,5 @@
+import { conversationReads } from "../state/conversationReads";
+
 export class HttpError extends Error {
   constructor(message: string, public readonly status: number) {
     super(message);
@@ -80,7 +82,10 @@ const requestJson = async <T,>(pathname: string, {
   return payload as T;
 };
 
-export const fetchJson = <T,>(pathname: string, signal?: AbortSignal) => requestJson<T>(pathname, { signal });
+export const fetchJson = <T,>(pathname: string, signal?: AbortSignal) => {
+  const finish = conversationReads.start(pathname);
+  return requestJson<T>(pathname, { signal }).finally(finish);
+};
 export const postJson = <T,>(pathname: string, body: unknown, signal?: AbortSignal) => requestJson<T>(pathname, {
   method: "POST", body, signal, errorMessage: "发送失败",
 });
