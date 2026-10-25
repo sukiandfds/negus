@@ -16,6 +16,7 @@ import { GoalControl } from "../../goals/components/GoalControl";
 import type { EditableGoalStatus, ThreadGoal } from "../../goals/model/types";
 import { goalCapabilityOptions } from "../../goals/model/capability";
 import { SlashCommandMenu, type SlashCommandOption } from "./SlashCommandMenu";
+import { QuoteDraft, type MessageQuote } from "./QuoteDraft";
 import { useDismissibleLayer } from "../../../shared/hooks/useDismissibleLayer";
 import styles from "./ConversationComposer.module.css";
 
@@ -43,6 +44,7 @@ const findSlash = (value: string, caret: number): SlashState | null => {
 };
 
 export interface ConversationComposerHandle {
+  quoteMessage: (message: SessionMessage) => void;
   editQueuedMessage: (item: FollowUpQueueItem, remove: (id: string) => Promise<boolean>) => Promise<boolean>;
 }
 
@@ -95,6 +97,7 @@ export function ConversationComposer({
   onReasoningEffortChange,
 }: ConversationComposerProps) {
   const [text, setText] = useState("");
+  const [quote, setQuote] = useState<MessageQuote | null>(null);
   const [goalConfirmation, setGoalConfirmation] = useState<"replace" | "resume" | null>(null);
   const [slash, setSlash] = useState<SlashState | null>(null);
   const [activeSlash, setActiveSlash] = useState(0);
@@ -111,6 +114,13 @@ export function ConversationComposer({
   )) || [];
   const hasContent = Boolean(text.trim() || draft.attachments.length || inheritedAttachments.length);
   useImperativeHandle(ref, () => ({
+    quoteMessage: message => {
+      if (!selected || archived) return;
+      onCancelEdit();
+      setQuote({ id: message.id, authorName: message.authorName || (message.role === "user" ? "我" : "助手"),
+        text: visibleMessageText(message) || message.blocks?.map(block => "file" in block && block.file ? block.file.name : `[${block.type}]`).join(" ") || "附件" });
+      requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+    },
     editQueuedMessage: async (item, remove) => {
       if (inputDisabled || submittingRef.current) return false;
       if (editing || hasContent) {
@@ -123,6 +133,7 @@ export function ConversationComposer({
       try {
         if (!await remove(item.id)) return false;
         setText(item.text);
+        setQuote(null);
         draft.restoreFiles(item.attachments);
         setSlash(null);
         requestAnimationFrame(() => textareaRef.current?.focus());
@@ -188,6 +199,7 @@ export function ConversationComposer({
   useEffect(() => {
     if (!editingMessage) return;
     setText(visibleMessageText(editingMessage));
+    setQuote(null);
     setSlash(null);
     draft.clear();
     requestAnimationFrame(() => textareaRef.current?.focus());
@@ -200,7 +212,7 @@ export function ConversationComposer({
   const submit = async (confirmedGoal = false) => {
     const disabled = inputDisabled || !hasContent;
     if (disabled || submittingRef.current) return;
-    const goalMatch = !editing ? text.trim().match(/^\/goal(?:\s+([\s\S]*))?$/iu) : null;
+    const goalMatch = !editing && !quote ? text.trim().match(/^\/goal(?:\s+([\s\S]*))?$/iu) : null;
     if (goalMatch && !confirmedGoal && goal && goal.status !== "complete") {
       setGoalConfirmation(goalMatch[1]?.trim() ? "replace" : "resume");
       return;
@@ -208,9 +220,11 @@ export function ConversationComposer({
     if (goalMatch && !goalMatch[1]?.trim() && !draft.attachments.length && !goal) return;
     submittingRef.current = true;
     const submittedText = text;
+    const submittedQuote = quote;
+    const messageText = quote ? `${[`引用 ${quote.authorName}：`, quote.text].join("\n").split(/\r?\n/u).map(line => `> ${line}`).join("\n")}\n\n${submittedText}` : submittedText;
     setText("");
     setSlash(null);
-    if (!editing && !draft.attachments.length && !inheritedAttachments.length) {
+    if (!editing && !quote && !draft.attachments.length && !inheritedAttachments.length) {
       const command = submittedText.trim().toLocaleLowerCase();
       if (command === "/compact" || command === "/stop" || command === "/review") {
         try {
@@ -226,21 +240,29 @@ export function ConversationComposer({
         return;
       }
     }
+    let uploaded: MediaFile[] = [];
     try {
-      const uploaded = draft.attachments.length ? await draft.uploadAll() : [];
+      uploaded = draft.attachments.length ? await draft.uploadAll() : [];
       const submittedAttachments = editing
         ? [...inheritedAttachments, ...uploaded.filter((attachment) => !inheritedAttachments.some((item) => item.id === attachment.id))]
         : uploaded;
+      draft.clear();
+      setQuote(current => current === submittedQuote ? null : current);
       const accepted = goalMatch
         ? (goalMatch[1]?.trim() || submittedAttachments.length
           ? await onSetGoal(goalMatch[1]?.trim() || "", submittedAttachments)
           : await onChangeGoalStatus("active"))
         : editing || !status.active
-        ? await onSend(submittedText, submittedAttachments)
-        : await onQueue(submittedText, submittedAttachments);
-      if (accepted) draft.clear();
-      else setText((current) => current || submittedText);
+        ? await onSend(messageText, submittedAttachments)
+        : await onQueue(messageText, submittedAttachments);
+      if (!accepted) {
+        setQuote(current => current || submittedQuote);
+        if (uploaded.length) draft.restoreFiles(uploaded);
+        setText((current) => current || submittedText);
+      }
     } catch {
+      setQuote(current => current || submittedQuote);
+      if (uploaded.length) draft.restoreFiles(uploaded);
       setText((current) => current || submittedText);
     } finally {
       submittingRef.current = false;
@@ -302,6 +324,7 @@ export function ConversationComposer({
           onRemove={draft.removeFile}
         />
         <label className={styles.srOnly} htmlFor="prompt">给 Codex 发送指令</label>
+        <QuoteDraft quote={quote} onClear={() => setQuote(null)} />
         <textarea
           id="prompt"
           ref={textareaRef}

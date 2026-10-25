@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy, Edit3, GitBranch, RefreshCw } from "lucide-react";
+import { Check, Copy, Edit3, GitBranch, RefreshCw, Quote } from "lucide-react";
 import { AgentMessageShareControl } from "../../agent-sharing/components/AgentMessageShareControl";
 import styles from "./MessageActions.module.css";
 
 interface MessageActionsProps {
+  onQuote?: () => void;
   text: string;
   forkable: boolean;
   forkDisabled?: boolean;
@@ -37,7 +38,7 @@ const copyWithFallback = async (text: string) => {
   if (!copied) throw new Error("clipboard unavailable");
 };
 
-export function MessageActions({ text, forkable, forkDisabled = false, forking, onFork, editable, editing, onEdit, retryable = false, retrying = false, onRetry, shareable = false, threadId = "", messageId = "" }: MessageActionsProps) {
+export function MessageActions({ onQuote, text, forkable, forkDisabled = false, forking, onFork, editable, editing, onEdit, retryable = false, retrying = false, onRetry, shareable = false, threadId = "", messageId = "" }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const resetTimerRef = useRef<number | null>(null);
@@ -75,6 +76,7 @@ export function MessageActions({ text, forkable, forkDisabled = false, forking, 
       >
         {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
       </button>
+      {onQuote ? <button className={styles.button} type="button" aria-label="引用这条消息" title="引用" onClick={onQuote}><Quote aria-hidden="true" /></button> : null}
       {forkable ? (
         <button
           className={styles.button}

@@ -292,11 +292,15 @@ export function ContentRenderer({ message, threadId = "" }: { message: SessionMe
   // One budget for the user's complete text, even when native input splits it
   // into multiple text blocks. Media stays outside the collapsible text.
   const userText = message.role === "user" ? blocks.filter((block) => block.type === "markdown").map((block) => block.text).join("\n") : "";
+  const quotedReply = userText.match(/^(> 引用 [^\n]*\n(?:> [^\n]*(?:\n|$))*)\n([\s\S]*)$/u);
   let renderedUserText = false;
   for (let index = 0; index < blocks.length;) {
     const block = blocks[index];
     if (message.role === "user" && block.type === "markdown") {
-      if (!renderedUserText) content.push(<CollapsedMarkdown key={`${message.id}-text`} text={userText} characterLimit={500} />);
+      if (!renderedUserText) {
+        if (quotedReply) content.push(<CollapsedMarkdown key={`${message.id}-quote`} text={quotedReply[1]} characterLimit={300} />);
+        content.push(<CollapsedMarkdown key={`${message.id}-text`} text={quotedReply?.[2] ?? userText} characterLimit={500} />);
+      }
       renderedUserText = true;
       index += 1;
       continue;

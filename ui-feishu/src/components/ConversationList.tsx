@@ -1,4 +1,4 @@
-import { Archive, ListFilter, Plus, RefreshCw, Search, MessageCircle, Users } from 'lucide-react';
+import { Archive, ListFilter, Menu, Plus, RefreshCw, Search, MessageCircle, Users } from 'lucide-react';
 import { ConversationRows } from './ConversationRows';
 import { DropdownMenu } from './DropdownMenu';
 import type { Conversation, ConversationFilter, ConversationState, Section } from '../types';
@@ -22,11 +22,12 @@ type Props = {
   onTogglePin: (item: Conversation) => void;
   selectedRoomId: string;
   onOpen: (item: Conversation) => void;
+  onOpenNavigation: () => void;
 };
 
-export function ConversationList({ c, section, query, filter, opening, openError, hasRoster, initialReady, visibleRoster, onQueryChange, onFilterChange, onRefresh, onCreate, onCreateGroup, pinned, onTogglePin, selectedRoomId, onOpen }: Props) {
+export function ConversationList({ c, section, query, filter, opening, openError, hasRoster, initialReady, visibleRoster, onQueryChange, onFilterChange, onRefresh, onCreate, onCreateGroup, pinned, onTogglePin, selectedRoomId, onOpen, onOpenNavigation }: Props) {
   return <aside className="message-list" aria-label="员工、项目和任务对话列表">
-      <header className="list-heading"><h2>{section === 'employees' ? '工作伙伴' : section === 'tasks' ? '任务' : '消息'}</h2><div>
+      <header className="list-heading"><button className="icon-button mobile-navigation" aria-label="打开功能菜单" onClick={onOpenNavigation}><Menu size={21} /></button><h2>{section === 'employees' ? '工作伙伴' : section === 'tasks' ? '任务' : '消息'}</h2><div>
         <button className="icon-button" title="刷新会话" aria-label="刷新会话" onClick={onRefresh}><RefreshCw size={16} /></button>
         <DropdownMenu label="添加" icon={<Plus size={19} />} items={[{ label: '新建对话', icon: <MessageCircle />, onClick: onCreate, disabled: c.creating }, { label: '创建群聊', icon: <Users />, onClick: onCreateGroup }]} /></div></header>
       <label className="list-search"><Search size={15} /><input id="conversation-search" placeholder="搜索联系人、对话" value={query} onChange={e => onQueryChange(e.target.value)} /></label>

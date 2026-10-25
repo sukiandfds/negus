@@ -50,8 +50,5 @@
   .personnelMenu { right: 10px; left: 10px; }
 }
 
-.quoteDraft { display: flex; gap: 8px; align-items: center; margin: 8px 12px 0; color: #bdbdbd; font-size: 11px; }
-.quoteDraft span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.quoteDraft button { flex: 0 0 auto; border: 0; background: transparent; color: #9a9a9a; cursor: pointer; font: inherit; }
 
 .orderHint { margin: 8px 12px 0; color: #b7d7a4; font-size: 11px; line-height: 1.4; }

@@ -58,6 +58,8 @@ export function FeishuApp() {
   const [sharing, setSharing] = useState(false);
   const [tab, setTab] = useState<ChatTab>('messages');
   const [mobileChat, setMobileChat] = useState(initialRoute.hasChat);
+  const [railOpen, setRailOpen] = useState(false);
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
   const employee = viewDirectory.projects.find(p => p.employeeId === agentId);
   const autoOpenedAgent = useRef('');
   const selectedName = employee?.name || 'Negus 助手';
@@ -164,12 +166,20 @@ export function FeishuApp() {
     url.searchParams.set('view', 'conversation'); history.pushState({}, '', `${url.pathname}${url.search}`);
     c.openNewSession(root, '', '', { deferred: true }); setRoomId(''); setMobileChat(true); setSection('messages'); setTab('messages');
   };
-  return <div className={`feishu-app ${mobileChat ? 'show-chat' : ''}`} style={{ '--agent-initial': JSON.stringify(selectedName.slice(0, 1)), '--agent-color': avatarColor(agentId) } as CSSProperties}>
+  return <div className={`feishu-app ${mobileChat ? 'show-chat' : ''} ${railOpen ? 'rail-open' : ''}`} onTouchStart={event => {
+    const touch = event.touches[0];
+    swipeStart.current = !mobileChat && event.touches.length === 1 && window.matchMedia('(max-width:760px), (max-width:1100px) and (orientation:portrait)').matches && event.target instanceof Element && Boolean(event.target.closest('.message-list, .app-rail')) ? { x: touch.clientX, y: touch.clientY } : null;
+  }} onTouchEnd={event => {
+    const start = swipeStart.current;
+    swipeStart.current = null;
+    const touch = event.changedTouches[0];
+    if (start && touch && Math.abs(touch.clientX - start.x) > Math.max(60, Math.abs(touch.clientY - start.y) * 2)) setRailOpen(touch.clientX > start.x);
+  }} onTouchCancel={() => { swipeStart.current = null; }} style={{ '--agent-initial': JSON.stringify(selectedName.slice(0, 1)), '--agent-color': avatarColor(agentId) } as CSSProperties}>
     <ChatSkin />
-    <AppRail section={section} connected={c.connected}
+    <AppRail section={section} connected={c.connected} open={railOpen && !mobileChat} onClose={() => setRailOpen(false)}
       onSearch={() => { setSection('messages'); setMobileChat(false); document.getElementById('conversation-search')?.focus(); }}
       onSectionChange={next => { setSection(next); setMobileChat(false); setFilter(next === 'employees' ? 'employees' : 'all'); setOpenError(''); }} onSettings={() => setSettings(true)} />
-    <ConversationList c={viewC} section={section} query={query} filter={filter}
+    <ConversationList c={viewC} section={section} query={query} filter={filter} onOpenNavigation={() => setRailOpen(true)}
       opening={opening} openError={openError} hasRoster={Boolean(roster.all.length)} initialReady={page.committed} visibleRoster={visibleRoster}
       onQueryChange={setQuery} onFilterChange={next => { setFilter(next); setSection('messages'); setOpenError(''); }} onRefresh={() => { void c.refresh(); void directory.refresh(undefined, true); void groups.refresh(); }}
       onCreate={create} onCreateGroup={() => setCreatingGroup(true)} pinned={pins.pinned} onTogglePin={pins.toggle} selectedRoomId={roomId} onOpen={item => void open(item)} />

@@ -3,6 +3,7 @@ import { AtSign, ChevronDown, MessagesSquare, Send, Sparkles, Square } from "luc
 import { AttachmentButton, AttachmentPreviews } from "../../attachments/components/AttachmentDraft";
 import { useAttachmentDraft } from "../../attachments/hooks/useAttachmentDraft";
 import { SlashCommandMenu, type SlashCommandOption } from "../../conversations/components/SlashCommandMenu";
+import { QuoteDraft } from "../../conversations/components/QuoteDraft";
 import { goalCapabilityOptions } from "../../goals/model/capability";
 import type { GroupAgent } from "../model/types";
 import { mentionedAgentIds } from "../model/agentMentions";
@@ -275,12 +276,7 @@ export function GroupComposer({ agents, disabled, busy = false, error, notice = 
           onRemove={draft.removeFile}
           onCancelUpload={draft.cancelUpload}
         />
-        {quote ? (
-        <div className={styles.quoteDraft}>
-          <span>回复 {quote.authorName}：{quote.text}</span>
-          <button type="button" aria-label="取消引用" onClick={onClearQuote}>取消</button>
-        </div>
-      ) : null}
+        <QuoteDraft quote={quote} onClear={onClearQuote} />
         {selectedNames.length ? <p className={styles.orderHint}>{busy ? copy.busyReplyHint(selectedNames) : selectedNames.length > 1 ? copy.orderedReplyHint(selectedNames) : copy.singleReplyHint(selectedNames[0])}</p> : null}
         <textarea
           ref={textareaRef}

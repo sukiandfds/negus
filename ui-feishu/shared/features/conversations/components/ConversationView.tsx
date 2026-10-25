@@ -23,6 +23,7 @@ const messageListKey = (message: SessionMessage) => (
 
 export function Message({
   message,
+  onQuote,
   streaming = false,
   forkable = false,
   forkDisabled = false,
@@ -45,6 +46,7 @@ export function Message({
   actions,
 }: {
   message: SessionMessage;
+  onQuote?: () => void;
   streaming?: boolean;
   forkable?: boolean;
   forkDisabled?: boolean;
@@ -99,6 +101,7 @@ export function Message({
       {!executionPlaceholder ? (
         <div className={styles.actionRow}>
           {actions ?? <MessageActions
+            onQuote={onQuote}
             text={copyText}
             forkable={forkable}
             forkDisabled={forkDisabled}
@@ -126,6 +129,7 @@ export function Message({
 }
 
 interface ConversationViewProps {
+  onQuoteMessage?: (message: SessionMessage) => void;
   queue?: ReactNode;
   completedGoal?: ThreadGoal | null;
   active?: boolean;
@@ -189,6 +193,7 @@ const orderVisibleItems = (items: ConversationItem[]) => {
 };
 
 export function ConversationView({
+  onQuoteMessage,
   queue,
   completedGoal,
   active = true,
@@ -210,6 +215,8 @@ export function ConversationView({
   retryingMessageId,
   }: ConversationViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const followBottomRef = useRef(true);
+  const previousScrollTopRef = useRef(0);
   const openedThreadRef = useRef("");
   const [returnButtonThread, setReturnButtonThread] = useState("");
   const loadingOlderThreadsRef = useRef(new Set<string>());
@@ -242,8 +249,8 @@ export function ConversationView({
   const transcript = advanceLiveTranscript(transcriptMemoryRef.current, {
     threadId: session?.threadId || "",
     messages,
-    streamingText: executionMatchesSession ? streamingText : "",
-    streamingItemId: executionMatchesSession ? executionStatus.streamingItemId || "" : "",
+    streamingText: "",
+    streamingItemId: "",
     turnId: executionMatchesSession ? executionStatus.turnId || "" : "",
     active: showExecution && executionStatus.active && !completedExecution,
     showExecution,
@@ -292,7 +299,7 @@ export function ConversationView({
       ? { ...message, turnStatus: "completed", turnStartedAtMs: message.turnStartedAtMs ?? Date.parse(executionStatus.startedAt || "") }
       : message;
   }), completedGoal);
-  // 用户授权：每次打开只定位一次底部，不跟随更新或补偿阅读位置；后续修改须获用户明确同意。
+  // 用户授权：打开定位底部，仅在底部时跟随内容更新，不补偿历史阅读位置；后续修改须获用户明确同意。
   useLayoutEffect(() => {
     if (!active) {
       openedThreadRef.current = "";
@@ -301,10 +308,23 @@ export function ConversationView({
     const threadId = session?.threadId;
     const root = scrollRef.current;
     if (!threadId || loading || !root || openedThreadRef.current === threadId) return;
+    followBottomRef.current = true;
     root.scrollTop = root.scrollHeight;
     openedThreadRef.current = threadId;
     setReturnButtonThread("");
   }, [active, loading, session?.threadId]);
+
+  useLayoutEffect(() => {
+    const root = scrollRef.current;
+    const content = root?.firstElementChild;
+    if (!active || !root || !content) return;
+    const observer = new ResizeObserver(() => {
+      if (followBottomRef.current) root.scrollTop = root.scrollHeight;
+    });
+    observer.observe(content);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [active]);
 
   useEffect(() => {
     if (!active) return undefined;
@@ -362,6 +382,9 @@ export function ConversationView({
     <div className={styles.viewport}>
       <div className={styles.scrollArea} ref={scrollRef} onScroll={(event) => {
         const root = event.currentTarget;
+        if (root.scrollHeight - root.scrollTop - root.clientHeight <= 2) followBottomRef.current = true;
+        else if (root.scrollTop < previousScrollTopRef.current) followBottomRef.current = false;
+        previousScrollTopRef.current = root.scrollTop;
         setReturnButtonThread(root.scrollHeight - root.scrollTop - root.clientHeight > 120 ? session?.threadId || "" : "");
       }}>
         <section className={styles.conversation} aria-label="真实项目对话" aria-live="off">
@@ -373,6 +396,7 @@ export function ConversationView({
                 <div data-message-id={item.message.id} key={item.id}>
                   <Message
                         message={item.message}
+                        onQuote={!session.archived && onQuoteMessage ? () => onQuoteMessage(item.message) : undefined}
                         completedGoal={item.message.id === goalMessageId ? completedGoal : null}
                         streaming={item.streaming}
                         forkable={item.message.role === "assistant"
@@ -380,7 +404,6 @@ export function ConversationView({
                         forking={forkingMessageId === item.message.id}
                         onFork={() => onForkMessage(item.message)}
                         editable={item.message.role === "user"
-                          && Boolean(item.message.turnId)
                           && !session?.archived}
                         editing={editingMessageId === item.message.id}
                         onEdit={() => onEditMessage(item.message)}
@@ -390,10 +413,6 @@ export function ConversationView({
                         shareable={agentScoped
                           && !employeeScoped
                           && item.message.role === "assistant"
-                          && Boolean(item.message.text?.trim())
-                          && Boolean(item.message.turnId)
-                          && !item.streaming
-                          && !(executionStatus.active && executionStatus.turnId === item.message.turnId)
                           && !session?.archived}
                         threadId={session.threadId}
                         executionStatus={item.execution ? executionStatus : undefined}
@@ -412,6 +431,7 @@ export function ConversationView({
       {loadingOlder ? <div className={styles.older} role="status" aria-label="正在加载更早消息"><LoaderCircle aria-hidden="true" /></div> : null}
       <JumpToLatest visible={Boolean(session?.threadId && returnButtonThread === session.threadId)} className={styles.jumpToLatest} onClick={() => {
         const root = scrollRef.current;
+        followBottomRef.current = true;
         if (root) root.scrollTop = root.scrollHeight;
         setReturnButtonThread("");
       }} />
