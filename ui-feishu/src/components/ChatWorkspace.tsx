@@ -50,7 +50,7 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
           <div className="chat-messages" style={{ display: tab === 'messages' ? undefined : 'none' }}>
             <ConversationView queue={c.queueItems.length || c.queueError ? <FollowUpQueue items={c.queueItems} busy={c.queueBusy} error={c.queueError}
               onEdit={item => composerRef.current?.editQueuedMessage(item, c.removeQueueItem) ?? Promise.resolve(false)} onRemove={c.removeQueueItem} onMove={c.moveQueueItem} onRetry={c.retryQueueItem} onSendNow={c.sendQueueItem} /> : null} session={displaySession} key={c.composerKey || 'conversation'} active={visible && tab === 'messages'}
-              completedGoal={c.goal?.status === 'complete' ? c.goal : null}
+              assistantName={selectedName} completedGoal={c.goal?.status === 'complete' ? c.goal : null}
               loading={c.loadingSession} contentSyncState={c.contentSyncState} loadingOlder={c.loadingOlder}
               error={c.sessionError} listAvailable={initialReady && !c.listError} streamingText={c.streamingText}
               executionStatus={c.executionStatus} contextStatus={c.contextStatus} onLoadOlder={c.loadOlder}

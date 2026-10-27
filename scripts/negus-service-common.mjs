@@ -126,11 +126,11 @@ export const run = (program, args, options = {}) => new Promise((resolve, reject
   child.once("error", reject);
   child.once("exit", (code, signal) => code === 0 ? resolve() : reject(new Error("Command failed: " + path.basename(program) + " (" + (signal || code) + ")")));
 });
-export const detached = async (script, args, logName, env = {}) => {
+export const detached = async (script, args, logName, env = {}, nodeArgs = []) => {
   await fs.mkdir(runtime, { recursive: true });
   const log = await fs.open(path.join(runtime, logName), "a", 0o600);
   try {
-    const child = spawn(process.execPath, [script, ...args], {
+    const child = spawn(process.execPath, [...nodeArgs, script, ...args], {
       cwd: root, detached: true, stdio: ["ignore", log.fd, log.fd], env: { ...process.env, ...env },
     });
     await new Promise((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });

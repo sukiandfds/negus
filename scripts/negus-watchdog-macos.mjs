@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { root, config, maintenanceKey, withLock } from "./negus-service-common.mjs";
 const exec = promisify(execFile);
 const label = "local.negus.watchdog";
-export const intervalSeconds = 10800;
+export const intervalSeconds = 60;
 const xml = (s) => String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 
 // Dependencies can target an isolated home and launchctl fixture in tests.

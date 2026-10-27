@@ -1,3 +1,4 @@
+import { communicationInstructions } from "./base-prompt.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -679,6 +680,7 @@ export const createAppServerConversationStore = ({
       const result = await client.request("turn/start", {
         threadId,
         input: await inputFromAttachments(promptFromSlashCommand(text, attachments), attachments, attachmentContent),
+        additionalContext: { "negus.communication": { kind: "application", value: communicationInstructions } },
         ...(developerInstructions ? { developerInstructions } : {}),
         ...(submissionId ? { clientUserMessageId: submissionId } : {}),
         ...(runtimeOptions?.turn || {}),

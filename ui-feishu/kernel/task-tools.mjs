@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 // Per-run capabilities: a tool cannot select or impersonate a different source task.
-export async function createTaskTools({ invoke }) {
+export async function createTaskTools({ invoke, background = false }) {
   const scopes = new Map();
   const byTask = new Map();
   const server = http.createServer(async (request, response) => {
@@ -25,7 +25,7 @@ export async function createTaskTools({ invoke }) {
       if (!byTask.has(taskId)) { const token = randomBytes(32).toString('hex'); scopes.set(token, taskId); byTask.set(taskId, token); }
       return { 'mcp_servers.negus_handoffs': {
         command: process.execPath, args: [fileURLToPath(new URL('./task-tools-mcp.mjs', import.meta.url))], required: true,
-        env: { NEGUS_HANDOFF_ENDPOINT: `http://127.0.0.1:${server.address().port}/`, NEGUS_HANDOFF_TOKEN: byTask.get(taskId) },
+        env: { NEGUS_HANDOFF_ENDPOINT: `http://127.0.0.1:${server.address().port}/`, NEGUS_HANDOFF_TOKEN: byTask.get(taskId), NEGUS_BACKGROUND_TASKS: background ? '1' : '0' },
       } };
     },
     release: taskId => { scopes.delete(byTask.get(taskId)); byTask.delete(taskId); },

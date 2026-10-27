@@ -143,6 +143,9 @@ server.listen(port,"127.0.0.1");process.on("SIGTERM",()=>{server.close();server.
   // Snapshot A is the backend recovery source; publish frontend B independently.
   const releaseDir = path.join(dir, "runtime/releases/A");
   await fs.cp(path.join(dir, "windows"), path.join(releaseDir, "windows"), { recursive: true });
+  await fs.mkdir(path.join(releaseDir, "ui-feishu/server"), { recursive: true });
+  await fs.writeFile(path.join(releaseDir, "ui-feishu/server/register.mjs"), 'globalThis.fixtureExtensionLoaded = true;');
+  await fs.appendFile(path.join(releaseDir, "windows/scripts/remote-room-demo.mjs"), '\nif (!globalThis.fixtureExtensionLoaded) throw Error("Backend extension not loaded");');
   await makeBuild(path.join(releaseDir, "ui-feishu/dist"), "A");
   const hash = createHash("sha256");
   const digest = async (relative = "") => {
@@ -157,6 +160,7 @@ server.listen(port,"127.0.0.1");process.on("SIGTERM",()=>{server.close();server.
   await fs.writeFile(path.join(releaseDir, "release.json"), JSON.stringify({ verifiedAt: new Date().toISOString(), digest: hash.digest("hex") }));
   await fs.writeFile(path.join(dir, "runtime/negus-release-state.json"), JSON.stringify({ active: {
     id: "A", directory: releaseDir, entryScript: path.join(releaseDir, "windows/scripts/remote-room-demo.mjs"),
+    loaderScript: path.join(releaseDir, "ui-feishu/server/register.mjs"),
   } }));
   const frontendB = path.join(dir, "frontend-B");
   await makeBuild(frontendB, "B");

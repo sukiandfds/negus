@@ -17,7 +17,7 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
       id: entry.id, name: entry.main && project.employeeId ? project.name : session?.title || entry.title,
       subtitle: project.name, agentId: project.employeeId, threadId: entry.threadId,
       conversationId: entry.conversationId, main: entry.main, pending: entry.pendingOpen,
-      origin: session?.createdBy || (/^(task|handoff)-/.test(entry.conversationId || '') ? 'assistant' : undefined),
+      origin: /^(task|handoff)-/.test(entry.conversationId || '') ? 'assistant' : session?.createdBy,
       projectId: entry.targetProjectId || project.projectId || project.id,
       time: session?.updatedAt || entry.lastActivityAt || entry.updatedAt,
       active: Boolean(status?.active), label: conversationStatus(status, directory.contextByThread[entry.threadId || '']), preview: session?.latestMessage, session,

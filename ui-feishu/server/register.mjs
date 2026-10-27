@@ -49,7 +49,7 @@ registerHooks({ load(url, context, nextLoad) {
     const employeeMarker = 'employeeRuntime = createEmployeeRuntimeService({';
     if (!source.includes(employeeMarker)) throw new Error('Employee task extension: host integration point changed');
     source = `import { extendEmployeeTasks } from ${JSON.stringify(employeeTasks)};\n` + source.replace(employeeMarker, `agentTasks = await extendEmployeeTasks(agentTasks, {
-      stateRoot: ${JSON.stringify(fileURLToPath(new URL('../runtime/employee-tasks/', import.meta.url)))},
+      stateRoot: path.join(process.env.NEGUS_UI_STATE_ROOT || path.join(projectRoot, 'runtime', 'ui-feishu'), 'employee-tasks'),
       registry: employeeRegistry, modelProviders, appServerClient, bindings: employeeConversationStore,
       execution, queue: followUpQueue, broadcast: realtime.broadcast,
     });\n${employeeMarker}`);

@@ -5,6 +5,41 @@ import os from "node:os";
 import path from "node:path";
 import { createProviderConversationStore } from "../server/provider-conversation-store.mjs";
 
+test("background task history and controls use its saved provider after reopening", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-task-provider-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const calls = [];
+  const store = provider => ({
+    findSession: async id => { calls.push([provider, 'history', id]); return { threadId: id, messages: [{ role: 'assistant', text: '5050' }] }; },
+    getThreadStatus: async id => { calls.push([provider, 'status', id]); return { type: 'idle' }; },
+    compactContext: async id => { calls.push([provider, 'compact', id]); return {}; },
+  });
+  const options = { current: store('current'), providers: { getClient: async ({ modelProviderId }) => modelProviderId },
+    createStore: store, stateFile: path.join(root, 'routes.json'), providerForThread: id => id === 'task' ? 'external' : null };
+  for (let i = 0; i < 2; i++) {
+    const service = createProviderConversationStore(options);
+    assert.equal((await service.findSession('task')).messages[0].text, '5050');
+    await service.getThreadStatus('task');
+    await service.compactContext('task');
+    await service.findSession('ordinary');
+  }
+  assert.deepEqual(calls, Array(2).fill([['external', 'history', 'task'], ['external', 'status', 'task'], ['external', 'compact', 'task'], ['current', 'history', 'ordinary']]).flat());
+});
+
+test("employee history uses its explicit provider without changing ordinary thread routing", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-employee-history-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const reads = [];
+  const store = provider => ({ findSession: async (...args) => { reads.push([provider, ...args]); return { messages: [] }; } });
+  const service = createProviderConversationStore({ current: store("current"),
+    providers: { getClient: async ({ modelProviderId }) => modelProviderId },
+    createStore: client => store(client), stateFile: path.join(root, "routes.json") });
+  const page = { limit: 60, cursor: "older" };
+  await service.findSessionForProvider("external", "employee-thread", "all", page);
+  await service.findSession("ordinary-thread", "all", page);
+  assert.deepEqual(reads, [["external", "employee-thread", "all", page], ["current", "ordinary-thread", "all", page]]);
+});
+
 test("channel switching preserves the thread and sends only the next user message, including after restart", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-model-transfer-"));
   try {

@@ -6,7 +6,7 @@ import test from "node:test";
 import { createEmployeeProjectRegistry } from "../server/employee-project-registry.mjs";
 import { createEmployeeRuntimeService } from "../server/employee-runtime-service.mjs";
 
-const fixture = async (t, { execution = null, onTurnCompleted = null, taskService = null } = {}) => {
+const fixture = async (t, { execution = null, onTurnCompleted = null, taskService = null, readHistory } = {}) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-employee-runtime-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const registry = await createEmployeeProjectRegistry({
@@ -38,6 +38,7 @@ const fixture = async (t, { execution = null, onTurnCompleted = null, taskServic
   const runtime = createEmployeeRuntimeService({
     registry,
     conversationStore,
+    readHistory,
     projectRoot: "D:\\project",
     client,
     broadcast: (event) => events.push(event),
@@ -51,6 +52,30 @@ const fixture = async (t, { execution = null, onTurnCompleted = null, taskServic
   });
   return { registry, client, conversationStore, runtime, events, calls, get listener() { return listener; } };
 };
+
+test("employee history preserves ordinary messages and pagination on the selected provider", async (t) => {
+  const messages = [
+    { id: "progress", role: "assistant", phase: "commentary", text: "checking", createdAt: "2026-10-26T01:00:00Z" },
+    { id: "command", role: "tool", text: "pwd", blocks: [{ type: "command", command: "pwd" }] },
+    { id: "image", role: "user", text: "", blocks: [{ type: "image", file: { id: "image-file", url: "/api/media/image-file" } }] },
+  ];
+  const reads = [];
+  const { runtime, registry, conversationStore } = await fixture(t, { readHistory: async (...args) => {
+    reads.push(args);
+    return { threadId: args[1], title: "Native history", messages, hasMore: true, nextCursor: "older-page" };
+  } });
+  conversationStore.readMessages = async () => { throw Error("simplified history must not be read"); };
+  await registry.bindConversation("developer", "history-conversation");
+  await registry.setModelSettings("developer", { modelProviderId: "external" });
+  const pagination = { limit: 60, cursor: "previous-page" };
+  const session = await runtime.readSession("developer", pagination);
+  assert.deepEqual(reads, [["external", "employee-thread", "all", pagination]]);
+  assert.deepEqual(session.messages, messages);
+  assert.equal(session.hasMore, true);
+  assert.equal(session.nextCursor, "older-page");
+  assert.equal(session.conversationKind, "direct");
+  assert.equal(session.conversationId, "history-conversation");
+});
 
 test("employee registry keeps identity state private from API-shaped values", async (t) => {
   const { registry } = await fixture(t);
@@ -75,8 +100,13 @@ test("employee runtime binds one main thread with main-agent host access", async
   assert.equal(turnStart.params.cwd, "D:\\project");
   assert.equal(turnStart.params.sandboxPolicy.type, "dangerFullAccess");
   assert.equal(turnStart.params.approvalPolicy, "never");
-  assert.match(turnStart.params.developerInstructions, /技术研发员工/u);
-  assert.match(turnStart.params.developerInstructions, /完整工具能力/u);
+  const role = turnStart.params.additionalContext['negus.employee'];
+  assert.equal(role.kind, 'application');
+  assert.match(role.value, /替代对话中旧的员工身份/);
+  assert.match(role.value, /技术研发/u);
+  assert.ok(role.value.includes(path.resolve('employees/developer/system-prompt.md')));
+  assert.equal(role.value.includes('默认提示词 1.'), false, 'role update must not repeat global rules and crowd out the employee identity');
+  assert.equal(turnStart.params.developerInstructions, undefined);
   assert.equal((events.find((event) => event.type === "employee_status")?.modificationConfirmed), true);
   listener({ method: "turn/completed", params: { threadId: "employee-thread", turn: { status: "completed" } } });
   await runtime.confirmModification("developer");
@@ -251,6 +281,7 @@ test('product leader starts with task tools and sends first message without resu
   const start = f.calls.find(c => c.method === 'thread/start');
   assert.ok(start.params.config['mcp_servers.negus_tasks']);
   assert.match(start.params.developerInstructions, /委派后台调研/);
+  assert.match(f.calls.find(c => c.method === 'turn/start').params.additionalContext['negus.employee'].value, /委派后台调研/);
 });
 
 for (const state of ['idle', 'active', 'unknown']) test(`existing product leader tool reload does not gate on ${state} state`, async t => {
@@ -288,4 +319,16 @@ test('completion callback waits for send lock even when a turn completes before 
   await f.runtime.sendMessage({ employeeId: 'researcher', text: '主对话' });
   assert.equal(await finished, undefined);
   assert.equal(f.calls.filter(c => c.method === 'turn/start').length, 2);
+});
+
+test("employee steering preserves submission identity and current turn when response has no turn object", async (t) => {
+  const { runtime, calls } = await fixture(t);
+  await runtime.sendMessage({ employeeId: "developer", text: "same", requestId: "first" });
+  for (const requestId of ["second", "third"]) {
+    const result = await runtime.sendMessage({ employeeId: "developer", text: "same", requestId });
+    assert.equal(calls.at(-1).method, "turn/steer");
+    assert.equal(calls.at(-1).params.clientUserMessageId, requestId);
+    assert.equal(calls.at(-1).params.expectedTurnId, "employee-turn");
+    assert.equal(result.turnId, "employee-turn");
+  }
 });

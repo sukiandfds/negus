@@ -51,6 +51,7 @@ export function FeishuApp() {
   if (!roomId) singleChat.current = viewC;
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ConversationFilter>('all');
+  const [origins, setOrigins] = useState(['user', 'assistant', 'employee']);
   const [opening, setOpening] = useState('');
   const [openError, setOpenError] = useState('');
   const [details, setDetails] = useState(false);
@@ -126,7 +127,11 @@ export function FeishuApp() {
       return { ...project, time: children[0]?.time || project.time, children };
     }).sort(byLatest) };
   }, [viewDirectory.projects, viewDirectory.statusByThread, viewDirectory.contextByThread, viewC.sessions, viewC.archivedView, viewC.project?.root, groups.rooms]);
-  const visibleRoster = filter === 'employees' ? roster.employees : filter === 'projects' ? roster.projects : sortPinned(roster.all, pins.pinned);
+  const filterOrigins = (items: Conversation[]): Conversation[] => items.flatMap(item => {
+    const children = item.children ? filterOrigins(item.children) : undefined;
+    return origins.includes(item.origin === 'assistant' ? 'assistant' : item.main && item.agentId ? 'employee' : 'user') || children?.length ? [{ ...item, children }] : [];
+  });
+  const visibleRoster = filterOrigins( filter === 'employees' ? roster.employees : filter === 'projects' ? roster.projects : sortPinned(roster.all.filter(item => filter === 'background' ? item.origin === 'assistant' : true), pins.pinned));
   const selected = roster.all.find(v => v.threadId === viewC.selectedId);
   const open = async (item: Conversation) => {
     if (opening) return;
@@ -170,7 +175,7 @@ export function FeishuApp() {
     <AppRail section={section} connected={c.connected} open={railOpen && !mobileChat} onClose={() => setRailOpen(false)}
       onSearch={() => { setSection('messages'); setMobileChat(false); document.getElementById('conversation-search')?.focus(); }}
       onSectionChange={next => { setSection(next); setMobileChat(false); setFilter(next === 'employees' ? 'employees' : 'all'); setOpenError(''); }} onSettings={() => setSettings(true)} />
-    <ConversationList c={viewC} section={section} query={query} filter={filter} onOpenNavigation={() => setRailOpen(open => !open)}
+    <ConversationList c={viewC} section={section} query={query} filter={filter} origins={origins} onOriginsChange={setOrigins} onOpenNavigation={() => setRailOpen(open => !open)}
       opening={opening} openError={openError} hasRoster={Boolean(roster.all.length)} initialReady={page.committed} visibleRoster={visibleRoster}
       onQueryChange={setQuery} onFilterChange={next => { setFilter(next); setSection('messages'); setOpenError(''); }} onRefresh={() => { void c.refresh(); void directory.refresh(undefined, true); void groups.refresh(); }}
       onCreate={create} onCreateGroup={() => setCreatingGroup(true)} pinned={pins.pinned} onTogglePin={pins.toggle} selectedRoomId={roomId} onOpen={item => void open(item)} />

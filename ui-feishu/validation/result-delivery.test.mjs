@@ -69,6 +69,19 @@ test('source stopping while result waits also exposes retry instead of hanging',
   assert.equal(f.sent.length, 0);
 });
 
+test('result waits for the current reply, then wakes the idle assistant exactly once', async t => {
+  const f = await fixture(t, 'working');
+  await until(() => f.queue.list('main').length === 1);
+  assert.equal(f.sent.length, 0);
+  f.phase = 'idle';
+  await f.queue.handleTurnTerminal({ threadId: 'main', status: 'completed' });
+  await until(() => f.delivery().state === 'delivered');
+  assert.equal(f.sent.length, 1);
+  assert.match(f.sent[0], /调研结果/);
+  await f.queue.handleTurnTerminal({ threadId: 'main', status: 'completed' });
+  assert.equal(f.sent.length, 1);
+});
+
 test('retry confirms an ambiguously delivered result without sending it twice', async t => {
   const f = await fixture(t, 'completed', true);
   await until(() => f.delivery().state === 'failed');

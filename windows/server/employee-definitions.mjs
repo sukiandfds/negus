@@ -56,7 +56,7 @@ export const loadEmployeeDefinitions = async (sourceRoot = builtInEmployeesRoot,
       const value = JSON.parse(await fs.readFile(path.join(sourceRoot, entry.name, "employee.json"), "utf8"));
       const promptPath = path.join(sourceRoot, entry.name, 'system-prompt.md');
       const prompt = await fs.readFile(promptPath, 'utf8').catch(() => '');
-      value.instructions = [value.instructions, prompt].filter(Boolean).join('\n\n');
+      value.instructions = [value.instructions, `本员工的职责提示词文件：${JSON.stringify(path.resolve(promptPath))}。用户要求调整你的职责、工作方式或职位要求时，将具体修改要求和此文件路径交给后台任务，默认只修改这份文件，不改其他员工或全局规则。修改后按 Negus 受控重启流程生效，区分文件已修改、重启已安排和已生效；不要只口头答应或另存一份职责。`, prompt].filter(Boolean).join('\n\n');
       return normalize(value, workRoot);
     }));
   const definitions = loaded.filter(Boolean).sort((left, right) => left.order - right.order);

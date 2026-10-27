@@ -317,10 +317,10 @@ export const createModelProviderService = ({
         const url = new URL(`${provider.baseUrl.replace(/\/$/, '')}/models`);
         if (url.protocol !== 'https:' || url.username || url.password) throw new Error('invalid URL');
         const response = await fetchModels(url, { headers: { Authorization: `Bearer ${credential}` }, redirect: 'error', signal: AbortSignal.timeout(10000) });
-        if (!response.ok) throw new Error('upstream failed');
+        if (!response.ok) throw statusError(`配置模型目录读取失败：供应商返回 HTTP ${response.status}${response.status === 403 ? '，当前 Key 无权访问此分组' : response.status === 401 ? '，请检查 API Key' : ''}`, 502);
         payload = await response.json();
         if (!Array.isArray(payload.data)) throw new Error('invalid models');
-      } catch { throw statusError('配置模型目录读取失败，请稍后重试', 502); }
+      } catch (error) { throw error.statusCode ? error : statusError(error.name === 'TimeoutError' ? '配置模型目录读取超时，请重试' : '配置模型目录读取失败，请检查地址和网络', 502); }
       const ids = [...new Set(payload.data.map((entry) => entry?.id).filter((model) => typeof model === 'string'
         && model.length > 0 && model.length <= 120 && !model.includes('::')
         && (id !== GROK_MODEL_PROVIDER_ID || /^grok-/i.test(model))))];
@@ -406,10 +406,10 @@ export const createModelProviderService = ({
       if (provider.mode === "current") continue;
       const available = await isProviderConfigured(provider.id);
       external.push(...provider.models.map((storedModel) => {
-        const nativeEfforts = provider.id.startsWith("ccswitch_")
+        const nativeEfforts = provider.id === `ccswitch_${currentProvider.sharedConfigId}`
           ? nativeByModel.get(storedModel.model)?.supportedReasoningEfforts : null;
         const model = withVerifiedReasoning({ ...storedModel,
-          supportedReasoningEfforts: nativeEfforts?.length ? nativeEfforts : storedModel.supportedReasoningEfforts,
+          supportedReasoningEfforts: storedModel.supportedReasoningEfforts?.length ? storedModel.supportedReasoningEfforts : nativeEfforts || [],
         }, provider.baseUrl);
         return {
           ...model,
@@ -464,7 +464,7 @@ export const createModelProviderService = ({
     ownedClients.clear();
     clientPromises.clear();
   };
-  const prepareResumeFile = async (providerId, info) => {
+  const prepareResumeFile = async (providerId, info, ancestors = new Set()) => {
     const home = providerId === CURRENT_MODEL_PROVIDER_ID
       ? process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
       : path.join(path.resolve(runtimeRoot), providerId, 'codex-home');
@@ -473,6 +473,19 @@ export const createModelProviderService = ({
     if (!date || !path.isAbsolute(info.path)) throw new Error('原会话记录位置无效');
     const destination = path.join(home, 'sessions', date[1], date[2], date[3], basename);
     if (path.resolve(destination).toLowerCase() !== path.resolve(info.path).toLowerCase()) {
+      if (ancestors.has(info.path)) throw new Error('对话来源记录存在循环，未切换配置');
+      ancestors.add(info.path);
+      const header = JSON.parse((await fs.readFile(info.path, 'utf8')).split('\n', 1)[0]);
+      const parentId = header.type === 'session_meta' ? header.payload?.forked_from_id : null;
+      if (parentId) {
+        if (!/^[a-f0-9-]{36}$/i.test(parentId)) throw new Error('对话来源编号无效，未切换配置');
+        let parent;
+        for await (const file of fs.glob(`**/rollout-*-${parentId}.jsonl`, { cwd: path.resolve(path.dirname(info.path), '../../..') })) {
+          parent = path.resolve(path.dirname(info.path), '../../..', file); break;
+        }
+        if (!parent) throw new Error('找不到分支来源对话记录，未切换配置');
+        await prepareResumeFile(providerId, { ...info, path: parent }, ancestors);
+      }
       await fs.mkdir(path.dirname(destination), { recursive: true });
       // Preserve the complete native rollout and its thread ID, not a text summary/new conversation.
       const temporary = `${destination}.resume-${process.pid}`;

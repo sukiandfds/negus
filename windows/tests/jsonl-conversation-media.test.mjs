@@ -110,3 +110,49 @@ test("lists sessions from each configured business project and preserves cwd", a
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("JSONL preserves internal identity and links commentary/final to enclosing protocol turn", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'negus-turn-identity-'));
+  t.after(() => rm(root, {recursive:true,force:true}));
+  const threadId='00000000-0000-4000-8000-000000000091';
+  const turn='01a17bed-protocol';
+  const lines=[
+    {type:'session_meta',payload:{id:threadId,cwd:root}},
+    {type:'event_msg',payload:{type:'task_started',turn_id:turn}},
+    ...['commentary','final_answer'].map((phase,i)=>({timestamp:`2026-10-27T05:56:${i ? '25.045' : '00.434'}Z`,type:'response_item',payload:{type:'message',id:`reply-${i}`,role:'assistant',phase,content:[{type:'output_text',text:phase}],internal_chat_message_metadata_passthrough:{turn_id:'4840b54c-internal'}}})),
+    {type:'event_msg',payload:{type:'task_complete',turn_id:turn}},
+  ];
+  await writeFile(path.join(root,`rollout-${threadId}.jsonl`),lines.map(JSON.stringify).join('\n')+'\n');
+  const store=createJsonlConversationStore({sessionRoot:root,projectRoot:root,registerMedia:()=>null,onChange:()=>{}});
+  t.after(()=>store.close());
+  const session=await store.findSession(threadId);
+  assert.equal(session.messages.length,2);
+  for(const message of session.messages){
+    assert.equal(message.turnId,'4840b54c-internal');
+    assert.equal(message.protocolTurnId,turn);
+    assert.equal(message.turnStatus,'completed');
+  }
+});
+
+test('no-reply history evidence requires task_complete and survives reloading', async (t) => {
+  const root=await mkdtemp(path.join(os.tmpdir(),'negus-no-reply-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  const threadId='00000000-0000-4000-8000-000000000092';
+  const file=path.join(root,`rollout-${threadId}.jsonl`);
+  const lines=[{type:'session_meta',payload:{id:threadId,cwd:root}},
+    {type:'event_msg',payload:{type:'task_started',turn_id:'empty'}},
+    {type:'response_item',payload:{type:'message',role:'user',content:[{type:'input_text',text:'hello'}]}}];
+  await writeFile(file,lines.map(JSON.stringify).join('\n')+'\n');
+  const make=()=>createJsonlConversationStore({sessionRoot:root,projectRoot:root,registerMedia:()=>null,onChange:()=>{}});
+  let store=make();
+  try {
+    assert.equal((await store.findSession(threadId)).messages[0].turnHasFinalAnswer,undefined);
+    const {appendFile}=await import('node:fs/promises');
+    await appendFile(file,JSON.stringify({type:'event_msg',payload:{type:'task_complete',turn_id:'empty'}})+'\n');
+    for(let mount=0;mount<2;mount++) {
+      const message=(await store.findSession(threadId)).messages[0];
+      assert.equal(message.turnStatus,'completed');assert.equal(message.turnHasFinalAnswer,false);
+      store.close();store=make();
+    }
+  } finally {store.close();}
+});

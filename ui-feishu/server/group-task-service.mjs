@@ -1,3 +1,4 @@
+import { backgroundTaskRoute } from '../../windows/server/background-tasks/model-policy.mjs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { createTaskKernel, terminalStates } from '../kernel/task-kernel.mjs';
@@ -38,8 +39,9 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
     `你是${agent.name}，只以自己的身份回复。复杂工作先拆给直属下属，收到结果后核验并汇总；只能向以下直属下属派工：${JSON.stringify(hierarchy.childrenOf(agent.id))}。需要交接用户已授权的工作时，调用 negus_handoffs.delegate_task；仅在文字中 @ 同事不会创建任务。工具确认保存后可立即回复用户，结果会自动回到来源对话。结果通知不是新的委派请求，不要重复派发相同工作。现有员工：${JSON.stringify(room.snapshot().agents.map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`);
   const runtime = createNativeTaskRuntime({ log,
     resolve: async (task, controls, { recovering }) => {
-      const agent = room.getAgent(task.agentId);
+      let agent = room.getAgent(task.agentId);
       if (!agent) throw Error('执行员工已不在当前群聊');
+      if (task.conversationId !== roomId) agent = { ...agent, ...(task.runtime.modelProviderId ? { modelProviderId: task.runtime.modelProviderId, model: task.runtime.model || agent.model } : await backgroundTaskRoute(modelProviders, agent)) };
       const modelProviderId = task.runtime.modelProviderId || agent.modelProviderId || 'current';
       const client = await clientFor({ ...agent, modelProviderId });
       const independent = task.conversationId !== roomId;
@@ -58,7 +60,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       if (!threadId) {
         const value = await client.request('thread/start', { ...options, cwd: employeeWorkRoots[agent.id] || projectRoot, ephemeral: false, serviceName: 'negus' });
         threadId = value.thread.id;
-        await controls.checkpoint({ threadId, modelProviderId });
+        await controls.checkpoint({ threadId, modelProviderId, model: agent.model });
         if (independent) await bindings?.bindRuntime({ conversationId: task.conversationId, agentId: agent.id,
           runtimeKind: 'codex', runtimeSessionId: threadId, conversationKind: 'task', title: task.title,
           targetProjectId: room.snapshot().room.projectId, executionRoot: projectRoot });
@@ -66,7 +68,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
         await client.request('thread/name/set', { threadId, name: independent ? task.title : `${agent.name} · ${room.snapshot().room.name}` });
       }
       const snapshot = await client.request('thread/read', { threadId, includeTurns: true });
-      await controls.checkpoint({ threadId, modelProviderId });
+      await controls.checkpoint({ threadId, modelProviderId, model: agent.model });
       const turns = snapshot.thread?.turns || [];
       if (turns.some(turn => !terminalStates.has(turn.status))) throw Object.assign(Error('员工会话仍有其他执行，等待核对状态'), { ambiguous: true });
       const context = room.getAgentContext(agent.id, { assignmentId: task.source?.messageId || '' });

@@ -40,6 +40,7 @@ export interface ExecutionStatus {
   label: string;
   detail: string;
   commentary: string;
+  hasFinalAnswer?: boolean;
   streamingItemId?: string;
   streamingText?: string;
   activities: ExecutionActivity[];

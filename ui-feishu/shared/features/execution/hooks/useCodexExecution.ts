@@ -288,23 +288,6 @@ export function useCodexExecution(threadId: string) {
       currentTurnIdRef.current = "";
       stateRevisionRef.current += 1;
       clearStreaming();
-      const submittedAt = new Date().toISOString();
-      setStatus({
-        ...idleStatus(threadId),
-        phase: "submitted",
-        label: "Sending to Codex",
-        active: true,
-        startedAt: submittedAt,
-        updatedAt: submittedAt,
-      });
-    } else if (isCurrent() && targetThreadId === threadId) {
-      stateRevisionRef.current += 1;
-      setStatus((current) => ({
-        ...current,
-        label: "Sending guidance...",
-        detail: "",
-        updatedAt: new Date().toISOString(),
-      }));
     }
     try {
       const accepted = await executionApi.sendMessage(targetThreadId, message, attachmentIds, acceptedSubmissionId, controller.signal, conversationId);
@@ -330,7 +313,7 @@ export function useCodexExecution(threadId: string) {
         setStatus((current) => ({
           ...current,
           turnId: accepted.turnId,
-          phase: current.phase === "submitted" ? "working" : current.phase,
+          phase: current.active ? current.phase : "working",
           active: true,
           updatedAt: new Date().toISOString(),
         }));

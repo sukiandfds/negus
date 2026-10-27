@@ -1,9 +1,10 @@
+import { backgroundTaskRoute } from './background-tasks/model-policy.mjs';
 import { isReasoningEffort } from './reasoning-efforts.mjs';
 import { latestAssistantReplyAtFromRollout } from "./app-server-conversation-store.mjs";
 import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 // Ordinary project conversations only. Employee runtimes keep their own bindings.
-export const createProviderConversationStore = ({ current, providers, createStore, stateFile }) => {
+export const createProviderConversationStore = ({ current, providers, createStore, stateFile, providerForThread = () => null }) => {
   const stores = new Map([["current", Promise.resolve(current)]]);
   let routes = {};
   const ready = readJsonFile(stateFile, {}).then((stored) => { routes = stored && typeof stored === "object" ? stored : {}; });
@@ -22,7 +23,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
     }
     return stores.get(providerId);
   };
-  const owner = (id) => routes[id]?.providerId || "current";
+  const owner = (id) => routes[id]?.providerId || providerForThread(id) || "current";
   const decorate = (session) => session && ({ ...session,
     createdBy: routes[session.threadId]?.createdBy || session.createdBy,
     ...(routes[session.threadId]?.manualTitle ? { title: routes[session.threadId].manualTitle } : {}),
@@ -30,6 +31,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
     modelProviderId: routes[session.threadId]?.pendingProviderId || owner(session.threadId),
   });
   const service = {};
+  service.findSessionForProvider = async (providerId, ...args) => (await storeFor(providerId)).findSession(...args);
   const rememberPreviousSettings = async (id, source) => {
     if (Object.hasOwn(routes[id] || {}, "lastSuccessfulSettings")) return;
     const info = source.isFreshSession?.(id) ? null : await source.getSessionResumeInfo(id);
@@ -212,12 +214,14 @@ export const createProviderConversationStore = ({ current, providers, createStor
   service.createSession = async (model = "", cwd = "", modelProviderId = "", options = {}) => {
     await ready;
     await providers.refreshShared?.().catch((error) => { if (model.includes('::')) throw error; });
-    const route = providers.resolveRoute({ model, modelProviderId });
+    const route = options.createdBy === "assistant"
+      ? await backgroundTaskRoute(providers, providers.resolveRoute({ model, modelProviderId }))
+      : providers.resolveRoute({ model, modelProviderId });
     const effectiveModel = route.model || model;
     const session = await (await storeFor(route.modelProviderId)).createSession(effectiveModel, cwd, options);
     routes[session.threadId] = { providerId: route.modelProviderId,
       createdBy: ['user', 'assistant'].includes(options.createdBy) ? options.createdBy : undefined,
-      model: route.modelProviderId === 'current' ? effectiveModel : model,
+      model: route.modelProviderId === 'current' ? effectiveModel : `${route.modelProviderId}::${effectiveModel}`,
       summary: session, lastSuccessfulSettings: null };
     await save();
     return decorate(session);

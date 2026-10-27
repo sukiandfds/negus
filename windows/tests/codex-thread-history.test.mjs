@@ -85,3 +85,12 @@ test("renders completed Negus Image MCP outputs once and keeps the final answer"
   assert.equal(messages[2].text, "Done.");
   assert.equal(registered.length, 2);
 });
+
+test('full completed turn carries no-reply evidence without confusing incomplete history', () => {
+  const user={type:'userMessage',id:'u',content:[{type:'text',text:'hello'}]};
+  const read=(status,items)=>messagesFromTurns([{id:'turn',status,items}])[0];
+  assert.equal(read('inProgress',[user]).turnHasFinalAnswer,undefined);
+  assert.equal(read('completed',[user]).turnHasFinalAnswer,false);
+  assert.equal(read('completed',[user,{type:'agentMessage',phase:'final_answer',text:'done'}]).turnHasFinalAnswer,true);
+  assert.equal(read('completed',[user,{type:'agentMessage',phase:'final_answer',text:''}]).turnHasFinalAnswer,false);
+});

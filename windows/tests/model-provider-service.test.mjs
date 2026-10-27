@@ -285,3 +285,33 @@ test('fresh installations and arbitrary shared config IDs reuse supplier Grok ca
     assert.deepEqual(result.capabilities.find(m => m.model === 'unverified').supportedReasoningEfforts, []);
   });
 });
+
+test('catalog permission failures explain the cause in refresh and configuration discovery', async () => {
+  await withTemporaryRoot(async root => {
+    const { createProviderProbe } = await import('../server/provider-probe.mjs');
+    const fetchImpl = async () => ({ ok: false, status: 403 });
+    const service = createModelProviderService({ projectRoot: root, currentApiConfiguration: async () => null,
+      sharedConfig: { runtimeProviders: async () => [] }, credentialStore: { read: async () => 'synthetic' }, fetchModels: fetchImpl });
+    try {
+      await assert.rejects(service.refreshProviderModels('fusheng-grok'), /HTTP 403.*无权/);
+      const probe = createProviderProbe({ resolveDraft: async () => ({ baseUrl: 'https://example.test/v1', key: 'synthetic' }), fetchImpl });
+      await assert.rejects(probe({ action: 'discover' }), /HTTP 403.*无权/);
+    } finally { service.close(); }
+  });
+});
+
+test('reasoning options from the active configuration do not leak into other configurations', async () => {
+  await withTemporaryRoot(async root => {
+    const service = createModelProviderService({ projectRoot: root,
+      currentApiConfiguration: async () => ({ baseUrl: 'https://active.test/v1', key: 'synthetic' }),
+      sharedConfig: { runtimeProviders: async () => [
+        { id: 'ccswitch_active', baseUrl: 'https://active.test/v1', key: 'synthetic', models: [{ model: 'same-model' }] },
+        { id: 'ccswitch_other', baseUrl: 'https://other.test/v1', key: 'other', models: [{ model: 'same-model' }] },
+      ], readCredential: async () => 'synthetic' } });
+    try {
+      const models = await service.listModels([{ model: 'same-model', supportedReasoningEfforts: [{ reasoningEffort: 'high' }] }]);
+      assert.deepEqual(models.find(m => m.modelProviderId === 'ccswitch_active').supportedReasoningEfforts, [{ reasoningEffort: 'high' }]);
+      assert.deepEqual(models.find(m => m.modelProviderId === 'ccswitch_other').supportedReasoningEfforts, []);
+    } finally { service.close(); }
+  });
+});

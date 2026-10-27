@@ -28,8 +28,11 @@ export interface SessionMessage {
   blocks?: ContentBlock[];
   createdAt?: string;
   turnId?: string;
+  protocolTurnId?: string;
+  phase?: string;
   turnItemIndex?: number;
   turnStatus?: string;
+  turnHasFinalAnswer?: boolean;
   turnStartedAtMs?: number | null;
   superseded?: boolean;
   itemId?: string;

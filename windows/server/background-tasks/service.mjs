@@ -1,3 +1,4 @@
+import { backgroundTaskRoute } from './model-policy.mjs';
 import http from 'node:http';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +11,7 @@ const active = task => ['starting', 'running'].includes(task.state);
 const workerInstructions = `${basePrompt}\n你是临时后台任务执行者，只执行任务中已授权的范围，不再委派子任务。最终回复包含完成内容、证据和未完成项。`;
 const leaderTaskInstructions = `先判断能否直接回答。需要较长时间查询资料、测试或实现时，且需求及修改授权已明确，调用 create_background_task 创建独立后台对话。任务指令必须包含来源背景、已完成内容、待办范围和交付要求。创建成功后立即说明已知情况、已完成内容及后台待办，不等待或轮询。`;
 
-export async function createBackgroundTaskService({ stateFile, registry, conversations, bindings, queue, execution, broadcast = () => {}, enabledEmployees = registry.list().map(employee => employee.id) }) {
+export async function createBackgroundTaskService({ stateFile, registry, modelProviders, conversations, bindings, queue, execution, broadcast = () => {}, enabledEmployees = registry.list().map(employee => employee.id) }) {
   let tasks = [];
   const stored = await readJsonFile(stateFile, null);
   if (stored) tasks = stored.tasks;
@@ -78,7 +79,8 @@ export async function createBackgroundTaskService({ stateFile, registry, convers
       await persist();
       const start = (async () => {
         try {
-          const session = await conversations.createSession(employee.model, employee.projectRoot, employee.modelProviderId, {
+          const route = await backgroundTaskRoute(modelProviders, employee);
+          const session = await conversations.createSession(route.model, employee.projectRoot, route.modelProviderId, {
             managed: true, sandbox: 'danger-full-access', approvalPolicy: 'never', developerInstructions: workerInstructions,
           });
           task.threadId = session.threadId;

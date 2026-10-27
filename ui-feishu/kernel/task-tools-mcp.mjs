@@ -3,7 +3,7 @@ import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
 import { pathToFileURL } from 'node:url';
 
-export function createHandoffMcpServer({ endpoint = process.env.NEGUS_HANDOFF_ENDPOINT, token = process.env.NEGUS_HANDOFF_TOKEN, fetchResponse = fetch } = {}) {
+export function createHandoffMcpServer({ endpoint = process.env.NEGUS_HANDOFF_ENDPOINT, token = process.env.NEGUS_HANDOFF_TOKEN, background = process.env.NEGUS_BACKGROUND_TASKS === '1', fetchResponse = fetch } = {}) {
   const server = new McpServer({ name: 'negus-handoffs', version: '1.0.0' });
   const call = async (action, args) => {
     try {
@@ -18,6 +18,10 @@ export function createHandoffMcpServer({ endpoint = process.env.NEGUS_HANDOFF_EN
     description: '将用户已授权的工作异步交给现有员工。工具保存任务后立即返回；你可以继续回复用户，结果完成后自动回到本对话。重试同一次交接必须沿用 requestId；新的工作使用新的 requestId。普通提到同事名字不会派发任务。',
     inputSchema: z.object({ requestId: z.string().min(1), agentId: z.string().min(1), title: z.string().min(1), instructions: z.string().min(1) }),
   }, args => call('delegate', args));
+  if (background) server.registerTool('create_background_task', {
+    description: '将用户已授权的执行工作放到独立后台对话。保存后立即返回；确认接单后结束本轮回复，不等待或查询，结果会自动回到本对话。重试沿用 requestId。',
+    inputSchema: z.object({ requestId: z.string().min(1), title: z.string().min(1), instructions: z.string().min(1) }),
+  }, args => call('background', args));
   server.registerTool('list_tasks', { description: '查询当前对话的任务和结果，不重复执行。', inputSchema: z.object({}), annotations: { readOnlyHint: true } }, args => call('list', args));
   return server;
 }

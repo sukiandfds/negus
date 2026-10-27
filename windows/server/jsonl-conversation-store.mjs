@@ -159,8 +159,13 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
       if (item.type === "event_msg" && item.payload?.type === "task_started") state.currentTurnId = item.payload.turn_id;
       if (item.type === "event_msg" && ["task_complete", "turn_aborted"].includes(item.payload?.type)) {
         const turnId = item.payload.turn_id || state.currentTurnId;
+        const hasFinalAnswer = state.messages.some(message => (message.protocolTurnId || message.turnId) === turnId
+          && message.role === "assistant" && message.phase === "final_answer" && Boolean(message.text?.trim()));
         for (const previous of state.messages) {
-          if (turnId && previous.turnId === turnId) previous.turnStatus = item.payload.type === "turn_aborted" ? "interrupted" : "completed";
+          if (turnId && (previous.protocolTurnId || previous.turnId) === turnId) {
+            previous.turnStatus = item.payload.type === "turn_aborted" ? "interrupted" : "completed";
+            previous.turnHasFinalAnswer = hasFinalAnswer;
+          }
         }
       }
       if (item?.type === "response_item" && item.payload?.type === "custom_tool_call_output") {
@@ -183,6 +188,7 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
       state.messageSequence += 1;
       const itemId = item.id || item.payload?.id || item.payload?.client_id || message.itemId || "";
       const turnId = message.turnId || item.turnId || item.payload?.internal_chat_message_metadata_passthrough?.turn_id || state.currentTurnId || "";
+      if (state.currentTurnId) message.protocolTurnId = state.currentTurnId;
       if (turnId) {
         message.turnId = turnId;
         message.turnItemIndex = messageIndex;

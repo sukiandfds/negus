@@ -132,6 +132,7 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
       label: next.label,
       detail: next.detail || "",
       commentary: beginsTurn ? "" : previous?.commentary || "",
+      hasFinalAnswer: beginsTurn ? undefined : next.hasFinalAnswer ?? previous?.hasFinalAnswer,
       streamingItemId: beginsTurn || !active ? "" : previous?.streamingItemId || "",
       streamingText: beginsTurn || !active ? "" : previous?.streamingText || "",
       activities,
@@ -248,17 +249,19 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
       reasoningBuffers.delete(threadId);
       const phase = params.turn?.status || "completed";
       const failed = phase === "failed";
+      const finalItems = Array.isArray(params.turn?.items)
+        ? params.turn.items.filter(item => item.type === "agentMessage" && item.phase === "final_answer") : [];
       publish(threadId, {
         phase,
         turnId,
         label: failed ? "Codex 执行失败" : phase === "interrupted" ? "Codex 已中断" : "Codex 已完成",
         detail: params.turn?.error?.message || "",
+        hasFinalAnswer: current?.hasFinalAnswer ?? (finalItems.length
+          ? finalItems.some(item => Boolean(String(item.text || "").trim())) : undefined),
         durationMs: Number.isFinite(params.turn?.durationMs) ? params.turn.durationMs : null,
       });
       rememberCompletedTurn(threadId, turnId || statuses.get(threadId)?.turnId || "");
-      if (phase !== "completed") {
-        broadcastThreadEvent(threadId, { type: "sessions_changed", threadId });
-      }
+      broadcastThreadEvent(threadId, { type: "sessions_changed", threadId });
       Promise.resolve(onTurnTerminal({ threadId, turnId, status: phase })).catch((error) => {
         console.warn(`[execution-tracker] terminal callback failed: ${error.message}`);
       });
@@ -304,6 +307,15 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
     if (method === "item/completed") {
       const itemId = String(params.item?.id || "");
       if (itemId) rememberItemTurn(threadId, itemId, eventTurnId);
+      if (params.item?.type === "agentMessage" && params.item.phase === "final_answer") {
+        const current = statuses.get(threadId);
+        if (current) {
+          const status = { ...current, hasFinalAnswer: Boolean(String(params.item.text || "").trim()), ...nextEventMetadata(threadId) };
+          statuses.set(threadId, status);
+          schedulePersist();
+          broadcast(status);
+        }
+      }
       if (isCompletedTurn) {
         if (isConversationItem(params.item)) {
           broadcastThreadEvent(threadId, { type: "sessions_changed", threadId });

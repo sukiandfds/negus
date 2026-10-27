@@ -61,6 +61,9 @@ const messagesFromTurn = (turn, registerMedia) => dedupeAssistantMediaMessages((
         itemId,
         turnItemIndex: index,
         turnStatus: turn.status || "",
+        turnHasFinalAnswer: turn.status === "completed" && Array.isArray(turn.items)
+          ? turn.items.some(entry => entry.type === "agentMessage" && entry.phase === "final_answer" && Boolean(entry.text?.trim()))
+          : undefined,
         turnStartedAtMs: timestampFromValue(turn.startedAt),
         superseded: message.role === "assistant" && turn.items.slice(index + 1).some((entry) => entry.type === "userMessage"),
       }

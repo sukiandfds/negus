@@ -14,7 +14,7 @@ export const createProviderProbe = ({ resolveDraft, fetchImpl = globalThis.fetch
       signal: AbortSignal.timeout(testing ? 45000 : 10000),
       ...(testing ? { body: JSON.stringify({ model, input: "Reply only OK.", max_output_tokens: 128, store: false }) } : {}),
     });
-    if (!response.ok) throw failure("供应商返回 HTTP " + response.status + "，请检查地址、Key、模型权限及接口支持", 502);
+    if (!response.ok) throw failure("供应商返回 HTTP " + response.status + (response.status === 403 ? "，当前 Key 无权访问此分组" : response.status === 401 ? "，请检查 API Key" : "，请检查地址、模型权限及接口支持"), 502);
     payload = await response.json();
   } catch (error) {
     if (error.statusCode) throw error;

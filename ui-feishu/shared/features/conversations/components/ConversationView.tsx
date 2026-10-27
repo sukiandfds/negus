@@ -1,3 +1,4 @@
+import { executionHandoff } from "../state/executionHandoff";
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CalendarClock, Clock3, LoaderCircle, Target } from "lucide-react";
 import { JumpToLatest } from "../../../components/JumpToLatest/JumpToLatest";
@@ -80,7 +81,7 @@ export function Message({
   return (
     <article className={`${styles.message} ${message.role === "user" ? styles.user : styles.assistant}`}>
       {message.authorName ? <span className={styles.authorName}>{message.authorName}</span> : null}
-      {!executionPlaceholder && (formattedTime || reserveTimestamp) ? (
+      {formattedTime || reserveTimestamp ? (
         <time className={styles.timestamp} dateTime={message.createdAt} aria-hidden={!formattedTime}>
           {formattedTime || "\u00a0"}
         </time>
@@ -129,6 +130,7 @@ export function Message({
 }
 
 interface ConversationViewProps {
+  assistantName?: string;
   onQuoteMessage?: (message: SessionMessage) => void;
   queue?: ReactNode;
   completedGoal?: ThreadGoal | null;
@@ -193,6 +195,7 @@ const orderVisibleItems = (items: ConversationItem[]) => {
 };
 
 export function ConversationView({
+  assistantName,
   onQuoteMessage,
   queue,
   completedGoal,
@@ -234,19 +237,8 @@ export function ConversationView({
   const agentScoped = Boolean(locationParams.get("agent"));
   const employeeScoped = Boolean(locationParams.get("employee"));
   const executionMatchesSession = executionStatus.threadId === session?.threadId;
-  const observedExecution = useRef({ threadId: "", turnId: "" });
-  if (observedExecution.current.threadId !== session?.threadId) {
-    observedExecution.current = { threadId: session?.threadId || "", turnId: "" };
-  }
-  if (executionMatchesSession && executionStatus.active && executionStatus.turnId) {
-    observedExecution.current.turnId = executionStatus.turnId;
-  }
   const completedExecution = ["completed", "failed", "interrupted", "systemError"].includes(executionStatus.phase);
-  const showExecution = executionMatchesSession
-    && Boolean(executionStatus.startedAt)
-    && executionStatus.phase !== "idle"
-    && (executionStatus.phase !== "completed"
-      || Boolean(executionStatus.turnId && observedExecution.current.turnId === executionStatus.turnId));
+  const { showExecution, waitingForReply, latestReplyAt } = executionHandoff(session?.threadId || "", messages, executionStatus);
   const transcript = advanceLiveTranscript(transcriptMemoryRef.current, {
     threadId: session?.threadId || "",
     messages,
@@ -254,6 +246,7 @@ export function ConversationView({
     streamingItemId: "",
     turnId: executionMatchesSession ? executionStatus.turnId || "" : "",
     active: showExecution && executionStatus.active && !completedExecution,
+    retainPlaceholder: waitingForReply,
     showExecution,
     now: new Date().toISOString(),
   });
@@ -287,7 +280,7 @@ export function ConversationView({
     }] : []),
     ...(transcript.placeholder ? [{
       id: "message:execution-placeholder",
-      message: transcript.placeholder,
+      message: { ...transcript.placeholder, authorName: assistantName, createdAt: latestReplyAt || executionStatus.startedAt || undefined },
       streaming: false,
       execution: true,
       executionPlaceholder: true,

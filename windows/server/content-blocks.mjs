@@ -268,6 +268,7 @@ export const messageFromItem = (item, registerMedia) => {
     blocks,
     ...(role === "assistant" && payload.phase ? { phase: payload.phase } : {}),
     ...(itemId ? { itemId } : {}),
+    ...(role === "user" && payload.client_id ? { submissionId: payload.client_id } : {}),
     ...(metadata.turn_id || item.turnId ? { turnId: metadata.turn_id || item.turnId } : {}),
   };
 };

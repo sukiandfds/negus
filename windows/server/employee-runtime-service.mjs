@@ -1,3 +1,4 @@
+import { communicationInstructions } from "./base-prompt.mjs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
@@ -42,6 +43,7 @@ const publicMessage = ({ id, role, text, turnId, itemId, createdAt }) => ({
 export const createEmployeeRuntimeService = ({
   registry,
   conversationStore,
+  readHistory,
   projectRoot,
   broadcast = () => {},
   growthService = null,
@@ -327,27 +329,15 @@ export const createEmployeeRuntimeService = ({
   };
 
   const readSession = async (employeeId, pagination = {}) => {
-    const session = await sessionFor(employeeId);
-    const allMessages = session.messages;
-    const end = Math.min(Number.isSafeInteger(pagination.before) ? pagination.before : allMessages.length, allMessages.length);
-    const start = pagination.limit ? Math.max(0, end - pagination.limit) : 0;
-    const messages = allMessages.slice(start, end);
-    const latest = allMessages.at(-1);
+    const { employee, binding, threadId } = await ensureOpen(employeeId);
+    const session = await readHistory(routeForEmployee(employee).modelProviderId, threadId, "all", pagination);
+    if (!session) throw statusError("员工对话记录不存在", 404);
     return {
-      threadId: session.conversation.threadId,
-      source: "codex",
-      title: session.employee.conversationTitle || `${session.employee.name} · 主对话`,
-      updatedAt: latest?.createdAt || session.employee.updatedAt || "",
-      messageCount: allMessages.length,
-      latestUser: [...allMessages].reverse().find((message) => message.role === "user")?.text || "",
-      latestAssistant: [...allMessages].reverse().find((message) => message.role === "assistant")?.text || "",
-      archived: session.employee.conversationArchived === true,
+      ...session,
+      title: employee.conversationTitle || session.title || `${employee.name} · 主对话`,
+      archived: employee.conversationArchived === true,
       conversationKind: "direct",
-      messages,
-      hasMore: start > 0,
-      nextBefore: start || null,
-      nextCursor: null,
-      conversationId: session.conversation.id,
+      conversationId: binding.conversationId,
     };
   };
 
@@ -528,7 +518,7 @@ export const createEmployeeRuntimeService = ({
   const sendMessage = async ({ employeeId, text, attachments = [], requestId = "" }) => {
     const employee = registry.require(employeeId);
     const cleanText = String(text || "").trim();
-    if (!cleanText) throw statusError("消息不能为空", 400);
+    if (!cleanText && !attachments.length) throw statusError("消息不能为空", 400);
     if (cleanText.length > 32000) throw statusError("消息过长", 413);
     const cleanRequestId = clean(requestId, 120) || randomUUID();
     if (sendLocks.has(employee.id)) throw statusError("员工消息正在提交", 409);
@@ -552,16 +542,16 @@ export const createEmployeeRuntimeService = ({
         const result = await runtimeClient.request(requestMethod, {
           threadId,
           input,
+          clientUserMessageId: cleanRequestId,
           ...(requestMethod === "turn/steer" ? { expectedTurnId: current.turnId } : {
             cwd: clean(employee.projectRoot, 400) || projectRoot,
-            clientUserMessageId: cleanRequestId,
             ...turnPolicyFor(),
           }),
           ...(requestMethod === "turn/start" ? {
-            developerInstructions: employeeTurnInstructions(
-              employee.instructions,
+            additionalContext: { 'negus.employee': { kind: 'application', value: '以下是本员工当前生效的职责和工作要求，替代对话中旧的员工身份及派工说明。\n' + [
+              communicationInstructions, employee.instructions,
               [runtimeClient.turnDeveloperInstructions === true ? context : "", taskService?.leaderInstructions(employee.id)].filter(Boolean).join("\n"),
-            ),
+            ].filter(Boolean).join('\n') } },
           } : {}),
         });
         freshThreads.delete(threadId);
@@ -571,7 +561,7 @@ export const createEmployeeRuntimeService = ({
             phase: "working",
             label: "正在处理",
             active: true,
-            turnId: clean(result?.turn?.id, 160),
+            turnId: clean(result?.turn?.id || result?.turnId || (requestMethod === "turn/steer" ? current.turnId : ""), 160),
           });
         }
         return {
@@ -580,7 +570,7 @@ export const createEmployeeRuntimeService = ({
           conversationId: binding.conversationId,
           threadId,
           status: requestMethod === "turn/steer" ? "steered" : "inProgress",
-          turnId: clean(result?.turn?.id, 160),
+          turnId: clean(result?.turn?.id || result?.turnId || (requestMethod === "turn/steer" ? current.turnId : ""), 160),
         };
       } catch (error) {
         publishStatus(employee.id, {

@@ -25,8 +25,8 @@ test("normal startup installs recovery only after healthy service; failures rema
   const order = [];
   const options = { platform: "darwin", initialize: async () => order.push("init"),
     start: async () => { order.push("start"); return { state: "healthy", frontend: "healthy" }; },
-    install: async () => { order.push("install"); return { state: "installed", intervalSeconds: 10800 }; } };
-  assert.equal((await startManaged(options)).watchdog.intervalSeconds, 10800);
+    install: async () => { order.push("install"); return { state: "installed", intervalSeconds: 60 }; } };
+  assert.equal((await startManaged(options)).watchdog.intervalSeconds, 60);
   assert.deepEqual(order, ["init", "start", "install"]);
   order.length = 0;
   await assert.rejects(startManaged({ ...options, start: async () => ({ state: "auth-error" }) }), /not ready/u);
@@ -51,15 +51,15 @@ test("installation is repeatable, updates stale interval and protects other depl
   const installer = createMacWatchdog(options);
   assert.equal((await installer.status()).intervalSeconds, null);
   assert.equal((await installer.install()).state, "installed");
-  assert.equal((await installer.status()).intervalSeconds, 10800);
+  assert.equal((await installer.status()).intervalSeconds, 60);
   assert.equal((await installer.install()).state, "already-installed");
   assert.equal(calls.filter(c => c[1] === "bootstrap").length, 1);
   const file = path.join(home, "Library/LaunchAgents/local.negus.watchdog.plist");
   const body = await fs.readFile(file, "utf8");
   assert.ok(body.includes("project &amp; space"));
-  await fs.writeFile(file, body.replace("<integer>10800</integer>", "<integer>60</integer>"));
+  await fs.writeFile(file, body.replace("<integer>60</integer>", "<integer>10800</integer>"));
   assert.equal((await installer.install()).state, "updated");
-  assert.equal((await installer.status()).intervalSeconds, 10800);
+  assert.equal((await installer.status()).intervalSeconds, 60);
   const before = await fs.readFile(file, "utf8");
   await assert.rejects(createMacWatchdog({ ...options, projectRoot: "/different" }).install(), /another deployment/u);
   assert.equal(await fs.readFile(file, "utf8"), before);

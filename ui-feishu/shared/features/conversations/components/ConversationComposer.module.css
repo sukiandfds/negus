@@ -115,16 +115,10 @@
   height: var(--control-icon-button-size);
   border: 0;
   border-radius: 10px;
-  background: #777;
-  color: #292929;
-  opacity: .55;
-  transition: var(--control-transition);
-}
-
-.sendButton:not(:disabled) {
   background: #cdd0d2;
   color: var(--color-bg);
   opacity: 1;
+  transition: var(--control-transition);
   cursor: pointer;
 }
 

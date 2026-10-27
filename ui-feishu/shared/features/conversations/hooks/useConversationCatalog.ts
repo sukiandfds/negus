@@ -93,15 +93,6 @@ export function useConversationCatalog(
       let serverSessions = (await conversationApi.sessions(requestedArchivedView, controller.signal))
         .filter((item) => !archiveBusyIdsRef.current.has(item.threadId));
       if (requestId !== listRequestRef.current || requestedArchivedView !== archivedViewRef.current) return;
-      if (!requestedArchivedView) {
-        const previous = new Map(sessionsRef.current.map(item => [item.threadId, item]));
-        serverSessions = (await Promise.all(serverSessions.map(async item => {
-          const cached = previous.get(item.threadId);
-          if (cached && sameSessionSummary(cached, item) && selection.cachedSessions.get(item.threadId)?.updatedAt === item.updatedAt) return item;
-          return await selection.loadSession(item.threadId, { prefetch: true, retry: false }) ? item : cached;
-        }))).filter((item): item is SessionSummary => Boolean(item));
-        if (requestId !== listRequestRef.current || requestedArchivedView !== archivedViewRef.current) return;
-      }
 
       const serverIds = new Set(serverSessions.map((item) => item.threadId));
       for (const threadId of serverIds) transientSessionsRef.current.delete(threadId);

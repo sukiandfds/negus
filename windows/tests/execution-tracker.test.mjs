@@ -218,7 +218,10 @@ test("keeps a completed turn terminal when its final item completion arrives lat
   const status = tracker.getStatus("thread-1");
   assert.equal(status.phase, "completed");
   assert.equal(status.active, false);
-  assert.equal(events.filter((event) => event.type === "sessions_changed").length, 2);
+  assert.equal(status.hasFinalAnswer, true);
+  assert.equal(status.threadId, "thread-1");
+  assert.equal(events.at(-1).type, "sessions_changed");
+  assert.equal(events.at(-1).threadId, "thread-1");
 });
 
 test("assigns monotonic per-thread event sequences", () => {

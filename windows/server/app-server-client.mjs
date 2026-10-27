@@ -149,6 +149,7 @@ export const createAppServerClient = ({
   label = "",
   workingDirectory = process.cwd(),
 } = {}) => {
+  let closed = false;
   let child;
   let buffer = "";
   let nextId = 1;
@@ -198,6 +199,7 @@ export const createAppServerClient = ({
   };
 
   const start = () => {
+    if (closed) throw new Error("Codex app-server client closed");
     if (child && !child.killed) return;
     const selected = resolveCodexCommand();
     const logPrefix = label ? `[app-server-client:${label}]` : "[app-server-client]";
@@ -345,6 +347,7 @@ export const createAppServerClient = ({
   };
 
   const close = () => {
+    closed = true;
     rejectPending(new Error("Codex app-server client closed"));
     pendingUserInputs.clear();
     child?.kill();

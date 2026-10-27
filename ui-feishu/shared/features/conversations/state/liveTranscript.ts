@@ -48,6 +48,7 @@ export interface LiveTranscriptInput {
   turnId: string;
   active: boolean;
   showExecution: boolean;
+  retainPlaceholder?: boolean;
   now: string;
 }
 
@@ -156,10 +157,12 @@ export const advanceLiveTranscript = (memory: LiveTranscriptMemory, input: LiveT
     input.turnId,
     input.active ? "1" : "0",
     input.showExecution ? "1" : "0",
+    input.retainPlaceholder ? "1" : "0",
     optimisticIds.join(","),
     input.messages.map((message) => [
       message.id,
       message.itemId || "",
+      message.protocolTurnId || message.turnId || "",
       message.createdAt || "",
       message.turnItemIndex ?? "",
       message.text.length,
@@ -273,7 +276,7 @@ export const advanceLiveTranscript = (memory: LiveTranscriptMemory, input: LiveT
     }),
     streaming: input.active,
   } : null;
-  const placeholder = input.active && !showLive && !overlayId ? {
+  const placeholder = (input.active || input.retainPlaceholder) && !showLive && !overlayId ? {
     id: "execution-placeholder",
     role: "assistant" as const,
     text: "",
@@ -288,7 +291,7 @@ export const advanceLiveTranscript = (memory: LiveTranscriptMemory, input: LiveT
     else {
       const preceding = [...memory.frozen].reverse().find((segment) => segment.turnId === input.turnId) || memory.frozen.at(-1);
       const persistedTarget = [...persisted].reverse().find((message) => (
-        message.role === "assistant" && (!input.turnId || message.turnId === input.turnId)
+        message.role === "assistant" && (!input.turnId || (message.protocolTurnId || message.turnId) === input.turnId)
       ));
       executionMessageId = preceding?.id || persistedTarget?.id || "";
     }

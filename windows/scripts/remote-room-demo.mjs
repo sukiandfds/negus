@@ -149,6 +149,7 @@ const currentConversations = createAppServerConversationStore(conversationStoreO
 const appServerConversations = createProviderConversationStore({
   current: currentConversations,
   providers: modelProviders,
+  providerForThread: threadId => agentTasks?.providerForThread?.(threadId),
   stateFile: path.join(projectRoot, "runtime", "conversation-provider-routes.json"),
   createStore: (client, providerId) => {
     const history = createJsonlConversationStore({
@@ -382,9 +383,10 @@ const employeeGrowth = createEmployeeGrowthService({
 });
 agentTasks = await createBackgroundTaskService({
   stateFile: path.join(projectRoot, "runtime", "background-tasks.json"), registry: employeeRegistry,
-  conversations, bindings: employeeConversationStore, queue: followUpQueue, execution, broadcast: realtime.broadcast,
+  conversations, modelProviders, bindings: employeeConversationStore, queue: followUpQueue, execution, broadcast: realtime.broadcast,
 });
 employeeRuntime = createEmployeeRuntimeService({
+  readHistory: appServerConversations.findSessionForProvider,
   taskService: agentTasks,
   execution,
   registry: employeeRegistry,

@@ -34,9 +34,9 @@ export const startBackend = async (cfg, entryScript, loaderScript) => {
     // Normal recovery preserves the independently published frontend.
     // Version deployment and rollback publish their matching UI in the supervisor.
   }
-  const pid = await detached(entry, [...(loader ? ["--import", loader] : []), "--port", String(cfg.port), "--observer-port", "9350",
+  const pid = await detached(entry, ["--port", String(cfg.port), "--observer-port", "9350",
     "--project", "negus", "--project-root", root, "--web-root", cfg.webRoot,
-    "--token", cfg.token, "--device-name", cfg.deviceName], "negus-web-demo.log", { NEGUS_INSTALL_ROOT: root });
+    "--token", cfg.token, "--device-name", cfg.deviceName], "negus-web-demo.log", { NEGUS_INSTALL_ROOT: root }, loader ? ["--import", loader] : []);
   const owner = await identity(pid, entry);
   const state = { pid, entryScript: entry, ...(loader ? { loaderScript: loader } : {}), port: cfg.port, startedAt: new Date().toISOString(), processStarted: owner?.started,
     webRoot: cfg.webRoot, deviceName: cfg.deviceName };
@@ -51,13 +51,22 @@ export const startBackend = async (cfg, entryScript, loaderScript) => {
 };
 export const stopOwnedBackend = async (cfg) => {
   const pid = cfg.state?.pid;
+  const entry = cfg.state?.entryScript || script;
+  let owner;
   if (alive(pid)) {
-    const entry = cfg.state.entryScript || script;
-    const owner = await identity(pid, entry);
+    owner = await identity(pid, entry);
     if (!owner || (cfg.state.processStarted && cfg.state.processStarted !== owner.started)) throw new Error("Process identity changed; refusing stop.");
     process.kill(pid, "SIGTERM");
   }
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 35; i++) {
+    if (i === 30 && alive(pid)) {
+      const current = await identity(pid, entry);
+      if (current && current.started !== owner?.started) throw new Error("Process identity changed; refusing forced stop.");
+      if (current) {
+        console.warn(JSON.stringify({ state: "forcing-exit", pid, at: new Date().toISOString() }));
+        process.kill(pid, "SIGKILL");
+      }
+    }
     if (!alive(pid) && (await portOpen(cfg.port)) === false) {
       const latest = await readJson(stateFile);
       if (latest?.pid === pid) await fs.rm(stateFile, { force: true });
@@ -66,7 +75,7 @@ export const stopOwnedBackend = async (cfg) => {
     }
     await delay(1000);
   }
-  throw new Error("Graceful exit timed out; no SIGKILL or competing service was started.");
+  throw new Error("Stopped process or port could not be released; refusing a competing service.");
 };
 export const stopWhenIdle = async (cfg, { handoff = false } = {}) => {
   const current = await checkBackend(cfg);

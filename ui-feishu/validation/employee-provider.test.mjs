@@ -81,7 +81,8 @@ test('employee switches providers and returns with full history and stable conve
   const f = await fixture(t);
   await f.service.updateModelSettings('researcher', { model: 'ccswitch_vip::model-b', reasoningEffort: 'high' });
   await f.service.updateModelSettings('researcher', { reasoningEffort: 'medium' });
-  assert.equal(f.registry.get('researcher').modelProviderId, 'ccswitch_vip');
+  assert.equal(f.registry.get('researcher').pendingModelSettings.modelProviderId, 'ccswitch_vip');
+  assert.equal(f.calls.some(c => c.params.path), false);
   const context = await f.service.getRuntimeContext('original-thread');
   assert.equal(context.model, 'ccswitch_vip::model-b');
   assert.equal(context.modelProvider, 'ccswitch_vip');
@@ -98,7 +99,9 @@ test('employee switches providers and returns with full history and stable conve
 
 test('failed switch leaves previous provider usable and settings unchanged', async t => {
   const f = await fixture(t); f.fail();
-  await assert.rejects(f.service.updateModelSettings('researcher', { model: 'ccswitch_vip::model-b' }), /target unavailable/);
+  await f.service.updateModelSettings('researcher', { model: 'ccswitch_vip::model-b' });
+  await assert.rejects(f.service.sendMessage({ employeeId: 'researcher', text: 'must not send' }), /target unavailable/);
+  await f.service.updateModelSettings('researcher', { model: 'model-a' });
   assert.equal(f.registry.get('researcher').modelProviderId, 'current');
   await f.service.sendMessage({ employeeId: 'researcher', text: 'still works' });
   assert.equal(f.histories.get('current').at(-1), 'still works');
@@ -135,6 +138,9 @@ test('a completed native task with stale employee status does not block the next
   await f.service.sendMessage({ employeeId: 'researcher', text: 'second' });
   f.client('current').setIdle();
   await f.service.updateModelSettings('researcher', { model: 'ccswitch_vip::model-b' });
-  assert.equal(f.registry.get('researcher').modelProviderId, 'ccswitch_vip');
-  assert.deepEqual(f.histories.get('ccswitch_vip').slice(-2), ['first', 'second']);
+  assert.equal(f.registry.get('researcher').pendingModelSettings.modelProviderId, 'ccswitch_vip');
+  assert.equal(f.calls.some(c => c.params.path), false);
+  assert.equal(f.histories.has('ccswitch_vip'), false);
+  await f.service.sendMessage({ employeeId: 'researcher', text: 'third' });
+  assert.deepEqual(f.histories.get('ccswitch_vip'), ['old question', 'old answer', 'first', 'second', 'third']);
 });

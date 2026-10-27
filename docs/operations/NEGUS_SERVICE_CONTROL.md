@@ -4,15 +4,15 @@
 
 ## 自带能力与命令
 
-正常新部署完成依赖与前端构建后，执行 `pnpm negus:start`：初始化持久访问凭据、保存并隔离验证初始运行快照、启动服务，并安装登录时及每3小时检查的用户级 LaunchAgent。已有健康旧部署不会被普通 start 擅自切换。
+正常新部署完成依赖与前端构建后，执行 `pnpm negus:start`：初始化持久访问凭据、保存并隔离验证初始运行快照、启动服务，并安装登录时及每分钟检查的用户级 LaunchAgent。已有健康旧部署不会被普通 start 擅自切换。
 
 | 操作 | 命令 |
 | --- | --- |
 | 本地/公网只读检查 | `node scripts/negus-watchdog.mjs check` |
 | 恢复已退出的服务 | `node scripts/negus-watchdog.mjs recover` |
 | 准备新版及验证回退版本 | `node scripts/negus-supervisor.mjs prepare` |
-| 常规后端重启，等待任务收口 | `node scripts/negus-supervisor.mjs restart` |
-| 用户接受中断当前任务时接管重启 | `node scripts/negus-supervisor.mjs restart --handoff` |
+| 后端重启，直接中断交接 | `node scripts/negus-supervisor.mjs restart` |
+| 兼容原中断交接命令 | `node scripts/negus-supervisor.mjs restart --handoff` |
 | 查看任务与最终结果 | `node scripts/negus-supervisor.mjs status` |
 | 前端重新构建并发布 | `node scripts/negus.mjs rebuild` |
 | 前端静态文件回退 | `node scripts/negus-frontend.mjs rollback` |
@@ -30,13 +30,13 @@
 
 当前新版同样生成独立快照并构建前端、启动预检。任一准备失败，原服务不停止。
 
-用户接受短暂断开时，使用 restart --handoff。独立进程有15秒交接时间；命令返回 scheduled 后应及时完成回复，不在当前对话等待自身重启。此模式可以中断任务，并允许从没有维护接口的旧后端切换；仍核验 PID、进程归属和端口，不直接强杀未知进程。默认无 --handoff 时继续等待任务收口。
+用户明确要求重启时，使用 restart，直接中断交接，不重复确认；restart --handoff 保持兼容。独立进程有15秒交接时间；命令返回 scheduled 后应及时完成回复，不在当前对话等待自身重启。此模式可以中断任务，并允许从没有维护接口的旧后端切换；仍核验 PID、进程归属和端口，不直接强杀未知进程。默认不等待任务收口。
 
 ## 三次失败与恢复
 
 - 源码、Node依赖及前端产物保存在 runtime/releases/，有内容校验和隔离预检记录；工作区后续编辑不改这些快照。
 - 独立管理进程也从候选快照运行。停止旧服务前，先持久化已验证的回退指针。
-- 停止使用 SIGTERM；30秒内无法确认原进程退出与端口释放则中止，不发送生产 SIGKILL、不并发启动第二份服务。
+- 停止先使用 SIGTERM；30秒未退出则重新核对进程归属和启动时间，对同一旧进程发送 SIGKILL，再用5秒确认退出与端口释放后继续启动。身份不符或端口仍占用时拒绝启动竞争服务。强制结束可能中断未完成工作。
 - 新版启动后检查 API、页面、前端版本及连续5次健康探测；失败先停止本管理器启动的进程，确认退出后重试。
 - 新版连续失败3次后恢复回退快照的前端文件和后端代码，并再次验证。回退失败记录 failed，不能承诺一定恢复。
 - 成功后保存当前运行快照；管理进程结束。若后端之后退出，定时检查/start 使用已确认的后端运行快照，保留当前已发布的前端，不重新发布快照中的旧页面。定时恢复周期仍为3小时，不是实时可用性保证。

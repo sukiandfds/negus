@@ -35,21 +35,7 @@ const sameSubmission = (left: SessionMessage, right: SessionMessage) => (
   && left.submissionId === right.submissionId
 );
 
-const normalizedText = (value: string) => value.replace(/\s+/gu, " ").trim();
-
-const sameInitialTurn = (left: SessionMessage, right: SessionMessage) => (
-  left.role === "user"
-  && right.role === "user"
-  && (isOptimisticMessage(left) || isOptimisticMessage(right))
-  && Boolean(left.turnId)
-  && left.turnId === right.turnId
-  && (!left.submissionId || !right.submissionId || left.submissionId === right.submissionId)
-  && normalizedText(left.text) === normalizedText(right.text)
-);
-
-const sameUserMessage = (left: SessionMessage, right: SessionMessage) => (
-  sameSubmission(left, right) || sameInitialTurn(left, right)
-);
+const sameUserMessage = sameSubmission;
 
 const persistedMatchesOptimistic = (persisted: SessionMessage, optimistic: SessionMessage) => {
   return !isOptimisticMessage(persisted)

@@ -130,7 +130,7 @@ export const main = async (args = process.argv.slice(2)) => {
     await verifyRelease(prepared.candidate); await verifyRelease(prepared.fallback);
     const cfg = await config();
     const job = { ...prepared, id: Date.now() + "-" + process.pid, expectedPid: cfg.state?.pid || null,
-      handoff: args.includes("--handoff"), phase: "scheduled", scheduledAt: new Date().toISOString() };
+      handoff: true, phase: "scheduled", scheduledAt: new Date().toISOString() };
     await writeJson(jobFile, job);
     // The worker itself runs from the candidate snapshot, so edits to working
     // source after handoff cannot remove its recovery implementation.
