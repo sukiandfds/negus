@@ -18,6 +18,21 @@ const createService = async ({ active = false } = {}) => {
   return { service, events, compacted, setExecutionActive: (value) => { executionActive = value; } };
 };
 
+test("accepted compaction reports asynchronous quota failure without treating retry as completion", async () => {
+  const { service, events } = await createService();
+  await service.requestCompaction("thread-1");
+  const error = { message: "unexpected status 403 Forbidden: 预扣费额度失败，用户剩余额度不足" };
+  service.handleProtocolMessage({ method: "error", params: { threadId: "thread-1", error, willRetry: true } });
+  assert.equal(service.getStatus("thread-1").phase, "compacting");
+  service.handleProtocolMessage({ method: "error", params: { threadId: "thread-1", error, willRetry: false } });
+  assert.equal(service.getStatus("thread-1").phase, "failed");
+  assert.equal(events.at(-1).message, error.message);
+  await service.requestCompaction("thread-1");
+  service.handleProtocolMessage({ method: "turn/completed", params: { threadId: "thread-1", turn: { status: "failed", error } } });
+  assert.equal(service.getStatus("thread-1").message, error.message);
+  await service.close();
+});
+
 test("reports the real model and current context percentage", async () => {
   const { service } = await createService();
   await service.load("thread-1");

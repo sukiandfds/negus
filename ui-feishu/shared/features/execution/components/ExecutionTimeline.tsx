@@ -45,6 +45,7 @@ export function ExecutionTimeline({
   const failed = status.phase === "failed" || status.phase === "systemError";
   const interrupted = status.phase === "interrupted";
   const terminalIssue = failed || interrupted;
+  const notices = [...new Set([...(status.notices || []), ...(terminalIssue && status.detail ? [status.detail] : [])])];
   const activities = status.activities || [];
   const startedAt = Date.parse(status.startedAt || "");
   const liveDurationMs = Number.isFinite(startedAt) ? now - startedAt : 0;
@@ -86,11 +87,10 @@ export function ExecutionTimeline({
                 </div>
               </div>
             );
-          }) : terminalIssue && status.detail ? (
-            <div className={styles.failureDetail}>{status.detail}</div>
-          ) : null}
+          }) : null}
         </div>
       ) : null}
+      {notices.map(notice => <div className={styles.failureDetail} role="status" key={notice}><CircleAlert aria-hidden="true" /><span>{notice}</span></div>)}
     </section>
   );
 }

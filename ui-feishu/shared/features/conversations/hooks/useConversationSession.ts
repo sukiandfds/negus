@@ -45,6 +45,8 @@ const sameVisibleSession = (left: SessionDetail, right: SessionDetail) => {
       && message.deliveryError === other.deliveryError
       && message.superseded === other.superseded
       && message.submissionId === other.submissionId
+      && message.authorName === other.authorName
+      && message.displaySourceAgentId === other.displaySourceAgentId
       && blockSignature(message) === blockSignature(other);
   });
 };
@@ -357,6 +359,7 @@ export function useConversationSession(initial: InitialConversationState) {
     sessionCache.current.set(detail.threadId, mergePendingOptimisticMessages(detail, pendingOptimisticMessagesRef.current.get(detail.threadId) || []));
   }, []);
 
+  const cancelSessionLoad = useCallback((threadId: string) => sessionRequestControllersRef.current.get(threadId)?.abort(), []);
   const invalidate = useCallback((threadId: string) => sessionCache.current.delete(threadId), []);
   const markSyncing = useCallback((value: boolean) => {
     setSyncing(value);
@@ -375,6 +378,6 @@ export function useConversationSession(initial: InitialConversationState) {
   return {
     selectedId, selectedIdRef, session, cachedSessions: sessionCache.current, loadingSession, loadingOlder, syncing, contentSyncState, sessionError, composerKey,
     setSyncing: markSyncing, loadSession, selectSession, adoptSelection, clearSelection, setCreatedSession, setSessionError,
-    cacheCreatedSession, updateOptimisticMessage, updateCurrentSession, addOptimisticMessage, removeOptimisticMessage, invalidate, loadOlder,
+    cacheCreatedSession, updateOptimisticMessage, updateCurrentSession, addOptimisticMessage, removeOptimisticMessage, cancelSessionLoad, invalidate, loadOlder,
   };
 }

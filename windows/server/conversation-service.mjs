@@ -188,6 +188,7 @@ export const createConversationService = ({ primary, fallback, contentVersionSto
     steerMessage: (...args) => primary.steerMessage(...args),
     interrupt: (...args) => primary.interrupt(...args),
     forkSession: (...args) => primary.forkSession(...args),
+    revertSession: (...args) => primary.revertSession(...args),
     archiveSession: (...args) => primary.archiveSession(...args),
     unarchiveSession: (...args) => primary.unarchiveSession(...args),
     listModels: (...args) => primary.listModels(...args),

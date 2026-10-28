@@ -1,3 +1,5 @@
+import { previewText } from "./content-blocks.mjs";
+
 const clean = (value, maxLength = 240) => String(value || "").trim().slice(0, maxLength);
 
 const idleStatus = () => ({
@@ -46,6 +48,7 @@ export const createEmployeeProjectDirectory = ({
   roomDirectory,
   personalStatus,
   agentTasks,
+  taskSessionSummaries,
 }) => {
   const readEmployeeStatus = async (employeeId) => {
     try {
@@ -56,25 +59,32 @@ export const createEmployeeProjectDirectory = ({
     }
   };
 
-  const employeeLastActivity = async (employee) => {
+  const employeeSummary = async (employee) => {
     const conversationId = clean(employee.conversationId, 120);
     const threadId = clean(employee.mainThreadId, 120);
     const timestamps = [];
+    const messages = [];
     try {
-      const messages = conversationId
+      const saved = conversationId
         ? await employeeConversations?.readMessages?.(conversationId) || []
         : [];
-      timestamps.push(...messages
-        .filter((message) => message?.role === "user" || message?.role === "assistant")
-        .map((message) => message.createdAt));
+      messages.push(...saved.filter((message) => message?.role === "user" || message?.role === "assistant"));
+      timestamps.push(...messages.map((message) => message.createdAt));
     } catch {}
     if (threadId) {
       try {
         const nativeSession = await conversations?.findSession?.(threadId, "all", { limit: 1 });
         timestamps.push(nativeSession?.updatedAt);
+        messages.push(...(nativeSession?.messages || []));
+        if (!nativeSession?.messages?.length) messages.push({
+          text: nativeSession?.latestMessage || nativeSession?.latestAssistant || nativeSession?.latestUser,
+          createdAt: nativeSession?.updatedAt,
+        });
       } catch {}
     }
-    return latestTimestamp(timestamps);
+    const latest = messages.filter((message) => String(message.text || "").trim())
+      .sort((left, right) => (Date.parse(right.createdAt || "") || 0) - (Date.parse(left.createdAt || "") || 0))[0];
+    return { lastActivityAt: latestTimestamp(timestamps), latestMessage: previewText(latest?.text || "", 260), latestMessageAt: latest?.createdAt || null };
   };
 
   const groupConversationsFor = async (employee, identity, conversationStatuses) => {
@@ -132,6 +142,12 @@ export const createEmployeeProjectDirectory = ({
       });
     }
     const conversationStatuses = {};
+    const entriesByEmployee = new Map(employees.map(employee => [employee.id, agentTasks?.directoryEntries(employee.id) || []]));
+    const taskEntries = [...entriesByEmployee.values()].flat();
+    const providerIds = [...new Set(taskEntries.map(entry => agentTasks?.providerForThread?.(entry.threadId) || "current"))];
+    const summaries = new Map((await Promise.all(providerIds.map(async providerId => {
+      try { return await taskSessionSummaries?.(providerId, "all", false) || []; } catch { return []; }
+    }))).flat().map(session => [session.threadId, session]));
     const employeeProjects = await Promise.all(employees.map(async (employee) => {
       const identity = projectIdentity?.getByKey?.("employee", employee.projectKey)
         || projectIdentity?.getForEmployee?.(employee.id)
@@ -141,13 +157,22 @@ export const createEmployeeProjectDirectory = ({
       const mainThreadId = clean(employee.mainThreadId || boundConversation?.threadId || boundConversation?.runtimeSessionId, 120) || null;
       const status = await readEmployeeStatus(employee.id);
       const statusKey = clean(mainThreadId || mainConversationId, 120);
-      const mainLastActivityAt = await employeeLastActivity({ ...employee, conversationId: mainConversationId, mainThreadId });
+      const mainSummary = await employeeSummary({ ...employee, conversationId: mainConversationId, mainThreadId });
       const groupConversations = await groupConversationsFor(employee, identity, conversationStatuses);
-      const taskConversations = agentTasks?.directoryEntries(employee.id) || [];
+      const tasksByThread = new Map();
+      for (const entry of entriesByEmployee.get(employee.id) || []) {
+        const previous = tasksByThread.get(entry.threadId);
+        if (!previous || (!previous.status?.active && (entry.status?.active || (Date.parse(entry.lastActivityAt || "") || 0) >= (Date.parse(previous.lastActivityAt || "") || 0)))) tasksByThread.set(entry.threadId, entry);
+      }
+      const taskConversations = [...tasksByThread.values()].map(entry => {
+        const summary = summaries.get(entry.threadId);
+        return { ...entry, lastActivityAt: summary?.latestMessageAt || null,
+          latestMessageAt: summary?.latestMessageAt || null, latestMessage: summary?.latestMessage || "" };
+      });
       for (const entry of taskConversations) conversationStatuses[entry.threadId] = entry.status;
       const lastActivityAt = latestTimestamp([
         ...taskConversations.map(entry => entry.lastActivityAt),
-        mainLastActivityAt,
+        mainSummary.lastActivityAt,
         ...groupConversations.map((conversation) => conversation.lastActivityAt),
       ]);
       if (statusKey) conversationStatuses[statusKey] = status;
@@ -162,7 +187,7 @@ export const createEmployeeProjectDirectory = ({
           runtimeSessionId: clean(boundConversation?.runtimeSessionId || mainThreadId, 200) || null,
           title: clean(employee.conversationTitle, 240) || "主对话",
           main: true,
-          lastActivityAt: mainLastActivityAt,
+          ...mainSummary,
           archived: employee.conversationArchived === true,
           status,
         }] : []),

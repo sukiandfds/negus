@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
-import { Check, Copy, Edit3, GitBranch, RefreshCw, Quote } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Check, Copy, Edit3, GitBranch, ListChecks, RefreshCw, Quote } from "lucide-react";
 import { AgentMessageShareControl } from "../../agent-sharing/components/AgentMessageShareControl";
 import styles from "./MessageActions.module.css";
 
 interface MessageActionsProps {
+  children?: ReactNode;
+  onSelect?: () => void;
   onQuote?: () => void;
   text: string;
   forkable: boolean;
@@ -21,7 +23,7 @@ interface MessageActionsProps {
   messageId?: string;
 }
 
-const copyWithFallback = async (text: string) => {
+export const copyWithFallback = async (text: string) => {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
     return;
@@ -38,7 +40,7 @@ const copyWithFallback = async (text: string) => {
   if (!copied) throw new Error("clipboard unavailable");
 };
 
-export function MessageActions({ onQuote, text, forkable, forkDisabled = false, forking, onFork, editable, editing, onEdit, retryable = false, retrying = false, onRetry, shareable = false, threadId = "", messageId = "" }: MessageActionsProps) {
+export function MessageActions({ children, onSelect, onQuote, text, forkable, forkDisabled = false, forking, onFork, editable, editing, onEdit, retryable = false, retrying = false, onRetry, shareable = false, threadId = "", messageId = "" }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const resetTimerRef = useRef<number | null>(null);
@@ -76,6 +78,19 @@ export function MessageActions({ onQuote, text, forkable, forkDisabled = false, 
       >
         {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
       </button>
+      {editable ? (
+        <button
+          className={styles.button}
+          type="button"
+          aria-label={editing ? "正在编辑" : "重新编辑"}
+          title={editing ? "正在编辑" : "重新编辑"}
+          disabled={editing}
+          onClick={onEdit}
+        >
+          <Edit3 aria-hidden="true" />
+        </button>
+      ) : null}
+      {onSelect ? <button className={styles.button} type="button" aria-label="多选消息" title="多选消息" onClick={onSelect}><ListChecks aria-hidden="true" /></button> : null}
       {onQuote ? <button className={styles.button} type="button" aria-label="引用这条消息" title="引用" onClick={onQuote}><Quote aria-hidden="true" /></button> : null}
       {forkable ? (
         <button
@@ -96,18 +111,6 @@ export function MessageActions({ onQuote, text, forkable, forkDisabled = false, 
           messageId={messageId}
         />
       ) : null}
-      {editable ? (
-        <button
-          className={styles.button}
-          type="button"
-          aria-label={editing ? "正在编辑" : "重新编辑"}
-          title={editing ? "正在编辑" : "重新编辑"}
-          disabled={editing}
-          onClick={onEdit}
-        >
-          <Edit3 aria-hidden="true" />
-        </button>
-      ) : null}
       {retryable && onRetry ? (
         <button
           className={styles.button}
@@ -120,6 +123,7 @@ export function MessageActions({ onQuote, text, forkable, forkDisabled = false, 
           <RefreshCw aria-hidden="true" className={retrying ? styles.spinning : undefined} />
         </button>
       ) : null}
+      {children}
     </div>
   );
 }

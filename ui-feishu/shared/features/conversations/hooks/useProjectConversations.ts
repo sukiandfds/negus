@@ -56,13 +56,6 @@ export function useProjectConversations() {
   const [editingMessage, setEditingMessage] = useState<SessionMessage | null>(null);
   const editingMessageRef = useRef<SessionMessage | null>(null);
   const desktopPreparingRef = useRef<Promise<boolean> | null>(null);
-  const pendingEditRef = useRef<{
-    threadId: string;
-    text: string;
-    attachments: MediaFile[];
-    resolve: (accepted: boolean) => void;
-  } | null>(null);
-  const [editRequestVersion, setEditRequestVersion] = useState(0);
   const [renaming, setRenaming] = useState(false);
   const [retryingMessageId, setRetryingMessageId] = useState("");
   const [localSendVersion, setLocalSendVersion] = useState(0);
@@ -285,6 +278,7 @@ export function useProjectConversations() {
     try {
       for (let attempt = 0; attempt < 30; attempt += 1) {
         const result = await executionApi.submissionStatus(threadId, submissionId, undefined, scope).catch(() => null);
+        if (reconciledSubmissionsRef.current.has(submissionId)) return;
         if (result?.status === "accepted" || result?.status === "failed") {
           selection.updateOptimisticMessage(threadId, messageId, {
             deliveryState: result.status === "failed" ? "failed" : undefined,
@@ -299,6 +293,7 @@ export function useProjectConversations() {
         }
         await new Promise(resolve => window.setTimeout(resolve, 2000));
       }
+      if (reconciledSubmissionsRef.current.has(submissionId)) return;
       selection.updateCurrentSession(threadId, current => ({ ...current, messages: current.messages.map(message =>
         message.id === messageId ? { ...message, deliveryState: "pending" } : message) }));
     } finally {
@@ -322,6 +317,7 @@ export function useProjectConversations() {
     selection.addOptimisticMessage(threadId, optimisticMessage);
     setLocalSendVersion(value => value + 1);
     const updateDelivery = (deliveryState: "pending" | "failed" | "occupied" | undefined, turnId?: string, deliveryError?: string) => {
+      if (deliveryState && reconciledSubmissionsRef.current.has(submissionId)) return;
       selection.updateOptimisticMessage(threadId, optimisticMessage.id, { deliveryState, deliveryError, ...(turnId ? { turnId } : {}) });
     };
     try {
@@ -398,51 +394,26 @@ export function useProjectConversations() {
     }
   }, [retryingMessageId, sendDirectMessage]);
 
-  useEffect(() => {
-    const pending = pendingEditRef.current;
-    if (!pending) return;
-    if (pending.threadId !== selection.selectedId) {
-      pendingEditRef.current = null;
-      pending.resolve(false);
-      return;
-    }
-    pendingEditRef.current = null;
-    void sendDirectMessage(pending.text, pending.attachments)
-      .then(pending.resolve)
-      .catch(() => pending.resolve(false));
-  }, [editRequestVersion, sendDirectMessage, selection.selectedId]);
-
   const sendMessage = useCallback(async (text: string, attachments: MediaFile[] = []) => {
     const target = editingMessageRef.current;
     if (!target) return sendDirectMessage(text, attachments);
-    const sourceThreadId = selection.selectedIdRef.current;
-    if (!sourceThreadId || !target.turnId || target.role !== "user" || execution.status.active || selection.session?.archived) return false;
-    const sourceMessages = selection.session?.messages || [];
-    const targetIndex = sourceMessages.findIndex((message) => message.id === target.id);
-    const previousTurnId = targetIndex > 0
-      ? [...sourceMessages.slice(0, targetIndex)].reverse().find((message) => message.role === "assistant" && message.turnId)?.turnId || ""
-      : "";
+    const threadId = selection.selectedIdRef.current;
+    if (!threadId || !target.turnId || target.role !== "user" || execution.status.active || selection.session?.archived) return false;
     setForkingMessageId(target.id);
     try {
-      const created = previousTurnId
-        ? await catalog.forkSession(sourceThreadId, previousTurnId, true)
-        : await catalog.createSession(selection.session?.cwd || "", "", "", "", true);
-      if (!created) return false;
+      await conversationApi.revert(threadId, target.protocolTurnId || target.turnId);
+      selection.cancelSessionLoad(threadId);
+      selection.updateCurrentSession(threadId, current => {
+        const index = current.messages.findIndex(message => message.id === target.id);
+        return { ...current, contentVersion: undefined, messages: index < 0 ? current.messages : current.messages.slice(0, index) };
+      });
       setEditingMessage(null);
       editingMessageRef.current = null;
-      return await new Promise<boolean>((resolve) => {
-        pendingEditRef.current = {
-          threadId: selection.selectedIdRef.current,
-          text,
-          attachments,
-          resolve,
-        };
-        setEditRequestVersion((value) => value + 1);
-      });
+      return await sendDirectMessage(text, attachments);
     } finally {
       setForkingMessageId("");
     }
-  }, [catalog.createSession, catalog.forkSession, execution.status.active, selection.selectedIdRef, selection.session, sendDirectMessage]);
+  }, [execution.status.active, selection.selectedIdRef, selection.session, selection.cancelSessionLoad, selection.updateCurrentSession, sendDirectMessage]);
 
   const beginEditMessage = useCallback((message: SessionMessage) => {
     if (message.role !== "user" || !message.turnId || selection.session?.archived) return;
@@ -635,6 +606,10 @@ export function useProjectConversations() {
     followUpQueue.handleEvent(event);
     goal.handleEvent(event);
     if (event.type === "context_status") contextManagement.handleEvent(event);
+    if (event.type === "user_message_accepted") {
+      reconciledSubmissionsRef.current.add(event.submissionId);
+      selection.updateOptimisticMessage(event.threadId, `optimistic-${event.submissionId}`, { deliveryState: undefined, deliveryError: undefined, turnId: event.turnId, protocolTurnId: event.turnId });
+    }
     if (event.type === "execution_status" && event.phase === "completed") contextManagement.completeSettings(event.threadId);
     if (event.type === "user_message_submitted") {
       const generated = createOptimisticMessage(
@@ -653,7 +628,7 @@ export function useProjectConversations() {
     if (event.type === "user_input_resolved" && event.threadId === selection.selectedIdRef.current) {
       setUserInputRequest((current) => String(current?.requestId) === String(event.requestId) ? null : current);
     }
-  }, [contextManagement.handleEvent, execution.handleEvent, followUpQueue.handleEvent, goal.handleEvent, selection.addOptimisticMessage, selection.selectedIdRef]);
+  }, [contextManagement.handleEvent, execution.handleEvent, followUpQueue.handleEvent, goal.handleEvent, selection.addOptimisticMessage, selection.updateOptimisticMessage, selection.selectedIdRef]);
   const recoverRealtime = useCallback((_reason: RealtimeRecoveryReason) => {
     const selected = selection.selectedIdRef.current;
     if (selected) void selection.loadSession(selected, { retry: false, recovery: true });
@@ -680,7 +655,11 @@ export function useProjectConversations() {
     catalog.selectLatestSession(desktopThreadId);
   }, [catalog.selectLatestSession]);
 
+  const prefetchSession = useCallback((threadId: string, conversationId?: string) =>
+    selection.loadSession(threadId, { prefetch: true, retry: false, conversationId }), [selection.loadSession]);
+
   return {
+    prefetchSession,
     project: catalog.project,
     sessions: catalog.sessions,
     archivedView: catalog.archivedView,

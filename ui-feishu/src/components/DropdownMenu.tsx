@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useDismissibleLayer } from '../../shared/shared/hooks/useDismissibleLayer';
 import styles from '../../shared/features/conversations/components/ConversationActions.module.css';
 
-export function DropdownMenu({ label, icon, items, title }: { title?: string; label: string; icon: ReactNode; items: { label: string; icon: ReactNode; onClick: () => void; disabled?: boolean; checked?: boolean }[] }) {
+export function DropdownMenu({ label, icon, items, title, align = 'end' }: { title?: string; label: string; icon: ReactNode; align?: 'start' | 'end'; items: { label: string; icon: ReactNode; onClick: () => void; disabled?: boolean; checked?: boolean }[] }) {
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -16,6 +16,6 @@ export function DropdownMenu({ label, icon, items, title }: { title?: string; la
   });
   return <><button ref={trigger} className="icon-button" aria-label={label} title={label} aria-haspopup="menu" aria-expanded={Boolean(position)} onClick={() => {
     const rect = trigger.current!.getBoundingClientRect();
-    setPosition(position ? null : { top: Math.max(8, Math.min(rect.bottom + 4, innerHeight - items.length * 40 - 15)), left: Math.max(8, Math.min(rect.right - 150, innerWidth - 158)) });
+    setPosition(position ? null : { top: Math.max(8, Math.min(rect.bottom + 4, innerHeight - items.length * 40 - 15)), left: Math.max(8, Math.min(align === 'start' ? rect.left : rect.right - 150, innerWidth - 158)) });
   }}>{icon}</button>{position && createPortal(<div ref={menu} className={styles.menu} role="menu" style={position}>{title && <div style={{ padding: "6px 10px", color: "#999faa", fontSize: 12 }}>{title}</div>}{items.map(item => <button key={item.label} role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"} aria-checked={item.checked} disabled={item.disabled} onClick={() => { if (item.checked === undefined) { setPosition(null); trigger.current?.focus(); } item.onClick(); }}>{item.icon}{item.label}</button>)}</div>, document.body)}</>;
 }

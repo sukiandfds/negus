@@ -19,6 +19,10 @@ import { usePageSnapshot } from './usePageSnapshot';
 import { CreateGroupDialog } from './components/CreateGroupDialog';
 import { GroupWorkspace } from './components/GroupWorkspace';
 import type { ChatTab, Conversation, ConversationFilter, Section } from './types';
+import { readValidStorage, writeStorage } from '../shared/shared/state/storage';
+
+const defaultOrigins = ['user', 'assistant', 'employee'];
+const originsStorageKey = 'negus:conversation-origins';
 
 function readRoute() {
   const params = new URLSearchParams(location.search);
@@ -51,7 +55,8 @@ export function FeishuApp() {
   if (!roomId) singleChat.current = viewC;
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ConversationFilter>('all');
-  const [origins, setOrigins] = useState(['user', 'assistant', 'employee']);
+  const [origins, setOrigins] = useState(() => readValidStorage<string[]>(originsStorageKey, (value): value is string[] => Array.isArray(value) && value.every(item => defaultOrigins.includes(item)) && new Set(value).size === value.length) ?? defaultOrigins);
+  const updateOrigins = (value: string[]) => { setOrigins(value); writeStorage(originsStorageKey, value); };
   const [opening, setOpening] = useState('');
   const [openError, setOpenError] = useState('');
   const [details, setDetails] = useState(false);
@@ -60,7 +65,7 @@ export function FeishuApp() {
   const [tab, setTab] = useState<ChatTab>('messages');
   const [mobileChat, setMobileChat] = useState(initialRoute.hasChat);
   const [railOpen, setRailOpen] = useState(false);
-  const employee = viewDirectory.projects.find(p => p.employeeId === agentId);
+  const employee = viewDirectory.projects.find(p => p.employeeId === agentId || (p.employeeId && (p.mainThreadId === viewC.selectedId || p.conversations?.some(item => item.threadId === viewC.selectedId))));
   const autoOpenedAgent = useRef('');
   const selectedName = employee?.name || 'Negus 助手';
   const closeSettings = () => {
@@ -119,33 +124,49 @@ export function FeishuApp() {
     return () => window.removeEventListener('keydown', search);
   }, []);
   const roster = useMemo(() => {
-    const base = buildConversationDirectory(viewDirectory, viewC.sessions, viewC.archivedView, viewC.project?.root);
+    const base = buildConversationDirectory(viewDirectory, viewC.sessions, viewC.archivedView, viewC.project?.root, viewC.cachedSessions);
     if (viewC.archivedView) return base;
     const rooms: Conversation[] = groups.rooms.map(room => ({ id: `group:${room.id}`, kind: 'group', roomId: room.id, name: room.name, subtitle: viewDirectory.projects.find(project => project.projectId === room.projectId)?.name || '群聊', projectId: room.projectId, time: room.lastActivityAt }));
     return { ...base, all: [...base.all, ...rooms], projects: base.projects.map(project => {
       const children = [...(project.children || []), ...rooms.filter(room => room.projectId === project.projectId)].sort(byLatest);
       return { ...project, time: children[0]?.time || project.time, children };
     }).sort(byLatest) };
-  }, [viewDirectory.projects, viewDirectory.statusByThread, viewDirectory.contextByThread, viewC.sessions, viewC.archivedView, viewC.project?.root, groups.rooms]);
+  }, [viewDirectory.projects, viewDirectory.statusByThread, viewDirectory.contextByThread, viewC.sessions, viewC.session, viewC.cachedSessions, viewC.archivedView, viewC.project?.root, groups.rooms]);
   const filterOrigins = (items: Conversation[]): Conversation[] => items.flatMap(item => {
     const children = item.children ? filterOrigins(item.children) : undefined;
     return origins.includes(item.origin === 'assistant' ? 'assistant' : item.main && item.agentId ? 'employee' : 'user') || children?.length ? [{ ...item, children }] : [];
   });
-  const visibleRoster = filterOrigins( filter === 'employees' ? roster.employees : filter === 'projects' ? roster.projects : sortPinned(roster.all.filter(item => filter === 'background' ? item.origin === 'assistant' : true), pins.pinned));
+  const visibleRoster = filter === 'background' ? sortPinned(roster.all.filter(item => item.origin === 'assistant'), pins.pinned) : filterOrigins(filter === 'employees' ? roster.employees : filter === 'projects' ? roster.projects : sortPinned(roster.all, pins.pinned));
   const selected = roster.all.find(v => v.threadId === viewC.selectedId);
+  const warmed = useRef(new Map<string, string>());
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      for (const [index, item] of [...roster.all].sort(byLatest).entries()) {
+        if (cancelled) break;
+        const id = item.threadId;
+        if (!id || id === c.selectedId || item.pending || (index >= 10 && !c.cachedSessions.has(id))) continue;
+        const version = item.time || "unknown";
+        if (warmed.current.get(id) === version) continue;
+        if (await c.prefetchSession(id, item.conversationId || undefined)) warmed.current.set(id, version);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [roster.all, c.selectedId, c.cachedSessions, c.prefetchSession]);
+  const forwardTargets = buildConversationDirectory(viewDirectory, viewC.sessions.filter(session => !session.archived), false, viewC.project?.root, viewC.cachedSessions).all;
   const open = async (item: Conversation) => {
-    if (opening) return;
+    if (opening) return false;
     if (item.roomId) {
       const url = new URL(location.href);
       for (const key of ['thread', 'agent', 'conversation', 'employee', 'employeeId', 'archived', 'managerProjectId', 'managerProjectTitle', 'managerProjectPhase', 'managerProjectGoal']) url.searchParams.delete(key);
       url.searchParams.set('roomId', item.roomId); url.searchParams.set('view', 'group');
       history.pushState({}, '', `${url.pathname}${url.search}`);
       window.dispatchEvent(new Event('negus:navigate'));
-      setOpenError(''); return;
+      setOpenError(''); return true;
     }
     if (!item.threadId && item.kind) {
       setOpenError(item.kind === 'project' ? '此项目尚无总群聊，请展开查看已有对话。' : '此定期任务尚无关联对话，请展开查看执行记录。');
-      return;
+      return false;
     }
     setOpening(item.id); setOpenError('');
     try {
@@ -160,7 +181,8 @@ export function FeishuApp() {
         window.dispatchEvent(new Event('negus:navigate'));
       }
       setTab('messages'); setMobileChat(true); setDetails(false);
-    } catch (reason) { setOpenError(reason instanceof Error ? reason.message : '暂时无法进入对话'); }
+      return true;
+    } catch (reason) { setOpenError(reason instanceof Error ? reason.message : '暂时无法进入对话'); return false; }
     finally { setOpening(''); }
   };
   const create = () => {
@@ -170,17 +192,18 @@ export function FeishuApp() {
     url.searchParams.set('view', 'conversation'); history.pushState({}, '', `${url.pathname}${url.search}`);
     c.openNewSession(root, '', '', { deferred: true }); setRoomId(''); setMobileChat(true); setSection('messages'); setTab('messages');
   };
-  return <div className={`feishu-app ${mobileChat ? 'show-chat' : ''} ${railOpen ? 'rail-open' : ''}`} style={{ '--agent-initial': JSON.stringify(selectedName.slice(0, 1)), '--agent-color': avatarColor(agentId) } as CSSProperties}>
+  return <div className={`feishu-app ${mobileChat ? 'show-chat' : ''} ${railOpen ? 'rail-open' : ''}`} style={{ '--agent-initial': JSON.stringify(selectedName.slice(0, 1)), '--agent-color': avatarColor(employee?.employeeId || agentId) } as CSSProperties}>
     <ChatSkin />
     <AppRail section={section} connected={c.connected} open={railOpen && !mobileChat} onClose={() => setRailOpen(false)}
       onSearch={() => { setSection('messages'); setMobileChat(false); document.getElementById('conversation-search')?.focus(); }}
       onSectionChange={next => { setSection(next); setMobileChat(false); setFilter(next === 'employees' ? 'employees' : 'all'); setOpenError(''); }} onSettings={() => setSettings(true)} />
-    <ConversationList c={viewC} section={section} query={query} filter={filter} origins={origins} onOriginsChange={setOrigins} onOpenNavigation={() => setRailOpen(open => !open)}
+    <ConversationList c={viewC} section={section} query={query} filter={filter} origins={origins} onOriginsChange={updateOrigins} onOpenNavigation={() => setRailOpen(open => !open)}
       opening={opening} openError={openError} hasRoster={Boolean(roster.all.length)} initialReady={page.committed} visibleRoster={visibleRoster}
       onQueryChange={setQuery} onFilterChange={next => { setFilter(next); setSection('messages'); setOpenError(''); }} onRefresh={() => { void c.refresh(); void directory.refresh(undefined, true); void groups.refresh(); }}
       onCreate={create} onCreateGroup={() => setCreatingGroup(true)} pinned={pins.pinned} onTogglePin={pins.toggle} selectedRoomId={roomId} onOpen={item => void open(item)} />
     <div className="chat-surface" style={{ display: roomId ? 'none' : undefined }}><ChatWorkspace visible={mobileChat || window.innerWidth > 760} c={singleChat.current} usage={usage} initialReady={page.committed} tab={tab} setTab={setTab}
-      details={details} setDetails={setDetails} agentId={agentId} selectedName={selectedName} selected={selected}
+      details={details} setDetails={setDetails} agentId={employee?.employeeId || agentId} selectedName={selectedName} selected={selected}
+      targets={forwardTargets} onOpenTarget={open}
       onBack={() => setMobileChat(false)} onShare={() => setSharing(true)} /></div>
     {roomId && <GroupWorkspace key={roomId} room={groups.rooms.find(room => room.id === roomId) || { id: roomId, name: '群聊', projectId: '' }} projectName={directory.projects.find(project => project.projectId === groups.rooms.find(room => room.id === roomId)?.projectId)?.name || ''} onBack={() => setMobileChat(false)} />}
     {creatingGroup && <CreateGroupDialog directory={directory} onClose={() => setCreatingGroup(false)} onCreated={room => { setCreatingGroup(false); void groups.refresh(); setSection('messages'); setFilter('all'); void open({ id: `group:${room.id}`, name: room.name, subtitle: '群聊', kind: 'group', roomId: room.id }); }} />}

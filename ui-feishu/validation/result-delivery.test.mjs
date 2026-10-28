@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createTaskKernel } from '../kernel/task-kernel.mjs';
 import { extendEmployeeTasks } from '../server/employee-task-extension.mjs';
 import { createFollowUpQueueService } from '../../windows/server/follow-up-queue-service.mjs';
 
@@ -10,7 +11,7 @@ const until = async check => {
   const end = Date.now() + 1500;
   while (!check()) { if (Date.now() > end) assert.fail('condition timed out'); await new Promise(resolve => setTimeout(resolve, 5)); }
 };
-async function fixture(t, initialPhase = 'completed', failSend = false, parentState) {
+async function fixture(t, initialPhase = 'completed', failSend = false, parentState, interruptionReason) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-result-delivery-'));
   const task = { id: 'child', kind: 'delegation', agentId: 'b', conversationId: 'child-conversation',
     title: '调研', state: 'completed', result: '调研结果', runtime: { threadId: 'child-thread', turnId: 'child-turn' },
@@ -18,8 +19,8 @@ async function fixture(t, initialPhase = 'completed', failSend = false, parentSt
   const tasks = [task];
   if (parentState) { task.parentTaskId = 'parent'; tasks.push({ id: 'parent', kind: 'external', state: parentState, runtime: { threadId: 'main', turnId: 'main-turn' } }); }
   await fs.writeFile(path.join(root, 'tasks.json'), JSON.stringify({ version: 1, tasks, deliveries: [{ id: 'result:child', taskId: 'child', state: 'pending', attempts: 0 }] }));
-  const f = { phase: initialPhase, failSend, sent: [], turns: [] };
-  const execution = { getStatus: () => ({ active: f.phase === 'working', phase: f.phase, turnId: 'main-turn' }) };
+  const f = { phase: initialPhase, interruptionReason, failSend, sent: [], turns: [] };
+  const execution = { getStatus: () => ({ active: f.phase === 'working', phase: f.phase, turnId: 'main-turn', interruptionReason: f.interruptionReason }) };
   const queue = createFollowUpQueueService({ stateFile: path.join(root, 'queue.json'), execution,
     conversations: { sendMessage: async (_threadId, text) => { f.sent.push(text); if (f.failSend) throw Error('供应商不可用');
       f.turns.push({ id: `notification-${f.sent.length}`, items: [{ type: 'userMessage', content: [{ type: 'inputText', text }] }] }); } },
@@ -33,7 +34,7 @@ async function fixture(t, initialPhase = 'completed', failSend = false, parentSt
     bindings: {}, execution, queue,
   });
   t.after(async () => { await extension.close(); await queue.close(); await fs.rm(root, { recursive: true, force: true }); });
-  return Object.assign(f, { extension, queue, delivery: () => extension.deliveries()[0] });
+  return Object.assign(f, { root, extension, queue, delivery: () => extension.deliveries()[0] });
 }
 
 test('retry result retries the failed underlying queue and acknowledges native history', async t => {
@@ -78,6 +79,11 @@ test('result waits for the current reply, then wakes the idle assistant exactly 
   await until(() => f.delivery().state === 'delivered');
   assert.equal(f.sent.length, 1);
   assert.match(f.sent[0], /调研结果/);
+  assert.match(f.sent[0], /对照用户原始要求和验收证据核验/);
+  assert.match(f.sent[0], /达到要求后简洁汇报实际结果/);
+  assert.match(f.sent[0], /证据缺失、矛盾时，在原授权内继续处理或只补派缺项/);
+  assert.match(f.sent[0], /不重复执行已验证工作/);
+  assert.match(f.sent[0], /仅需用户决策时询问用户/);
   await f.queue.handleTurnTerminal({ threadId: 'main', status: 'completed' });
   assert.equal(f.sent.length, 1);
 });
@@ -100,4 +106,27 @@ test('persisted stopped source remains blocked even when its visible status has 
   await f.extension.retryDelivery('result:child');
   await until(() => f.delivery().state === 'delivered');
   assert.equal(f.sent.length, 1);
+});
+
+ test('service restart interruption delivers the child result once without rerunning the task', async t => {
+  const f = await fixture(t, 'interrupted', false, 'interrupted', 'serviceRestart');
+  await until(() => f.delivery().state === 'delivered');
+  assert.equal(f.sent.length, 1);
+  await f.extension.retryDelivery('result:child');
+  assert.equal(f.sent.length, 1);
+});
+
+test('shutdown preserves an unacknowledged result for delivery after restart', async t => {
+  const f = await fixture(t, 'working');
+  await until(() => f.queue.list('main').length === 1);
+  await f.extension.close();
+  const saved = JSON.parse(await fs.readFile(path.join(f.root, 'tasks.json'), 'utf8'));
+  assert.ok(['pending', 'delivering'].includes(saved.deliveries[0].state));
+  assert.equal(f.sent.length, 0);
+  let delivered = 0;
+  const recovered = await createTaskKernel({ stateFile: path.join(f.root, 'tasks.json'), runtime: {},
+    deliver: async () => { delivered++; return { acknowledged: true }; } });
+  await until(() => recovered.deliveries()[0].state === 'delivered');
+  assert.equal(delivered, 1);
+  await recovered.close();
 });

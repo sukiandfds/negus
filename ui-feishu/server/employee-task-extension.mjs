@@ -10,7 +10,7 @@ import { createEmployeeHierarchy } from '../kernel/employee-hierarchy.mjs';
 
 // Adapts the same kernel to employee conversations and existing task conversations.
 export async function extendEmployeeTasks(original, { stateRoot, registry, modelProviders, appServerClient,
-  bindings, execution, queue, broadcast = () => {}, employeeHierarchy = null }) {
+  bindings, execution, queue, providerForThread = async () => null, broadcast = () => {}, employeeHierarchy = null }) {
   let kernel;
   let closing = false;
   const taskProviders = new Map();
@@ -66,10 +66,21 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     if (!['external', 'followup'].includes(task.kind)) employee = { ...employee, ...(task.runtime.modelProviderId
       ? { modelProviderId: task.runtime.modelProviderId, model: task.runtime.model || employee.model }
       : await backgroundTaskRoute(modelProviders, employee)) };
-    const modelProviderId = task.runtime.modelProviderId || employee.modelProviderId || 'current';
-    const client = await clientFor({ ...employee, modelProviderId });
+    const observed = ['external', 'followup'].includes(task.kind);
+    const related = observed && kernel?.list().find(candidate => candidate.runtime.threadId === task.runtime.threadId && candidate.runtime.modelProviderId);
+    const modelProviderId = (observed && await providerForThread(task.runtime.threadId)) || task.runtime.modelProviderId || related?.runtime?.modelProviderId || employee.modelProviderId || 'current';
+    const client = await clientFor({ ...employee, modelProviderId, ...(observed ? { model: '' } : {}) });
     let threadId = task.runtime.threadId;
-    if (['external', 'followup'].includes(task.kind)) return { client, threadId };
+    if (observed) {
+      try {
+        const response = await client.request('thread/read', { threadId, includeTurns: true });
+        if (response.thread?.status?.type === 'notLoaded') throw Error('thread not loaded');
+      } catch (error) {
+        if (!/thread not loaded/i.test(error.message)) throw error;
+        await client.request('thread/resume', { ...executionPolicy, threadId, persistExtendedHistory: true });
+      }
+      return { client, threadId };
+    }
     const options = { ...executionPolicy, developerInstructions: instructions(employee, task.background), config: task.background ? {} : tools.config(task.id),
       ...(employee.model ? { model: employee.model } : {}) };
     if (recovering) {
@@ -91,6 +102,22 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
   const conversationTasks = () => [...publicTasks(), ...[...taskProviders.values()].flatMap(provider => provider.tasks()
     .filter(task => task.conversationId !== task.source?.roomId)
     .map(task => ({ ...task, threadId: task.runtime.threadId || '' })))];
+  const decorateTaskSession = (threadId, session) => {
+    if (!session) return session;
+    const tasks = [...kernel.list(), ...[...taskProviders.values()].flatMap(provider => provider.tasks())];
+    const matches = tasks.filter(task => task.kind === 'delegation' && task.runtime?.threadId === threadId && task.runtime?.turnId);
+    const decorate = message => {
+      if (message.role !== 'user' || !message.id?.startsWith('codex:') || !message.itemId || message.turnItemIndex !== 0 || !message.turnId) return message;
+      const candidates = matches.filter(task => task.runtime.turnId === message.turnId);
+      if (candidates.length !== 1) return message;
+      const task = candidates[0];
+      const sourceId = task.source?.agentId || tasks.find(parent => parent.id === task.parentTaskId)?.agentId;
+      const employee = registry.list().find(entry => entry.id === sourceId);
+      return employee?.name ? { ...message, authorId: employee.id, authorName: employee.name, displaySourceAgentId: employee.id } : message;
+    };
+    return { ...session, ...(session.messages ? { messages: session.messages.map(decorate) } : {}),
+      ...(session.upserts ? { upserts: session.upserts.map(decorate) } : {}) };
+  };
   kernel = await createTaskKernel({ stateFile: path.join(stateRoot, 'tasks.json'), runtime, broadcast, log,
     validate: input => { registry.require(input.agentId); if (input.kind === 'external' && (!input.runtime.threadId || !input.runtime.turnId)) throw Error('缺少来源执行信息'); },
     deliver: async ({ id, task, retryRequested }) => {
@@ -104,18 +131,22 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       const history = await client.request('thread/read', { threadId: source.threadId, includeTurns: true });
       const acknowledged = history.thread?.turns?.some(turn => turn.items?.some(item => item.type === 'userMessage' && JSON.stringify(item.content || []).includes(marker)));
       if (acknowledged) return { acknowledged: true, threadId: source.threadId };
+      const sourceRestarted = () => {
+        const status = execution.getStatus(source.threadId);
+        return !kernel.get(task.parentTaskId)?.cancelRequested && !status.active && status.phase === 'interrupted' && status.interruptionReason === 'serviceRestart';
+      };
       const sourceBlocked = (includeParent = true) => {
         const status = execution.getStatus(source.threadId);
         const parent = kernel.get(task.parentTaskId);
-        return !status.active && ((includeParent && (parent?.cancelRequested || ['failed', 'interrupted'].includes(parent?.state)))
+        return !status.active && !sourceRestarted() && ((includeParent && (parent?.cancelRequested || ['failed', 'interrupted'].includes(parent?.state)))
           || ['failed', 'interrupted', 'systemError', 'waitingOnApproval', 'waitingOnUserInput'].includes(status.phase));
       };
       const blockedMessage = '来源对话已停止或暂停，结果尚未送达；可点击重新发送结果';
       if (!retryRequested && sourceBlocked()) throw Error(blockedMessage);
       let receipt = await queue.enqueue({ threadId: source.threadId, submissionId: id,
-        text: `${marker}\n任务：${task.title}\n状态：${task.state}\n${task.error || task.result || '未产生文字结果'}\n任务对话：/?agent=${task.agentId}&thread=${task.runtime.threadId}&conversation=${task.conversationId}\n这是已有任务的反馈，请据此回复；不要再次创建相同任务。` });
+        text: `${marker}\n任务：${task.title}\n状态：${task.state}\n${task.error || task.result || (task.state === 'interrupted' ? '任务已中断，未完成。' : '未产生文字结果')}\n任务对话：/?agent=${task.agentId}&thread=${task.runtime.threadId}&conversation=${task.conversationId}\n这是已有任务的反馈，属于内部报告。先对照用户原始要求和验收证据核验；达到要求后简洁汇报实际结果。未达到要求或证据缺失、矛盾时，在原授权内继续处理或只补派缺项，不重复执行已验证工作，不重复创建相同任务；仅需用户决策时询问用户。` });
       if (retryRequested && receipt.state === 'failed') receipt = await queue.retry(source.threadId, receipt.id);
-      if (retryRequested && sourceBlocked(false)) {
+      if ((retryRequested && sourceBlocked(false)) || sourceRestarted()) {
         const queued = queue.list(source.threadId).find(item => item.submissionId === id);
         if (queued?.state === 'pending') receipt = await queue.sendNow(source.threadId, queued.id);
       }
@@ -172,7 +203,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       status: execution.getStatus(task.threadId).active ? execution.getStatus(task.threadId)
         : { ...execution.getStatus(task.threadId), active: !terminalStates.has(task.state), phase: task.state, label: task.state, detail: task.error || '' },
     }))],
-    tasks: publicTasks, deliveries: kernel.deliveries, cancelTask: kernel.cancel, reconcileTask: kernel.reconcile, retryDelivery: kernel.retryDelivery,
+    tasks: publicTasks, deliveries: kernel.deliveries, cancelTask: kernel.cancel, reconcileTask: kernel.reconcile, retryDelivery: kernel.retryDelivery, decorateTaskSession,
     providerForThread: threadId => conversationTasks().find(task => task.threadId === threadId)?.runtime.modelProviderId,
     registerTaskProvider: (id, provider) => taskProviders.set(id, provider),
     hasPendingWork: () => original.hasPendingWork() || kernel.hasPendingWork(),

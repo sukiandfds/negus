@@ -116,7 +116,8 @@ export const createConversationRoutes = ({
   const sessionSource = (binding) => isEmployeeDirectBinding(binding) ? employeeRuntime : conversations;
 
   const readGroupAgentSession = async (binding, source, pagination = {}) => {
-    const session = await conversations.findSession(binding.runtimeSessionId, source, pagination);
+    const options = binding.conversationKind === "task" && pagination ? { ...pagination, contentVersion: undefined } : pagination;
+    const session = await conversations.findSession(binding.runtimeSessionId, source, options);
     if (!session) return null;
     return {
       ...session,
@@ -129,7 +130,8 @@ export const createConversationRoutes = ({
   const readAgentSession = async (binding, source, pagination) => {
     if (binding.conversationKind === "group") return readGroupAgentSession(binding, source, pagination);
     if (isEmployeeDirectBinding(binding)) return employeeRuntime.readSession(binding.agentId, pagination);
-    return conversations.findSession(binding.runtimeSessionId, source, pagination);
+    const session = await conversations.findSession(binding.runtimeSessionId, source, pagination);
+    return binding.conversationKind === "task" ? agentTasks?.decorateTaskSession?.(binding.runtimeSessionId, session) ?? session : session;
   };
 
   return async (request, response, url) => {
@@ -555,6 +557,17 @@ export const createConversationRoutes = ({
     const source = sessionSource(binding);
     await source.clearGoal(threadId);
     sendJson(response, { threadId, goal: null });
+    return true;
+  }
+  if (url.pathname === "/api/session/revert" && request.method === "POST") {
+    const { threadId, conversationId, beforeTurnId } = await readJson(request);
+    if (!threadId || !beforeTurnId) throw Object.assign(new Error("请选择要重新编辑的消息"), { statusCode: 400 });
+    const binding = await authorizeAgentThread({ threadId, conversationId });
+    if (execution.getStatus(threadId).active) throw Object.assign(new Error("请先停止当前回复再重新编辑"), { statusCode: 409 });
+    if (isEmployeeDirectBinding(binding)) await employeeRuntime.revertSession(binding.agentId, beforeTurnId);
+    else await conversations.revertSession(threadId, beforeTurnId);
+    publishThreadEvent(threadId, { type: "sessions_changed", threadId });
+    sendJson(response, { threadId });
     return true;
   }
   if (url.pathname === "/api/session/fork" && request.method === "POST") {

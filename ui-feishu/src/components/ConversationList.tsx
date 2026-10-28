@@ -33,14 +33,14 @@ export function ConversationList({ c, section, query, filter, origins, onOrigins
         <button className="icon-button" title="刷新会话" aria-label="刷新会话" onClick={onRefresh}><RefreshCw size={16} /></button>
         <DropdownMenu label="添加" icon={<Plus size={19} />} items={[{ label: '新建对话', icon: <MessageCircle />, onClick: onCreate, disabled: c.creating }, { label: '创建群聊', icon: <Users />, onClick: onCreateGroup }]} /></div></header>
       <label className="list-search"><Search size={15} /><input id="conversation-search" placeholder="搜索联系人、对话" value={query} onChange={e => onQueryChange(e.target.value)} /></label>
-      {section !== 'tasks' && <div className="list-filters"><DropdownMenu label="筛选会话" title="展示会话" icon={<ListFilter size={15} />} items={[
+      {section !== 'tasks' && <div className="list-filters"><DropdownMenu label="筛选会话" title="展示会话" align="start" icon={<ListFilter size={15} />} items={[
         { label: '全部会话', icon: origins.length === 3 ? <CheckSquare size={15} /> : <Square size={15} />, checked: origins.length === 3, onClick: () => onOriginsChange(origins.length === 3 ? [] : ['user', 'assistant', 'employee']) },
         ...([['user', '来自用户'], ['assistant', '来自助手'], ['employee', '员工会话']] as const).map(([id, label]) => ({ label, icon: origins.includes(id) ? <CheckSquare size={15} /> : <Square size={15} />, checked: origins.includes(id), onClick: () => onOriginsChange(origins.includes(id) ? origins.filter(value => value !== id) : [...origins, id]) })),
       ]} />{([['all', '全部'], ['employees', '员工'], ['projects', '项目'], ['background', '后台']] as const).map(([id, label]) => <button key={id} className={filter === id ? 'active' : ''} aria-pressed={filter === id} onClick={() => onFilterChange(id)}>{label}</button>)}
         <button className={`archive-filter ${c.archivedView ? 'active' : ''}`} title={c.archivedView ? '返回活动对话' : '查看已归档对话'} aria-label={c.archivedView ? '返回活动对话' : '查看已归档对话'} onClick={() => void c.setArchiveViewMode(!c.archivedView)}><Archive size={15} /></button></div>}
       <div className="contacts-scroll">
         {openError ? <div className="list-error" role="alert">{openError}</div> : null}
-        {(initialReady || hasRoster) ? <ConversationRows items={visibleRoster} c={c} opening={opening} query={query} onOpen={onOpen} pinned={filter === 'all' ? pinned : undefined} onTogglePin={filter === 'all' ? onTogglePin : undefined} selectedRoomId={selectedRoomId} /> : null}
+        {(initialReady || hasRoster) ? <ConversationRows items={visibleRoster} c={c} opening={opening} query={query} onOpen={onOpen} pinned={filter === 'all' || filter === 'background' ? pinned : undefined} onTogglePin={filter === 'all' || filter === 'background' ? onTogglePin : undefined} selectedRoomId={selectedRoomId} /> : null}
 
       </div>
       <footer className="list-footer"><ListFilter size={14} />{c.archivedView ? '已归档对话' : '聊天'}<span>{visibleRoster.length}</span></footer>

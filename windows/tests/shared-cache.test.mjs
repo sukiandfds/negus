@@ -7,7 +7,8 @@ const source = await fs.readFile(new URL("../../ui-feishu/shared/shared/state/lo
 const moduleUrl = (text) => "data:text/javascript;base64," + Buffer.from(ts.transpileModule(text, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText).toString("base64");
-const cacheUrl = moduleUrl(source);
+const storageUrl = moduleUrl(await fs.readFile(new URL("../../ui-feishu/shared/shared/state/storage.ts", import.meta.url), "utf8"));
+const cacheUrl = moduleUrl(source.replace('"./storage"', JSON.stringify(storageUrl)));
 const { createCachedResource } = await import(cacheUrl);
 const storage = new Map();
 globalThis.window = { localStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) } };

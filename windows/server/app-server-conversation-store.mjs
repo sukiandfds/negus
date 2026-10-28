@@ -382,7 +382,7 @@ export const createAppServerConversationStore = ({
       .map(async (thread) => {
         const summary = summaryFromThread(thread, archived);
         const latest = await latestAssistantReplyAtFromRollout(thread.path, false, true);
-        if (latest) Object.assign(summary, latest);
+        if (latest) Object.assign(summary, latest, { latestMessageAt: latest.updatedAt });
         return summary;
       }));
     return summaries.sort((left, right) => sessionTime(right.updatedAt) - sessionTime(left.updatedAt));
@@ -628,7 +628,11 @@ export const createAppServerConversationStore = ({
   };
 
   const resumeThread = async (threadId) => {
-    const { runtimeOptions } = await ensureProjectThread(threadId);
+    const { runtimeOptions } = await ensureProjectThread(threadId).catch(async error => {
+      if (!threadNotLoaded(error)) throw error;
+      await loadThreadForResume(threadId);
+      return ensureProjectThread(threadId);
+    });
     const freshRuntime = freshThreadRuntime.get(threadId);
     // New threads already start with their requested policy;
     // empty threads cannot be resumed before their first persisted turn.
@@ -716,7 +720,11 @@ export const createAppServerConversationStore = ({
   const interrupt = async (threadId, turnId) => client.request("turn/interrupt", { threadId, turnId });
 
   const getRuntimeContext = async (threadId) => {
-    const result = await resumeThread(threadId);
+    const result = await resumeThread(threadId).catch(async error => {
+      if (!/cannot resume an unloaded multi-agent v2 sub-agent/i.test(error.message)) throw error;
+      const { thread } = await client.request("thread/read", { threadId, includeTurns: true });
+      return { ...thread, ...await latestAssistantReplyAtFromRollout(thread.path, true) };
+    });
     return {
       model: result.model || "",
       modelProvider: result.modelProvider || "",
@@ -732,6 +740,11 @@ export const createAppServerConversationStore = ({
       { timeoutMs: 5000, threadId },
     );
     return result.thread?.status || null;
+  };
+
+  const revertSession = async (threadId, beforeTurnId) => {
+    await resumeThread(threadId);
+    return client.request("thread/revert", { threadId, beforeTurnId });
   };
 
   const compactContext = async (threadId) => {
@@ -789,7 +802,10 @@ export const createAppServerConversationStore = ({
       if (!threadNotLoaded(error)) throw error;
     }
     if (known?.path && known?.cwd) return known;
-    const readThread = async () => (await client.request("thread/read", { threadId, includeTurns: false })).thread;
+    const readThread = async () => (await client.request("thread/read", { threadId, includeTurns: false }).catch(error => {
+      if (!threadNotLoaded(error)) throw error;
+      return client.request("thread/read", { threadId, includeTurns: true });
+    })).thread;
     try {
       const thread = await readThread();
       if (thread?.id) threadCache.set(thread.id, thread);
@@ -890,7 +906,7 @@ export const createAppServerConversationStore = ({
     listSessions, createSession, renameSession, findSession, sendMessage, steerMessage, interrupt,
     forkSession, archiveSession, unarchiveSession,
     listModels, updateModel, updateReasoningEffort, getRuntimeContext, getThreadStatus,
-    compactContext, reviewSession, getGoal, setGoal, clearGoal,
+    revertSession, compactContext, reviewSession, getGoal, setGoal, clearGoal,
     getPendingUserInput, respondToUserInput, isFreshSession, close,
     getSessionResumeInfo, releaseSession, resumeProviderSession,
   };

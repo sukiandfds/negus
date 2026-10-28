@@ -1,5 +1,5 @@
 import { executionHandoff } from "../state/executionHandoff";
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, type Ref, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { CalendarClock, Clock3, LoaderCircle, Target } from "lucide-react";
 import { JumpToLatest } from "../../../components/JumpToLatest/JumpToLatest";
 import type { ContentSyncState, SessionDetail, SessionMessage } from "../model/types";
@@ -15,6 +15,7 @@ import { orderMessageList } from "../state/conversationMerge";
 import styles from "./ConversationView.module.css";
 import type { ThreadGoal } from "../../goals/model/types";
 import { completedGoalMessageId } from "../../goals/model/completedGoal";
+import { composeForwardedMessages, forwardableMessage } from "../state/forwardMessages";
 
 const messageListKey = (message: SessionMessage) => (
   message.role === "user" && message.submissionId
@@ -45,6 +46,7 @@ export function Message({
   completedGoal,
   queued = false,
   actions,
+  onSelect,
 }: {
   message: SessionMessage;
   onQuote?: () => void;
@@ -68,6 +70,7 @@ export function Message({
   completedGoal?: ThreadGoal | null;
   queued?: boolean;
   actions?: ReactNode;
+  onSelect?: () => void;
 }) {
   const presentation = presentConversationMessage(message);
   const shown = presentation.message;
@@ -76,10 +79,10 @@ export function Message({
   const copyText = heartbeatUser?.instructions ?? assistantText ?? message.text;
   const richBlocks = message.blocks?.some((block) => block.type !== "markdown") ?? false;
   const formattedTime = formatConversationTimestamp(message.createdAt);
-  const reserveTimestamp = message.role === "assistant";
+  const reserveTimestamp = message.role === "assistant" || Boolean(message.displaySourceAgentId);
   if (assistantText === "" && !streaming && !executionStatus && !executionPlaceholder && !richBlocks) return null;
   return (
-    <article className={`${styles.message} ${message.role === "user" ? styles.user : styles.assistant}`}>
+    <article className={`${styles.message} ${message.role === "user" && !message.displaySourceAgentId ? styles.user : styles.assistant}`}>
       {message.authorName ? <span className={styles.authorName}>{message.authorName}</span> : null}
       {formattedTime || reserveTimestamp ? (
         <time className={styles.timestamp} dateTime={message.createdAt} aria-hidden={!formattedTime}>
@@ -102,6 +105,7 @@ export function Message({
       {!executionPlaceholder ? (
         <div className={styles.actionRow}>
           {actions ?? <MessageActions
+            onSelect={onSelect}
             onQuote={onQuote}
             text={copyText}
             forkable={forkable}
@@ -129,7 +133,14 @@ export function Message({
   );
 }
 
+export interface ConversationViewHandle {
+  composeForward: (source: string, selected: ReadonlySet<string>) => { text: string; hasAttachments: boolean };
+}
+
 interface ConversationViewProps {
+  ref?: Ref<ConversationViewHandle>;
+  selectedMessages?: ReadonlySet<string> | null;
+  onSelectMessage?: (id: string) => void;
   assistantName?: string;
   onQuoteMessage?: (message: SessionMessage) => void;
   queue?: ReactNode;
@@ -195,6 +206,9 @@ const orderVisibleItems = (items: ConversationItem[]) => {
 };
 
 export function ConversationView({
+  ref,
+  selectedMessages,
+  onSelectMessage,
   assistantName,
   onQuoteMessage,
   queue,
@@ -246,7 +260,7 @@ export function ConversationView({
     streamingItemId: "",
     turnId: executionMatchesSession ? executionStatus.turnId || "" : "",
     active: showExecution && executionStatus.active && !completedExecution,
-    retainPlaceholder: waitingForReply,
+    retainPlaceholder: waitingForReply || (showExecution && (Boolean(executionStatus.notices?.length) || (completedExecution && executionStatus.phase !== "completed"))),
     showExecution,
     now: new Date().toISOString(),
   });
@@ -293,6 +307,9 @@ export function ConversationView({
       ? { ...message, turnStatus: "completed", turnStartedAtMs: message.turnStartedAtMs ?? Date.parse(executionStatus.startedAt || "") }
       : message;
   }), completedGoal);
+  useImperativeHandle(ref, () => ({
+    composeForward: (source, selected) => composeForwardedMessages(source, visibleItems.filter(item => !item.executionPlaceholder), selected),
+  }));
   // 用户授权：打开定位底部，仅在底部时跟随内容更新，不补偿历史阅读位置；后续修改须获用户明确同意。
   useLayoutEffect(() => {
     if (!active) {
@@ -390,8 +407,10 @@ export function ConversationView({
           <>
             {visibleItems.map((item, index) => (
                 <div data-message-id={item.message.id} key={item.id}>
+                  {selectedMessages && !item.executionPlaceholder && forwardableMessage(item.message).text.trim() ? <label className={styles.selectMessage}><input type="checkbox" aria-label={`选择消息 ${item.message.id}`} checked={selectedMessages.has(item.id)} onChange={() => onSelectMessage?.(item.id)} />选择</label> : null}
                   <Message
                         message={item.message}
+                        onSelect={!selectedMessages && !item.executionPlaceholder && forwardableMessage(item.message).text.trim() ? () => onSelectMessage?.(item.id) : undefined}
                         onQuote={!session.archived && onQuoteMessage ? () => onQuoteMessage(item.message) : undefined}
                         completedGoal={item.message.id === goalMessageId ? completedGoal : null}
                         streaming={item.streaming}

@@ -40,6 +40,8 @@ export interface DirectoryConversation {
   main?: boolean;
   updatedAt?: string | null;
   lastActivityAt?: string | null;
+  latestMessage?: string;
+  latestMessageAt?: string | null;
   messageCount?: number | null;
   archived?: boolean;
   status?: ProjectRuntimeStatus | null;

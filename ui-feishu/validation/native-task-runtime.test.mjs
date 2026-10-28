@@ -48,6 +48,13 @@ test('restart recovers the exact persisted turn without starting another', async
   assert.equal(f.listeners.size, 0);
 });
 
+test('an idle thread with only another completed turn cannot settle the requested turn', async () => {
+  const f = fixture(async () => ({ thread: { status: 'idle', turns: [{ id: 'other', status: 'completed', items: [{ type: 'agentMessage', text: '其他结果' }] }] } }));
+  const result = await f.runtime.observe({ id: 'task', runtime: { turnId: 'turn' } }, f.controls);
+  assert.equal(result.status, 'unknown');
+  assert.ok(!result.text);
+});
+
 test('lost start response reconciles the new turn, never replays turn/start', async () => {
   const f = fixture(async method => {
     if (method === 'turn/start') throw Error('response lost');

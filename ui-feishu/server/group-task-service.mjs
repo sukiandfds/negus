@@ -33,7 +33,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
     hierarchy.assertCanDelegate(source.agentId, input.agentId);
     const conversationId = `handoff-${createHash('sha256').update(`${sourceId}:${input.requestId}`).digest('hex').slice(0, 32)}`;
     return kernel.delegate(sourceId, { requestId: input.requestId, agentId: input.agentId, title: input.title, instructions: input.instructions,
-      conversationId, lane: `${roomId}:${conversationId}:${input.agentId}` });
+      conversationId, lane: `${roomId}:${conversationId}:${input.agentId}`, source: { ...source.source, agentId: source.agentId } });
   } });
   const instructionsFor = agent => employeeTurnInstructions(agent.instructions,
     `你是${agent.name}，只以自己的身份回复。复杂工作先拆给直属下属，收到结果后核验并汇总；只能向以下直属下属派工：${JSON.stringify(hierarchy.childrenOf(agent.id))}。需要交接用户已授权的工作时，调用 negus_handoffs.delegate_task；仅在文字中 @ 同事不会创建任务。工具确认保存后可立即回复用户，结果会自动回到来源对话。结果通知不是新的委派请求，不要重复派发相同工作。现有员工：${JSON.stringify(room.snapshot().agents.map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`);

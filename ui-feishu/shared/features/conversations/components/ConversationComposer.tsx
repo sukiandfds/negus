@@ -1,4 +1,4 @@
-import { useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
+import { useEffect, useId, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
 import { Send, Sparkles, Square, X } from "lucide-react";
 import { AttachmentButton, AttachmentPreviews } from "../../attachments/components/AttachmentDraft";
 import { useAttachmentDraft } from "../../attachments/hooks/useAttachmentDraft";
@@ -46,6 +46,8 @@ const findSlash = (value: string, caret: number): SlashState | null => {
 export interface ConversationComposerHandle {
   quoteMessage: (message: SessionMessage) => void;
   editQueuedMessage: (item: FollowUpQueueItem, remove: (id: string) => Promise<boolean>) => Promise<boolean>;
+  hasDraft: () => boolean;
+  insertForward: (text: string) => boolean;
 }
 
 interface ConversationComposerProps {
@@ -103,6 +105,7 @@ export function ConversationComposer({
   const [activeSlash, setActiveSlash] = useState(0);
   const [collapsedSlashGroups, setCollapsedSlashGroups] = useState<Record<string, boolean>>({});
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const promptId = useId();
   const submittingRef = useRef(false);
   const draft = useAttachmentDraft();
   const [withdrawing, setWithdrawing] = useState(false);
@@ -114,6 +117,16 @@ export function ConversationComposer({
   )) || [];
   const hasContent = Boolean(text.trim() || draft.attachments.length || inheritedAttachments.length);
   useImperativeHandle(ref, () => ({
+    hasDraft: () => Boolean(editing || hasContent || quote || submittingRef.current || draft.uploading),
+    insertForward: value => {
+      if (inputDisabled || editing || hasContent || quote || submittingRef.current || !value.trim()) {
+        draft.setError("请先处理输入框中的草稿，再转发消息");
+        return false;
+      }
+      setText(value);
+      requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+      return true;
+    },
     quoteMessage: message => {
       if (!selected || archived) return;
       onCancelEdit();
@@ -323,10 +336,10 @@ export function ConversationComposer({
           uploadSlow={draft.uploadSlow}
           onRemove={draft.removeFile}
         />
-        <label className={styles.srOnly} htmlFor="prompt">给 Codex 发送指令</label>
+        <label className={styles.srOnly} htmlFor={promptId}>给 Codex 发送指令</label>
         <QuoteDraft quote={quote} onClear={() => setQuote(null)} />
         <textarea
-          id="prompt"
+          id={promptId}
           ref={textareaRef}
           rows={2}
           value={text}

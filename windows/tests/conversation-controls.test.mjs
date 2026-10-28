@@ -995,3 +995,24 @@ test('managed research retains read-only policy inside a registered project on f
   assert.equal(resume.params.developerInstructions, 'Only research');
   for (const c of calls.filter(c => c.method === 'turn/start')) assert.equal(c.params.sandboxPolicy.type, 'readOnly');
 });
+
+test("reading runtime settings resumes an unloaded original thread without creating a conversation", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "negus-unloaded-context-"));
+  const calls = [];
+  const thread = { id: "old-thread", cwd: root, path: path.join(root, "rollout.jsonl") };
+  const store = createAppServerConversationStore({ projectRoot: root, autoTitleEnabled: false, registerMedia: () => null,
+    client: { subscribe: () => () => {}, close() {}, request: async (method, params) => {
+      calls.push({ method, params });
+      if (method === "thread/read") throw Error("thread not loaded: old-thread");
+      if (method === "thread/resume") return { thread, model: "gpt-6.1-terra", reasoningEffort: "xhigh" };
+      throw Error(`Unexpected request: ${method}`);
+    } },
+  });
+  try {
+    const result = await store.getRuntimeContext("old-thread");
+    assert.equal(result.model, "gpt-6.1-terra");
+    assert.equal(result.reasoningEffort, "xhigh");
+    assert.ok(calls.every(call => call.params.threadId === "old-thread"));
+    assert.equal(calls.some(call => /start|fork/.test(call.method)), false);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});

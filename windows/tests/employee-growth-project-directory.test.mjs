@@ -47,7 +47,7 @@ test("registry provisions isolated context roots and keeps legacy developer bind
   await fs.writeFile(stateFile, JSON.stringify({ employees: [{ id: "developer", mainThreadId: "old-thread", conversationId: "old-conversation" }] }));
   const registry = await createEmployeeProjectRegistry({ stateFile, workspaceRoot: root });
   t.after(() => registry.close());
-  assert.deepEqual(registry.list().map((item) => item.id), ["manager", "researcher", "developer", "reviewer", "grok"]);
+  assert.deepEqual(registry.list().map((item) => item.id), ["negus-assistant", "manager", "researcher", "developer", "reviewer", "grok"]);
   assert.equal(registry.get("developer").mainThreadId, "old-thread");
   assert.equal(registry.get("developer").conversationId, "old-conversation");
   assert.notEqual(registry.get("manager").contextRoot, registry.get("developer").contextRoot);
@@ -73,8 +73,8 @@ test("growth stores facts immediately and keeps rules/skills pending until appro
     employeeRuntime: { getStatus: async () => ({ status: { phase: "idle", active: false } }) },
   });
   const listing = await directory.list();
-  assert.equal(listing.projects.length, 6);
-  assert.equal(listing.projects.filter((item) => item.kind === "employee").length, 5);
+  assert.equal(listing.projects.length, 7);
+  assert.equal(listing.projects.filter((item) => item.kind === "employee").length, 6);
 });
 
 test("reviewer failures return a failed result without throwing", async (t) => {
@@ -131,4 +131,49 @@ test("failed directory scan releases the shared request for retry", async () => 
   await assert.rejects(directory.list(), /unavailable/);
   fail = false;
   assert.equal((await directory.list()).projects.length, 1);
+});
+
+test("directory returns fresh employee previews without opening their conversations", async () => {
+  const messages = [{ role: "assistant", text: "上次回复", createdAt: "2026-10-28T09:00:00Z" }];
+  const directory = createEmployeeProjectDirectory({
+    project: "negus", projectRoot: "/fixture",
+    registry: { list: () => [{ id: "developer", mainThreadId: "thread-B", conversationId: "conversation-B" }] },
+    employeeConversations: { readMessages: async () => messages },
+    conversations: {
+      findSession: async () => ({ updatedAt: "2026-10-28T10:00:00Z",
+        messages: [{ role: "assistant", text: "原生记录新回复", createdAt: "2026-10-28T10:00:00Z" }] }),
+      listSessions: async () => [],
+    },
+  });
+  const first = (await directory.list()).projects.find(project => project.kind === "employee").conversations[0];
+  assert.equal(first.latestMessage, "原生记录新回复");
+  messages.push({ role: "assistant", text: "刚收到\n更新的回复", createdAt: "2026-10-28T11:00:00Z" });
+  const next = (await directory.list()).projects.find(project => project.kind === "employee").conversations[0];
+  assert.equal(next.latestMessage, "刚收到 更新的回复");
+  assert.equal(next.latestMessageAt, "2026-10-28T11:00:00Z");
+  assert.equal(next.lastActivityAt, "2026-10-28T11:00:00Z");
+  assert.equal(next.messages, undefined);
+});
+
+test("task directory deduplicates threads and sorts by real messages, not recovery updates", async () => {
+  let latestMessageAt = "2026-10-28T05:46:02.516Z";
+  const calls = [];
+  const directory = createEmployeeProjectDirectory({
+    project: "negus", projectRoot: "/fixture",
+    registry: { list: () => [{ id: "developer" }] },
+    agentTasks: { directoryEntries: () => [
+      { threadId: "thread", conversationId: "handoff-1", lastActivityAt: "2026-10-28T04:45:27Z", status: { active: false, phase: "completed" } },
+      { threadId: "thread", conversationId: "handoff-1", lastActivityAt: "2026-10-28T15:28:22Z", status: { active: false, phase: "completed" } },
+    ], providerForThread: () => "vip" },
+    taskSessionSummaries: async (...args) => { calls.push(args); return [{ threadId: "thread", latestMessageAt, latestMessage: "消息" }]; },
+    conversations: { listSessions: async () => [] },
+  });
+  const read = async () => (await directory.list()).projects.find(project => project.kind === "employee");
+  const first = await read();
+  assert.equal(first.conversations.length, 1);
+  assert.equal(first.conversations[0].lastActivityAt, latestMessageAt);
+  assert.equal(first.lastActivityAt, latestMessageAt);
+  assert.deepEqual(calls, [["vip", "all", false]]);
+  latestMessageAt = "2026-10-28T16:00:00Z";
+  assert.equal((await read()).conversations[0].lastActivityAt, latestMessageAt);
 });

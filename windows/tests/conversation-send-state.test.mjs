@@ -125,3 +125,21 @@ test('first send creates one draft with final settings and survives navigating a
   assert.equal(selectedId, 'b');
   assert.equal(sessions.get('real').messages[0].deliveryState, 'failed');
 });
+
+for (const phase of ['completed', 'failed']) test(`late send response cannot replace ${phase} received in real time`, async () => {
+  const gate = deferred();
+  const render = await harness('features/execution/hooks/useCodexExecution.ts', {
+    createClientId: () => 'submission',
+    executionApi: { sendMessage: () => gate.promise },
+  });
+  const h = render('useCodexExecution', 'a');
+  const sent = h.sendMessage('message', [], `late-${phase}`);
+  h.handleEvent({ type: 'execution_status', threadId: 'a', turnId: 'new-turn', phase,
+    active: false, activities: [], label: phase, detail: phase === 'failed' ? 'quota exceeded' : '',
+    notices: phase === 'failed' ? ['quota exceeded'] : [], startedAt: new Date().toISOString() });
+  gate.resolve({ threadId: 'a', turnId: 'new-turn', status: 'inProgress' });
+  assert.equal((await sent).outcome, 'accepted');
+  const status = render('useCodexExecution', 'a').status;
+  assert.equal(status.phase, phase);
+  assert.equal(status.active, false);
+});

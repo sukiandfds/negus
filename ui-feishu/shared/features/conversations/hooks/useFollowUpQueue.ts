@@ -14,6 +14,7 @@ export function useFollowUpQueue(threadId: string) {
   const [error, setError] = useState("");
   const threadIdRef = useRef(threadId);
   const requestRef = useRef(0);
+  const accepted = useRef(new Set<string>());
   if (threadIdRef.current !== threadId) {
     threadIdRef.current = threadId;
     requestRef.current += 1;
@@ -81,11 +82,17 @@ export function useFollowUpQueue(threadId: string) {
   }, [run, threadId]);
 
   const handleEvent = useCallback((event: ProjectEvent) => {
+    if (event.type === "user_message_accepted") {
+      accepted.current.add(event.submissionId);
+      if (accepted.current.size > 500) accepted.current.delete(accepted.current.values().next().value!);
+      setSnapshot(current => ({ ...current, items: current.items.filter(item => (item.dispatchSubmissionId || item.submissionId) !== event.submissionId) }));
+      return;
+    }
     if (event.type !== "queue_changed" || event.threadId !== threadIdRef.current) return;
     requestRef.current += 1;
     setSnapshot({ threadId: event.threadId, items: event.items || [] });
     setError("");
   }, [threadId]);
 
-  return { items: snapshot.threadId === threadId ? snapshot.items : [], loading, busy, error, enqueue, remove, move, retry, sendNow, refresh, handleEvent };
+  return { items: snapshot.threadId === threadId ? snapshot.items.filter(item => !accepted.current.has(item.dispatchSubmissionId || item.submissionId)) : [], loading, busy, error, enqueue, remove, move, retry, sendNow, refresh, handleEvent };
 }

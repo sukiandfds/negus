@@ -36,7 +36,7 @@ export const startBackend = async (cfg, entryScript, loaderScript) => {
   }
   const pid = await detached(entry, ["--port", String(cfg.port), "--observer-port", "9350",
     "--project", "negus", "--project-root", root, "--web-root", cfg.webRoot,
-    "--token", cfg.token, "--device-name", cfg.deviceName], "negus-web-demo.log", { NEGUS_INSTALL_ROOT: root }, loader ? ["--import", loader] : []);
+    "--token", cfg.token, "--device-name", cfg.deviceName], "negus-web-demo.log", { NEGUS_INSTALL_ROOT: root, NEGUS_UI_STATE_ROOT: path.join(runtime, "ui-feishu") }, loader ? ["--import", loader] : []);
   const owner = await identity(pid, entry);
   const state = { pid, entryScript: entry, ...(loader ? { loaderScript: loader } : {}), port: cfg.port, startedAt: new Date().toISOString(), processStarted: owner?.started,
     webRoot: cfg.webRoot, deviceName: cfg.deviceName };

@@ -11,9 +11,6 @@ const extension = new URL('./group-extension.mjs', import.meta.url).href;
 const taskRoutes = new URL('./task-routes.mjs', import.meta.url).href;
 const employeeTasks = new URL('./employee-task-extension.mjs', import.meta.url).href;
 const existingProjects = new URL('./existing-projects.mjs', import.meta.url).href;
-const stateRoot = process.env.NEGUS_UI_STATE_ROOT
-  ? path.resolve(process.env.NEGUS_UI_STATE_ROOT)
-  : fileURLToPath(new URL('../runtime/groups/', import.meta.url));
 registerHooks({ load(url, context, nextLoad) {
   const result = nextLoad(url, context);
   if (url.endsWith('/windows/server/app-server-client.mjs')) return { ...result, source: adaptExecutionClientSource(fs.readFileSync(fileURLToPath(url), 'utf8')) };
@@ -51,12 +48,13 @@ registerHooks({ load(url, context, nextLoad) {
     source = `import { extendEmployeeTasks } from ${JSON.stringify(employeeTasks)};\n` + source.replace(employeeMarker, `agentTasks = await extendEmployeeTasks(agentTasks, {
       stateRoot: path.join(process.env.NEGUS_UI_STATE_ROOT || path.join(projectRoot, 'runtime', 'ui-feishu'), 'employee-tasks'),
       registry: employeeRegistry, modelProviders, appServerClient, bindings: employeeConversationStore,
+      providerForThread: threadId => appServerConversations.getRecordedProviderForThread(threadId),
       execution, queue: followUpQueue, broadcast: realtime.broadcast,
     });\n${employeeMarker}`);
     const marker = 'const requestHandler = createRequestHandler({';
     if (!source.includes(marker)) throw new Error('Group extension: host integration point changed');
     source = `import { extendGroupRooms } from ${JSON.stringify(extension)};\n` + source.replace(marker, `
-await extendGroupRooms({ stateRoot: ${JSON.stringify(stateRoot)}, roomDirectory: groupRoomDirectory, services: multiAgentDirectory,
+await extendGroupRooms({ stateRoot: path.resolve(process.env.NEGUS_UI_STATE_ROOT || path.join(projectRoot, 'runtime', 'ui-feishu')), roomDirectory: groupRoomDirectory, services: multiAgentDirectory,
   projects: () => projectIdentity.list(), employees: () => employeeRegistry.listRuntimeProfiles(), broadcast: realtime.broadcast,
   onMessageCreated: broadcastEmployeeGroupMessage,
   createServiceOptions: (identity, room) => ({ projectRoot: identity.root || projectRoot,

@@ -503,6 +503,9 @@ test("normalizes a persisted recovery failure after the service restarts", async
     const status = tracker.getStatus("thread-recovery-failed");
     assert.equal(status.phase, "interrupted");
     assert.equal(status.label, "项目服务已重启，上一任务已中断");
+    assert.equal(status.interruptionReason, "serviceRestart");
+    assert.ok(status.notices.includes("项目服务已重启，上一任务已中断"));
+    assert.equal(status.updatedAt, "2026-08-03T06:48:27.000Z");
     assert.equal(status.active, false);
     assert.equal(status.streamingItemId, "");
     assert.equal(status.streamingText, "");
@@ -510,4 +513,29 @@ test("normalizes a persisted recovery failure after the service restarts", async
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
+});
+
+test('protocol errors and warnings remain visible through completion and preserve retry state', () => {
+  const tracker = createExecutionTracker({ broadcast: () => {} });
+  tracker.handleProtocolMessage({ method: 'turn/started', params: { threadId: 't', turn: { id: 'turn' } } });
+  tracker.handleProtocolMessage({ method: 'error', params: { threadId: 't', turnId: 'turn', willRetry: true, error: { message: 'retrying' } } });
+  assert.equal(tracker.getStatus('t').active, true);
+  tracker.handleProtocolMessage({ method: 'error', params: { threadId: 't', turnId: 'turn', willRetry: false, error: { message: '403: 额度不足' } } });
+  assert.equal(tracker.getStatus('t').phase, 'failed');
+  tracker.handleProtocolMessage({ method: 'turn/completed', params: { threadId: 't', turn: { id: 'turn', status: 'failed' } } });
+  assert.deepEqual(tracker.getStatus('t').notices, ['retrying', '403: 额度不足']);
+  tracker.handleProtocolMessage({ method: 'warning', params: { threadId: 'idle', message: 'model changed' } });
+  assert.equal(tracker.getStatus('idle').active, false);
+  assert.deepEqual(tracker.getStatus('idle').notices, ['model changed']);
+});
+
+test('native user receipt identifies the exact submitted message before assistant progress', () => {
+  const events = [];
+  const tracker = createExecutionTracker({ broadcast: event => events.push(event) });
+  tracker.handleProtocolMessage({ method: 'turn/started', params: { threadId: 't', turn: { id: 'turn' } } });
+  tracker.handleProtocolMessage({ method: 'item/started', params: { threadId: 't', turnId: 'turn', item: { type: 'userMessage', id: 'native-id', clientId: 'submitted-id' } } });
+  const receipt = events.find(event => event.type === 'user_message_accepted');
+  assert.equal(receipt.submissionId, 'submitted-id');
+  assert.equal(receipt.turnId, 'turn');
+  assert.equal(receipt.threadId, 't');
 });

@@ -37,16 +37,7 @@ const prepare = async (revision) => withLock("negus-service-operation", async ()
   const state = await readJson(releaseStateFile, {});
   let fallback = state.active;
   if (fallback) {
-    try {
-      await verifyRelease(fallback);
-    } catch (error) {
-      // Releases created before the web-ui -> ui-feishu migration cannot be
-      // verified by the current publisher. Preserve the upgrade boundary by
-      // making a fresh, smoke-tested working-copy fallback before preparing
-      // the candidate instead of carrying an unverifiable pointer forward.
-      if (!/ui-feishu\/dist|Missing|Release missing verification/u.test(String(error?.message || error))) throw error;
-      fallback = await snapshotRelease({ build: true });
-    }
+    await verifyRelease(fallback);
   }
   else {
     if (!revision) throw new Error("First upgrade requires prepare --fallback-revision <commit>; an old in-memory process is not a recoverable release.");

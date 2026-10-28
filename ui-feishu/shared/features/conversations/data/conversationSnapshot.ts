@@ -4,7 +4,7 @@ import { readStorage, writeStorage } from "../../../shared/state/storage";
 const storageKey = "negus-conversation-snapshot-v1";
 const legacyStorageKey = "codex-collab-conversation-snapshot-v1";
 const maxSnapshotCharacters = 1024 * 1024;
-const maxCachedConversations = 5;
+const maxCachedConversations = 10;
 const maxCachedMessages = 60;
 
 export interface CachedConversation {
@@ -88,6 +88,7 @@ export const writeConversationSnapshot = ({ selectedId, sessions, session, cache
       ? { ...session, messages: session.messages.slice(-maxCachedMessages) }
       : null;
     const previousEntries: CachedConversation[] = [
+      ...[...(cachedSessions?.values() || [])].sort((a, b) => Date.parse(b.updatedAt || "") - Date.parse(a.updatedAt || "")).map(session => ({ savedAt, isPartial: Boolean(session.hasMore), session })),
       ...(previous?.session ? [{
         savedAt: previous.savedAt,
         isPartial: previous.isPartial,

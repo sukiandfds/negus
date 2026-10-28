@@ -40,6 +40,7 @@ export interface ExecutionStatus {
   label: string;
   detail: string;
   commentary: string;
+  notices?: string[];
   hasFinalAnswer?: boolean;
   streamingItemId?: string;
   streamingText?: string;
@@ -148,4 +149,4 @@ export interface HeartbeatEvent {
   at: string;
 }
 
-export type ProjectEvent = ExecutionStatus | AssistantDeltaEvent | AssistantCommentaryEvent | SessionsChangedEvent | UserMessageSubmittedEvent | QueueChangedEvent | GoalStatusEvent | UserInputRequestedEvent | UserInputResolvedEvent | ContextStatus | HeartbeatEvent | RealtimeConnectedEvent;
+export type ProjectEvent = { type: "user_message_accepted"; threadId: string; turnId: string; submissionId: string } | ExecutionStatus | AssistantDeltaEvent | AssistantCommentaryEvent | SessionsChangedEvent | UserMessageSubmittedEvent | QueueChangedEvent | GoalStatusEvent | UserInputRequestedEvent | UserInputResolvedEvent | ContextStatus | HeartbeatEvent | RealtimeConnectedEvent;

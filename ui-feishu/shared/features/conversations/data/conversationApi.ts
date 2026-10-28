@@ -1,5 +1,5 @@
 import type { ProjectInfo, SessionResponse, SessionSummary } from "../model/types";
-import { currentConversationId, conversationQuery, withConversation } from "../../../shared/api/conversationScope";
+import { currentConversationId, resolveConversationId, conversationQuery, withConversation } from "../../../shared/api/conversationScope";
 import { fetchJson, postJson } from "../../../shared/api/http";
 
 const PAGE_SIZE = 60;
@@ -28,7 +28,7 @@ const fetchConversationJson = async <T,>(pathname: string, signal?: AbortSignal)
 
 export const conversationApi = {
   project: (signal?: AbortSignal) => fetchConversationJson<ProjectInfo>("/api/project", signal),
-  sessions: (archived = false, signal?: AbortSignal) => fetchConversationJson<SessionSummary[]>(`/api/sessions?source=all${archived ? "&archived=1" : ""}${conversationQuery()}`, signal),
+  sessions: (archived = false, signal?: AbortSignal) => fetchConversationJson<SessionSummary[]>(`/api/sessions?source=all${archived ? "&archived=1" : ""}`, signal),
   create: (model = "", projectRoot = "", modelProviderId = "", signal?: AbortSignal) => postJson<SessionSummary>("/api/session", { model, modelProviderId, projectRoot, createdBy: 'user' }, signal),
   rename: (threadId: string, name: string, signal?: AbortSignal) => postJson<SessionSummary>("/api/session/name", withConversation({ threadId, name }), signal),
   fork: (threadId: string, lastTurnId: string, signal?: AbortSignal) => postJson<{
@@ -36,13 +36,15 @@ export const conversationApi = {
     sourceThreadId: string;
     forkedFromTurnId: string;
   }>("/api/session/fork", withConversation({ threadId, lastTurnId }), signal),
+  revert: (threadId: string, beforeTurnId: string) => postJson<{ threadId: string }>("/api/session/revert", withConversation({ threadId, beforeTurnId })),
   archive: (threadId: string, signal?: AbortSignal) => postJson<{ threadId: string; archived: boolean }>("/api/session/archive", withConversation({ threadId }), signal),
   unarchive: (threadId: string, signal?: AbortSignal) => postJson<SessionSummary>("/api/session/unarchive", withConversation({ threadId }), signal),
-  session: (threadId: string, { before, cursor, contentVersion }: {
+  session: async (threadId: string, { before, cursor, contentVersion }: {
     before?: number;
     cursor?: string;
     contentVersion?: number;
-  } = {}, signal?: AbortSignal, conversationId = currentConversationId()) => {
+  } = {}, signal?: AbortSignal, conversationId = currentConversationId(threadId)) => {
+    conversationId ||= await resolveConversationId(threadId);
     const beforeQuery = before === undefined ? "" : `&before=${before}`;
     const cursorQuery = cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`;
     const contentVersionQuery = contentVersion === undefined ? "" : `&contentVersion=${contentVersion}`;

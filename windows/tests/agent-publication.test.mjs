@@ -49,6 +49,68 @@ const fixture = async (t) => {
   return { service, conversationStore, conversationStateFile, groupRoom, roomDirectory, publicationStore, events };
 };
 
+test("history reads wait for runtime writes without blocking other conversations", { timeout: 5000 }, async (t) => {
+  const { conversationStore } = await fixture(t);
+  for (const name of ["a", "b"]) {
+    await conversationStore.bindRuntime({ conversationId: `conversation-${name}`, agentId: "manager", runtimeSessionId: `thread-${name}`, conversationKind: "direct" });
+    await conversationStore.appendMessage({ conversationId: `conversation-${name}`, message: { id: "old", role: "assistant", text: "OLD" } });
+  }
+  const originalAppend = fs.appendFile;
+  let release;
+  let entered;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const started = new Promise((resolve) => { entered = resolve; });
+  fs.appendFile = async (...args) => { entered(); await gate; return originalAppend(...args); };
+  let writing;
+  let reading;
+  try {
+    writing = conversationStore.recordRuntimeEvent({ method: "item/completed", params: { threadId: "thread-b", item: { id: "new", type: "agentMessage", phase: "final_answer", text: "NEW" } } });
+    let settled = false;
+    reading = conversationStore.readMessages("conversation-b").then((messages) => { settled = true; return messages; });
+    await started;
+    assert.equal((await conversationStore.readMessages("conversation-a")).at(-1).text, "OLD");
+    assert.equal(settled, false);
+    release();
+    await writing;
+    assert.equal((await reading).at(-1).text, "NEW");
+  } finally {
+    release();
+    await Promise.allSettled([writing, reading]);
+    fs.appendFile = originalAppend;
+  }
+});
+
+test("history reads propagate pending write failures and later recover", { timeout: 5000 }, async (t) => {
+  const { conversationStore } = await fixture(t);
+  await conversationStore.bindRuntime({ conversationId: "conversation-b", agentId: "manager", runtimeSessionId: "thread-b", conversationKind: "direct" });
+  await conversationStore.appendMessage({ conversationId: "conversation-b", message: { id: "old", role: "assistant", text: "OLD" } });
+  const originalAppend = fs.appendFile;
+  const failure = new Error("delayed write failed");
+  let release;
+  let entered;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const started = new Promise((resolve) => { entered = resolve; });
+  fs.appendFile = async () => { entered(); await gate; throw failure; };
+  let writing;
+  let reading;
+  try {
+    writing = conversationStore.recordRuntimeEvent({ method: "item/completed", params: { threadId: "thread-b", item: { id: "new", type: "agentMessage", phase: "final_answer", text: "NEW" } } });
+    reading = conversationStore.readMessages("conversation-b");
+    const writeRejected = assert.rejects(writing, (error) => error === failure);
+    const readRejected = assert.rejects(reading, (error) => error === failure);
+    await started;
+    release();
+    await Promise.all([writeRejected, readRejected]);
+    assert.equal((await conversationStore.readMessages("conversation-b")).at(-1).text, "OLD");
+  } finally {
+    release();
+    await Promise.allSettled([writing, reading]);
+    fs.appendFile = originalAppend;
+  }
+  await conversationStore.appendMessage({ conversationId: "conversation-b", message: { id: "new", role: "assistant", text: "NEW" } });
+  assert.equal((await conversationStore.readMessages("conversation-b")).at(-1).text, "NEW");
+});
+
 test("publishes one Agent message without starting a discussion", async (t) => {
   const { service, conversationStore, groupRoom, events } = await fixture(t);
   const targets = await conversationStore.getShareTargets({ threadId: "thread-manager" });

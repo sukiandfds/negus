@@ -783,6 +783,7 @@ export const createEmployeeRuntimeService = ({
     readSession,
     renameSession,
     forkSession,
+    revertSession: (employeeId, beforeTurnId) => requestThread(employeeId, "thread/revert", { beforeTurnId }),
     archiveSession,
     unarchiveSession,
     reviewSession,

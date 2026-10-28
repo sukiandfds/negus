@@ -212,6 +212,7 @@ followUpQueue = createFollowUpQueueService({
 });
 
 contextManagement = await createContextManagementService({
+  onError: (threadId, error) => execution.handleProtocolMessage({ method: "error", params: { threadId, error: { message: error.message || String(error) }, willRetry: false } }),
   stateFile: path.join(projectRoot, "runtime", "context-settings.json"),
   broadcast: realtime.broadcast,
   getExecutionStatus: execution.getStatus,
@@ -402,6 +403,7 @@ employeeRuntime = createEmployeeRuntimeService({
 });
 const employeeProjectDirectory = createEmployeeProjectDirectory({
   agentTasks,
+  taskSessionSummaries: appServerConversations.listSessionsForProvider,
   project,
   projectRoot,
   registry: employeeRegistry,

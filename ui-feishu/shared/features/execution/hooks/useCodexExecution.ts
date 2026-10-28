@@ -289,12 +289,14 @@ export function useCodexExecution(threadId: string) {
       stateRevisionRef.current += 1;
       clearStreaming();
     }
+    const sendRevision = stateRevisionRef.current;
     try {
       const accepted = await executionApi.sendMessage(targetThreadId, message, attachmentIds, acceptedSubmissionId, controller.signal, conversationId);
       if (!isCurrent() || targetThreadId !== threadId) return accepted.status === "pending"
         ? { outcome: "uncertain", result: null }
         : { outcome: "accepted", result: accepted };
       if (accepted.status === "pending") {
+        if (sendRevision !== stateRevisionRef.current) return { outcome: "uncertain", result: null };
         stateRevisionRef.current += 1;
         setStatus((current) => ({
           ...current,
@@ -307,7 +309,7 @@ export function useCodexExecution(threadId: string) {
         return { outcome: "uncertain", result: null };
       }
       if (accepted.threadId !== targetThreadId) return { outcome: "accepted", result: accepted };
-      if (accepted.turnId) {
+      if (accepted.turnId && sendRevision === stateRevisionRef.current) {
         currentTurnIdRef.current = accepted.turnId;
         stateRevisionRef.current += 1;
         setStatus((current) => ({
@@ -327,6 +329,7 @@ export function useCodexExecution(threadId: string) {
       const detail = uncertain
         ? "发送确认超时，未重复提交；请确认任务状态后重试"
         : receipt?.error || (reason instanceof Error ? reason.message : String(reason));
+      if (sendRevision !== stateRevisionRef.current) return uncertain ? { outcome: "uncertain", result: null } : { outcome: "failed", result: null, error: detail };
       if (steering) {
         setStatus((current) => uncertain
           ? { ...current, phase: "unknown", label: "正在确认指令是否已送达", detail }

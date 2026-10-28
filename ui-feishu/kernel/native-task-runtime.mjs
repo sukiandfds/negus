@@ -75,8 +75,8 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
       if (candidates.length > 1) return { status: 'unknown', error: '发现多次可能的执行，无法确认本次任务结果' };
       const found = candidates[0];
       const idle = value.thread?.status?.type === 'idle' || value.thread?.status === 'idle';
-      if ((recovering || turnId) && idle && (!found || !terminal.has(found.status))) return {
-        status: 'interrupted', text: found ? resultFrom(found).text : '', error: '原执行已不在运行，任务未自动重复启动',
+      if ((recovering || turnId) && idle && found && !terminal.has(found.status)) return {
+        status: 'interrupted', text: resultFrom(found).text, error: '原执行已不在运行，任务未自动重复启动',
       };
       if (!found) return { status: 'unknown', error: '尚未在原会话中确认这次执行' };
       if (!turnId) {

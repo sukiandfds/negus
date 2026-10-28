@@ -1,5 +1,5 @@
 import { fetchJson, postJson } from "../../../shared/api/http";
-import { conversationQuery, withConversation, currentConversationId } from "../../../shared/api/conversationScope";
+import { conversationQuery, withConversation, currentConversationId, resolveConversationId } from "../../../shared/api/conversationScope";
 import type { ExecutionStatus, UserInputRequest } from "../model/types";
 
 export interface SendMessageResult {
@@ -32,7 +32,8 @@ interface InterruptResult {
 const statusRequests = new Map<string, Promise<ExecutionStatus>>();
 
 export const executionApi = {
-  status: (threadId: string, signal?: AbortSignal, reconcile = false, conversationId = currentConversationId()) => {
+  status: async (threadId: string, signal?: AbortSignal, reconcile = false, conversationId = currentConversationId(threadId)) => {
+    conversationId ||= await resolveConversationId(threadId);
     const url = `/api/execution-status?threadId=${encodeURIComponent(threadId)}${conversationQuery(conversationId)}${reconcile ? "&reconcile=1" : ""}`;
     if (reconcile) return fetchJson<ExecutionStatus>(url, signal);
     if (signal?.aborted) return Promise.reject(signal.reason);

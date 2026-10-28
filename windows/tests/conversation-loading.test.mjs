@@ -22,6 +22,7 @@ async function harness(cachedSessions = [], partialSessionIds = []) {
   const rewritten = source.replace(/import .* from "react";/, `const {useState,useRef,useCallback,useEffect}=globalThis.${key}.hooks;`)
     .replace(/import .* from "\.\.\/data\/conversationApi";/, `const conversationApi=globalThis.${key}.api;`)
     .replace(/import .* from ".*pendingThread";/, 'const isPendingThread=id=>id.startsWith("pending:");')
+    .replace(/import .* from ".*useCodexExecution";/, "const preloadExecutionStatus = async () => {}; ")
     .replace('"../state/conversationMerge"', JSON.stringify(mergeUrl));
   const { useConversationSession } = await import(moduleUrl(rewritten));
   delete globalThis[key];
@@ -88,8 +89,10 @@ test("selecting an in-flight prefetch immediately clears previous error and show
 
 const groupSource = compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/hooks/useGroupRoom.ts", import.meta.url), "utf8"));
 const groupMessageUrl = moduleUrl(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/data/groupMessageState.ts", import.meta.url), "utf8")));
+const mentionsUrl = moduleUrl(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/model/agentMentions.ts", import.meta.url), "utf8")));
+const storageUrl = moduleUrl(compile(await fs.readFile(new URL("../../ui-feishu/shared/shared/state/storage.ts", import.meta.url), "utf8")));
 const groupSnapshotUrl = moduleUrl(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/data/groupSnapshot.ts", import.meta.url), "utf8"))
-  .replace('"./groupMessageState"', JSON.stringify(groupMessageUrl)));
+  .replace('"./groupMessageState"', JSON.stringify(groupMessageUrl)).replace('"../../../shared/state/storage"', JSON.stringify(storageUrl)));
 const groupSnapshot = (id, text = id) => ({ room: { id }, messages: [{ id: `${id}-message`, text, sequence: 1 }], agents: [], members: [] });
 const groupPage = (text) => ({ messages: [{ id: text, text, sequence: 1 }], found: true, hasOlder: false, hasNewer: false, oldestSequence: 1, newestSequence: 1 });
 
@@ -107,6 +110,7 @@ async function groupHarness() {
     .replace(/import .* from ".*clientId";/, 'const createClientId=()=>"test";')
     .replace(/import .* from ".*groupMemberStorage";/, 'const readStoredMember=()=>null,writeStoredMember=()=>{},createMemberId=()=>"test";')
     .replace(/import .* from ".*groupApi";/, `const groupApi=globalThis.${key}.api;`)
+    .replace('"../model/agentMentions"', JSON.stringify(mentionsUrl))
     .replace('"../data/groupMessageState"', JSON.stringify(groupMessageUrl))
     .replace('"../data/groupSnapshot"', JSON.stringify(groupSnapshotUrl))
     .replace(/import .* from ".*useGroupEvents";/, 'const useGroupEvents=()=>({});');
@@ -176,6 +180,7 @@ test("group switch cancels the old frame and new-room deltas still paint; closed
   globalThis[key] = { hooks };
   const rewritten = source.replace(/import .* from "react";/, `const {useState,useRef,useEffect}=globalThis.${key}.hooks;`)
     .replace(/import .* from ".*groupApi";/, 'const groupApi={eventsUrl:()=>"/events"};')
+    .replace('"../model/agentMentions"', JSON.stringify(mentionsUrl))
     .replace('"../data/groupMessageState"', JSON.stringify(groupMessageUrl))
     .replace('"../data/groupSnapshot"', JSON.stringify(groupSnapshotUrl));
   const { useGroupEvents } = await import(moduleUrl(rewritten));

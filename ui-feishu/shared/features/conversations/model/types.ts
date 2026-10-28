@@ -38,6 +38,7 @@ export interface SessionMessage {
   itemId?: string;
   authorId?: string;
   authorName?: string;
+  displaySourceAgentId?: string;
   sequence?: number;
   source?: string;
 }

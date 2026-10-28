@@ -291,7 +291,9 @@ export const createAgentConversationStore = async ({ stateFile, groupRoom, roomD
   const readMessages = async (conversationId) => {
     const binding = bindings.get(clean(conversationId, 120));
     if (!binding) throw statusError("对话不存在", 404);
-    return readHistoryFile(path.join(historyRoot, historyFileName(binding.conversationId)));
+    const file = path.join(historyRoot, historyFileName(binding.conversationId));
+    await historyQueues.get(file);
+    return readHistoryFile(file);
   };
 
   const readMessage = async (conversationId, messageId) => {

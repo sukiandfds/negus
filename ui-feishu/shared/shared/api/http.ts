@@ -68,7 +68,7 @@ const requestJson = async <T,>(pathname: string, {
     if (method === "GET" && response.status === 401) throw new Error("访问令牌无效，请使用启动命令输出的完整链接");
     if (method === "GET" && response.status === 404) throw new HttpError("请求的项目会话不存在", response.status);
     const message = typeof payload?.error === "string" && payload.error.trim()
-      ? payload.error.slice(0, 400)
+      ? payload.error
       : method === "GET" ? `项目数据服务暂不可用（${response.status}）` : `${errorMessage}（${response.status}）`;
     throw new Error(message);
   }

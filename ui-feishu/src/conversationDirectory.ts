@@ -1,4 +1,5 @@
 import { conversationStatus } from './presentation';
+import { visibleTaskPreview } from './taskNotice';
 import type { DirectoryConversation, DirectoryProject } from '../shared/features/project-directory/model/types';
 import type { Conversation, ConversationState, DirectoryState } from './types';
 
@@ -8,19 +9,28 @@ export const conversationKey = (item: Conversation) => item.roomId ? `group:${it
 export const uniqueConversations = (items: Conversation[]) => [...new Map(items.map(item => [conversationKey(item), item])).values()].sort(byLatest);
 
 // Every view points to the same conversation identity and existing navigation route.
-export function buildConversationDirectory(directory: DirectoryState, sessions: ConversationState['sessions'], archived: boolean, projectRoot = '') {
+export function buildConversationDirectory(directory: DirectoryState, sessions: ConversationState['sessions'], archived: boolean, projectRoot = '', cachedSessions?: ConversationState['cachedSessions']) {
   const summaries = new Map(sessions.map(s => [s.threadId, s]));
   const toConversation = (project: DirectoryProject, entry: Entry): Conversation => {
-    const session = summaries.get(entry.threadId || '');
+    const listed = summaries.get(entry.threadId || '');
+    const cached = cachedSessions?.get(entry.threadId || '');
+    const session = cached && (!listed || (Date.parse(cached.updatedAt) || 0) > (Date.parse(listed.updatedAt) || 0)) ? cached : listed;
+    const isTask = /^(task|handoff)-/.test(entry.conversationId || '');
+    const messageTime = isTask && cached ? cached.messages.filter(message => message.role === 'user' || message.role === 'assistant')
+      .map(message => message.createdAt).filter(Boolean).sort((a, b) => (Date.parse(b || '') || 0) - (Date.parse(a || '') || 0))[0] : undefined;
+    const sessionTime = isTask ? messageTime : session?.updatedAt;
+    const directoryIsNewer = !sessionTime || (Date.parse(entry.lastActivityAt || entry.updatedAt || '') || 0) >= (Date.parse(sessionTime) || 0);
+    const previewIsNewer = !sessionTime || (Date.parse(entry.latestMessageAt || entry.lastActivityAt || '') || 0) >= (Date.parse(sessionTime) || 0);
     const status = directory.statusByThread[entry.threadId || ''] || entry.status;
     return {
       id: entry.id, name: entry.main && project.employeeId ? project.name : session?.title || entry.title,
       subtitle: project.name, agentId: project.employeeId, threadId: entry.threadId,
       conversationId: entry.conversationId, main: entry.main, pending: entry.pendingOpen,
-      origin: /^(task|handoff)-/.test(entry.conversationId || '') ? 'assistant' : session?.createdBy,
+      origin: isTask ? 'assistant' : session?.createdBy,
       projectId: entry.targetProjectId || project.projectId || project.id,
-      time: session?.updatedAt || entry.lastActivityAt || entry.updatedAt,
-      active: Boolean(status?.active), label: conversationStatus(status, directory.contextByThread[entry.threadId || '']), preview: session?.latestMessage, session,
+      time: directoryIsNewer ? entry.lastActivityAt || entry.updatedAt || sessionTime : sessionTime,
+      active: Boolean(status?.active), label: conversationStatus(status, directory.contextByThread[entry.threadId || '']),
+      preview: previewIsNewer && visibleTaskPreview(entry.latestMessage) ? entry.latestMessage : session?.latestMessage, session,
     };
   };
   const all: Conversation[] = [];
@@ -39,7 +49,7 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
         pendingOpen: !project.mainThreadId, status: project.status,
       }) : null);
       if (!main) continue;
-      employees.push({ ...main, time: project.lastActivityAt || main.time, children: uniqueConversations(rows.filter(row => !row.main)) });
+      employees.push({ ...main, time: (Date.parse(project.lastActivityAt || '') || 0) > (Date.parse(main.time || '') || 0) ? project.lastActivityAt : main.time, children: uniqueConversations(rows.filter(row => !row.main)) });
       all.push(...rows);
       if (!rows.some(row => conversationKey(row) === conversationKey(main)) && main.threadId) all.push(main);
     } else {
@@ -55,7 +65,7 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
     if (session.conversationKind === 'group' || all.some(row => row.threadId === session.threadId)) continue;
     all.push({ id: session.threadId, name: session.title || '未命名对话', subtitle: '项目对话',
       threadId: session.threadId, time: session.updatedAt, session,
-      origin: session.createdBy,
+      origin: session.createdBy || 'user',
       active: Boolean(directory.statusByThread[session.threadId]?.active),
       label: conversationStatus(directory.statusByThread[session.threadId], directory.contextByThread[session.threadId]), preview: session.latestMessage });
   }

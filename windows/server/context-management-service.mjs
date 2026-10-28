@@ -21,7 +21,7 @@ const emptyStatus = (threadId, threshold) => ({
 });
 
 export const createContextManagementService = async ({
-  stateFile, broadcast, getExecutionStatus, getRuntimeContext, compactContext,
+  stateFile, broadcast, getExecutionStatus, getRuntimeContext, compactContext, onError = () => {},
 }) => {
   const states = new Map();
   let settings = { version: 1, defaultThreshold: DEFAULT_THRESHOLD, threads: {} };
@@ -76,6 +76,7 @@ export const createContextManagementService = async ({
       await compactContext(threadId);
       return publicStatus(statusFor(threadId));
     } catch (error) {
+      onError(threadId, error);
       publish(threadId, {
         phase: "failed",
         message: error instanceof Error ? error.message : String(error),
@@ -153,6 +154,12 @@ export const createContextManagementService = async ({
     const { method, params = {} } = message || {};
     const threadId = params.threadId;
     if (!threadId) return;
+
+    if (statusFor(threadId).phase === "compacting"
+      && ((method === "error" && !params.willRetry) || (method === "turn/completed" && params.turn?.status === "failed"))) {
+      publish(threadId, { phase: "failed", message: params.error?.message || params.turn?.error?.message || "上下文压缩失败" });
+      return;
+    }
 
     if (method === "thread/tokenUsage/updated") {
       const usedTokens = Number(params.tokenUsage?.last?.totalTokens);

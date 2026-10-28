@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import test from "node:test";
+import { createConversationService } from "../server/conversation-service.mjs";
 import { createConversationRoutes } from "../server/routes/conversation-routes.mjs";
 
 const invoke = (route, body) => {
@@ -320,6 +321,7 @@ test("routes direct employee text through employee runtime", async () => {
   assert.deepEqual(employeeCalls, [{
     employeeId: "developer",
     text: "run employee task",
+    attachments: [],
     requestId: "employee-submission",
   }]);
   assert.deepEqual(JSON.parse(call.response.body), {
@@ -409,7 +411,7 @@ test("adds external models only for an owned employee conversation", async () =>
   assert.deepEqual(JSON.parse(call.response.body).map((model) => model.model), ["gpt-5.6-terra", "grok-4.6"]);
 });
 
-test("rejects employee attachments instead of bypassing employee runtime", async () => {
+test("routes employee attachments through employee runtime", async () => {
   const binding = {
     conversationId: "employee-conversation",
     agentId: "developer",
@@ -417,12 +419,13 @@ test("rejects employee attachments instead of bypassing employee runtime", async
     runtimeSessionId: "employee-thread",
     conversationKind: "direct",
   };
-  let employeeCalls = 0;
+  const employeeCalls = [];
+  const attachment = { id: "file-1", name: "test.txt", mimeType: "text/plain", path: "/tmp/test.txt" };
   const route = createConversationRoutes({
     conversations: { sendMessage: async () => { throw new Error("generic path used"); } },
     execution: { getStatus: () => ({ active: false, turnId: "" }) },
     contextManagement: {},
-    media: { resolveMany: () => [] },
+    media: { resolveMany: () => [attachment] },
     agentConversationStore: {
       findByRuntimeSession: () => binding,
       resolve: async () => binding,
@@ -430,7 +433,7 @@ test("rejects employee attachments instead of bypassing employee runtime", async
     employeeRuntime: {
       supportsEmployee: () => true,
       ownsConversation: (value) => value === binding,
-      sendMessage: async () => { employeeCalls += 1; },
+      sendMessage: async (value) => { employeeCalls.push(value); return { threadId: binding.runtimeSessionId, turnId: "employee-turn" }; },
     },
   });
 
@@ -441,8 +444,9 @@ test("rejects employee attachments instead of bypassing employee runtime", async
     attachmentIds: ["file-1"],
     submissionId: "employee-attachment-submission",
   });
-  await assert.rejects(call.promise, (error) => error?.statusCode === 400);
-  assert.equal(employeeCalls, 0);
+  await call.promise;
+  assert.equal(call.response.status, 202);
+  assert.deepEqual(employeeCalls, [{ employeeId: "developer", text: "inspect attachment", attachments: [attachment], requestId: "employee-attachment-submission" }]);
 });
 
 test("keeps an older direct binding on the generic conversation path", async () => {
@@ -534,4 +538,20 @@ test('task binding opens, steers and stops its own thread while leader is busy',
   assert.deepEqual(calls.map(c => c.slice(0, 3)), [['steer', 'worker', 'worker-turn'], ['stop', 'worker', 'worker-turn']]);
   await assert.rejects(invoke(route, { ...body, threadId: 'leader', submissionId: 'wrong-thread' }).promise, /不匹配/);
   await assert.rejects(invoke(route, { ...body, conversationId: '', submissionId: 'missing-binding' }).promise, /conversationId/);
+});
+
+test('editing reverts the original thread and refuses to change an active conversation', async () => {
+  const calls = [];
+  let active = false;
+  const route = createConversationRoutes({
+    conversations: createConversationService({ primary: { revertSession: async (...args) => calls.push(args) }, fallback: {} }),
+    execution: { getStatus: () => ({ active }) },
+  });
+  const result = invokePost(route, '/api/session/revert', { threadId: 'original', beforeTurnId: 'edited-turn' });
+  await result.promise;
+  assert.deepEqual(calls, [['original', 'edited-turn']]);
+  assert.deepEqual(JSON.parse(result.response.body), { threadId: 'original' });
+  active = true;
+  await assert.rejects(invokePost(route, '/api/session/revert', { threadId: 'original', beforeTurnId: 'edited-turn' }).promise, /先停止/);
+  assert.equal(calls.length, 1);
 });

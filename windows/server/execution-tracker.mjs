@@ -32,10 +32,11 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
           ...status,
           phase: "interrupted",
           label: "项目服务已重启，上一任务已中断",
+          interruptionReason: "serviceRestart",
+          notices: [...new Set([...(status.notices || []), "项目服务已重启，上一任务已中断"])],
           active: false,
           streamingItemId: "",
           streamingText: "",
-          updatedAt: new Date().toISOString(),
           eventEpoch,
           eventSeq: 0,
         } : { ...status, eventEpoch, eventSeq: 0 });
@@ -131,6 +132,8 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
       phase: next.phase,
       label: next.label,
       detail: next.detail || "",
+      interruptionReason: beginsTurn ? undefined : previous?.interruptionReason,
+      notices: next.notices ?? (beginsTurn ? [] : previous?.notices || []),
       commentary: beginsTurn ? "" : previous?.commentary || "",
       hasFinalAnswer: beginsTurn ? undefined : next.hasFinalAnswer ?? previous?.hasFinalAnswer,
       streamingItemId: beginsTurn || !active ? "" : previous?.streamingItemId || "",
@@ -269,6 +272,21 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
     }
     const eventTurnId = turnIdFor(threadId, params, params.itemId || params.item?.id || "");
     if (isRetiredTurn(threadId, eventTurnId)) return;
+    if (method === "error" || method === "warning") {
+      const current = getStatus(threadId);
+      const detail = method === "error" ? params.error?.message : params.message;
+      if (!detail) return;
+      const failed = method === "error" && !params.willRetry;
+      publish(threadId, {
+        phase: failed ? "failed" : current.phase,
+        label: failed ? "Codex 执行失败" : current.label,
+        active: failed ? false : current.active,
+        turnId: params.turnId || current.turnId,
+        detail: failed ? detail : current.detail,
+        notices: [...new Set([...(current.notices || []), detail])],
+      });
+      return;
+    }
     const isCompletedTurn = Boolean(eventTurnId && completedTurns.get(threadId)?.has(eventTurnId));
     if (isCompletedTurn && method !== "item/completed") return;
     protocolEventTimes.set(threadId, new Date().toISOString());
@@ -295,6 +313,9 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
     if (method === "item/started") {
       const itemId = String(params.item?.id || "");
       if (itemId) rememberItemTurn(threadId, itemId, eventTurnId);
+      if (params.item?.type === "userMessage" && params.item.clientId) broadcastThreadEvent(threadId, {
+        type: "user_message_accepted", threadId, turnId: eventTurnId, submissionId: params.item.clientId,
+      });
       if (params.item?.type === "agentMessage") messagePhases.set(itemKey(threadId, itemId), params.item.phase);
       const state = stateFromItem(params.item);
       if (state) publish(threadId, {

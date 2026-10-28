@@ -6,9 +6,12 @@ import { useDismissibleLayer } from "../../shared/shared/hooks/useDismissibleLay
 import type { SessionSummary } from "../../shared/features/conversations/model/types";
 import styles from "../../shared/features/conversations/components/ConversationActions.module.css";
 
+import { copyWithFallback } from "../../shared/features/conversations/components/MessageActions";
+
 type Target = { threadId: string; title: string; projectName: string; employeeId: string; conversationId: string };
-type Props = { session: SessionSummary; archived: boolean; disabled: boolean; onArchive: () => void; className: string; pinned?: boolean; onTogglePin?: () => void; pinOnly?: boolean };
-export function ConversationActions({ session, archived, disabled, onArchive, className, pinned, onTogglePin, pinOnly }: Props) {
+type Props = { conversationId?: string; session: SessionSummary; archived: boolean; disabled: boolean; onArchive: () => void; className: string; pinned?: boolean; onTogglePin?: () => void; pinOnly?: boolean };
+export function ConversationActions({ conversationId, session, archived, disabled, onArchive, className, pinned, onTogglePin, pinOnly }: Props) {
+  const [idCopied, setIdCopied] = useState(false);
   const [menu, setMenu] = useState(false);
   const [dialog, setDialog] = useState<"forward" | "rename" | "">("");
   const [name, setName] = useState("");
@@ -39,6 +42,7 @@ export function ConversationActions({ session, archived, disabled, onArchive, cl
     finally { setBusy(false); }
   };
   const sourceConversationId = async () => {
+    if (conversationId) return conversationId;
     const targets = await fetchJson<Target[]>("/api/conversation-forward/targets");
     return targets.find(t => t.threadId === session.threadId)?.conversationId || "";
   };
@@ -93,10 +97,14 @@ export function ConversationActions({ session, archived, disabled, onArchive, cl
       onClick={() => {
         const rect = button.current!.getBoundingClientRect();
         setPosition({ top: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 255)), left: Math.max(8, Math.min(rect.right - 150, window.innerWidth - 160)) });
-        setMenu(!menu);
+        setIdCopied(false); setError(""); setMenu(!menu);
       }}><MoreHorizontal aria-hidden="true" /></button>
     {menu && createPortal(<div ref={menuElement} role="menu" className={styles.menu} style={position}>
       {onTogglePin && <button role="menuitem" onClick={() => { setMenu(false); onTogglePin(); }}>{pinned ? <PinOff /> : <Pin />}{pinned ? '取消置顶' : '置顶'}</button>}
+      <button role="menuitem" disabled={!session.threadId && !conversationId} onClick={async () => {
+        try { await copyWithFallback([conversationId && `conversationId: ${conversationId}`, session.threadId && `threadId: ${session.threadId}`].filter(Boolean).join("\n")); setIdCopied(true); setError(""); }
+        catch { setError("复制失败，请重试"); }
+      }}><Copy />{idCopied ? "已复制对话 ID" : "复制对话 ID"}</button>
       {!pinOnly && <>
       <button role="menuitem" disabled={busy || session.readOnly} onClick={() => {
         setMenu(false); setName(session.title); setError(""); setDialog("rename");

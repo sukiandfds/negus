@@ -31,7 +31,9 @@ export const createProviderConversationStore = ({ current, providers, createStor
     modelProviderId: routes[session.threadId]?.pendingProviderId || owner(session.threadId),
   });
   const service = {};
+  service.getRecordedProviderForThread = async id => { await ready; return routes[id]?.providerId || null; };
   service.findSessionForProvider = async (providerId, ...args) => (await storeFor(providerId)).findSession(...args);
+  service.listSessionsForProvider = async (providerId, ...args) => (await storeFor(providerId || "current")).listSessions(...args);
   const rememberPreviousSettings = async (id, source) => {
     if (Object.hasOwn(routes[id] || {}, "lastSuccessfulSettings")) return;
     const info = source.isFreshSession?.(id) ? null : await source.getSessionResumeInfo(id);
@@ -95,7 +97,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
   };
   for (const method of ["renameSession", "findSession", "sendMessage", "steerMessage", "interrupt",
     "updateReasoningEffort", "getRuntimeContext", "getThreadStatus",
-    "compactContext", "reviewSession", "getGoal", "setGoal", "clearGoal", "getPendingUserInput",
+    "revertSession", "compactContext", "reviewSession", "getGoal", "setGoal", "clearGoal", "getPendingUserInput",
     "respondToUserInput"]) {
     service[method] = async (id, ...args) => {
       await ready;
