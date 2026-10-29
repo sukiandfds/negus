@@ -73,14 +73,12 @@ export const defaultModelProviders = () => [
       model: GROK_MODEL_ID,
       displayName: "Grok 4.6 (Test)",
       description: "Grok 4.6 through the configured Fusheng provider.",
-      supportedReasoningEfforts: ["low", "medium", "high"].map((reasoningEffort) => ({ reasoningEffort, description: "" })),
       experimental: true,
     }, {
       id: "grok-4.5",
       model: "grok-4.5",
       displayName: "Grok 4.5",
       description: "Fusheng Grok",
-      supportedReasoningEfforts: ["low", "medium", "high"].map((reasoningEffort) => ({ reasoningEffort, description: "" })),
       experimental: true,
     }],
   }),
@@ -194,6 +192,7 @@ export const renderModelProviderConfig = ({
     `name = ${tomlString(normalized.displayName)}`,
     `base_url = ${tomlString(normalized.baseUrl)}`,
     `wire_api = ${tomlString(normalized.wireApi)}`,
+    "stream_max_retries = 2",
     "",
     `[model_providers.${providerKey}.auth]`,
     `command = ${tomlString(credentialCommand?.command || "powershell.exe")}`,
@@ -393,7 +392,7 @@ export const createModelProviderService = ({
       ? currentCatalog.map(entry => ({ ...entry, ...(nativeByModel.get(entry.model) || {}) }))
       : nativeModels;
     const current = visibleCurrent.filter((model) => !model.modelProviderId || model.modelProviderId === CURRENT_MODEL_PROVIDER_ID).map((model) => ({
-      ...withVerifiedReasoning(model, native?.baseUrl),
+      ...withVerifiedReasoning(model),
       ...(modelOwner(model.model).id !== CURRENT_MODEL_PROVIDER_ID
         ? { id: `current::${model.model}`, model: `current::${model.model}` } : {}),
       modelProviderId: CURRENT_MODEL_PROVIDER_ID,
@@ -406,11 +405,11 @@ export const createModelProviderService = ({
       if (provider.mode === "current") continue;
       const available = await isProviderConfigured(provider.id);
       external.push(...provider.models.map((storedModel) => {
-        const nativeEfforts = provider.id === `ccswitch_${currentProvider.sharedConfigId}`
+        const nativeEfforts = provider.id === `ccswitch_${currentProvider.sharedConfigId}` || /^gpt-/u.test(storedModel.model)
           ? nativeByModel.get(storedModel.model)?.supportedReasoningEfforts : null;
         const model = withVerifiedReasoning({ ...storedModel,
           supportedReasoningEfforts: storedModel.supportedReasoningEfforts?.length ? storedModel.supportedReasoningEfforts : nativeEfforts || [],
-        }, provider.baseUrl);
+        });
         return {
           ...model,
         ...(provider.id.startsWith('ccswitch_') ? { id: `${provider.id}::${model.model}`, model: `${provider.id}::${model.model}`, displayName: `${provider.displayName} · ${model.model}` } : {}),

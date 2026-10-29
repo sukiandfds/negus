@@ -16,10 +16,12 @@ interface Snapshot {
   resumePrompt: boolean;
 }
 const empty = (): Snapshot => ({ goal: null, completed: null, error: "", busy: false, revision: 0, mutation: 0, conversationId: "", hydrated: false, resumePrompt: false });
+const completionKey = (goal: ThreadGoal) => JSON.stringify([goal.createdAt, goal.updatedAt, goal.objective]);
 
 export function useThreadGoal(threadId: string) {
   const conversationId = currentConversationId();
   const entries = useRef(new Map<string, Snapshot>());
+  const dismissedCompletion = useRef(new Map<string, string>());
   const [, render] = useState(0);
   const entry = useCallback((id: string) => {
     if (!entries.current.has(id)) entries.current.set(id, empty());
@@ -30,6 +32,7 @@ export function useThreadGoal(threadId: string) {
   }, []);
   const accept = useCallback((id: string, goal: ThreadGoal | null) => {
     const value = entry(id);
+    if (goal?.status === "complete" && dismissedCompletion.current.get(id) === completionKey(goal)) return;
     if (goal && !goal.displayObjective && value.goal?.objective === goal.objective && value.goal.displayObjective) {
       goal = { ...goal, displayObjective: value.goal.displayObjective };
     }
@@ -102,6 +105,13 @@ export function useThreadGoal(threadId: string) {
     if (!targetId) return false;
     const value = entry(targetId);
     if (value.busy) return false;
+    const completed = !preserveCompletion ? value.completed : null;
+    if (completed && !value.goal) {
+      dismissedCompletion.current.set(targetId, completionKey(completed));
+      value.completed = null;
+      notify(targetId);
+      return true;
+    }
     const mutation = ++value.mutation;
     const revision = ++value.revision;
     value.busy = true;
@@ -109,6 +119,12 @@ export function useThreadGoal(threadId: string) {
     notify(targetId);
     try {
       await goalApi.clear(targetId, undefined, value.conversationId);
+      if (completed) {
+        dismissedCompletion.current.set(targetId, completionKey(completed));
+        if (value.completed && completionKey(value.completed) === completionKey(completed)) value.completed = null;
+        if (value.goal?.status === "complete" && completionKey(value.goal) === completionKey(completed)) value.goal = null;
+        notify(targetId);
+      }
       if (value.revision === revision) {
         value.goal = null;
         if (!preserveCompletion) value.completed = null;
@@ -144,7 +160,7 @@ export function useThreadGoal(threadId: string) {
     for (const [id, snapshot] of entries.current) {
       const goal = snapshot.goal;
       if (goal?.status !== "complete" || snapshot.busy) continue;
-      const key = JSON.stringify([goal.createdAt, goal.updatedAt, goal.objective]);
+      const key = completionKey(goal);
       if (completedCleanup.current.get(id) === key) continue;
       completedCleanup.current.set(id, key);
       void clear(true, id);

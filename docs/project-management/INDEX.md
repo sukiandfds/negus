@@ -7,6 +7,13 @@ last_updated: "2026-09-29 18:31 +08:00"
 
 # 项目管理目录
 
+修改前按功能和文件定位条目，读取有效决定及用户澄清；不能将历史完成状态当作当前验收结果。维护规则见 [助手工作规则](../../AI_ASSISTANT_WORK_RULES.md#需求原话与澄清2026-10-30)。
+
+| 当前需求入口 | 相关功能与文件 | 记录 |
+| --- | --- | --- |
+| PM-004 原话与澄清维护 | 所有 Negus 修改、AGENTS.md、maintenance-instructions.mjs | [有效决定](items/PM-004/item.md) |
+| FEAT-001 缓存与聊天体验 | usePageSnapshot.ts、FeishuApp.tsx、conversationMerge.ts、useConversationSession.ts、useConversationCatalog.ts、useProjectDirectory.ts、ChannelManager.tsx | [最新澄清](items/FEAT-001/item.md#2026-10-30-缓存同步需求核对) |
+
 本文件只负责定位条目文件，不承载条目的完整内容。以下计划与进行中列表沿用历史登记，尚未按 2026-09-29 产品方向重新排期，不视为新的开发授权。
 
 ## 当前计划
@@ -37,6 +44,7 @@ last_updated: "2026-09-29 18:31 +08:00"
 | 条目编号 | 类型 | 分类 | 文件夹 | 排序 |
 | --- | --- | --- | --- | --- |
 | `PM-001` | feature | development | `items/PM-001/` | 1 |
+| `PM-004` | maintenance | maintenance | `items/PM-004/` | 20 |
 | `PM-002` | maintenance | maintenance | `items/PM-002/` | 17 |
 | `RESEARCH-001` | research | research | `items/RESEARCH-001/` | 2 |
 | `RESEARCH-002` | research | research | `items/RESEARCH-002/` | 3 |

@@ -39,7 +39,7 @@ export function ConversationList({ c, section, query, filter, origins, onOrigins
       ]} />{([['all', '全部'], ['employees', '员工'], ['projects', '项目'], ['background', '后台']] as const).map(([id, label]) => <button key={id} className={filter === id ? 'active' : ''} aria-pressed={filter === id} onClick={() => onFilterChange(id)}>{label}</button>)}
         <button className={`archive-filter ${c.archivedView ? 'active' : ''}`} title={c.archivedView ? '返回活动对话' : '查看已归档对话'} aria-label={c.archivedView ? '返回活动对话' : '查看已归档对话'} onClick={() => void c.setArchiveViewMode(!c.archivedView)}><Archive size={15} /></button></div>}
       <div className="contacts-scroll">
-        {openError ? <div className="list-error" role="alert">{openError}</div> : null}
+        {openError || c.listError ? <div className="list-error" role="alert">{openError || c.listError}</div> : null}
         {(initialReady || hasRoster) ? <ConversationRows items={visibleRoster} c={c} opening={opening} query={query} onOpen={onOpen} pinned={filter === 'all' || filter === 'background' ? pinned : undefined} onTogglePin={filter === 'all' || filter === 'background' ? onTogglePin : undefined} selectedRoomId={selectedRoomId} /> : null}
 
       </div>

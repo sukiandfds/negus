@@ -79,12 +79,12 @@ export function Message({
   const copyText = heartbeatUser?.instructions ?? assistantText ?? message.text;
   const richBlocks = message.blocks?.some((block) => block.type !== "markdown") ?? false;
   const formattedTime = formatConversationTimestamp(message.createdAt);
-  const reserveTimestamp = message.role === "assistant" || Boolean(message.displaySourceAgentId);
+  const reserveTimestamp = !executionPlaceholder && (message.role === "assistant" || Boolean(message.displaySourceAgentId));
   if (assistantText === "" && !streaming && !executionStatus && !executionPlaceholder && !richBlocks) return null;
   return (
     <article className={`${styles.message} ${message.role === "user" && !message.displaySourceAgentId ? styles.user : styles.assistant}`}>
       {message.authorName ? <span className={styles.authorName}>{message.authorName}</span> : null}
-      {formattedTime || reserveTimestamp ? (
+      {!executionPlaceholder && (formattedTime || reserveTimestamp) ? (
         <time className={styles.timestamp} dateTime={message.createdAt} aria-hidden={!formattedTime}>
           {formattedTime || "\u00a0"}
         </time>
@@ -252,7 +252,7 @@ export function ConversationView({
   const employeeScoped = Boolean(locationParams.get("employee"));
   const executionMatchesSession = executionStatus.threadId === session?.threadId;
   const completedExecution = ["completed", "failed", "interrupted", "systemError"].includes(executionStatus.phase);
-  const { showExecution, waitingForReply, latestReplyAt } = executionHandoff(session?.threadId || "", messages, executionStatus);
+  const { showExecution, waitingForReply } = executionHandoff(session?.threadId || "", messages, executionStatus);
   const transcript = advanceLiveTranscript(transcriptMemoryRef.current, {
     threadId: session?.threadId || "",
     messages,
@@ -294,7 +294,7 @@ export function ConversationView({
     }] : []),
     ...(transcript.placeholder ? [{
       id: "message:execution-placeholder",
-      message: { ...transcript.placeholder, authorName: assistantName, createdAt: latestReplyAt || executionStatus.startedAt || undefined },
+      message: { ...transcript.placeholder, authorName: assistantName },
       streaming: false,
       execution: true,
       executionPlaceholder: true,

@@ -1,10 +1,11 @@
 import test from "node:test";
+import TOML from "@iarna/toml";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { buildAppServerEnvironment } from "../server/app-server-client.mjs";
+import { buildAppServerEnvironment, streamRetryArguments } from "../server/app-server-client.mjs";
 import {
   CURRENT_MODEL_PROVIDER_ID,
   GROK_MODEL_ID,
@@ -143,11 +144,23 @@ test("external client is lazy, reused, and configured with command auth", async 
     assert.equal(first.options.sanitizeEnvironment, true);
     const config = await fs.readFile(path.join(first.options.codexHome, "config.toml"), "utf8");
     assert.match(config, /model_provider = "fusheng-grok"/u);
+    assert.match(config, /stream_max_retries = 2/u);
     assert.match(config, /\[model_providers\.fusheng-grok\.auth\]/u);
     assert.match(config, /command = "powershell\.exe"/u);
     assert.doesNotMatch(config, /env_key|requires_openai_auth|synthetic-token/u);
     service.close();
     assert.equal(first.closeCount, 1);
+  });
+});
+
+test("stream retry overrides preserve dotted and Chinese provider names", async () => {
+  await withTemporaryRoot(async (root) => {
+    await fs.writeFile(path.join(root, "config.toml"), '[model_providers.custom]\nstream_max_retries = 9\n[model_providers.other-provider]\nname = "other"\n');
+    assert.equal(TOML.parse(streamRetryArguments(root)[1]).model_providers.custom.stream_max_retries, 2);
+    await fs.writeFile(path.join(root, "config.toml"), '[model_providers."other.provider"]\nname = "other"\n');
+    assert.equal(TOML.parse(streamRetryArguments(root)[1]).model_providers["other.provider"].stream_max_retries, 2);
+    await fs.writeFile(path.join(root, 'config.toml'), '[model_providers."ccswitch_折扣-1790603771586"]\nname = "折扣"\n');
+    assert.deepEqual(TOML.parse(streamRetryArguments(root)[1]).model_providers["ccswitch_折扣-1790603771586"], { name: "折扣", stream_max_retries: 2 });
   });
 });
 
@@ -193,7 +206,7 @@ test("current API configuration refresh reads supplier models, keeps native IDs 
     assert.deepEqual(current.map(m => m.model), ["gpt-6-sol", "gpt-6.1-sol"]);
     assert.ok(current.every(m => m.providerDisplayName === "vip"));
     assert.equal(current[0].supportedReasoningEfforts[0].reasoningEffort, "high");
-    assert.deepEqual(current[1].supportedReasoningEfforts, []);
+    assert.deepEqual(current[1].supportedReasoningEfforts.map(e => e.reasoningEffort), ["low", "medium", "high", "xhigh", "max", "ultra"]);
     assert.equal(service.resolveRoute({ model: "gpt-6.1-sol" }).modelProviderId, "current");
     assert.equal(service.resolveRoute({ model: "gpt-6.1-sol" }).model, "gpt-6-sol");
     assert.equal(service.resolveRoute({}).model, "gpt-6-sol");
@@ -207,7 +220,7 @@ test("current API configuration refresh reads supplier models, keeps native IDs 
   });
 });
 
-test("verified 6.1 reasoning fills cached empty capabilities only for the tested endpoint", async () => {
+test("official model reasoning fills cached empty capabilities across providers", async () => {
   await withTemporaryRoot(async root => {
     const efforts = list => list.map(e => e.reasoningEffort);
     const sharedConfig = { runtimeProviders: async () => [
@@ -223,10 +236,9 @@ test("verified 6.1 reasoning fills cached empty capabilities only for the tested
     service.close();
     service = createModelProviderService(options);
     const models = await service.listModels([]);
-    for (const id of ["gpt-6.1-sol", "ccswitch_verified::gpt-6.1-sol"]) {
-      assert.deepEqual(efforts(models.find(m => m.model === id).supportedReasoningEfforts), ["low", "medium", "high", "xhigh"]);
+    for (const id of ["gpt-6.1-sol", "ccswitch_verified::gpt-6.1-sol", "ccswitch_other::gpt-6.1-sol"]) {
+      assert.deepEqual(efforts(models.find(m => m.model === id).supportedReasoningEfforts), ["low", "medium", "high", "xhigh", "max", "ultra"]);
     }
-    assert.deepEqual(models.find(m => m.model === "ccswitch_other::gpt-6.1-sol").supportedReasoningEfforts, []);
     assert.deepEqual(models.find(m => m.model === "unknown-model").supportedReasoningEfforts, []);
     const authoritative = await service.listModels([{ model: "gpt-6.1-sol", supportedReasoningEfforts: [{ reasoningEffort: "high" }] }]);
     assert.deepEqual(efforts(authoritative.find(m => m.model === "gpt-6.1-sol").supportedReasoningEfforts), ["high"]);
@@ -269,19 +281,18 @@ test('fresh installations and arbitrary shared config IDs reuse supplier Grok ca
       const service = createModelProviderService(options);
       try {
         const models = await service.listModels([]);
-        for (const id of ids) {
+        for (const id of [...ids, 'foreign']) {
           const model = 'ccswitch_' + id + '::grok-4.7';
-          assert.deepEqual(models.find(m => m.model === model).supportedReasoningEfforts.map(e => e.reasoningEffort), ['low', 'medium', 'high']);
+          assert.deepEqual(models.find(m => m.model === model).supportedReasoningEfforts.map(e => e.reasoningEffort), ['low', 'medium', 'high', 'xhigh']);
           assert.equal(service.resolveRoute({ model }).modelProviderId, 'ccswitch_' + id);
         }
-        assert.deepEqual(models.find(m => m.model === 'ccswitch_foreign::grok-4.7').supportedReasoningEfforts, []);
         assert.deepEqual(models.find(m => m.model === 'ccswitch_authoritative::grok-4.7').supportedReasoningEfforts.map(e => e.reasoningEffort), ['high']);
       } finally { service.close(); }
     }
     const probe = createProviderProbe({ resolveDraft: async () => ({ baseUrl, key: 'synthetic' }),
       fetchImpl: async () => ({ ok: true, json: async () => ({ data: [{ id: 'grok-4.7' }, { id: 'unverified' }] }) }) });
     const result = await probe({ action: 'discover' });
-    assert.deepEqual(result.capabilities.find(m => m.model === 'grok-4.7').supportedReasoningEfforts.map(e => e.reasoningEffort), ['low', 'medium', 'high']);
+    assert.deepEqual(result.capabilities.find(m => m.model === 'grok-4.7').supportedReasoningEfforts.map(e => e.reasoningEffort), ['low', 'medium', 'high', 'xhigh']);
     assert.deepEqual(result.capabilities.find(m => m.model === 'unverified').supportedReasoningEfforts, []);
   });
 });
@@ -312,6 +323,38 @@ test('reasoning options from the active configuration do not leak into other con
       const models = await service.listModels([{ model: 'same-model', supportedReasoningEfforts: [{ reasoningEffort: 'high' }] }]);
       assert.deepEqual(models.find(m => m.modelProviderId === 'ccswitch_active').supportedReasoningEfforts, [{ reasoningEffort: 'high' }]);
       assert.deepEqual(models.find(m => m.modelProviderId === 'ccswitch_other').supportedReasoningEfforts, []);
+    } finally { service.close(); }
+  });
+});
+
+
+test('model presets distinguish official effort levels without inventing capabilities for image or unknown models', async () => {
+  const { withVerifiedReasoning } = await import('../server/model-capabilities.mjs');
+  const options = model => withVerifiedReasoning({ model }).supportedReasoningEfforts.map(e => e.reasoningEffort);
+  assert.deepEqual(options('gpt-6.1-terra'), ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+  assert.deepEqual(options('gpt-6-luna'), ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.deepEqual(options('grok-4.5'), ['low', 'medium', 'high']);
+  assert.deepEqual(options('grok-4.7'), ['low', 'medium', 'high', 'xhigh']);
+  for (const model of ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-v4-flash']) {
+    assert.deepEqual(options(model), ['none', 'low', 'high', 'max']);
+  }
+  for (const model of ['gpt-image-2', 'gpt-4o', 'unverified']) assert.deepEqual(options(model), []);
+});
+
+test('new native GPT capabilities apply across configurations while explicit supplier capabilities take priority', async () => {
+  await withTemporaryRoot(async root => {
+    const service = createModelProviderService({ projectRoot: root, currentApiConfiguration: async () => null,
+      sharedConfig: { runtimeProviders: async () => [
+        { id: 'ccswitch_vip', models: [{ model: 'gpt-future' }, { model: 'gpt-6.1-terra' }] },
+        { id: 'ccswitch_other', models: [{ model: 'gpt-future', supportedReasoningEfforts: [{ reasoningEffort: 'low' }] }, { model: 'gpt-6.1-terra' }] },
+      ], readCredential: async () => 'synthetic' } });
+    try {
+      const models = await service.listModels([{ model: 'gpt-future', supportedReasoningEfforts: [{ reasoningEffort: 'high' }] }]);
+      const options = model => models.find(m => m.model === model).supportedReasoningEfforts.map(e => e.reasoningEffort);
+      assert.deepEqual(options('ccswitch_vip::gpt-future'), ['high']);
+      assert.deepEqual(options('ccswitch_other::gpt-future'), ['low']);
+      assert.deepEqual(options('ccswitch_vip::gpt-6.1-terra'), options('ccswitch_other::gpt-6.1-terra'));
+      assert.ok(options('ccswitch_vip::gpt-6.1-terra').includes('medium'));
     } finally { service.close(); }
   });
 });

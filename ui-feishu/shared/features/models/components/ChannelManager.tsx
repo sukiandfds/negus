@@ -14,7 +14,7 @@ const validChannels = (value: unknown): value is Channel[] => Array.isArray(valu
   && value.every((entry) => Boolean(entry) && typeof entry === 'object'
     && typeof (entry as Channel).id === 'string' && typeof (entry as Channel).name === 'string');
 let cachedChannels: Channel[] = readLocalCache(channelCacheKey, validChannels) || [];
-let cachedAt = cachedChannels.length ? Date.now() : 0;
+let cachedAt = 0;
 let pendingChannels: Promise<Channel[]> | null = null;
 const refreshChannels = (force = false) => {
   if (pendingChannels) return pendingChannels;
@@ -29,10 +29,7 @@ const refreshChannels = (force = false) => {
   return pendingChannels;
 };
 export const readChannels = (force = false) => {
-  if (!force && cachedChannels.length) {
-    if (Date.now() - cachedAt >= 60000) void refreshChannels().catch(() => {});
-    return Promise.resolve(cachedChannels);
-  }
+  if (!force && cachedChannels.length && Date.now() - cachedAt < 60000) return Promise.resolve(cachedChannels);
   return refreshChannels(force);
 };
 export const buildBuiltInChannels = (models: CodexModel[], currentModel: string, channels: Channel[] = []): Channel[] => [...new Set(models.map((entry) => entry.modelProviderId || 'current'))]

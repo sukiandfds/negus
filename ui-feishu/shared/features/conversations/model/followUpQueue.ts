@@ -13,6 +13,7 @@ export interface FollowUpQueueItem {
   state: FollowUpQueueState;
   error: string;
   createdAt: string;
+  sentAt?: string;
   updatedAt: string;
   position: number;
 }

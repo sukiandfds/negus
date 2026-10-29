@@ -3,6 +3,7 @@ import type { SessionDelta, SessionDetail, SessionMessage } from "../model/types
 const isOptimisticMessage = (message: SessionMessage) => message.id.startsWith("optimistic-");
 
 const timestampOf = (message: SessionMessage) => {
+  if (isOptimisticMessage(message) && !message.serverTimestamp) return null;
   const timestamp = Date.parse(message.createdAt || "");
   return Number.isFinite(timestamp) ? timestamp : null;
 };
@@ -10,6 +11,12 @@ const timestampOf = (message: SessionMessage) => {
 // Preserve native item order within a turn; timestamps only supplement it.
 export const orderMessageList = (messages: SessionMessage[]) => {
   const ordered: SessionMessage[] = [];
+  const turnStarts = new Map<string, number>();
+  for (const message of messages) {
+    if (message.turnId && message.turnStartedAtMs != null && Number.isFinite(message.turnStartedAtMs)) {
+      turnStarts.set(message.turnId, message.turnStartedAtMs);
+    }
+  }
   for (const message of messages) {
     const timestamp = timestampOf(message);
     const insertAt = ordered.findIndex((current) => {
@@ -20,8 +27,9 @@ export const orderMessageList = (messages: SessionMessage[]) => {
         const local = (item: SessionMessage) => item.id.startsWith("stream-") || isOptimisticMessage(item);
         if (!local(message) && !local(current)) return false;
       }
-      const currentTimestamp = timestampOf(current);
-      return timestamp !== null && currentTimestamp !== null && currentTimestamp > timestamp;
+      const turnTimestamp = message.turnId ? turnStarts.get(message.turnId) ?? timestamp : timestamp;
+      const currentTimestamp = (current.turnId ? turnStarts.get(current.turnId) : undefined) ?? timestampOf(current);
+      return turnTimestamp !== null && currentTimestamp !== null && currentTimestamp > turnTimestamp;
     });
     ordered.splice(insertAt < 0 ? ordered.length : insertAt, 0, message);
   }
@@ -108,9 +116,11 @@ export const mergeSessionRefresh = (current: SessionDetail, incoming: SessionDet
     : [];
   const pending = unresolvedOptimisticMessages(incoming, current)
     .filter((message) => !incomingIds.has(message.id));
+  const retained = incoming.hasMore && firstOverlap >= 0
+    ? current.messages.filter(message => !isOptimisticMessage(message)) : olderPrefix;
   return {
     ...incoming,
-    messages: mergeMessageList(mergeMessageList(olderPrefix, incoming.messages), pending),
+    messages: mergeMessageList(mergeMessageList(retained, incoming.messages), pending),
   };
 };
 

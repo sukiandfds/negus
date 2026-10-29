@@ -24,7 +24,7 @@ const uncommittedChoice = new Map<string, { model: string; reasoningEffort: stri
 const serverModelReady = new Set<string>();
 const submittedChoices = new Map<string, { model: string; reasoningEffort: string }>();
 
-const emptyStatus = (threadId: string): ContextStatus => ({
+export const emptyStatus = (threadId: string): ContextStatus => ({
   type: "context_status",
   threadId,
   model: "",

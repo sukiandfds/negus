@@ -63,13 +63,13 @@ export function GoalControl({ goal, busy, error, disabled, onStatusChange, onCle
           <span className={styles.objective}>{objective}</span>
           <span className={styles.progress}>{progress}</span>
         </button>
-        {!finished ? <div className={styles.actions}>
-          <button type="button" disabled={disabled || busy} title="清除目标" aria-label="清除目标" onClick={() => void onClear()}><X /></button>
-          {next ? <button type="button" disabled={disabled || busy} title={next === "paused" ? "暂停目标" : "恢复目标"} aria-label={next === "paused" ? "暂停目标" : "恢复目标"} onClick={() => void onStatusChange(next)}>
+        <div className={styles.actions}>
+          <button type="button" disabled={disabled || busy} title={finished ? "关闭目标提示" : "清除目标"} aria-label={finished ? "关闭目标提示" : "清除目标"} onClick={() => void onClear()}><X /></button>
+          {!finished && next ? <button type="button" disabled={disabled || busy} title={next === "paused" ? "暂停目标" : "恢复目标"} aria-label={next === "paused" ? "暂停目标" : "恢复目标"} onClick={() => void onStatusChange(next)}>
             {busy ? <LoaderCircle className={styles.spinner} /> : next === "paused" ? <Pause /> : <Play />}
           </button> : null}
-          <button type="button" disabled={disabled || busy} title="编辑目标" aria-label="编辑目标" onClick={edit}><Pencil /></button>
-        </div> : null}
+          {!finished ? <button type="button" disabled={disabled || busy} title="编辑目标" aria-label="编辑目标" onClick={edit}><Pencil /></button> : null}
+        </div>
       </div>
       {error ? <p className={styles.error} role="alert">{error}</p> : null}
       {editing ? createPortal(

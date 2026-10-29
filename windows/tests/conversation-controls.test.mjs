@@ -1016,3 +1016,53 @@ test("reading runtime settings resumes an unloaded original thread without creat
     assert.equal(calls.some(call => /start|fork/.test(call.method)), false);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test('new goal sessions read persisted messages instead of returning an empty draft', async () => {
+  const thread = { id: 'goal-new', cwd: process.cwd(), turns: [{ id: 'turn', status: 'completed', items: [{ type: 'agentMessage', id: 'reply', text: '已开始检查', phase: 'commentary' }] }] };
+  const client = { subscribe: () => () => {}, close() {}, request: async method => {
+    if (['thread/start', 'thread/read', 'thread/resume'].includes(method)) return { thread };
+    if (method === 'thread/goal/set') return { goal: { status: 'active' } };
+    throw Error(method);
+  } };
+  const store = createAppServerConversationStore({ projectRoot: process.cwd(), client, registerMedia: () => null, autoTitleEnabled: false });
+  try {
+    await store.createSession();
+    assert.equal((await store.findSession(thread.id)).messages.length, 0);
+    await store.setGoal(thread.id, { objective: '检查页面', status: 'active' });
+    assert.equal((await store.findSession(thread.id)).messages[0].text, '已开始检查');
+  } finally { store.close(); }
+});
+
+test('migrated archived conversation resumes by ID when native storage reports a stale path', async () => {
+  const calls = [];
+  const thread = { id: 'archived', cwd: process.cwd() };
+  const client = { subscribe: () => () => {}, close() {}, request: async (method, params) => {
+    calls.push(params);
+    if (params.path) throw Error('cannot resume paginated thread archived with stale path: requested old, current archived; omit path and resume by thread id');
+    return { thread };
+  } };
+  const store = createAppServerConversationStore({ projectRoot: process.cwd(), client, registerMedia: () => null });
+  try {
+    await store.resumeProviderSession(thread.id, { path: '/tmp/negus-absent-old-rollout.jsonl', cwd: process.cwd(), model: 'deepseek-flash' });
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].path, undefined);
+    assert.equal(calls[1].threadId, thread.id);
+    assert.equal(calls[1].model, 'deepseek-flash');
+  } finally { store.close(); }
+});
+
+test('steered user messages recover actual recorded times without borrowing the turn start', async () => {
+  const thread = { id:'timestamp-thread',cwd:process.cwd(),turns:[{id:'turn',items:[
+    {type:'userMessage',id:'first',content:[{type:'text',text:'first'}]},
+    {type:'userMessage',id:'steered',content:[{type:'text',text:'追加消息'}]},
+    {type:'userMessage',id:'unknown',content:[{type:'text',text:'没有记录'}]},
+  ]}]};
+  const store = createAppServerConversationStore({projectRoot:process.cwd(),registerMedia:()=>null,
+    client:{subscribe:()=>()=>{},close(){},request:async()=>({thread})},
+    historyFallback:async()=>({messages:[{role:'user',itemId:'different-native-id',protocolTurnId:'turn',text:'追加消息',createdAt:'2026-10-29T14:42:32.230Z'}]})});
+  try {
+    const result=await store.findSession(thread.id);
+    assert.equal(result.messages[1].createdAt,'2026-10-29T14:42:32.230Z');
+    assert.equal(result.messages[2].createdAt,undefined);
+  } finally {store.close();}
+});

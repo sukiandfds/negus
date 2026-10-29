@@ -1,4 +1,5 @@
 import { communicationInstructions } from "./base-prompt.mjs";
+import { neutralThreadInstructions } from './model-catalog.mjs';
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -589,10 +590,15 @@ export const createAppServerConversationStore = ({
     }
     try {
       const session = await readNativeSession(threadId, source, options);
-      if (historyFallback && session?.messages.some((message) => message.phase === "commentary" && !message.createdAt)) {
+      if (historyFallback && session?.messages.some((message) => (message.role === 'user' || message.phase === "commentary") && !message.createdAt)) {
         const history = await historyFallback(threadId, source).catch(() => null);
         const times = new Map((history?.messages || []).filter((message) => message.itemId && message.createdAt).map((message) => [message.itemId, message.createdAt]));
-        session.messages = session.messages.map((message) => message.phase !== "commentary" || message.createdAt ? message : { ...message, createdAt: times.get(message.itemId) });
+        session.messages = session.messages.map((message) => {
+          if (message.createdAt || (message.role !== 'user' && message.phase !== 'commentary')) return message;
+          const matches = (history?.messages || []).filter(item => item.role === message.role && item.text === message.text
+            && (item.protocolTurnId || item.turnId) === message.turnId && item.createdAt);
+          return { ...message, createdAt: times.get(message.itemId) || (matches.length === 1 ? matches[0].createdAt : undefined) };
+        });
       }
       return session;
     }
@@ -628,7 +634,7 @@ export const createAppServerConversationStore = ({
   };
 
   const resumeThread = async (threadId) => {
-    const { runtimeOptions } = await ensureProjectThread(threadId).catch(async error => {
+    const { thread, runtimeOptions } = await ensureProjectThread(threadId).catch(async error => {
       if (!threadNotLoaded(error)) throw error;
       await loadThreadForResume(threadId);
       return ensureProjectThread(threadId);
@@ -639,6 +645,7 @@ export const createAppServerConversationStore = ({
     if (freshRuntime) return freshRuntime;
     return client.request("thread/resume", {
       threadId, persistExtendedHistory: true,
+      ...await neutralThreadInstructions(thread.path),
       developerInstructions: await getUserProfilePrompt(), ...(runtimeOptions?.resume || {}),
     });
   };
@@ -773,6 +780,7 @@ export const createAppServerConversationStore = ({
     if (patch.tokenBudget !== undefined) params.tokenBudget = patch.tokenBudget;
     // Retain the objective file on transport failure: the native goal may already reference it.
     const result = await client.request("thread/goal/set", params, options);
+    if (patch.objective !== undefined || patch.status === 'active') freshThreadRuntime.delete(threadId);
     return { ...result, goal: await expandGoalObjective(result.goal, goalAttachmentRoot) };
   };
 
@@ -862,12 +870,18 @@ export const createAppServerConversationStore = ({
 
   const resumeProviderSession = async (threadId, options) => {
     if (!isAllowedProjectRoot(options.cwd) || !path.isAbsolute(options.path)) throw new Error('无法验证原会话记录的位置');
-    const result = await client.request('thread/resume', {
+    const params = {
       threadId, path: options.path, cwd: options.cwd, model: options.model,
+      ...await neutralThreadInstructions(options.path),
       developerInstructions: await getUserProfilePrompt(),
       ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
       ...(options.reasoningEffort ? { config: { model_reasoning_effort: options.reasoningEffort } } : {}),
       excludeTurns: true,
+    };
+    const result = await client.request('thread/resume', params).catch(error => {
+      if (!/with stale path:.*omit path and resume by thread id/su.test(String(error.message))) throw error;
+      const { path: stalePath, ...byId } = params;
+      return client.request('thread/resume', byId);
     });
     if (result.thread?.id !== threadId || !isSameProjectRoot(result.thread.cwd, options.cwd)) throw new Error('原会话恢复未通过校验，未发送消息');
     threadCache.set(threadId, result.thread);

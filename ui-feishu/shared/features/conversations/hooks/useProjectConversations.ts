@@ -59,6 +59,7 @@ export function useProjectConversations() {
   const [renaming, setRenaming] = useState(false);
   const [retryingMessageId, setRetryingMessageId] = useState("");
   const [localSendVersion, setLocalSendVersion] = useState(0);
+  const [historyEdit, setHistoryEdit] = useState<{ threadId: string; revision: number } | null>(null);
   const [userInputRequest, setUserInputRequest] = useState<UserInputRequest | null>(null);
   const [userInputBusy, setUserInputBusy] = useState(false);
   const [userInputError, setUserInputError] = useState("");
@@ -311,7 +312,7 @@ export function useProjectConversations() {
     const scope = conversationScope;
     let threadId = requestedThreadId;
     const submissionId = existingSubmissionId || createSubmissionId();
-    const optimisticMessage = { ...createOptimisticMessage(messageText, attachments, submissionId), deliveryState: "sending" as const };
+    const optimisticMessage = { ...createOptimisticMessage(messageText, attachments, submissionId), deliveryState: "preparing" as const };
     if (replacingMessageId) selection.removeOptimisticMessage(threadId, replacingMessageId);
     reconciledSubmissionsRef.current.delete(submissionId);
     selection.addOptimisticMessage(threadId, optimisticMessage);
@@ -343,6 +344,7 @@ export function useProjectConversations() {
         if (settings.reasoningEffort) await modelApi.updateReasoningEffort(threadId, settings.reasoningEffort, undefined, scope);
         contextManagement.markSubmitted(threadId, settings);
       }
+      selection.updateOptimisticMessage(threadId, optimisticMessage.id, { deliveryState: "sending" });
       const attempt = await execution.sendMessage(messageText, attachments.map(file => file.id), submissionId, threadId, scope);
       if (!attempt || attempt.outcome === "failed") {
         const reason = attempt?.error || "发送失败";
@@ -403,6 +405,7 @@ export function useProjectConversations() {
     try {
       await conversationApi.revert(threadId, target.protocolTurnId || target.turnId);
       selection.cancelSessionLoad(threadId);
+      setHistoryEdit(previous => ({ threadId, revision: (previous?.revision || 0) + 1 }));
       selection.updateCurrentSession(threadId, current => {
         const index = current.messages.findIndex(message => message.id === target.id);
         return { ...current, contentVersion: undefined, messages: index < 0 ? current.messages : current.messages.slice(0, index) };
@@ -603,22 +606,27 @@ export function useProjectConversations() {
 
   const handleEvent = useCallback((event: ProjectEvent) => {
     execution.handleEvent(event);
-    followUpQueue.handleEvent(event);
+    const acceptedQueueItem = followUpQueue.handleEvent(event);
     goal.handleEvent(event);
     if (event.type === "context_status") contextManagement.handleEvent(event);
     if (event.type === "user_message_accepted") {
+      if (acceptedQueueItem) {
+        const message = createOptimisticMessage(acceptedQueueItem.text, acceptedQueueItem.attachments, event.submissionId, acceptedQueueItem.sentAt || undefined);
+        selection.addOptimisticMessage(event.threadId, { ...message, turnId: event.turnId, serverTimestamp: Boolean(acceptedQueueItem.sentAt) });
+      }
       reconciledSubmissionsRef.current.add(event.submissionId);
       selection.updateOptimisticMessage(event.threadId, `optimistic-${event.submissionId}`, { deliveryState: undefined, deliveryError: undefined, turnId: event.turnId, protocolTurnId: event.turnId });
     }
     if (event.type === "execution_status" && event.phase === "completed") contextManagement.completeSettings(event.threadId);
     if (event.type === "user_message_submitted") {
+      selection.updateOptimisticMessage(event.threadId, event.messageId || `optimistic-${event.submissionId}`, { createdAt: event.createdAt, serverTimestamp: true });
       const generated = createOptimisticMessage(
         event.text,
         event.attachments || [],
         event.submissionId,
         event.createdAt,
       );
-      const message = { ...generated, id: event.messageId || generated.id, deliveryState: "pending" as const };
+      const message = { ...generated, id: event.messageId || generated.id, deliveryState: "pending" as const, serverTimestamp: true };
       selection.addOptimisticMessage(event.threadId, message);
     }
     if (event.type === "user_input_requested" && event.threadId === selection.selectedIdRef.current) {
@@ -655,8 +663,11 @@ export function useProjectConversations() {
     catalog.selectLatestSession(desktopThreadId);
   }, [catalog.selectLatestSession]);
 
-  const prefetchSession = useCallback((threadId: string, conversationId?: string) =>
-    selection.loadSession(threadId, { prefetch: true, retry: false, conversationId }), [selection.loadSession]);
+  const prefetchSession = useCallback(async (threadId: string, conversationId?: string) => {
+    const loaded = await selection.loadSession(threadId, { prefetch: true, retry: false, conversationId });
+    if (!loaded) throw new Error(selection.sessionErrors.get(threadId) || '对话同步失败，保留已有内容');
+    return true;
+  }, [selection.loadSession, selection.sessionErrors]);
 
   return {
     prefetchSession,
@@ -692,6 +703,7 @@ export function useProjectConversations() {
     retryPendingMessage,
     retryingMessageId,
     localSendVersion,
+    historyEdit,
     beginEditMessage,
     cancelEditMessage,
     renameSession,
@@ -770,6 +782,7 @@ export function useProjectConversations() {
       return Boolean(await goal.update({ status }, threadId));
     },
     clearGoal: () => goal.clear(),
+    archivedByThread: catalog.archivedByThread,
     refresh: () => catalog.refreshSessions(),
   };
 }

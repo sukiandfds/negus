@@ -159,16 +159,7 @@ export const advanceLiveTranscript = (memory: LiveTranscriptMemory, input: LiveT
     input.showExecution ? "1" : "0",
     input.retainPlaceholder ? "1" : "0",
     optimisticIds.join(","),
-    input.messages.map((message) => [
-      message.id,
-      message.itemId || "",
-      message.protocolTurnId || message.turnId || "",
-      message.createdAt || "",
-      message.turnItemIndex ?? "",
-      message.text.length,
-      message.deliveryState || "",
-      message.deliveryError || "",
-    ].join("|")).join("\n"),
+    JSON.stringify(input.messages),
   ].join("\n");
   if (memory.signature === signature && memory.view) return memory.view;
 

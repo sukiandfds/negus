@@ -72,6 +72,7 @@ export function useConversationSession(initial: InitialConversationState) {
   const requestRef = useRef<AbortController | null>(null);
   const retryTimerRef = useRef(0);
   const sessionLoadsRef = useRef(new Map<string, Promise<boolean>>());
+  const sessionErrors = useRef(new Map<string, string>());
   const sessionRequestControllersRef = useRef(new Map<string, AbortController>());
   const pendingSessionSyncRef = useRef(new Map<string, boolean>());
   const pendingOptimisticMessagesRef = useRef(new Map<string, SessionMessage[]>());
@@ -162,6 +163,7 @@ export function useConversationSession(initial: InitialConversationState) {
       loadSucceeded = true;
       return true;
     } catch (reason) {
+      if (!controller.signal.aborted) sessionErrors.current.set(threadId, reason instanceof Error ? reason.message : String(reason));
       if (!controller.signal.aborted && isSelected()) {
         setSessionError(presentConversationError(reason));
         if (!older && retry) {
@@ -176,6 +178,7 @@ export function useConversationSession(initial: InitialConversationState) {
       }
       return false;
     } finally {
+      if (loadSucceeded) sessionErrors.current.delete(threadId);
       if (!controller.signal.aborted && isSelected()) {
         if (older) {
           setLoadingOlder(false);
@@ -376,7 +379,7 @@ export function useConversationSession(initial: InitialConversationState) {
   }, []);
 
   return {
-    selectedId, selectedIdRef, session, cachedSessions: sessionCache.current, loadingSession, loadingOlder, syncing, contentSyncState, sessionError, composerKey,
+    sessionErrors: sessionErrors.current, selectedId, selectedIdRef, session, cachedSessions: sessionCache.current, loadingSession, loadingOlder, syncing, contentSyncState, sessionError, composerKey,
     setSyncing: markSyncing, loadSession, selectSession, adoptSelection, clearSelection, setCreatedSession, setSessionError,
     cacheCreatedSession, updateOptimisticMessage, updateCurrentSession, addOptimisticMessage, removeOptimisticMessage, cancelSessionLoad, invalidate, loadOlder,
   };

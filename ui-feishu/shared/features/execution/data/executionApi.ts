@@ -67,8 +67,8 @@ export const executionApi = {
     withConversation({ threadId }),
     signal,
   ),
-  pendingUserInput: (threadId: string, signal?: AbortSignal) => fetchJson<{ request: UserInputRequest | null }>(
-    `/api/session/user-input?threadId=${encodeURIComponent(threadId)}${conversationQuery()}`,
+  pendingUserInput: (threadId: string, signal?: AbortSignal, conversationId = currentConversationId(threadId)) => fetchJson<{ request: UserInputRequest | null }>(
+    `/api/session/user-input?threadId=${encodeURIComponent(threadId)}${conversationQuery(conversationId)}`,
     signal,
   ),
   answerUserInput: (

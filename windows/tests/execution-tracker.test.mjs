@@ -529,6 +529,24 @@ test('protocol errors and warnings remain visible through completion and preserv
   assert.deepEqual(tracker.getStatus('idle').notices, ['model changed']);
 });
 
+test('native reconnect notices and final failure propagate in order', () => {
+  const published = [];
+  const tracker = createExecutionTracker({ broadcast: event => published.push(event) });
+  tracker.handleProtocolMessage({ method: 'turn/started', params: { threadId: 't', turn: { id: 'turn' } } });
+  for (const message of ['Reconnecting... 1/2', 'Reconnecting... 2/2']) {
+    tracker.handleProtocolMessage({ method: 'error', params: { threadId: 't', turnId: 'turn', willRetry: true, error: { message } } });
+    assert.equal(tracker.getStatus('t').active, true);
+    assert.ok(tracker.getStatus('t').notices.includes(message));
+  }
+  tracker.handleProtocolMessage({ method: 'error', params: { threadId: 't', turnId: 'turn', willRetry: false, error: { message: 'stream disconnected' } } });
+  tracker.handleProtocolMessage({ method: 'turn/completed', params: { threadId: 't', turn: { id: 'turn', status: 'failed', error: { message: 'stream disconnected' } } } });
+  const status = tracker.getStatus('t');
+  assert.equal(status.active, false);
+  assert.equal(status.phase, 'failed');
+  assert.deepEqual(status.notices, ['Reconnecting... 1/2', 'Reconnecting... 2/2', 'stream disconnected']);
+  assert.ok(published.some(event => event.type === 'execution_status' && event.notices?.includes('Reconnecting... 2/2')));
+});
+
 test('native user receipt identifies the exact submitted message before assistant progress', () => {
   const events = [];
   const tracker = createExecutionTracker({ broadcast: event => events.push(event) });

@@ -9,6 +9,7 @@ import { createSubmissionId } from "../state/optimisticMessage";
 export function useFollowUpQueue(threadId: string) {
   const conversationId = currentConversationId();
   const [snapshot, setSnapshot] = useState({ threadId, items: [] as FollowUpQueueItem[] });
+  const snapshotRef = useRef(snapshot);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -29,7 +30,9 @@ export function useFollowUpQueue(threadId: string) {
     try {
       const response = await request();
       if (isCurrent()) {
-        setSnapshot({ threadId: targetThreadId, items: response.items || [] });
+        const next = { threadId: targetThreadId, items: response.items || [] };
+        snapshotRef.current = next;
+        setSnapshot(next);
         setError("");
       }
       return true;
@@ -83,14 +86,22 @@ export function useFollowUpQueue(threadId: string) {
 
   const handleEvent = useCallback((event: ProjectEvent) => {
     if (event.type === "user_message_accepted") {
+      const item = snapshotRef.current.threadId === event.threadId
+        ? snapshotRef.current.items.find(item => (item.dispatchSubmissionId || item.submissionId) === event.submissionId)
+        : undefined;
       accepted.current.add(event.submissionId);
       if (accepted.current.size > 500) accepted.current.delete(accepted.current.values().next().value!);
-      setSnapshot(current => ({ ...current, items: current.items.filter(item => (item.dispatchSubmissionId || item.submissionId) !== event.submissionId) }));
-      return;
+      const current = snapshotRef.current;
+      if (current.threadId === event.threadId) {
+        snapshotRef.current = { ...current, items: current.items.filter(entry => (entry.dispatchSubmissionId || entry.submissionId) !== event.submissionId) };
+        setSnapshot(snapshotRef.current);
+      }
+      return item;
     }
     if (event.type !== "queue_changed" || event.threadId !== threadIdRef.current) return;
     requestRef.current += 1;
-    setSnapshot({ threadId: event.threadId, items: event.items || [] });
+    snapshotRef.current = { threadId: event.threadId, items: event.items || [] };
+    setSnapshot(snapshotRef.current);
     setError("");
   }, [threadId]);
 

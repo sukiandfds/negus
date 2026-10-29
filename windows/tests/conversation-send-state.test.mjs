@@ -23,6 +23,37 @@ async function harness(file, dependencies) {
   return (name, id) => { cursor = 0; return module[name](id); };
 }
 
+test('closing a completed goal ignores a delayed completion event', async () => {
+  const gate = deferred();
+  const render = await harness('features/goals/hooks/useThreadGoal.ts', {
+    currentConversationId: () => '', goalApi: { clear: () => gate.promise },
+  });
+  const goal = { threadId: 't', status: 'complete', objective: 'done', createdAt: 1, updatedAt: 2 };
+  let hook = render('useThreadGoal', 't');
+  hook.handleEvent({ type: 'goal_status', threadId: 't', goal });
+  hook = render('useThreadGoal', 't');
+  const clearing = hook.clear();
+  hook.handleEvent({ type: 'goal_status', threadId: 't', goal: null });
+  gate.resolve({ goal: null });
+  assert.equal(await clearing, true);
+  hook.handleEvent({ type: 'goal_status', threadId: 't', goal });
+  assert.equal(render('useThreadGoal', 't').goal, null);
+  hook.handleEvent({ type: 'goal_status', threadId: 't', goal: { ...goal, objective: 'new' } });
+  assert.equal(render('useThreadGoal', 't').goal.objective, 'new');
+});
+
+test('queue acceptance recovers a dispatching item when its submitted event was missed', async () => {
+  const render = await harness('features/conversations/hooks/useFollowUpQueue.ts', {
+    currentConversationId: () => '', followUpQueueApi: {}, createSubmissionId: () => 'unused',
+  });
+  const queue = render('useFollowUpQueue', 't');
+  const item = {id:'queue',threadId:'t',submissionId:'queued',dispatchSubmissionId:'dispatch',state:'dispatching',text:'with image',sentAt:'2026-10-29T03:42:42Z',attachments:[{id:'image'}]};
+  queue.handleEvent({type:'queue_changed',threadId:'t',items:[item]});
+  assert.deepEqual(queue.handleEvent({type:'user_message_accepted',threadId:'other',turnId:'turn',submissionId:'dispatch'}),undefined);
+  assert.deepEqual(queue.handleEvent({type:'user_message_accepted',threadId:'t',turnId:'turn',submissionId:'dispatch'}),item);
+  assert.deepEqual(render('useFollowUpQueue', 't').items,[]);
+});
+
 test('switching conversations keeps both sends alive and independent', async () => {
   const calls = [];
   const render = await harness('features/execution/hooks/useCodexExecution.ts', {
@@ -72,7 +103,7 @@ test('first send creates one draft with final settings and survives navigating a
   const selectedIdRef = { current: selectedId };
   const sessions = new Map([['a', { threadId: 'a', model: 'default', messages: [] }]]);
   const select = id => { selectedId = id; selectedIdRef.current = id; };
-  const calls = []; const gate = deferred();
+  const calls = []; const gate = deferred(); let receiveEvent;
   const noop = () => {};
   const context = { status: { threadId: 'a', model: 'default', reasoningEffort: 'high' }, applyModelSettings: noop, markSubmitted: noop };
   const render = await harness('features/conversations/hooks/useProjectConversations.ts', {
@@ -82,7 +113,7 @@ test('first send creates one draft with final settings and survives navigating a
     useConversationSession: () => ({ selectedId, selectedIdRef, session: sessions.get(selectedId), loadingSession: false,
       setCreatedSession(detail) { sessions.set(detail.threadId, detail); select(detail.threadId); },
       updateCurrentSession(id, update) { sessions.set(id, update(sessions.get(id))); },
-      addOptimisticMessage(id, message) { sessions.get(id).messages.push(message); },
+      addOptimisticMessage(id, message) { if (!sessions.get(id).messages.some(item => item.id === message.id)) sessions.get(id).messages.push(message); },
       removeOptimisticMessage(id, messageId) { const session = sessions.get(id); if (session) session.messages = session.messages.filter(message => message.id !== messageId); },
       updateOptimisticMessage(id, messageId, patch) { const message = sessions.get(id).messages.find(message => message.id === messageId); if (message) Object.assign(message, patch); },
       loadSession: async () => true, selectSession: select,
@@ -92,17 +123,19 @@ test('first send creates one draft with final settings and survives navigating a
         calls.push(['create', model, provider]); sessions.set('real', { threadId: 'real', model, messages: [] }); return 'real';
       },
     }),
-    useCodexExecution: () => ({ status: { active: false }, sendMessage: async (...args) => {
+    useCodexExecution: () => ({ status: { active: false }, handleEvent: noop, sendMessage: async (...args) => {
       calls.push(['send', ...args]); return { outcome: 'failed', result: null };
     } }),
-    useFollowUpQueue: () => ({}), useThreadGoal: () => ({}), useConversationEvents: () => ({}),
+    useFollowUpQueue: () => ({handleEvent: event => event.type === 'user_message_accepted' && event.submissionId === 'queued-dispatch'
+      ? {text:'queued image',attachments:[{id:'image'}],sentAt:'2026-10-29T03:42:43Z'} : undefined}), useThreadGoal: () => ({handleEvent: noop}),
+    useConversationEvents: (_changed, handler) => { receiveEvent = handler; return {}; },
     useModels: () => ({ models: [{ model: 'chosen', modelProviderId: 'provider-chosen' }], clearPending: noop }),
     readInitialConversationState: () => ({}), readModelCatalog: () => [{ model: 'chosen', modelProviderId: 'provider-chosen' }],
     readModelDefaults: () => ({}), useModelDefaults: () => ({}), readLocalCache: () => null,
     resolveVisibleModel: (_models, _defaults, recorded, session) => recorded || session || 'default',
     resolveVisibleEffort: (_models, _defaults, _model, effort) => effort || 'high', providerIdOf: entry => entry.modelProviderId,
     createClientId: () => 'draft', createSubmissionId: () => 'receipt',
-    createOptimisticMessage: (text, _files, submissionId) => ({ id: `optimistic-${submissionId}`, role: 'user', text, submissionId }),
+    createOptimisticMessage: (text, files, submissionId, createdAt) => ({ id: `optimistic-${submissionId}`, role: 'user', text, submissionId, createdAt, blocks:files }),
     isPendingThread: id => id.startsWith('pending:'),
   });
   window.location = { search: '' };
@@ -114,6 +147,14 @@ test('first send creates one draft with final settings and survives navigating a
   hook = render('useProjectConversations');
   const sending = hook.sendMessage('hello', [{ id: 'attachment' }]);
   await new Promise(setImmediate);
+  receiveEvent({type:'user_message_submitted',threadId:'real',messageId:'optimistic-receipt',submissionId:'receipt',text:'hello',attachments:[],createdAt:'2026-10-29T03:42:42Z'});
+  assert.equal(sessions.get('real').messages[0].createdAt,'2026-10-29T03:42:42Z');
+  assert.equal(sessions.get('real').messages[0].serverTimestamp,true);
+  assert.equal(sessions.get('real').messages.length,1);
+  receiveEvent({type:'user_message_accepted',threadId:'real',turnId:'turn',submissionId:'queued-dispatch'});
+  assert.equal(sessions.get('real').messages[1].text,'queued image');
+  assert.equal(sessions.get('real').messages[1].blocks[0].id,'image');
+  assert.equal(sessions.get('real').messages[1].serverTimestamp,true);
   select('b'); sessions.set('b', { threadId: 'b', model: 'another', messages: [] });
   render('useProjectConversations');
   gate.resolve();
@@ -142,4 +183,24 @@ for (const phase of ['completed', 'failed']) test(`late send response cannot rep
   const status = render('useCodexExecution', 'a').status;
   assert.equal(status.phase, phase);
   assert.equal(status.active, false);
+});
+
+test('accepted new turn drops old failure notices without erasing steering progress', async () => {
+  const render = await harness('features/execution/hooks/useCodexExecution.ts', {
+    createClientId: () => 'new-send', executionApi: { sendMessage: async () => ({threadId:'retry-error',turnId:'new-turn',status:'accepted'}) },
+  });
+  let h = render('useCodexExecution','retry-error');
+  h.handleEvent({type:'execution_status',threadId:'retry-error',turnId:'old-turn',phase:'failed',active:false,notices:['403 quota'],detail:'403 quota',label:'failed',activities:[]});
+  h = render('useCodexExecution','retry-error');
+  await h.sendMessage('继续',[],'new-send');
+  h = render('useCodexExecution','retry-error');
+  assert.equal(h.status.phase,'working');
+  assert.equal(h.status.detail,'');
+  assert.equal(h.status.notices?.length || 0,0);
+  h.handleEvent({type:'execution_status',threadId:'retry-error',turnId:'new-turn',phase:'tool',active:true,notices:['current warning'],detail:'current tool',label:'tool',activities:[]});
+  h = render('useCodexExecution','retry-error');
+  await h.sendMessage('补充',[],'steer-send');
+  h = render('useCodexExecution','retry-error');
+  assert.deepEqual(h.status.notices,['current warning']);
+  assert.equal(h.status.phase,'tool');
 });

@@ -6,7 +6,7 @@
 .selectMessage { display: flex; align-items: center; gap: 6px; width: fit-content; margin-bottom: 6px; color: var(--color-text-muted); font-size: 12px; cursor: pointer; }
 .body { position: relative; color: var(--color-text); }
 .sending, .waiting { position: absolute; left: -22px; top: 12px; width: 14px; height: 14px; color: var(--color-text-muted); }
-.sending { opacity: 0; animation: loading-spin .8s linear infinite, sending-reveal 0s 3s forwards; }
+.sending { opacity: 0; animation: loading-spin .8s linear infinite, sending-reveal 0s 10s forwards; }
 @keyframes sending-reveal { to { opacity: 1; } }
 .priorReply { margin: 0 0 6px; color: var(--color-text-muted); font-size: 12px; line-height: 1.4; }
 .user .body { width: fit-content; max-width: min(620px, 82%); margin-left: auto; padding: 10px 14px; border: 1px solid rgba(255,255,255,.04); border-radius: 16px; background: #2b2b2b; }

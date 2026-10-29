@@ -67,11 +67,11 @@ try {
   await check('cached message visible while session API waits', async () => { await page.getByText('缓存先显示').first().waitFor(); for (let i = 0; i < 40 && !releaseSession; i++) await page.waitForTimeout(50); assert.ok(releaseSession); });
   releaseSession?.();
   await check('old link employee identity', async () => { await page.getByText('技术研发', { exact: true }).first().waitFor(); });
-  await check('prefetch first ten conversations', async () => {
+  await check('prefetch recent batch then remaining conversations', async () => {
     await page.waitForFunction(() => document.body.innerText.includes('原消息'));
     await page.waitForTimeout(1200);
     const ids = new Set(calls.filter(c => c.path === '/api/session' && c.method === 'GET').map(c => new URLSearchParams(c.query).get('threadId')));
-    assert.deepEqual([...ids].sort(), sessions.slice(0, 10).map(s => s.threadId).sort());
+    assert.deepEqual([...ids].sort(), sessions.map(s => s.threadId).sort());
   });
   await check('background menu without session summary', async () => {
     await page.getByRole('button', { name: '后台', exact: true }).click();

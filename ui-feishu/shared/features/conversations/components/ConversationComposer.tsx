@@ -343,7 +343,7 @@ export function ConversationComposer({
           ref={textareaRef}
           rows={2}
           value={text}
-          placeholder={!selected ? "请选择一个对话" : archived ? "已归档，请先恢复对话" : status.active ? "追加指令，引导当前任务" : "给 Codex 发送指令"}
+          placeholder={!selected ? "请选择一个对话" : archived ? "已归档，请先恢复对话" : status.active && status.phase !== "submitted" ? "追加指令，引导当前任务" : "给 Codex 发送指令"}
           disabled={inputDisabled}
           onChange={(event) => {
             setText(event.target.value);
@@ -438,7 +438,7 @@ export function ConversationComposer({
             >
               <Square className={styles.stopIcon} aria-hidden="true" />
             </button>
-          ) : (status.active || goal?.status === "active") && !hasContent ? (
+          ) : ((status.active && status.phase !== "submitted") || goal?.status === "active") && !hasContent ? (
             <button
               className={styles.sendButton}
               type="button"

@@ -64,6 +64,8 @@ export function useConversationCatalog(
   const [sessions, setSessions] = useState<SessionSummary[]>(initialArchivedView ? [] : initial.sessions);
   const [loadingList, setLoadingList] = useState(initialArchivedView || !initial.sessions.length);
   const [initialSyncReady, setInitialSyncReady] = useState(false);
+  // FEAT-001: confirmed archive results outrank stale directory associations.
+  const [archivedByThread, setArchivedByThread] = useState<Record<string, boolean>>({});
   const [archivedView, setArchivedView] = useState(initialArchivedView);
   const [creating, setCreating] = useState(false);
   const [archiveBusyIds, setArchiveBusyIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -94,6 +96,10 @@ export function useConversationCatalog(
         .filter((item) => !archiveBusyIdsRef.current.has(item.threadId));
       if (requestId !== listRequestRef.current || requestedArchivedView !== archivedViewRef.current) return;
 
+      setArchivedByThread(previous => {
+        const changed = serverSessions.filter(item => previous[item.threadId] !== Boolean(item.archived));
+        return changed.length ? { ...previous, ...Object.fromEntries(changed.map(item => [item.threadId, Boolean(item.archived)])) } : previous;
+      });
       const serverIds = new Set(serverSessions.map((item) => item.threadId));
       for (const threadId of serverIds) transientSessionsRef.current.delete(threadId);
       const transientSessions = archivedViewRef.current
@@ -346,6 +352,7 @@ export function useConversationCatalog(
       removed = removeSessionOptimistically(threadId);
       await request;
       if (requestFailed) throw requestError;
+      setArchivedByThread(previous => ({ ...previous, [threadId]: true }));
       window.dispatchEvent(new CustomEvent("negus:conversation-archived", { detail: { threadId } }));
       transientSessionsRef.current.delete(threadId);
       if (selection.selectedIdRef.current === threadId) selection.clearSelection();
@@ -375,6 +382,7 @@ export function useConversationCatalog(
       removed = removeSessionOptimistically(threadId);
       await request;
       if (requestFailed) throw requestError;
+      setArchivedByThread(previous => ({ ...previous, [threadId]: false }));
       if (selection.selectedIdRef.current === threadId) selection.clearSelection();
       return true;
     } catch (reason) {
@@ -426,6 +434,7 @@ export function useConversationCatalog(
     initialSyncReady,
     creating,
     archiveBusyIds,
+    archivedByThread,
     listError,
     refreshSessions,
     setArchiveViewMode,

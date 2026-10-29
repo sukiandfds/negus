@@ -53,7 +53,7 @@ export function ExecutionTimeline({
     ? elapsedText(liveDurationMs)
     : Number.isFinite(status.durationMs) ? elapsedText(status.durationMs || 0) : "";
   const compacting = contextStatus.threadId === status.threadId && contextStatus.phase === "compacting";
-  const label = compacting ? "正在压缩上下文" : status.label.replace(/^Codex\s*/u, "");
+  const label = compacting ? "正在压缩上下文" : status.phase === "submitted" ? "连接状态" : status.label.replace(/^Codex\s*/u, "");
 
   return (
     <section className={styles.timeline} aria-label="Codex 工作过程">

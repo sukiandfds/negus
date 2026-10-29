@@ -13,7 +13,7 @@ const sendingThreads = new Set<string>();
 
 type RefreshStatus = (signal?: AbortSignal, reconcile?: boolean) => Promise<ExecutionStatus | null>;
 
-const idleStatus = (threadId: string): ExecutionStatus => ({
+export const idleStatus = (threadId: string): ExecutionStatus => ({
   type: "execution_status",
   threadId,
   turnId: "",
@@ -313,9 +313,10 @@ export function useCodexExecution(threadId: string) {
         currentTurnIdRef.current = accepted.turnId;
         stateRevisionRef.current += 1;
         setStatus((current) => ({
-          ...current,
+          ...(steering ? current : idleStatus(targetThreadId)),
           turnId: accepted.turnId,
-          phase: current.active ? current.phase : "working",
+          phase: steering && current.active ? current.phase : "working",
+          label: steering && current.active ? current.label : "Codex 正在处理任务",
           active: true,
           updatedAt: new Date().toISOString(),
         }));

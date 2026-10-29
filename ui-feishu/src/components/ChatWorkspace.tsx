@@ -109,7 +109,7 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
     } finally { setForwardBusy(false); }
   };
   return <section className="chat-workspace" aria-label="聊天工作区">
-      <ChatHeader avatar={<Avatar name={selectedName} projectRoot={projectRoot} agentId={agentId} active={c.executionStatus.active} size="small" />}
+      <ChatHeader avatar={<Avatar name={selectedName} projectRoot={projectRoot} agentId={agentId} active={c.executionStatus.active && c.executionStatus.phase !== 'submitted'} size="small" />}
         title={<><ConversationOrigin origin={selected?.origin} /><span>{agentId ? selectedName : selected?.name || c.session?.title || selectedName}</span></>}
         subtitle={selected?.label || conversationStatus(c.executionStatus, c.contextStatus.threadId === c.selectedId ? c.contextStatus.phase : undefined, projectRoot || '未关联')}
         onBack={onBack} tab={tab} onTabChange={setTab} fileCount={files.length}

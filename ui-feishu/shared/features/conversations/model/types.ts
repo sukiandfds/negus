@@ -22,11 +22,12 @@ export interface SessionMessage {
   id: string;
   role: MessageRole;
   text: string;
-  deliveryState?: "sending" | "pending" | "failed" | "occupied";
+  deliveryState?: "preparing" | "sending" | "pending" | "failed" | "occupied";
   deliveryError?: string;
   submissionId?: string;
   blocks?: ContentBlock[];
   createdAt?: string;
+  serverTimestamp?: boolean;
   turnId?: string;
   protocolTurnId?: string;
   phase?: string;
@@ -87,3 +88,17 @@ export interface SessionDelta {
 }
 
 export type SessionResponse = SessionDetail | SessionDelta;
+
+// FEAT-001 (2026-10-30): persist associated conversation display fields with its history snapshot.
+export interface ConversationPresentation {
+  executionStatus: import('../../execution/model/types').ExecutionStatus;
+  contextStatus: import('../../context-management/model/types').ContextStatus;
+  visibleModel: string;
+  visibleEffort: string;
+  usageModel: string;
+  goal: import('../../goals/model/types').ThreadGoal | null;
+  queueItems: import('./followUpQueue').FollowUpQueueItem[];
+  userInputRequest: import('../../execution/model/types').UserInputRequest | null;
+  streamingText: string;
+  commentaryText: string;
+}

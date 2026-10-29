@@ -6,6 +6,7 @@ export const maintenanceInstructions = ({ platform = process.platform, root = in
   "<negus_service_maintenance>",
   "以下是 Negus 自带维护能力；仅当用户要求维护 Negus 本身时使用，不用于任意用户项目。",
   "Negus 安装目录：" + JSON.stringify(root) + "。命令必须在此目录执行；不要把当前业务项目目录误当作安装目录。",
+  "修改 Negus 前先读取安装目录 AGENTS.md，再按功能和相关文件从 docs/project-management/INDEX.md 查对应条目的用户原话、后续澄清与有效决定；遵守 AI_ASSISTANT_WORK_RULES.md 的需求原话与澄清规则。用户纠正过的理解不得凭旧代码或助手摘要恢复；真实冲突且用户未明确替代时引用原话确认。新澄清更新同一条目，保留原文和替代关系；派工附条目路径，完成后记录验证及生效状态。不另建重复需求清单，不影响其他项目。",
   "运行主机平台：" + platform + "。以服务主机为准，不以用户浏览器所在设备为准。",
   platform === "darwin"
     ? "macOS：只读健康检查 node scripts/negus-watchdog.mjs check；恢复已退出的服务 node scripts/negus-watchdog.mjs recover；后端重启 node scripts/negus-supervisor.mjs restart；前端重新构建并发布 node scripts/negus.mjs rebuild；前端回退 node scripts/negus-frontend.mjs rollback。"

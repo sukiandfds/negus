@@ -5,6 +5,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
+import TOML from "@iarna/toml";
+import { sharedModelCatalogArguments } from './model-catalog.mjs';
+
+export const streamRetryArguments = (home) => {
+  let config;
+  try { config = TOML.parse(fs.readFileSync(path.join(home, "config.toml"), "utf8")); }
+  catch (error) { if (error.code === "ENOENT") return []; throw error; }
+  const providers = config.model_providers || {};
+  for (const provider of Object.values(providers)) provider.stream_max_retries = 2;
+  return Object.keys(providers).length ? ['-c', `model_providers=${TOML.stringify.value(providers)}`] : [];
+};
 
 const versionParts = (version) => {
   const match = version.match(/(\d+)\.(\d+)\.(\d+)(?:-([\w.-]+))?/);
@@ -85,7 +96,7 @@ const commandOnPath = () => {
   return String(result.stdout || "").split(/\r?\n/u).map((value) => value.trim()).find(Boolean) || null;
 };
 
-const resolveCodexCommand = () => {
+export const resolveCodexCommand = () => {
   const override = process.env.CODEX_APP_SERVER_BIN?.trim();
   if (override) {
     const selected = inspectCandidate(path.resolve(override));
@@ -204,7 +215,8 @@ export const createAppServerClient = ({
     const selected = resolveCodexCommand();
     const logPrefix = label ? `[app-server-client:${label}]` : "[app-server-client]";
     console.log(`${logPrefix} using ${selected.entrypoint} (${selected.version})`);
-    const spawned = spawn(selected.command, [...selected.prefixArgs, "app-server", ...imageMcpArguments(), ...computerMcpArguments(), ...nativeComputerMcpArguments()], {
+    const effectiveHome = codexHome || environment.CODEX_HOME || process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+    const spawned = spawn(selected.command, [...selected.prefixArgs, "app-server", ...streamRetryArguments(effectiveHome), ...sharedModelCatalogArguments(), ...imageMcpArguments(), ...computerMcpArguments(), ...nativeComputerMcpArguments()], {
       cwd: workingDirectory,
       env: buildAppServerEnvironment({
         environment,

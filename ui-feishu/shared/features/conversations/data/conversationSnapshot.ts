@@ -1,4 +1,4 @@
-import type { SessionDetail, SessionSummary } from "../model/types";
+import type { ConversationPresentation, SessionDetail, SessionSummary } from "../model/types";
 import { readStorage, writeStorage } from "../../../shared/state/storage";
 
 const storageKey = "negus-conversation-snapshot-v1";
@@ -21,6 +21,7 @@ export interface ConversationSnapshot {
   sessions: SessionSummary[];
   session: SessionDetail | null;
   recentSessions?: CachedConversation[];
+  presentation?: Record<string, ConversationPresentation>;
 }
 
 const isSessionDetail = (value: unknown): value is SessionDetail => Boolean(
@@ -74,11 +75,12 @@ export const readConversationSnapshot = (): ConversationSnapshot | null => selec
   readLocalSnapshot(legacyStorageKey),
 );
 
-export const writeConversationSnapshot = ({ selectedId, sessions, session, cachedSessions }: {
+export const writeConversationSnapshot = ({ selectedId, sessions, session, cachedSessions, presentation }: {
   selectedId: string;
   sessions: SessionSummary[];
   session: SessionDetail | null;
   cachedSessions?: ReadonlyMap<string, SessionDetail>;
+  presentation?: Record<string, ConversationPresentation>;
 }) => {
   try {
     const previous = readConversationSnapshot();
@@ -116,12 +118,17 @@ export const writeConversationSnapshot = ({ selectedId, sessions, session, cache
       sessions: sessions.slice(0, 50),
       session: cachedSession,
       recentSessions,
+      presentation: Object.fromEntries([selectedId, ...recentSessions.map(entry => entry.session.threadId)].flatMap(id => {
+        const value = presentation?.[id];
+        return value ? [[id, value]] : [];
+      })),
     };
     let serialized = JSON.stringify(snapshot);
     while (serialized.length > maxSnapshotCharacters && snapshot.recentSessions?.length) {
       const oldest = snapshot.recentSessions[snapshot.recentSessions.length - 1];
       if (oldest.session.messages.length <= 1) {
         snapshot.recentSessions.pop();
+        if (snapshot.presentation) delete snapshot.presentation[oldest.session.threadId];
       } else {
         oldest.isPartial = true;
         oldest.session = {

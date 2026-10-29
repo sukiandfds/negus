@@ -24,19 +24,12 @@ const timestampFromValue = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const timestampFromSubmissionId = (value) => {
-  const match = /^msg-([0-9a-z]+)-/iu.exec(String(value || ""));
-  if (!match) return null;
-  const timestamp = Number.parseInt(match[1], 36);
-  return Number.isSafeInteger(timestamp) && timestamp > 0 ? timestamp : null;
-};
-
 const userMessageTimestamp = (item, fallback) => {
   for (const value of [item?.createdAt, item?.timestamp, item?.created_at]) {
     const timestamp = timestampFromValue(value);
     if (timestamp !== null) return timestamp;
   }
-  return timestampFromSubmissionId(item?.clientId) ?? timestampFromValue(fallback);
+  return timestampFromValue(fallback);
 };
 
 const turnPageLimit = (messageLimit) => {
@@ -49,7 +42,7 @@ const messagesFromTurn = (turn, registerMedia) => dedupeAssistantMediaMessages((
     const message = messageFromThreadItem(item, registerMedia);
     if (!message) return null;
     const timestamp = message.role === "user"
-      ? userMessageTimestamp(item, turn.startedAt)
+      ? userMessageTimestamp(item, index === turn.items.findIndex((entry) => entry.type === "userMessage") ? turn.startedAt : null)
       : timestampFromValue(item.createdAt ?? item.timestamp ?? item.created_at)
         ?? (index === turn.items.findLastIndex((entry) => entry.type === "agentMessage") ? timestampFromValue(turn.completedAt) : null);
     const itemId = item.id || message.itemId || "";

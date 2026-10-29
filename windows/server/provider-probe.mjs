@@ -25,7 +25,7 @@ export const createProviderProbe = ({ resolveDraft, fetchImpl = globalThis.fetch
     const models = [...new Set(payload.data.map(entry => entry?.id).filter(id =>
       typeof id === "string" && id.length > 0 && id.length <= 120 && !id.includes("::") && !/[\r\n]/u.test(id)))].sort();
     if (!models.length) throw failure("这个 Key 未查询到模型", 502);
-    return { models, capabilities: models.map(model => withVerifiedReasoning({ model }, baseUrl)) };
+    return { models, capabilities: models.map(model => withVerifiedReasoning({ model })) };
   }
   const replied = Array.isArray(payload.output) && payload.output.some(item =>
     item.type === "message" && item.role === "assistant" && Array.isArray(item.content) && item.content.some(part =>

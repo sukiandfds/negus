@@ -9,7 +9,7 @@ export const conversationKey = (item: Conversation) => item.roomId ? `group:${it
 export const uniqueConversations = (items: Conversation[]) => [...new Map(items.map(item => [conversationKey(item), item])).values()].sort(byLatest);
 
 // Every view points to the same conversation identity and existing navigation route.
-export function buildConversationDirectory(directory: DirectoryState, sessions: ConversationState['sessions'], archived: boolean, projectRoot = '', cachedSessions?: ConversationState['cachedSessions']) {
+export function buildConversationDirectory(directory: DirectoryState, sessions: ConversationState['sessions'], archived: boolean, projectRoot = '', cachedSessions?: ConversationState['cachedSessions'], archivedByThread: Record<string, boolean> = {}) {
   const summaries = new Map(sessions.map(s => [s.threadId, s]));
   const toConversation = (project: DirectoryProject, entry: Entry): Conversation => {
     const listed = summaries.get(entry.threadId || '');
@@ -39,10 +39,10 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
   for (const project of directory.projects) {
     const entries = (project.conversations || []) as Entry[];
     // Project group execution is outside this UI phase.
-    const available = entries.filter(entry => entry.role !== 'project' && Boolean(entry.archived) === archived);
+    const available = entries.filter(entry => entry.role !== 'project' && Boolean(archivedByThread[entry.threadId || ''] ?? entry.archived) === archived);
     const rows = available.map(entry => toConversation(project, entry));
     if (project.kind === 'employee') {
-      if (archived && !rows.length) continue;
+      if ((archived && !rows.length) || (!archived && archivedByThread[project.mainThreadId || ''])) continue;
       const main = rows.find(row => row.main) || (!archived ? toConversation(project, {
         id: `${project.id}:main`, title: project.name, main: true,
         threadId: project.mainThreadId, conversationId: project.mainConversationId,
