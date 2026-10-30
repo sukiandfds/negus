@@ -12,7 +12,7 @@ export const conversationReads = {
     const relevant = () => [...pending.keys()].some(pathname => {
       const url = new URL(pathname, window.location.origin);
       const id = url.searchParams.get('threadId');
-      return !id || threadIds.has(id);
+      return Boolean(id && threadIds.has(id));
     });
     const finish = () => { if (!relevant()) { cleanup(); resolve(); } };
     const timer = window.setTimeout(() => { cleanup(); reject(new Error('同步超时，正在保留当前内容')); }, timeoutMs);

@@ -26,3 +26,25 @@ test('large batches bound concurrent conversation reads while publishing togethe
  await readConversationBatches(Array.from({length:94},(_,i)=>i),async()=>{peak=Math.max(peak,++active);await new Promise(r=>setTimeout(r,1));active--;},r=>publications.push(r),new AbortController().signal,1000);
  assert.equal(peak,4);assert.deepEqual(publications.map(p=>p.length),[10,84]);
 });
+
+test('many stalled conversations share one deadline per batch instead of extending it per slot', async () => {
+ const publications=[],calls=[];
+ const started=Date.now();
+ await readConversationBatches(Array.from({length:94},(_,i)=>i),i=>{calls.push(i);return new Promise(()=>{});},r=>publications.push(r),new AbortController().signal,30);
+ assert.ok(Date.now()-started<250,'two batches must not wait for 24 separate timeouts');
+ assert.deepEqual(publications.map(p=>p.length),[10,84]);
+ assert.equal(calls.length,8);
+ assert.ok(publications.flat().every(r=>r.error.includes('同步超时')));
+});
+
+test('a conversation batch does not wait on unrelated global catalog requests', async () => {
+ const code=await fs.readFile(new URL('../../ui-feishu/shared/shared/state/conversationReads.ts',import.meta.url),'utf8');
+ const {conversationReads}=await import(`data:text/javascript;base64,${Buffer.from(ts.transpile(code,{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022})).toString('base64')}`);
+ globalThis.window={location:{origin:'http://localhost'},setTimeout,clearTimeout};
+ const finishGlobal=conversationReads.start('/api/sessions');
+ const finishThread=conversationReads.start('/api/session?threadId=selected');
+ const waiting=conversationReads.wait(new Set(['selected']),100);
+ finishThread();await waiting;
+ assert.equal(conversationReads.pending(),true);
+ finishGlobal();await new Promise(r=>setTimeout(r,5));
+});

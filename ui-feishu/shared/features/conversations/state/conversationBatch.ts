@@ -11,14 +11,17 @@ export async function readConversationBatches<T>(
     if (!batch.length) continue;
     const results: { entry: T; error: string }[] = new Array(batch.length);
     let next = 0;
+    const deadline = Date.now() + timeoutMs;
     // Each conversation reads several resources. Bound reads, not the atomic publication.
     await Promise.all(Array.from({ length: Math.min(4, batch.length) }, async () => {
       while (next < batch.length && !signal.aborted) {
         const index = next++, entry = batch[index];
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) throw new Error('同步超时，正在保留当前内容');
           await Promise.race([read(entry), new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new Error('同步超时，正在保留当前内容')), timeoutMs);
+            timer = setTimeout(() => reject(new Error('同步超时，正在保留当前内容')), remaining);
           })]);
           results[index] = { entry, error: '' };
         } catch (reason) {
