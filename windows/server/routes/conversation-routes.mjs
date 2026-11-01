@@ -744,11 +744,29 @@ export const createConversationRoutes = ({
     const source = url.searchParams.get("source") || "all";
     const pagination = paginationFrom(url);
     const binding = await authorizeAgentThread({ threadId, conversationId, allowGroup: true });
-    const session = binding
-      ? await readAgentSession(binding, source, pagination)
+    const view = url.searchParams.get("view") === "1";
+    const requestedRevision = view ? url.searchParams.get("sourceRevision") : null;
+    const revisionSource = sessionSource(binding);
+    const readRevision = () => Promise.resolve().then(() => revisionSource.getSourceRevision(threadId)).catch(() => null);
+    const currentRevision = view ? await readRevision() : null;
+    const reuseBody = Boolean(requestedRevision && currentRevision === requestedRevision);
+    const session = reuseBody ? null : binding
+      ? view && isEmployeeDirectBinding(binding)
+        ? await employeeRuntime.readSession(binding.agentId, { ...pagination, readOnly: true })
+        : await readAgentSession(binding, source, pagination)
       : await conversations.findSession(threadId, source, pagination);
-    if (!session) {
+    if (!session && !reuseBody) {
       sendJson(response, { error: "session not found" }, 404);
+      return true;
+    }
+    if (view) {
+      const source = sessionSource(binding);
+      const [context, goal, input, finalRevision] = await Promise.all([
+        contextManagement.load(threadId), source.getGoal(threadId), source.getPendingUserInput(threadId), readRevision(),
+      ]);
+      if (currentRevision !== finalRevision) throw Object.assign(new Error("对话更新中，请重试同步"), { statusCode: 409 });
+      sendJson(response, { session, context, goal: goal.goal, status: execution.getStatus(threadId),
+        queue: followUpQueue.list(threadId), input: publicUserInputRequest(input), sourceRevision: finalRevision });
       return true;
     }
     sendJson(response, session);

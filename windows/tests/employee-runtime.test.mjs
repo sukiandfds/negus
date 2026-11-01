@@ -6,7 +6,7 @@ import test from "node:test";
 import { createEmployeeProjectRegistry } from "../server/employee-project-registry.mjs";
 import { createEmployeeRuntimeService } from "../server/employee-runtime-service.mjs";
 
-const fixture = async (t, { execution = null, onTurnCompleted = null, taskService = null, readHistory } = {}) => {
+const fixture = async (t, { execution = null, onTurnCompleted = null, taskService = null, readHistory, registerSession } = {}) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-employee-runtime-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const registry = await createEmployeeProjectRegistry({
@@ -39,6 +39,7 @@ const fixture = async (t, { execution = null, onTurnCompleted = null, taskServic
     registry,
     conversationStore,
     readHistory,
+    registerSession,
     projectRoot: "D:\\project",
     client,
     broadcast: (event) => events.push(event),
@@ -75,6 +76,20 @@ test("employee history preserves ordinary messages and pagination on the selecte
   assert.equal(session.nextCursor, "older-page");
   assert.equal(session.conversationKind, "direct");
   assert.equal(session.conversationId, "history-conversation");
+});
+
+test("employee cached-view history reads the existing binding without resuming or creating a thread", async (t) => {
+  const reads = [];
+  const { runtime, registry, conversationStore, calls } = await fixture(t, { readHistory: async (...args) => {
+    reads.push(args); return { threadId: args[1], messages: [] };
+  } });
+  await registry.bindMainThread("developer", "employee-thread");
+  await registry.bindConversation("developer", "employee-conversation");
+  conversationStore.findByAgentKind = () => ({ conversationId: "employee-conversation", runtimeSessionId: "employee-thread" });
+  const result = await runtime.readSession("developer", { limit: 60, readOnly: true });
+  assert.equal(result.threadId, "employee-thread");
+  assert.equal(reads[0][3].readOnly, undefined);
+  assert.deepEqual(calls, []);
 });
 
 test("employee registry keeps identity state private from API-shaped values", async (t) => {
@@ -331,4 +346,25 @@ test("employee steering preserves submission identity and current turn when resp
     assert.equal(calls.at(-1).params.expectedTurnId, "employee-turn");
     assert.equal(result.turnId, "employee-turn");
   }
+});
+
+
+test('employee fork registers as ordinary user conversation without replacing the employee', async t => {
+  const registrations = [];
+  const f = await fixture(t, { registerSession: async (...args) => { registrations.push(args); return args[0]; } });
+  await f.runtime.open('developer');
+  const before = f.registry.require('developer');
+  const original = f.client.request.bind(f.client);
+  f.client.request = async (method, params) => method === 'thread/fork'
+    ? { thread: { id: 'employee-fork', model: 'actual-model', cwd: before.projectRoot } }
+    : original(method, params);
+  const result = await f.runtime.forkSession('developer', 'finished-turn');
+  assert.equal(result.conversationKind, 'standard');
+  assert.equal(result.forkedFromId, before.mainThreadId);
+  assert.equal(registrations.length, 1);
+  assert.equal(registrations[0][1], before.modelProviderId || 'current');
+  assert.ok(registrations[0][2].endsWith('actual-model'));
+  assert.equal(f.registry.require('developer').mainThreadId, before.mainThreadId);
+  assert.equal(f.registry.require('developer').conversationId, before.conversationId);
+  assert.equal(result.conversationId, undefined);
 });

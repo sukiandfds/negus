@@ -119,14 +119,8 @@ export function adaptEmployeeProviderSource(source) {
       throw error;
     }
 ` + source.slice(end + '    return { employee: updated, status: statusFor(employee.id) };'.length);
-  replace('    const result = await resumeThread(cleanThreadId, employee);', `    if (employee.pendingModelSettings) {
-      const selected = employee.pendingModelSettings;
-      return { model: selected.modelProviderId.startsWith("ccswitch_") ? selected.modelProviderId + "::" + selected.model : selected.model,
-        modelProvider: selected.modelProviderId, reasoningEffort: selected.reasoningEffort };
-    }
-    const result = await resumeThread(cleanThreadId, employee);`);
-  // Return a provider-qualified model to the shared model picker after reload.
-  replace('model: result?.model || employee.model || "",', 'model: employee.modelProviderId?.startsWith("ccswitch_") ? employee.modelProviderId + "::" + (result?.model || employee.model) : result?.model || employee.model || "",');
-  replace('modelProvider: result?.modelProvider || employee.modelProviderId || CURRENT_MODEL_PROVIDER_ID,', 'modelProvider: employee.modelProviderId || CURRENT_MODEL_PROVIDER_ID,');
+  // Reading settings uses the saved selection, without resuming the employee thread.
+  replace('    const employee = registry.require(employeeId);\n    return {\n      model: employee.model || "",',
+    '    const saved = registry.require(employeeId);\n    const employee = saved.pendingModelSettings || saved;\n    return {\n      model: employee.modelProviderId?.startsWith("ccswitch_") ? employee.modelProviderId + "::" + employee.model : employee.model || "",');
   return `import { transferEmployeeThread } from ${JSON.stringify(import.meta.url)};\n` + source;
 }

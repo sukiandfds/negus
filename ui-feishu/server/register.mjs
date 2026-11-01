@@ -49,6 +49,7 @@ registerHooks({ load(url, context, nextLoad) {
       stateRoot: path.join(process.env.NEGUS_UI_STATE_ROOT || path.join(projectRoot, 'runtime', 'ui-feishu'), 'employee-tasks'),
       registry: employeeRegistry, modelProviders, appServerClient, bindings: employeeConversationStore,
       providerForThread: threadId => appServerConversations.getRecordedProviderForThread(threadId),
+      registerSession: appServerConversations.registerSession,
       execution, queue: followUpQueue, broadcast: realtime.broadcast,
     });\n${employeeMarker}`);
     const marker = 'const requestHandler = createRequestHandler({';

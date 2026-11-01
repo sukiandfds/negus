@@ -11,7 +11,7 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
   const employees = [{ id: 'a', name: '助手', modelProviderId: 'external', reasoningEffort: 'high', projectRoot: root, mainThreadId: 'main', conversationId: 'direct-a' }, { id: 'b', name: '研究员', modelProviderId: 'external', reasoningEffort: 'high', projectRoot: root }];
   const registry = { list: () => employees, require: id => { const employee = employees.find(item => item.id === id); if (!employee) throw Error('员工不存在'); return employee; } };
   const listeners = new Set(); const threads = new Map([['main', { id: 'main', turns: [{ id: 'main-turn', status: 'inProgress' }] }]]);
-  const starts = []; const bindings = []; const results = []; const created = [];
+  const starts = []; const bindings = []; const results = []; const created = []; const registrations = [];
   let mainActive = true;
   const client = { subscribe: callback => { listeners.add(callback); return () => listeners.delete(callback); },
     request: async (method, params) => {
@@ -29,6 +29,7 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
   const modelProviders = { providers: () => [{ id: 'vip', displayName: 'VIP', models: [{ model: 'gpt-6.1-terra' }] }],
     isProviderConfigured: async () => true, resolveRoute: route => route, getClient: async () => client };
   const extension = await extendEmployeeTasks(original, { stateRoot: root, registry, appServerClient: client, modelProviders,
+    registerSession: async (...args) => registrations.push(args),
     bindings: { bindRuntime: async binding => bindings.push(binding), findByRuntimeSession: (_, id) => bindings.find(binding => binding.runtimeSessionId === id) }, execution: { getStatus: id => ({ active: id === 'main' && mainActive, turnId: 'main-turn' }) },
     queue: { list: () => [], enqueue: async value => { results.push(value);
       threads.get(value.threadId).turns[0].items = [{ type: 'userMessage', content: [{ type: 'inputText', text: value.text }] }];
@@ -79,6 +80,9 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
     await until(() => extension.deliveries().some(delivery => delivery.taskId === child.parentTaskId && delivery.state === 'delivered'));
     assert.equal(extension.tasks()[0].state, 'running', 'background work continues after the main reply ends');
   }
+  assert.equal(registrations.length, 1);
+  assert.equal(registrations[0][0].threadId, starts[0].threadId);
+  assert.equal(registrations[0][3].createdBy, 'assistant');
   const { threadId, turn } = starts[0]; turn.status = 'completed'; turn.items = [{ type: 'agentMessage', text: '核查完成' }];
   listeners.forEach(callback => callback({ method: 'turn/completed', params: { threadId, turn } }));
   await until(() => results.length === 1);
@@ -119,7 +123,7 @@ for (const scenario of ['completed', 'running', 'cancel', 'missing']) test(`unlo
   const original = { ownsThread: () => false, list: () => [], directoryEntries: () => [], hasPendingWork: () => false, close: async () => {} };
   const extension = await extendEmployeeTasks(original, { stateRoot: root, registry: { list: () => [employee], require: () => employee },
     modelProviders: { resolveRoute: route => { routes.push(route); return route; }, getClient: async () => client },
-    providerForThread: async () => 'actual-provider', bindings: {}, execution: { getStatus: () => ({ active: false }) }, queue: {} });
+    providerForThread: async () => 'actual-provider', bindings: { bindRuntime: async () => {} }, execution: { getStatus: () => ({ active: false }) }, queue: {} });
   t.after(async () => { await extension.close(); await fs.rm(root, { recursive: true, force: true }); });
   await until(() => scenario === 'completed' ? extension.tasks().find(item => item.id === 'followup').state === 'completed'
     : scenario === 'missing' ? extension.tasks().find(item => item.id === 'followup').state === 'needs-reconciliation'
@@ -144,4 +148,41 @@ for (const scenario of ['completed', 'running', 'cancel', 'missing']) test(`unlo
     await until(() => extension.tasks().find(item => item.id === 'followup').state === (scenario === 'cancel' ? 'interrupted' : 'completed'));
     await until(() => extension.deliveries().some(delivery => delivery.taskId === 'followup' && delivery.state === 'delivered'));
   }
+});
+
+for (const state of ['recovering', 'completed']) test(`${state} employee task repairs missing registration without creating another thread`, async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-task-registration-'));
+  const task = { id: 'repair', kind: 'delegation', agentId: 'a', conversationId: 'task-repair', lane: 'repair',
+    title: '恢复任务', instructions: '', state, createdAt: '2026-10-01T00:00:00Z',
+    runtime: { threadId: 'existing', turnId: 'turn', modelProviderId: 'saved-provider', model: 'saved-model' } };
+  await fs.writeFile(path.join(root, 'tasks.json'), JSON.stringify({version:1,tasks:[task],deliveries:[]}));
+  const calls = [], registrations = [], bindings = [];
+  const client = { subscribe: () => () => {}, request: async (method, params) => {
+    calls.push(method);
+    if (method === 'thread/resume') return {};
+    if (method === 'thread/read') return {thread:{id:'existing',status:{type:'idle'},turns:[{id:'turn',status:'completed',items:[]}]}};
+    throw Error(`unexpected ${method}`);
+  } };
+  const employee = {id:'a',name:'员工',projectRoot:root,model:'changed-model'};
+  const extension = await extendEmployeeTasks({directoryEntries:()=>[],close:async()=>{}}, {
+    stateRoot:root,registry:{list:()=>[employee],require:()=>employee}, appServerClient:client,
+    registerSession:async(...args)=>registrations.push(args),
+    bindings:{bindRuntime:async value=>bindings.push(value)}, execution:{getStatus:()=>({active:false})},queue:{} });
+  t.after(async()=>{await extension.close();await fs.rm(root,{recursive:true,force:true});});
+  await until(()=>extension.tasks()[0].state==='completed');
+  assert.equal(bindings[0].conversationId,'task-repair');
+  assert.equal(bindings[0].runtimeSessionId,'existing');
+  if (state === 'completed') {
+    assert.equal(registrations.length, 0);
+    assert.deepEqual(calls, [], 'repairing a completed task must not resume or send messages');
+    return;
+  }
+  assert.equal(registrations.length,1);
+  assert.equal(registrations[0][0].threadId,'existing');
+  assert.equal(registrations[0][1],'saved-provider');
+  assert.equal(registrations[0][2],'saved-provider::saved-model');
+  assert.equal(bindings[0].conversationId,'task-repair');
+  assert.equal(bindings[0].runtimeSessionId,'existing');
+  assert.equal(calls.includes('thread/start'),false);
+  assert.equal(calls.includes('turn/start'),false);
 });

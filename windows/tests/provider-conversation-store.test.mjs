@@ -286,3 +286,37 @@ test("imports the previous successful model from history instead of the latest f
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("new chats and forks persist the same registration and reopen on their actual provider", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-registration-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const stateFile = path.join(root, "routes.json"), reads = [];
+  const source = {
+    createSession: async (model, cwd) => ({ threadId: 'new', model, cwd, title: 'new' }),
+    forkSession: async () => ({ threadId: 'fork', model: 'original-model', cwd: root, title: 'branch' }),
+    findSession: async id => { reads.push(id); return { threadId: id, messages: [] }; },
+  };
+  const options = { stateFile, current: { findSession: () => { throw Error('wrong provider'); } },
+    providers: { resolveRoute: () => ({ modelProviderId: 'external', model: 'original-model' }), getClient: async () => ({}) },
+    createStore: () => source };
+  const service = createProviderConversationStore(options);
+  await service.createSession('original-model', root);
+  const saved = JSON.parse(await fs.readFile(stateFile, 'utf8'));
+  saved.new.pendingProviderId = 'other'; saved.new.model = 'other::pending-model';
+  await fs.writeFile(stateFile, JSON.stringify(saved));
+  await createProviderConversationStore(options).forkSession('new', 'completed-turn');
+  const records = JSON.parse(await fs.readFile(stateFile, 'utf8'));
+  for (const id of ['new', 'fork']) {
+    assert.equal(records[id].providerId, 'external');
+    assert.equal(records[id].createdBy, 'user');
+    assert.equal(records[id].summary.cwd, root);
+    assert.equal(records[id].summary.threadId, id);
+  }
+  assert.equal(records.fork.model, 'external::original-model');
+  assert.equal(records.fork.summary.forkedFromId, 'new');
+  assert.equal(records.fork.pendingProviderId, undefined);
+  const reopened = createProviderConversationStore(options);
+  assert.equal((await reopened.findSession('fork')).modelProviderId, 'external');
+  assert.deepEqual(reads, ['fork']);
+});

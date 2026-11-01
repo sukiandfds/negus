@@ -300,12 +300,11 @@ test("updates the model only after resuming the selected project thread", async 
     "thread/read",
     "thread/resume",
     "thread/settings/update",
-    "thread/resume",
   ]);
 
   const effortResult = await store.updateReasoningEffort("thread-1", "high");
   assert.equal(effortResult.reasoningEffort, "high");
-  assert.deepEqual(calls.at(-2), {
+  assert.deepEqual(calls.at(-1), {
     method: "thread/settings/update",
     params: { threadId: "thread-1", effort: "high" },
   });
@@ -972,6 +971,79 @@ test("releases an unloaded thread without unsubscribing", async () => {
   }
 });
 
+test("an empty native body falls back only to the current store history", async () => {
+  const thread = { id: "empty-native", cwd: process.cwd(), source: "appServer", updatedAt: 100 };
+  const history = { threadId: thread.id, source: "codex", title: "已有历史", updatedAt: "2026-10-31T08:23:18.153Z",
+    messageCount: 1, latestUser: "问题", latestAssistant: "回答", archived: false,
+    messages: [{ id: "history-message", role: "user", text: "问题", createdAt: "2026-10-31T08:23:18.153Z" }] };
+  const calls = [];
+  const client = {
+    subscribe: () => () => {},
+    close() {},
+    request: async (method) => {
+      calls.push(method);
+      if (method === "thread/read") return { thread: { ...thread, turns: [] } };
+      if (method === "thread/turns/list") throw new Error("thread not loaded: empty-native");
+      throw new Error(`Unexpected request: ${method}`);
+    },
+  };
+  const store = createAppServerConversationStore({ projectRoot: process.cwd(), registerMedia: () => null,
+    autoTitleEnabled: false, client, historyFallback: async (...args) => { calls.push(["fallback", ...args]); return history; } });
+  try {
+    const session = await store.findSession(thread.id, "all", { limit: 60 });
+    assert.equal(session.title, "已有历史");
+    assert.deepEqual(session.messages.map((message) => message.text), ["问题"]);
+    assert.deepEqual(calls.at(-1).slice(0, 3), ["fallback", thread.id, "all"]);
+  } finally {
+    store.close();
+  }
+});
+
+test("an empty native body remains empty when the same store has no messages", async () => {
+  const thread = { id: "actually-empty", cwd: process.cwd(), source: "appServer", updatedAt: 100 };
+  let fallbackCalls = 0;
+  const store = createAppServerConversationStore({ projectRoot: process.cwd(), registerMedia: () => null,
+    autoTitleEnabled: false,
+    client: {
+      subscribe: () => () => {},
+      close() {},
+      request: async (method) => {
+        if (method === "thread/read") return { thread: { ...thread, turns: [] } };
+        if (method === "thread/turns/list") throw new Error("thread not loaded: actually-empty");
+        throw new Error(`Unexpected request: ${method}`);
+      },
+    },
+    historyFallback: async () => { fallbackCalls += 1; return null; },
+  });
+  try {
+    const session = await store.findSession(thread.id, "all", { limit: 60 });
+    assert.equal(session.threadId, thread.id);
+    assert.deepEqual(session.messages, []);
+    assert.equal(fallbackCalls, 1);
+  } finally {
+    store.close();
+  }
+});
+
+test("native read errors still use the existing history fallback", async () => {
+  const history = { threadId: "native-error", messages: [{ id: "saved", role: "assistant", text: "saved" }] };
+  const store = createAppServerConversationStore({ projectRoot: process.cwd(), registerMedia: () => null,
+    autoTitleEnabled: false,
+    client: {
+      subscribe: () => () => {},
+      close() {},
+      request: async () => { throw new Error("thread not loaded: native-error"); },
+    },
+    historyFallback: async () => history,
+  });
+  try {
+    const session = await store.findSession("native-error", "all", {});
+    assert.equal(session.messages[0].text, "saved");
+  } finally {
+    store.close();
+  }
+});
+
 test('managed research retains read-only policy inside a registered project on first send and resume', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'negus-task-policy-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -996,15 +1068,15 @@ test('managed research retains read-only policy inside a registered project on f
   for (const c of calls.filter(c => c.method === 'turn/start')) assert.equal(c.params.sandboxPolicy.type, 'readOnly');
 });
 
-test("reading runtime settings resumes an unloaded original thread without creating a conversation", async () => {
+test("reading runtime settings never resumes an occupied original thread", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "negus-unloaded-context-"));
   const calls = [];
   const thread = { id: "old-thread", cwd: root, path: path.join(root, "rollout.jsonl") };
   const store = createAppServerConversationStore({ projectRoot: root, autoTitleEnabled: false, registerMedia: () => null,
     client: { subscribe: () => () => {}, close() {}, request: async (method, params) => {
       calls.push({ method, params });
-      if (method === "thread/read") throw Error("thread not loaded: old-thread");
-      if (method === "thread/resume") return { thread, model: "gpt-6.1-terra", reasoningEffort: "xhigh" };
+      if (method === "thread/read") return { thread: { ...thread, model: "gpt-6.1-terra", reasoningEffort: "xhigh" } };
+      if (method === "thread/resume") throw Error("already has an active writer");
       throw Error(`Unexpected request: ${method}`);
     } },
   });
@@ -1013,7 +1085,7 @@ test("reading runtime settings resumes an unloaded original thread without creat
     assert.equal(result.model, "gpt-6.1-terra");
     assert.equal(result.reasoningEffort, "xhigh");
     assert.ok(calls.every(call => call.params.threadId === "old-thread"));
-    assert.equal(calls.some(call => /start|fork/.test(call.method)), false);
+    assert.equal(calls.some(call => /start|fork|resume/.test(call.method)), false);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -1065,4 +1137,54 @@ test('steered user messages recover actual recorded times without borrowing the 
     assert.equal(result.messages[1].createdAt,'2026-10-29T14:42:32.230Z');
     assert.equal(result.messages[2].createdAt,undefined);
   } finally {store.close();}
+});
+
+
+test("reading settings without a rollout does not apply channel-switch checks", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "negus-read-settings-"));
+  const calls = [];
+  const store = createAppServerConversationStore({ projectRoot: root, registerMedia: () => null,
+    client: { subscribe: () => () => {}, close: () => {}, request: async method => {
+      calls.push(method);
+      if (method === "thread/read") return { thread: { id: "old", cwd: root, model: "saved-model" } };
+      if (method === "thread/resume") throw Error("no rollout found for thread id");
+      throw Error(`Unexpected request: ${method}`);
+    } } });
+  try {
+    assert.equal((await store.getSessionResumeInfo("old", { readOnly: true })).model, "saved-model");
+    assert.equal((await store.getRuntimeContext("old")).model, "saved-model");
+    assert.deepEqual(calls, ["thread/read"]);
+    await assert.rejects(() => store.getSessionResumeInfo("old"), error => error.statusCode === 409);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("unloaded settings reuse project history metadata without resuming a thread", async () => {
+  const { createJsonlConversationStore } = await import('../server/jsonl-conversation-store.mjs');
+  const { createProviderConversationStore } = await import('../server/provider-conversation-store.mjs');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'negus-unloaded-settings-'));
+  const { mkdir } = await import('node:fs/promises');
+  const sessions = path.join(root, 'sessions'); await mkdir(sessions);
+  const file = path.join(sessions, 'old.jsonl');
+  await writeFile(file, [
+    { type: 'session_meta', payload: { id: 'old', cwd: root } },
+    { type: 'turn_context', payload: { model: 'saved-model', effort: 'high' } },
+    { type: 'response_item', payload: { type: 'message', role: 'assistant', phase: 'final_answer' } },
+  ].map(JSON.stringify).join('\n') + '\n');
+  const history = createJsonlConversationStore({ sessionRoot: sessions, projectRoot: root, registerMedia: () => null, onChange: () => {} });
+  const calls = [];
+  const store = createAppServerConversationStore({ projectRoot: root, registerMedia: () => null,
+    historyFallback: (...args) => history.findSession(...args),
+    client: { subscribe: () => () => {}, close: () => {}, request: async method => {
+      calls.push(method); throw Error(method === 'thread/read' ? 'thread not loaded: old' : `unexpected ${method}`);
+    } } });
+  try {
+    const service = createProviderConversationStore({ current: store, providers: {}, stateFile: path.join(root, 'routes.json') });
+    const context = await service.getRuntimeContext('old');
+    assert.equal(context.model, 'saved-model');
+    assert.equal(context.reasoningEffort, 'high');
+    assert.deepEqual(context.lastSuccessfulSettings, { model: 'saved-model', reasoningEffort: 'high' });
+    assert.ok(calls.every(method => method === 'thread/read'), 'viewing must never resume or start a turn');
+    await assert.rejects(() => store.getRuntimeContext('absent'), /thread not loaded/);
+    await assert.rejects(() => store.getSessionResumeInfo('old'), /unexpected thread\/resume/);
+  } finally { store.close(); history.close(); await rm(root, { recursive: true, force: true }); }
 });

@@ -2,7 +2,7 @@ import { communicationInstructions } from "./base-prompt.mjs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
-import { materializeGoalObjective, expandGoalObjective } from "./thread-goal-objective.mjs";
+import { materializeGoalObjective, expandGoalObjective, readThreadGoal } from "./thread-goal-objective.mjs";
 import { createAppServerClient } from "./app-server-client.mjs";
 import { inputFromAttachments } from "./app-server-conversation-store.mjs";
 import { messagesFromTurns } from "./codex-thread-history.mjs";
@@ -44,6 +44,7 @@ export const createEmployeeRuntimeService = ({
   registry,
   conversationStore,
   readHistory,
+  readRevision,
   projectRoot,
   broadcast = () => {},
   growthService = null,
@@ -54,6 +55,7 @@ export const createEmployeeRuntimeService = ({
   onTurnCompleted = null,
   client = null,
   modelProviders = null,
+  registerSession,
 }) => {
   const defaultClient = client || createAppServerClient();
   const ownsDefaultClient = !client;
@@ -329,8 +331,13 @@ export const createEmployeeRuntimeService = ({
   };
 
   const readSession = async (employeeId, pagination = {}) => {
-    const { employee, binding, threadId } = await ensureOpen(employeeId);
-    const session = await readHistory(routeForEmployee(employee).modelProviderId, threadId, "all", pagination);
+    const { readOnly, ...page } = pagination;
+    const opened = readOnly ? null : await ensureOpen(employeeId);
+    const employee = opened?.employee || registry.require(employeeId);
+    const binding = opened?.binding || conversationStore.findByAgentKind?.(employee.id, "direct");
+    const threadId = readOnly ? clean(employee.mainThreadId, 120) : binding?.runtimeSessionId;
+    if (!threadId || binding?.runtimeSessionId !== threadId) throw statusError("员工对话记录不存在", 404);
+    const session = await readHistory(routeForEmployee(employee).modelProviderId, threadId, "all", page);
     if (!session) throw statusError("员工对话记录不存在", 404);
     return {
       ...session,
@@ -375,6 +382,7 @@ export const createEmployeeRuntimeService = ({
 
   const forkSession = async (employeeId, lastTurnId) => {
     if (!clean(lastTurnId, 160)) throw statusError("请选择一个已完成的对话位置再继续", 400);
+    if (!registerSession) throw statusError("分支登记服务未连接", 503);
     return withEmployeeThread(employeeId, async ({ threadId, employee, runtimeClient }) => {
       const result = await runtimeClient.request("thread/fork", {
         threadId,
@@ -383,7 +391,9 @@ export const createEmployeeRuntimeService = ({
       });
       const fork = result?.thread;
       if (!fork?.id) throw new Error("Codex 未返回新的分支会话");
-      return {
+      const route = routeForEmployee(employee);
+      const model = fork.model || route.model;
+      return registerSession({
         threadId: clean(fork.id, 120),
         source: "codex",
         title: clean(fork.name, 240) || `${employee.name} · 分支`,
@@ -397,7 +407,8 @@ export const createEmployeeRuntimeService = ({
         readOnly: false,
         forkedFromId: threadId,
         cwd: fork.cwd || employee.projectRoot,
-      };
+      }, route.modelProviderId, route.modelProviderId !== 'current' && model && !model.includes('::')
+        ? `${route.modelProviderId}::${model}` : model);
     });
   };
 
@@ -682,11 +693,10 @@ export const createEmployeeRuntimeService = ({
     const employeeId = threadEmployees.get(cleanThreadId);
     if (!employeeId) throw statusError("员工 Thread 不存在", 404);
     const employee = registry.require(employeeId);
-    const result = await resumeThread(cleanThreadId, employee);
     return {
-      model: result?.model || employee.model || "",
-      modelProvider: result?.modelProvider || employee.modelProviderId || CURRENT_MODEL_PROVIDER_ID,
-      reasoningEffort: result?.reasoningEffort || employee.reasoningEffort || "",
+      model: employee.model || "",
+      modelProvider: employee.modelProviderId || CURRENT_MODEL_PROVIDER_ID,
+      reasoningEffort: employee.reasoningEffort || "",
     };
   };
 
@@ -748,7 +758,7 @@ export const createEmployeeRuntimeService = ({
       : path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "attachments");
     if (patch.objective !== undefined || patch.status === "active") await resumeThread(threadId, employee);
     const materialized = patch.objective !== undefined ? await materializeGoalObjective(patch.objective, attachmentRoot) : null;
-    const result = await runtimeClient.request(method, {
+    const result = method === 'thread/goal/get' ? await readThreadGoal(runtimeClient, threadId, attachmentRoot, options) : await runtimeClient.request(method, {
       threadId, ...patch, ...(materialized ? { objective: materialized.objective } : {}),
     }, options);
     return Object.hasOwn(result, "goal") ? { ...result, goal: await expandGoalObjective(result.goal, attachmentRoot) } : result;
@@ -781,6 +791,10 @@ export const createEmployeeRuntimeService = ({
     hasPendingWork: () => openPromises.size > 0 || sendLocks.size > 0 || [...statuses.values()].some((status) => status.active),
     open: sessionFor,
     readSession,
+    getSourceRevision: (threadId) => {
+      const employee = registry.require(threadEmployees.get(threadId));
+      return readRevision(routeForEmployee(employee).modelProviderId, threadId);
+    },
     renameSession,
     forkSession,
     revertSession: (employeeId, beforeTurnId) => requestThread(employeeId, "thread/revert", { beforeTurnId }),

@@ -10,7 +10,7 @@ import { createEmployeeHierarchy } from '../kernel/employee-hierarchy.mjs';
 
 // Adapts the same kernel to employee conversations and existing task conversations.
 export async function extendEmployeeTasks(original, { stateRoot, registry, modelProviders, appServerClient,
-  bindings, execution, queue, providerForThread = async () => null, broadcast = () => {}, employeeHierarchy = null }) {
+  bindings, execution, queue, registerSession, providerForThread = async () => null, broadcast = () => {}, employeeHierarchy = null }) {
   let kernel;
   let closing = false;
   const taskProviders = new Map();
@@ -64,7 +64,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
   const runtime = createNativeTaskRuntime({ log, resolve: async (task, controls, { recovering }) => {
     let employee = registry.require(task.agentId);
     if (!['external', 'followup'].includes(task.kind)) employee = { ...employee, ...(task.runtime.modelProviderId
-      ? { modelProviderId: task.runtime.modelProviderId, model: task.runtime.model || employee.model }
+      ? { modelProviderId: task.runtime.modelProviderId, model: task.runtime.model || employee.model, reasoningEffort: task.runtime.reasoningEffort ?? employee.reasoningEffort }
       : await backgroundTaskRoute(modelProviders, employee)) };
     const observed = ['external', 'followup'].includes(task.kind);
     const related = observed && kernel?.list().find(candidate => candidate.runtime.threadId === task.runtime.threadId && candidate.runtime.modelProviderId);
@@ -81,17 +81,26 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       }
       return { client, threadId };
     }
+    if (!registerSession) throw Error('任务对话登记服务未连接');
+    const register = async () => {
+      if (!await providerForThread(threadId)) await registerSession({ threadId, source: 'codex', title: task.title,
+        cwd: employee.projectRoot, updatedAt: task.createdAt, archived: false, conversationKind: 'task' },
+      modelProviderId, modelProviderId !== 'current' && employee.model && !employee.model.includes('::')
+        ? `${modelProviderId}::${employee.model}` : employee.model || '',
+      { createdBy: 'assistant', reasoningEffort: employee.reasoningEffort || '' });
+      await bindings.bindRuntime({ conversationId: task.conversationId, agentId: employee.id, runtimeKind: 'codex', runtimeSessionId: threadId, conversationKind: 'task', title: task.title });
+    };
     const options = { ...executionPolicy, developerInstructions: instructions(employee, task.background), config: task.background ? {} : tools.config(task.id),
       ...(employee.model ? { model: employee.model } : {}) };
     if (recovering) {
-      if (threadId) await client.request('thread/resume', { ...options, threadId, persistExtendedHistory: true });
+      if (threadId) { await register(); await client.request('thread/resume', { ...options, threadId, persistExtendedHistory: true }); }
       return { client, threadId };
     }
     if (controls.signal.aborted) return { client, threadId: threadId || 'cancelled-before-start', input: [] };
     const started = await client.request('thread/start', { ...options, cwd: employee.projectRoot, ephemeral: false, serviceName: 'negus' });
     threadId = started.thread.id;
-    await controls.checkpoint({ threadId, modelProviderId, model: employee.model });
-    await bindings.bindRuntime({ conversationId: task.conversationId, agentId: employee.id, runtimeKind: 'codex', runtimeSessionId: threadId, conversationKind: 'task', title: task.title });
+    await controls.checkpoint({ threadId, modelProviderId, model: employee.model, reasoningEffort: employee.reasoningEffort });
+    await register();
     await client.request('thread/name/set', { threadId, name: task.title });
     return { client, threadId, input: [{ type: 'text', text: task.instructions, text_elements: [] }],
       turnOptions: { cwd: employee.projectRoot, ...turnExecutionPolicy, developerInstructions: instructions(employee, task.background), ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}) } };
@@ -169,6 +178,12 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       return { queueId: receipt.id, threadId: source.threadId };
     },
   });
+  // FEAT-001: completed tasks stay in the directory and need their original conversation binding too.
+  for (const task of kernel.list()) {
+    if (!terminalStates.has(task.state) || ['external', 'followup'].includes(task.kind) || !task.runtime.threadId || !task.conversationId
+      || bindings.findByRuntimeSession?.('codex', task.runtime.threadId)?.conversationId === task.conversationId) continue;
+    await bindings.bindRuntime({ conversationId: task.conversationId, agentId: task.agentId, runtimeKind: 'codex', runtimeSessionId: task.runtime.threadId, conversationKind: 'task', title: task.title });
+  }
   return { ...original,
     onProtocolMessage: async event => {
       await original.onProtocolMessage?.(event);

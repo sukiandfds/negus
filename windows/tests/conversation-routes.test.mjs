@@ -43,6 +43,74 @@ const invokePost = (route, pathname, body) => {
   return { response, promise: route(request, response, new URL(`http://127.0.0.1${pathname}`)) };
 };
 
+test("combined session view reuses ordinary/employee readers and can skip unchanged history", async () => {
+  for (const employee of [false, true]) {
+    let reads = 0;
+    let revision = "r1";
+    const binding = { runtimeSessionId: "t1", conversationKind: "direct", agentId: "engineer" };
+    const session = { threadId: "t1", messages: [{ id: "m1", text: "hello" }], hasMore: true, nextCursor: "older" };
+    const reader = {
+      findSession: async () => { reads++; return session; },
+      readSession: async () => { reads++; return session; },
+      getSourceRevision: async () => revision,
+      getGoal: async () => ({ goal: null }), getPendingUserInput: async () => null,
+      supportsEmployee: () => true, ownsConversation: () => true,
+    };
+    const route = createConversationRoutes({
+      conversations: employee ? {} : reader, employeeRuntime: employee ? reader : null,
+      agentConversationStore: employee ? { resolve: async () => binding } : null,
+      execution: { getStatus: () => ({ phase: "working", active: true }) },
+      contextManagement: { load: async () => ({ model: "model-a", reasoningEffort: "high" }) },
+      followUpQueue: { list: () => [{ id: "queued" }] },
+    });
+    const path = `/api/session?threadId=t1&view=1${employee ? "&conversationId=employee-chat" : ""}`;
+    const full = invokeGet(route, path);
+    await full.promise;
+    assert.equal(full.response.status, 200);
+    assert.deepEqual(JSON.parse(full.response.body), { session, context: { model: "model-a", reasoningEffort: "high" },
+      status: { phase: "working", active: true }, goal: null, queue: [{ id: "queued" }], input: null, sourceRevision: "r1" });
+    const reused = invokeGet(route, `${path}&sourceRevision=r1`);
+    await reused.promise;
+    assert.equal(JSON.parse(reused.response.body).session, null);
+    assert.equal(reads, 1, "unchanged body must not be read again");
+    revision = "r2";
+    const changed = invokeGet(route, `${path}&sourceRevision=r1`);
+    await changed.promise;
+    assert.deepEqual(JSON.parse(changed.response.body).session, session);
+    revision = null;
+    const unavailable = invokeGet(route, `${path}&sourceRevision=r1`);
+    await unavailable.promise;
+    assert.deepEqual(JSON.parse(unavailable.response.body).session, session);
+    const legacy = invokeGet(route, `${path}&body=0`);
+    await legacy.promise;
+    assert.deepEqual(JSON.parse(legacy.response.body).session, session);
+    assert.equal(reads, 4);
+  }
+});
+
+test("combined session view propagates a component failure instead of returning partial success", async () => {
+  const route = createConversationRoutes({
+    conversations: { findSession: async () => ({ messages: [] }), getGoal: async () => { throw new Error("goal failed"); }, getPendingUserInput: async () => null },
+    contextManagement: { load: async () => ({}) }, execution: { getStatus: () => ({}) }, followUpQueue: { list: () => [] },
+  });
+  const call = invokeGet(route, "/api/session?threadId=t1&view=1");
+  await assert.rejects(call.promise, /goal failed/);
+  assert.equal(call.response.body, "");
+});
+
+test("combined session view rejects a revision change during the read", async () => {
+  let revision = "r1";
+  const route = createConversationRoutes({
+    conversations: { getSourceRevision: async () => revision, findSession: async () => ({ messages: [] }),
+      getGoal: async () => ({ goal: null }), getPendingUserInput: async () => null },
+    contextManagement: { load: async () => { revision = "r2"; return {}; } },
+    execution: { getStatus: () => ({}) }, followUpQueue: { list: () => [] },
+  });
+  const call = invokeGet(route, "/api/session?threadId=t1&view=1&sourceRevision=r1");
+  await assert.rejects(call.promise, /对话更新中/);
+  assert.equal(call.response.body, "");
+});
+
 test("reads and answers the matching Codex user-input request", async () => {
   const pending = {
     id: 41,

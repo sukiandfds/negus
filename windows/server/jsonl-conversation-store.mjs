@@ -3,6 +3,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { blocksFromContent, messageFromItem, messagePreview, previewText } from "./content-blocks.mjs";
+import { conversationSourceRevision } from "./conversation-version-store.mjs";
 
 const walkJsonl = async (directory) => {
   let entries = [];
@@ -244,6 +245,7 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
     const latestAssistant = state.messages.findLast((item) => item.role === "assistant")?.text || "";
     return {
       threadId: state.threadId,
+      sourceRevision: conversationSourceRevision(stat),
       file: path.basename(header.file),
       source: state.cliVersion === "0.122.0" ? "happy" : "codex",
       title: header.title?.trim()
@@ -270,10 +272,11 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   };
 
-  const findSession = async (threadId, source = "all", { before, limit } = {}) => {
+  const findSession = async (threadId, source = "all", { before, limit, metadataOnly = false } = {}) => {
     await initialize();
     const header = [...projectHeaders.values()].find((item) => item.threadId === threadId);
     if (!header) return null;
+    if (metadataOnly) return { id: header.threadId, path: header.file, cwd: header.cwd, name: header.title };
     const session = await readSession(header);
     if (source !== "all" && session.source !== source) return null;
     if (!limit) return session;

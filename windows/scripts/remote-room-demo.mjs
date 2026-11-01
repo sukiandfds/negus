@@ -388,6 +388,8 @@ agentTasks = await createBackgroundTaskService({
 });
 employeeRuntime = createEmployeeRuntimeService({
   readHistory: appServerConversations.findSessionForProvider,
+  readRevision: appServerConversations.getSourceRevisionForProvider,
+  registerSession: appServerConversations.registerSession,
   taskService: agentTasks,
   execution,
   registry: employeeRegistry,

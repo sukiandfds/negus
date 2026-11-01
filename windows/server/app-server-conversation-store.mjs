@@ -3,12 +3,13 @@ import { neutralThreadInstructions } from './model-catalog.mjs';
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { materializeGoalObjective, expandGoalObjective } from "./thread-goal-objective.mjs";
+import { materializeGoalObjective, expandGoalObjective, readThreadGoal } from "./thread-goal-objective.mjs";
 import { messageFromItem, messagePreview, previewText } from "./content-blocks.mjs";
 import { createAppServerClient } from "./app-server-client.mjs";
 import { messagesFromTurns, readRecentThreadPage } from "./codex-thread-history.mjs";
 import { loadUserProfilePrompt } from "./user-profile-prompt.mjs";
 import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
+import { conversationSourceRevision } from "./conversation-version-store.mjs";
 
 const sourceFromThread = (thread) => thread.source === "cli" && thread.cliVersion === "0.122.0" ? "happy" : "codex";
 
@@ -83,7 +84,7 @@ export const latestAssistantReplyAtFromRollout = async (file, readSettings = fal
         try { item = JSON.parse(line); } catch { continue; }
         if (readSettings) {
           if (isAssistantReplyRecord(item)) foundReply = true;
-          if (foundReply && item.type === "turn_context" && item.payload?.model) return {
+          if ((foundReply || readSettings === "latest") && item.type === "turn_context" && item.payload?.model) return {
             model: item.payload.model, reasoningEffort: item.payload.effort || item.payload.reasoning_effort || "",
           };
           continue;
@@ -291,6 +292,7 @@ export const createAppServerConversationStore = ({
   const unsubscribe = client.subscribe(handleProtocolMessage);
   const unsubscribeHealth = client.subscribeHealth?.(handleHealthState) || (() => {});
   const threadCache = new Map();
+  const previewCache = new Map();
   const freshThreadRuntime = new Map();
 
   const monitorActiveRuns = async () => {
@@ -382,7 +384,11 @@ export const createAppServerConversationStore = ({
       .filter((thread) => source === "all" || sourceFromThread(thread) === source)
       .map(async (thread) => {
         const summary = summaryFromThread(thread, archived);
-        const latest = await latestAssistantReplyAtFromRollout(thread.path, false, true);
+        if (thread.path) summary.sourceRevision = await fs.stat(thread.path).then(conversationSourceRevision).catch(() => undefined);
+        const cached = previewCache.get(thread.id);
+        const latest = summary.sourceRevision && cached?.revision === summary.sourceRevision
+          ? cached.latest : await latestAssistantReplyAtFromRollout(thread.path, false, true);
+        if (summary.sourceRevision) previewCache.set(thread.id, { revision: summary.sourceRevision, latest });
         if (latest) Object.assign(summary, latest, { latestMessageAt: latest.updatedAt });
         return summary;
       }));
@@ -590,6 +596,12 @@ export const createAppServerConversationStore = ({
     }
     try {
       const session = await readNativeSession(threadId, source, options);
+      // A successful empty native read can mean the thread is not loaded, not
+      // that its persisted history is empty. Recheck only this store's owner.
+      if (historyFallback && session && Array.isArray(session.messages) && session.messages.length === 0 && options.cursor === undefined) {
+        const fallback = await historyFallback(threadId, source, options).catch(() => null);
+        if (fallback?.messages?.length) return fallback;
+      }
       if (historyFallback && session?.messages.some((message) => (message.role === 'user' || message.phase === "commentary") && !message.createdAt)) {
         const history = await historyFallback(threadId, source).catch(() => null);
         const times = new Map((history?.messages || []).filter((message) => message.itemId && message.createdAt).map((message) => [message.itemId, message.createdAt]));
@@ -726,12 +738,22 @@ export const createAppServerConversationStore = ({
 
   const interrupt = async (threadId, turnId) => client.request("turn/interrupt", { threadId, turnId });
 
+  const readSettingsThread = async (threadId) => {
+    try { return (await ensureProjectThread(threadId)).thread; }
+    catch (error) {
+      if (!threadNotLoaded(error)) throw error;
+      const thread = await historyFallback?.(threadId, "all", { metadataOnly: true });
+      if (!thread) throw error;
+      return thread;
+    }
+  };
+
   const getRuntimeContext = async (threadId) => {
-    const result = await resumeThread(threadId).catch(async error => {
-      if (!/cannot resume an unloaded multi-agent v2 sub-agent/i.test(error.message)) throw error;
-      const { thread } = await client.request("thread/read", { threadId, includeTurns: true });
-      return { ...thread, ...await latestAssistantReplyAtFromRollout(thread.path, true) };
-    });
+    // FEAT-001: reading settings must never acquire a writer.
+    const thread = await readSettingsThread(threadId);
+    const result = freshThreadRuntime.get(threadId) || {
+      ...thread, ...await latestAssistantReplyAtFromRollout(thread.path, "latest"),
+    };
     return {
       model: result.model || "",
       modelProvider: result.modelProvider || "",
@@ -765,8 +787,8 @@ export const createAppServerConversationStore = ({
   };
 
   const getGoal = async (threadId, options) => {
-    await ensureProjectThread(threadId);
-    const result = await client.request("thread/goal/get", { threadId }, options);
+    await readSettingsThread(threadId);
+    const result = await readThreadGoal(client, threadId, goalAttachmentRoot, options);
     return { ...result, goal: await expandGoalObjective(result.goal, goalAttachmentRoot) };
   };
 
@@ -795,7 +817,7 @@ export const createAppServerConversationStore = ({
     if (freshThreadRuntime.has(threadId)) {
       freshThreadRuntime.set(threadId, { ...runtime, model });
     }
-    return getRuntimeContext(threadId);
+    return { model, modelProvider: runtime.modelProvider || "", reasoningEffort: runtime.reasoningEffort || "" };
   };
 
   const threadNotLoaded = (error) => /thread not loaded/i.test(String(error?.message || ""));
@@ -840,17 +862,19 @@ export const createAppServerConversationStore = ({
     return thread;
   };
 
-  const getSessionResumeInfo = async (threadId) => {
+  const getSessionResumeInfo = async (threadId, { readOnly = false } = {}) => {
     let thread;
     try {
-      thread = await loadThreadForResume(threadId);
+      thread = readOnly ? await readSettingsThread(threadId) : await loadThreadForResume(threadId);
     } catch (error) {
       if (error?.statusCode) throw error;
       if (missingPersistedThread(error)) throw persistedThreadError();
       throw error;
     }
-    if (!thread?.path || !isAllowedProjectRoot(thread.cwd)) throw persistedThreadError();
-    await fs.access(thread.path).catch(() => { throw persistedThreadError(); });
+    if (!readOnly) {
+      if (!thread?.path || !isAllowedProjectRoot(thread.cwd)) throw persistedThreadError();
+      await fs.access(thread.path).catch(() => { throw persistedThreadError(); });
+    }
     return { path: thread.path, cwd: thread.cwd, model: thread.model, reasoningEffort: thread.reasoningEffort, manualTitle: thread.name?.trim() || "", summary: summaryFromThread(thread) };
   };
 
@@ -896,7 +920,7 @@ export const createAppServerConversationStore = ({
     if (freshThreadRuntime.has(threadId)) {
       freshThreadRuntime.set(threadId, { ...runtime, reasoningEffort });
     }
-    return getRuntimeContext(threadId);
+    return { model: runtime.model || "", modelProvider: runtime.modelProvider || "", reasoningEffort };
   };
 
   const getPendingUserInput = async (threadId) => client.getPendingUserInput?.(threadId) || null;

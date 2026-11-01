@@ -184,6 +184,10 @@ export const createConversationService = ({ primary, fallback, contentVersionSto
     createSession: (...args) => primary.createSession(...args),
     renameSession: (...args) => primary.renameSession(...args),
     findSession,
+    getSourceRevision: async (threadId) => {
+      if (supplementalMessages && (await supplementalMessages.list(threadId)).length) return null;
+      return primary.getSourceRevision(threadId);
+    },
     sendMessage,
     steerMessage: (...args) => primary.steerMessage(...args),
     interrupt: (...args) => primary.interrupt(...args),

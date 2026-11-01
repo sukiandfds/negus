@@ -133,7 +133,6 @@ export const createContextManagementService = async ({
       ...(runtime.lastSuccessfulSettings !== undefined ? { lastSuccessfulSettings: runtime.lastSuccessfulSettings } : {}),
       ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null } : {}),
     });
-    maybeAutoCompact(threadId);
     return publicStatus(statusFor(threadId));
   };
 

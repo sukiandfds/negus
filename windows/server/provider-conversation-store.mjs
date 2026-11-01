@@ -1,6 +1,8 @@
 import { backgroundTaskRoute } from './background-tasks/model-policy.mjs';
 import { isReasoningEffort } from './reasoning-efforts.mjs';
 import { latestAssistantReplyAtFromRollout } from "./app-server-conversation-store.mjs";
+import fs from "node:fs/promises";
+import { conversationSourceRevision } from "./conversation-version-store.mjs";
 import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 // Ordinary project conversations only. Employee runtimes keep their own bindings.
@@ -33,10 +35,15 @@ export const createProviderConversationStore = ({ current, providers, createStor
   const service = {};
   service.getRecordedProviderForThread = async id => { await ready; return routes[id]?.providerId || null; };
   service.findSessionForProvider = async (providerId, ...args) => (await storeFor(providerId)).findSession(...args);
+  service.getSourceRevisionForProvider = async (providerId, id) => {
+    const info = await (await storeFor(providerId)).getSessionResumeInfo(id, { readOnly: true });
+    return info?.path ? fs.stat(info.path).then(conversationSourceRevision).catch(() => null) : null;
+  };
+  service.getSourceRevision = async id => { await ready; return service.getSourceRevisionForProvider(owner(id), id); };
   service.listSessionsForProvider = async (providerId, ...args) => (await storeFor(providerId || "current")).listSessions(...args);
-  const rememberPreviousSettings = async (id, source) => {
+  const rememberPreviousSettings = async (id, source, readOnly = false) => {
     if (Object.hasOwn(routes[id] || {}, "lastSuccessfulSettings")) return;
-    const info = source.isFreshSession?.(id) ? null : await source.getSessionResumeInfo(id);
+    const info = source.isFreshSession?.(id) ? null : await source.getSessionResumeInfo(id, { readOnly });
     const previous = info?.path ? await latestAssistantReplyAtFromRollout(info.path, true) : null;
     routes[id] = { ...routes[id], providerId: owner(id), lastSuccessfulSettings: previous ? {
       ...previous, model: owner(id).startsWith("ccswitch_") ? owner(id) + "::" + previous.model : previous.model,
@@ -103,7 +110,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
       await ready;
       if (method === 'sendMessage') await providers.refreshShared?.().catch(() => {});
       if (switching.has(id)) await switching.get(id);
-      await ensureRestored(id);
+      if (!["findSession", "getRuntimeContext", "getThreadStatus", "getGoal", "getPendingUserInput"].includes(method)) await ensureRestored(id);
       if (method === 'sendMessage') {
         const source = await storeFor(owner(id));
         await rememberPreviousSettings(id, source);
@@ -141,7 +148,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
       }
       const source = await storeFor(owner(id));
       if (method === "updateReasoningEffort" || method === "getRuntimeContext") {
-        await rememberPreviousSettings(id, source);
+        await rememberPreviousSettings(id, source, method === "getRuntimeContext");
       }
       const result = await source[method](id, ...args);
       if (method === "renameSession") {
@@ -213,6 +220,13 @@ export const createProviderConversationStore = ({ current, providers, createStor
     return result.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
   };
   service.listModels = async () => providers.listModels(await current.listModels());
+  // FEAT-001: new chats and forks share registration; native start/fork stay distinct.
+  const registerSession = service.registerSession = async (session, providerId, model, metadata = {}) => {
+    await ready;
+    routes[session.threadId] = { providerId, model, createdBy: 'user', summary: session, ...metadata };
+    await save();
+    return decorate(session);
+  };
   service.createSession = async (model = "", cwd = "", modelProviderId = "", options = {}) => {
     await ready;
     await providers.refreshShared?.().catch((error) => { if (model.includes('::')) throw error; });
@@ -221,19 +235,19 @@ export const createProviderConversationStore = ({ current, providers, createStor
       : providers.resolveRoute({ model, modelProviderId });
     const effectiveModel = route.model || model;
     const session = await (await storeFor(route.modelProviderId)).createSession(effectiveModel, cwd, options);
-    routes[session.threadId] = { providerId: route.modelProviderId,
-      createdBy: ['user', 'assistant'].includes(options.createdBy) ? options.createdBy : undefined,
-      model: route.modelProviderId === 'current' ? effectiveModel : `${route.modelProviderId}::${effectiveModel}`,
-      summary: session, lastSuccessfulSettings: null };
-    await save();
-    return decorate(session);
+    return registerSession(session, route.modelProviderId,
+      route.modelProviderId === 'current' ? effectiveModel : `${route.modelProviderId}::${effectiveModel}`,
+      { createdBy: options.createdBy === 'assistant' ? 'assistant' : 'user', lastSuccessfulSettings: null });
   };
   service.forkSession = async (id, ...args) => {
     await ready;
-    const result = await (await storeFor(owner(id))).forkSession(id, ...args);
-    routes[result.threadId] = { providerId: owner(id), model: routes[id]?.model || "" };
-    await save();
-    return decorate(result);
+    const providerId = owner(id);
+    const result = await (await storeFor(providerId)).forkSession(id, ...args);
+    // A pending provider selection belongs to the parent, not the native fork.
+    const model = result.model || routes[id]?.activeModel
+      || (routes[id]?.pendingProviderId ? routes[id]?.resumeInfo?.model : routes[id]?.model) || '';
+    return registerSession({ ...result, forkedFromId: id }, providerId,
+      providerId !== 'current' && model && !model.includes('::') ? `${providerId}::${model}` : model);
   };
   const switching = new Map();
   service.updateModel = async (id, model, { allowProviderSwitch = false, reasoningEffort = "" } = {}) => {
