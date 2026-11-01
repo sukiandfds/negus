@@ -1,4 +1,8 @@
-import type { ProjectInfo, SessionResponse, SessionSummary } from "../model/types";
+import type { ProjectInfo, SessionDetail, SessionResponse, SessionSummary } from "../model/types";
+import type { ContextStatus } from "../../context-management/model/types";
+import type { ExecutionStatus, UserInputRequest } from "../../execution/model/types";
+import type { ThreadGoal } from "../../goals/model/types";
+import type { FollowUpQueueItem } from "../model/followUpQueue";
 import { currentConversationId, resolveConversationId, conversationQuery, withConversation } from "../../../shared/api/conversationScope";
 import { fetchJson, postJson } from "../../../shared/api/http";
 
@@ -27,6 +31,12 @@ const fetchConversationJson = async <T,>(pathname: string, signal?: AbortSignal)
 };
 
 export const conversationApi = {
+  snapshot: async (threadId: string, sourceRevision: string, signal?: AbortSignal, conversationId = currentConversationId(threadId)) => {
+    conversationId ||= await resolveConversationId(threadId);
+    return fetchConversationJson<{ session: SessionDetail | null; context: ContextStatus; status: ExecutionStatus;
+      goal: ThreadGoal | null; queue: FollowUpQueueItem[]; input: UserInputRequest | null; sourceRevision: string | null }>(
+      `/api/session?threadId=${encodeURIComponent(threadId)}&limit=${PAGE_SIZE}&view=1${sourceRevision ? `&sourceRevision=${encodeURIComponent(sourceRevision)}` : ''}${conversationQuery(conversationId)}`, signal);
+  },
   project: (signal?: AbortSignal) => fetchConversationJson<ProjectInfo>("/api/project", signal),
   sessions: (archived = false, signal?: AbortSignal) => fetchConversationJson<SessionSummary[]>(`/api/sessions?source=all${archived ? "&archived=1" : ""}`, signal),
   create: (model = "", projectRoot = "", modelProviderId = "", signal?: AbortSignal) => postJson<SessionSummary>("/api/session", { model, modelProviderId, projectRoot, createdBy: 'user' }, signal),

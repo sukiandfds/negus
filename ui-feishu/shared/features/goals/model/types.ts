@@ -21,3 +21,5 @@ export const nextGoalStatus = (status: GoalStatus): EditableGoalStatus | null =>
   status === "active" ? "paused" : ["paused", "blocked", "usageLimited"].includes(status) ? "active" : null;
 export const goalElapsedSeconds = (goal: ThreadGoal, now: number) => Math.max(0,
   goal.timeUsedSeconds + (goal.status === "active" ? now / 1000 - goal.updatedAt : 0));
+
+export const goalCompletionKey = (goal: ThreadGoal) => JSON.stringify([goal.createdAt, goal.updatedAt, goal.objective]);

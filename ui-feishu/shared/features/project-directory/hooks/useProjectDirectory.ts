@@ -1,127 +1,29 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { hasAccessToken, withAccessToken } from "../../../shared/api/http";
-import type { ExecutionStatus } from "../../execution/model/types";
-import type { ThreadGoal } from "../../goals/model/types";
-import { projectDirectoryApi, projectDirectoryResource } from "../data/projectDirectoryApi";
-import type { DirectoryProject, ProjectRuntimeStatus } from "../model/types";
-import { readCachedContextPhases } from "../../context-management/hooks/useContextManagement";
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { projectDirectoryApi, projectDirectoryResource } from '../data/projectDirectoryApi';
+import type { DirectoryProject } from '../model/types';
+import type { ConversationStore } from '../../conversations/state/conversationStore';
 
-type StatusByThread = Record<string, ProjectRuntimeStatus>;
 const emptyProjects: DirectoryProject[] = [];
-type DirectoryEvent = {
-  type?: string;
-  employeeId?: string;
-  threadId?: string;
-  status?: ProjectRuntimeStatus;
-  phase?: string;
-  label?: string;
-  active?: boolean;
-  turnId?: string | null;
-  goal?: ThreadGoal | null;
-};
-
-const sameStatus = (left?: ProjectRuntimeStatus, right?: ProjectRuntimeStatus) => (
-  String(left?.phase || "") === String(right?.phase || "")
-  && Boolean(left?.active) === Boolean(right?.active)
-  && String(left?.turnId || "") === String(right?.turnId || "")
-  && left?.updatedAt === right?.updatedAt && left?.label === right?.label
-);
-
-export function useProjectDirectory(currentStatus?: ExecutionStatus, currentContext?: { threadId: string; phase: string }) {
-  const currentStatusRef = useRef(currentStatus);
-  currentStatusRef.current = currentStatus;
+// Conversation events are consumed once, by useConversationEvents. Directory membership is a shared resource.
+export function useProjectDirectory(store: ConversationStore) {
+  const [goalRecovery, setGoalRecovery] = useState(0);
   const cached = useSyncExternalStore(projectDirectoryResource.subscribe, projectDirectoryResource.getSnapshot);
   const projects = cached.data ?? emptyProjects;
-  const [statusByThread, setStatusByThread] = useState<StatusByThread>({});
-  const [contextByThread, setContextByThread] = useState<Record<string, string>>(readCachedContextPhases);
-  const [goalByThread, setGoalByThread] = useState<Record<string, ThreadGoal | null>>({});
-  const [goalRecovery, setGoalRecovery] = useState(0);
-  const loading = cached.data === null && !cached.error;
-  const error = cached.error;
-  const projectsRef = useRef(projects);
-  const refreshVersion = useRef(0);
-  projectsRef.current = projects;
-
-  const cacheStatus = useCallback((threadId: string, status?: ProjectRuntimeStatus | null) => {
-    if (!threadId || !status) return;
-    if (currentStatusRef.current?.threadId === threadId && status !== currentStatusRef.current) return;
-    setStatusByThread((current) => sameStatus(current[threadId], status)
-      || (threadId !== currentStatusRef.current?.threadId && Date.parse(current[threadId]?.updatedAt || "") > Date.parse(status.updatedAt || ""))
-      ? current
-      : { ...current, [threadId]: status });
-  }, []);
-
   const refresh = useCallback(async (signal?: AbortSignal, invalidate = false) => {
-    const version = ++refreshVersion.current;
-    try {
-      const next = await projectDirectoryApi.list(signal, invalidate);
-      if (signal?.aborted || version !== refreshVersion.current) return;
-      for (const entry of next) {
-        if (entry.mainThreadId) cacheStatus(entry.mainThreadId, entry.status);
-        for (const conversation of entry.conversations || []) {
-          cacheStatus(conversation.threadId || conversation.id, conversation.status);
-        }
-      }
-    } catch { /* Shared resource retains the last good directory and error. */ }
-  }, [cacheStatus]);
-
-  useEffect(() => {
-    if (!currentStatus?.threadId || !currentStatus.updatedAt) return;
-    cacheStatus(currentStatus.threadId, currentStatus);
-  }, [cacheStatus, currentStatus]);
-
-  useEffect(() => {
-    if (currentContext?.threadId) setContextByThread(current => current[currentContext.threadId] === currentContext.phase ? current : { ...current, [currentContext.threadId]: currentContext.phase });
-  }, [currentContext?.threadId, currentContext?.phase]);
-
+    try { await projectDirectoryApi.list(signal, invalidate); } catch { /* Shared resource retains its last good value. */ }
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
     void refresh(controller.signal);
-    if (!hasAccessToken || typeof EventSource === "undefined") return () => controller.abort();
-    const source = new EventSource(withAccessToken("/events"));
-    let refreshTimer = 0;
-    const scheduleActivityRefresh = () => {
-      window.clearTimeout(refreshTimer);
-      refreshTimer = window.setTimeout(() => void refresh(controller.signal, true), 180);
-    };
-    source.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data) as DirectoryEvent;
-        if (payload.type === "goal_status" && payload.threadId) {
-          setGoalByThread((current) => ({ ...current, [payload.threadId!]: payload.goal || null }));
-          return;
-        }
-        if (payload.type === "context_status" && payload.threadId && payload.phase) {
-          setContextByThread(current => current[payload.threadId!] === payload.phase ? current : { ...current, [payload.threadId!]: payload.phase! });
-          return;
-        }
-        if (payload.type === "execution_status" && payload.threadId) {
-          cacheStatus(payload.threadId, payload);
-          return;
-        }
-        if (payload.type === "employee_status") {
-          const employeeProject = projectsRef.current.find((entry) => entry.employeeId === payload.employeeId);
-          if (employeeProject?.mainThreadId) cacheStatus(employeeProject.mainThreadId, payload.status);
-          return;
-        }
-        if (payload.type === "sessions_changed" || payload.type === "employee_message_completed") scheduleActivityRefresh();
-      } catch { /* Existing conversation SSE remains the source of truth. */ }
-    };
-    let opened = false;
-    source.onopen = () => { if (opened) { setGoalRecovery((value) => value + 1); void refresh(controller.signal); } opened = true; };
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") { setGoalRecovery((value) => value + 1); void refresh(); }
-    };
-    window.addEventListener("pageshow", refreshWhenVisible);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
-    return () => {
-      controller.abort();
-      source.close();
-      window.clearTimeout(refreshTimer);
-      window.removeEventListener("pageshow", refreshWhenVisible);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
-    };
-  }, [cacheStatus, refresh]);
-
-  return { projects, statusByThread, contextByThread: currentContext?.threadId ? { ...contextByThread, [currentContext.threadId]: currentContext.phase } : contextByThread, goalByThread, goalRecovery, loading, error, refresh };
+    const changed = () => { void refresh(controller.signal, true); };
+    const recovered = () => setGoalRecovery(value => value + 1);
+    window.addEventListener('negus:realtime-recovered', recovered);
+    window.addEventListener('negus:directory-changed', changed);
+    return () => { window.removeEventListener('negus:realtime-recovered', recovered); controller.abort(); window.removeEventListener('negus:directory-changed', changed); };
+  }, [refresh]);
+  const entries = [...store.committed.keys()].map(id => [id, store.get(id)] as const);
+  return { projects, goalRecovery, loading: cached.data === null && !cached.error, error: cached.error, refresh,
+    statusByThread: Object.fromEntries(entries.map(([id, view]) => [id, view.executionStatus])),
+    contextByThread: Object.fromEntries(entries.map(([id, view]) => [id, view.contextStatus.phase])),
+    goalByThread: Object.fromEntries(entries.map(([id, view]) => [id, view.goal])) };
 }

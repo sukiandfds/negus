@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import { ConversationStore, mergeOlderMessages } from "./frontend-conversation-store.mjs";
 import ts from "../../ui-feishu/node_modules/typescript/lib/typescript.js";
 
 const compile = (source) => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -14,77 +15,75 @@ async function harness(cachedSessions = [], partialSessionIds = []) {
   const hooks = {
     useState(value) { const index = cursor++; if (!(index in slots)) slots[index] = typeof value === "function" ? value() : value; return [slots[index], (next) => { slots[index] = typeof next === "function" ? next(slots[index]) : next; }]; },
     useRef(value) { const index = cursor++; return slots[index] ||= { current: value }; },
-    useCallback(fn) { return fn; }, useEffect() {},
+    useCallback(fn) { return fn; }, useEffect() {}, useSyncExternalStore() {},
   };
   const api = { session(id, options, signal) { return new Promise((resolve, reject) => pending.push({ id, options, signal, resolve, reject })); } };
   const key = `__loadingTest${Math.random().toString(36).slice(2)}`;
-  globalThis[key] = { hooks, api };
-  const rewritten = source.replace(/import .* from "react";/, `const {useState,useRef,useCallback,useEffect}=globalThis.${key}.hooks;`)
-    .replace(/import .* from "\.\.\/data\/conversationApi";/, `const conversationApi=globalThis.${key}.api;`)
-    .replace(/import .* from ".*pendingThread";/, 'const isPendingThread=id=>id.startsWith("pending:");')
-    .replace(/import .* from ".*useCodexExecution";/, "const preloadExecutionStatus = async () => {}; ")
-    .replace('"../state/conversationMerge"', JSON.stringify(mergeUrl));
+  globalThis[key] = { ...hooks, conversationApi: api, ConversationStore, mergeOlderMessages, isPendingThread: id => id.startsWith("pending:") };
+  const rewritten = source.replace(/^import\s+\{([^}]+)\}\s+from\s+[^;]+;/gm, (_, names) => `const {${names}}=globalThis.${key};`);
   const { useConversationSession } = await import(moduleUrl(rewritten));
   delete globalThis[key];
   globalThis.window = { location: { search: "", pathname: "/" }, history: { replaceState() {} }, setTimeout, clearTimeout };
   const initial = { selectedId: "a", session: cachedSessions.find((s) => s.threadId === "a") || null, cachedSessions, partialSessionIds, sessionIsPartial: false };
   const render = () => { cursor = 0; return useConversationSession(initial); };
-  return { render, pending };
+  return { render, pending, publish(id, session) {
+    const store = render().store;
+    store.commit(id, { ...store.empty(id), session }, store.revisions.get(id) || 0); store.notify();
+  }, fail(id, error) { render().store.finish(id, error); } };
 }
 
-test("prefetch warms a conversation without replacing the visible conversation", async () => {
+test("batch prefetch warms the action store; opening it does not read details again", async () => {
   const h = await harness([detail("a")]);
   const loading = h.render().loadSession("b", { prefetch: true });
-  assert.equal(h.pending.length, 1);
   assert.equal(h.render().session.threadId, "a");
-  assert.equal(h.render().loadingSession, false);
-  h.pending[0].resolve(detail("b")); await loading;
+  h.publish("b", detail("b")); await loading;
   h.render().selectSession("b");
-  assert.equal(h.render().session.threadId, "b");
   assert.equal(h.render().loadingSession, false);
-  h.pending[1].resolve(detail("b"));
+  assert.equal(h.pending.length, 0);
 });
 
-test("late response for previous selection only warms cache and cannot replace new selection", async () => {
+test("late batch response for previous selection cannot replace the new selection", async () => {
   const h = await harness([detail("a")]);
   const first = h.render().loadSession("a");
   h.render().selectSession("b");
-  assert.equal(h.pending[0].signal.aborted, false);
-  h.pending[0].resolve(detail("a")); await first;
+  h.publish("a", detail("a")); await first;
   assert.equal(h.render().selectedId, "b");
-  assert.equal(h.render().session, null);
-  h.pending[1].resolve(detail("b")); await new Promise(setImmediate);
-  assert.equal(h.render().session.threadId, "b");
+  assert.equal(h.render().loadingSession, true);
+  assert.deepEqual(h.render().session.messages, []);
+  h.publish("b", detail("b"));
+  assert.equal(h.render().session.messages[0].text, "b");
 });
 
-test("adopting a persisted partial cache forces full-page recovery", async () => {
+test("adopting a partial cache displays it immediately; recovery forces a complete body", async () => {
   const h = await harness([detail("a"), detail("b")], ["b"]);
-  const loading = h.render().adoptSelection("b", true);
-  assert.equal(h.pending[0].options.contentVersion, undefined);
+  await h.render().adoptSelection("b");
   assert.equal(h.render().session.threadId, "b");
-  h.pending[0].resolve(detail("b")); await loading;
+  assert.equal(h.render().contentSyncState, "recovering");
+  assert.equal(h.render().store.freshBodies.has("b"), true, "partial startup cache must recover a complete body even at the same source version");
+  const loading = h.render().loadSession("b", { recovery: true });
+  assert.equal(h.render().store.freshBodies.has("b"), true);
+  h.publish("b", detail("b")); await loading;
+  assert.equal(h.render().contentSyncState, "stable");
 });
 
-test("failed background prefetch leaves the selected conversation and its error unchanged", async () => {
+test("failed background read leaves the selected conversation and error unchanged", async () => {
   const h = await harness([detail("a")]);
-  const loading = h.render().loadSession("b", { prefetch: true, retry: false });
-  h.pending[0].reject(new Error("offline")); await loading;
+  const loading = h.render().loadSession("b");
+  h.fail("b", "offline"); assert.equal(await loading, false);
   assert.equal(h.render().session.threadId, "a");
   assert.equal(h.render().sessionError, "");
 });
 
-test("selecting an in-flight prefetch immediately clears previous error and shows loading", async () => {
+test("switching during a read clears the prior error and keeps the destination editable", async () => {
   const h = await harness([detail("a")]);
-  const failed = h.render().loadSession("a", { retry: false });
-  h.pending[0].reject(new Error("previous conversation offline")); await failed;
-  const prefetch = h.render().loadSession("b", { prefetch: true, retry: false });
+  h.render().setSessionError("previous conversation offline");
+  const loading = h.render().loadSession("b");
   h.render().selectSession("b");
-  assert.equal(h.render().session, null);
   assert.equal(h.render().loadingSession, true);
   assert.equal(h.render().sessionError, "");
-  // Clear selection before completion so no redundant follow-up is scheduled.
   h.render().clearSelection();
-  h.pending[1].resolve(detail("b")); await prefetch;
+  h.publish("b", detail("b")); await loading;
+  assert.equal(h.render().selectedId, "");
 });
 
 const groupSource = compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/hooks/useGroupRoom.ts", import.meta.url), "utf8"));
@@ -240,9 +239,8 @@ test("background receipt updates survive before the destination session is loade
   h.render().addOptimisticMessage("b", { id: "optimistic-send", role: "user", text: "hello", submissionId: "send" });
   h.render().updateOptimisticMessage("b", "optimistic-send", { deliveryState: "failed" });
   const load = h.render().loadSession("b");
-  h.pending[0].resolve({ ...detail("b"), messages: [] });
+  h.publish("b", { ...detail("b"), messages: [] });
   await load;
   h.render().selectSession("b");
   assert.equal(h.render().session.messages[0].deliveryState, "failed");
-  h.pending[1].resolve({ ...detail("b"), messages: [] });
 });

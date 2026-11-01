@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { currentConversationId } from "../../../shared/api/conversationScope";
 import { goalApi } from "../data/goalApi";
 import type { ProjectEvent } from "../../execution/model/types";
-import type { EditableGoalStatus, ThreadGoal } from "../model/types";
+import { goalCompletionKey, type EditableGoalStatus, type ThreadGoal } from "../model/types";
 
 interface Snapshot {
   goal: ThreadGoal | null;
@@ -16,61 +16,40 @@ interface Snapshot {
   resumePrompt: boolean;
 }
 const empty = (): Snapshot => ({ goal: null, completed: null, error: "", busy: false, revision: 0, mutation: 0, conversationId: "", hydrated: false, resumePrompt: false });
-const completionKey = (goal: ThreadGoal) => JSON.stringify([goal.createdAt, goal.updatedAt, goal.objective]);
 
-export function useThreadGoal(threadId: string) {
+import type { ConversationStore } from "../../conversations/state/conversationStore";
+
+export function useThreadGoal(threadId: string, store: ConversationStore) {
   const conversationId = currentConversationId();
   const entries = useRef(new Map<string, Snapshot>());
-  const dismissedCompletion = useRef(new Map<string, string>());
   const [, render] = useState(0);
   const entry = useCallback((id: string) => {
-    if (!entries.current.has(id)) entries.current.set(id, empty());
+    if (!entries.current.has(id)) entries.current.set(id, { ...empty(),
+      get goal() { return store.get(id).goal; },
+      set goal(goal: ThreadGoal | null) { store.update(id, { goal }); } });
     return entries.current.get(id)!;
-  }, []);
+  }, [store]);
   const notify = useCallback((_id: string) => {
     render((n) => n + 1);
   }, []);
-  const accept = useCallback((id: string, goal: ThreadGoal | null) => {
+  const accept = useCallback((id: string, goal: ThreadGoal | null, remote = false) => {
     const value = entry(id);
-    if (goal?.status === "complete" && dismissedCompletion.current.get(id) === completionKey(goal)) return;
+    if (goal?.status === "complete" && store.dismissedGoals.get(id) === goalCompletionKey(goal)) return;
     if (goal && !goal.displayObjective && value.goal?.objective === goal.objective && value.goal.displayObjective) {
       goal = { ...goal, displayObjective: value.goal.displayObjective };
     }
-    value.goal = goal;
-    if (goal) value.completed = goal.status === "complete" ? goal : null;
+    store.update(id, { goal }, remote);
+    if (goal && !remote) value.completed = goal.status === "complete" ? goal : null;
     if (!goal || !["paused", "blocked", "usageLimited"].includes(goal.status)) value.resumePrompt = false;
     value.error = "";
     notify(id);
-  }, [entry, notify]);
+  }, [store, entry, notify]);
 
-  const refresh = useCallback(async (signal?: AbortSignal) => {
+  const refresh = useCallback(async (_signal?: AbortSignal) => {
     if (!threadId) return null;
-    const value = entry(threadId);
-    value.conversationId = conversationId;
-    if (value.busy) return value.goal;
-    const revision = ++value.revision;
-    try {
-      const result = await goalApi.get(threadId, signal, value.conversationId);
-      if (!signal?.aborted && value.revision === revision) {
-        if (!value.hydrated) value.resumePrompt = Boolean(result.goal && ["paused", "blocked", "usageLimited"].includes(result.goal.status));
-        value.hydrated = true;
-        accept(threadId, result.goal);
-      }
-      return result.goal;
-    } catch (reason) {
-      if (!signal?.aborted && value.revision === revision) {
-        value.error = reason instanceof Error ? reason.message : String(reason);
-        notify(threadId);
-      }
-      return null;
-    }
-  }, [threadId, conversationId, entry, accept, notify]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void refresh(controller.signal);
-    return () => controller.abort();
-  }, [refresh]);
+    await store.request(threadId);
+    return store.get(threadId).goal;
+  }, [store, threadId]);
 
   const update = useCallback(async (
     patch: { objective?: string; status?: EditableGoalStatus; tokenBudget?: number; attachmentIds?: string[] },
@@ -105,9 +84,9 @@ export function useThreadGoal(threadId: string) {
     if (!targetId) return false;
     const value = entry(targetId);
     if (value.busy) return false;
-    const completed = !preserveCompletion ? value.completed : null;
+    const completed = !preserveCompletion ? value.completed || (value.goal?.status === "complete" ? value.goal : null) : null;
     if (completed && !value.goal) {
-      dismissedCompletion.current.set(targetId, completionKey(completed));
+      store.dismissedGoals.set(targetId, goalCompletionKey(completed));
       value.completed = null;
       notify(targetId);
       return true;
@@ -120,9 +99,9 @@ export function useThreadGoal(threadId: string) {
     try {
       await goalApi.clear(targetId, undefined, value.conversationId);
       if (completed) {
-        dismissedCompletion.current.set(targetId, completionKey(completed));
-        if (value.completed && completionKey(value.completed) === completionKey(completed)) value.completed = null;
-        if (value.goal?.status === "complete" && completionKey(value.goal) === completionKey(completed)) value.goal = null;
+        store.dismissedGoals.set(targetId, goalCompletionKey(completed));
+        if (value.completed && goalCompletionKey(value.completed) === goalCompletionKey(completed)) value.completed = null;
+        if (value.goal?.status === "complete" && goalCompletionKey(value.goal) === goalCompletionKey(completed)) value.goal = null;
         notify(targetId);
       }
       if (value.revision === revision) {
@@ -147,10 +126,17 @@ export function useThreadGoal(threadId: string) {
     const value = entry(event.threadId);
     if (event.conversationId) value.conversationId = event.conversationId;
     value.revision += 1;
-    accept(event.threadId, event.goal);
+    accept(event.threadId, event.goal, true);
   }, [entry, accept]);
 
   const value = entry(threadId);
+  useEffect(() => {
+    if (!value.hydrated && store.synced.has(threadId)) {
+      value.hydrated = true;
+      value.resumePrompt = Boolean(value.goal && ['paused', 'blocked', 'usageLimited'].includes(value.goal.status));
+      notify(threadId);
+    }
+  });
   useEffect(() => {
     if (value.goal?.objective.startsWith("Read the Codex goal objective file at ") && !value.goal.displayObjective) void refresh();
   }, [value.goal?.objective, value.goal?.updatedAt, value.busy, refresh]);
@@ -158,9 +144,10 @@ export function useThreadGoal(threadId: string) {
   useEffect(() => {
     // Native completion applies to every observed conversation, including background tabs.
     for (const [id, snapshot] of entries.current) {
-      const goal = snapshot.goal;
-      if (goal?.status !== "complete" || snapshot.busy) continue;
-      const key = completionKey(goal);
+      const goal = store.committed.get(id)?.goal;
+      if (!store.synced.has(id) || goal?.status !== "complete" || snapshot.busy) continue;
+      snapshot.completed = goal;
+      const key = goalCompletionKey(goal);
       if (completedCleanup.current.get(id) === key) continue;
       completedCleanup.current.set(id, key);
       void clear(true, id);

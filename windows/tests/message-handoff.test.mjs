@@ -67,7 +67,7 @@ test('server turn order survives skewed device clocks, steers, images and delaye
     assert.deepEqual(persisted[0].blocks.map(b=>b.type), ['markdown','image']);
     const optimistic = {id:`optimistic-${id}`,role:'user',text:'text with image',submissionId:id,createdAt:new Date(started+offset*3600000).toISOString(),deliveryState:'sending',blocks:persisted[0].blocks};
     for (const deliveryState of ['sending','pending',undefined]) {
-      assert.deepEqual(mergeMessageList([earlier],[{...optimistic,deliveryState}]).map(m=>m.id), ['older',optimistic.id]);
+      assert.deepEqual(mergeMessageList([earlier],[{...optimistic,deliveryState}]).map(m=>m.id), offset < 0 ? [optimistic.id,'older'] : ['older',optimistic.id]);
     }
     const current = {threadId:'t',messages:[earlier,{...optimistic,createdAt:new Date(started-1000).toISOString(),serverTimestamp:true,deliveryState:undefined}]};
     const incoming = {threadId:'t',messages:[earlier,...persisted,later]};

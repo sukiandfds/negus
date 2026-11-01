@@ -1,6 +1,5 @@
 import { fetchJson, postJson } from "../../../shared/api/http";
-import { conversationQuery, withConversation, currentConversationId, resolveConversationId } from "../../../shared/api/conversationScope";
-import type { ExecutionStatus, UserInputRequest } from "../model/types";
+import { conversationQuery, withConversation, currentConversationId } from "../../../shared/api/conversationScope";
 
 export interface SendMessageResult {
   threadId: string;
@@ -29,25 +28,7 @@ interface InterruptResult {
   status: string;
 }
 
-const statusRequests = new Map<string, Promise<ExecutionStatus>>();
-
 export const executionApi = {
-  status: async (threadId: string, signal?: AbortSignal, reconcile = false, conversationId = currentConversationId(threadId)) => {
-    conversationId ||= await resolveConversationId(threadId);
-    const url = `/api/execution-status?threadId=${encodeURIComponent(threadId)}${conversationQuery(conversationId)}${reconcile ? "&reconcile=1" : ""}`;
-    if (reconcile) return fetchJson<ExecutionStatus>(url, signal);
-    if (signal?.aborted) return Promise.reject(signal.reason);
-    let request = statusRequests.get(url);
-    if (!request) {
-      request = fetchJson<ExecutionStatus>(url, AbortSignal.timeout(10000)).finally(() => statusRequests.delete(url));
-      statusRequests.set(url, request);
-    }
-    return new Promise<ExecutionStatus>((resolve, reject) => {
-      const abort = () => reject(signal?.reason);
-      signal?.addEventListener("abort", abort, { once: true });
-      request.then(value => { signal?.removeEventListener("abort", abort); resolve(value); }, error => { signal?.removeEventListener("abort", abort); reject(error); });
-    });
-  },
   sendMessage: (threadId: string, text: string, attachmentIds: string[] = [], submissionId = "", signal?: AbortSignal, conversationId = currentConversationId()) => postJson<SendMessageResult>(
     "/api/session/message",
     withConversation({ threadId, text, attachmentIds, submissionId }, conversationId),
@@ -65,10 +46,6 @@ export const executionApi = {
   review: (threadId: string, signal?: AbortSignal) => postJson<{ threadId: string; status: string }>(
     "/api/session/review",
     withConversation({ threadId }),
-    signal,
-  ),
-  pendingUserInput: (threadId: string, signal?: AbortSignal, conversationId = currentConversationId(threadId)) => fetchJson<{ request: UserInputRequest | null }>(
-    `/api/session/user-input?threadId=${encodeURIComponent(threadId)}${conversationQuery(conversationId)}`,
     signal,
   ),
   answerUserInput: (

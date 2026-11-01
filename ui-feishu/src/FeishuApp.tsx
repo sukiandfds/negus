@@ -38,7 +38,7 @@ export function FeishuApp() {
   const initialRoute = readRoute();
   const initialView = initialRoute.view;
   const c = useProjectConversations();
-  const directory = useProjectDirectory(c.executionStatus, c.contextStatus);
+  const directory = useProjectDirectory(c.store);
   const page = usePageSnapshot(c, directory);
   const viewC = page.conversations;
   const viewDirectory = page.directory;

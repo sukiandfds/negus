@@ -109,8 +109,7 @@ export function ConversationComposer({
   const submittingRef = useRef(false);
   const draft = useAttachmentDraft();
   const [withdrawing, setWithdrawing] = useState(false);
-  const inputDisabled = withdrawing || !selected || archived || queueing || draft.uploading
-    || goalBusy || status.phase === "recovering" || status.phase === "unknown";
+  const inputDisabled = withdrawing || !selected || archived || queueing || draft.uploading || goalBusy;
   const editing = Boolean(editingMessage);
   const inheritedAttachments = editingMessage?.blocks?.flatMap((block) => (
     "file" in block && block.file ? [block.file] : []

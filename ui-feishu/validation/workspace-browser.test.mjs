@@ -18,8 +18,13 @@ const sessions = Array.from({ length: 12 }, (_, i) => ({ ...summary(`thread-${St
 const cached = { ...sessions[0], messages: [{ ...messages[0], text: '缓存先显示' }] };
 let releaseSession;
 let releaseSend;
+let releaseQueue;
+let rejectQueue = false;
 let latestExecution;
-let queue = [{ id: 'q1', threadId: 'thread-00', submissionId: 'queued', dispatchSubmissionId: 'dispatch', text: '排队消息', attachments: [], state: 'pending', createdAt: stamp }];
+let latestContext;
+let queue = [{ id: 'q1', threadId: 'thread-00', submissionId: 'queued', dispatchSubmissionId: '', text: '排队消息', attachments: [], state: 'pending', createdAt: stamp }];
+const execution = id => latestExecution?.threadId === id ? latestExecution : { type: 'execution_status', threadId: id, turnId: '', phase: 'idle', active: false, activities: [], startedAt: null, label: '', detail: '', commentary: '', updatedAt: stamp };
+const context = id => latestContext?.threadId === id ? latestContext : { type: 'context_status', threadId: id, model: '', reasoningEffort: '', phase: 'idle', message: '', updatedAt: stamp, autoCompactThreshold: 80 };
 await page.addInitScript(({ cached, sessions, stamp }) => {
   localStorage.setItem('negus-conversation-snapshot-v1', JSON.stringify({ version: 1, savedAt: stamp, selectedId: 'thread-00', session: cached, sessions }));
   const sources = [];
@@ -45,17 +50,20 @@ await page.route('**/*', async route => {
   else if (url.pathname === '/api/project-directory') data = { projects: [{ id: 'developer', name: '技术研发', kind: 'employee', employeeId: 'developer', mainThreadId: 'thread-00', mainConversationId: 'employee-conversation', conversations: [{ id: 'employee-conversation', threadId: 'thread-00', conversationId: 'employee-conversation', title: '技术研发', main: true }] }] };
   else if (url.pathname === '/api/session' && req.method() === 'GET') {
     if (id === 'thread-00' && !releaseSession) await new Promise(resolve => { releaseSession = resolve; });
-    data = { ...summary(id), messages: id === 'thread-00' ? messages : [] };
-  } else if (url.pathname === '/api/execution-status') data = latestExecution || { type: 'execution_status', threadId: id, turnId: '', phase: 'idle', active: false, activities: [], startedAt: null, label: '', detail: '', commentary: '', updatedAt: stamp };
-  else if (url.pathname === '/api/session/context') data = { type: 'context_status', threadId: id, model: '', reasoningEffort: '', phase: 'idle', message: '', updatedAt: stamp, autoCompactThreshold: 80 };
+    const session = { ...summary(id), messages: id === 'thread-00' ? messages : [] };
+    data = url.searchParams.get('view') === '1' ? { session, sourceRevision: '', status: execution(id), context: context(id),
+      goal: null, queue: id === 'thread-00' ? queue : [], input: null } : session;
+  }
   else if (url.pathname === '/api/session/context/compact') data = { type: 'context_status', threadId: id, model: '', reasoningEffort: '', phase: 'compacting', message: '正在压缩上下文', updatedAt: stamp };
-  else if (url.pathname === '/api/session/queue') data = { threadId: id, items: queue };
-  else if (url.pathname === '/api/session/user-input') data = { request: null };
-  else if (url.pathname === '/api/session/goal') data = { goal: null };
   else if (url.pathname === '/api/models') data = [];
   else if (url.pathname === '/api/model-channels') data = { channels: [] };
   else if (url.pathname === '/api/model-defaults') data = { model: '', effort: '', providerId: '' };
   else if (url.pathname === '/api/session/message') { await new Promise(resolve => { releaseSend = resolve; }); data = { threadId: id, turnId: 'new-turn', status: 'inProgress' }; }
+  else if (url.pathname === '/api/session/queue' && body?.action === 'sendNow') {
+    await new Promise(resolve => { releaseQueue = resolve; });
+    if (rejectQueue) { await route.fulfill({ status: 409, json: { error: '发送失败，请重试' } }); return; }
+    data = { threadId: id, items: queue };
+  }
   else if (url.pathname === '/api/session/revert') { messages.splice(0); data = { threadId: id }; }
   else if (url.pathname === '/api/conversation-forward/targets') data = [];
   else if (url.pathname.includes('rooms')) data = { rooms: [] };
@@ -82,9 +90,32 @@ try {
   });
   await check('queue accepted event removes clock', async () => {
     await page.getByLabel('等待助手完成后发送').waitFor();
+    await page.getByRole('button', { name: '直接发送' }).click();
+    await page.waitForFunction(() => document.querySelector('[data-message-id="optimistic-queued"]'));
+    assert.equal(await page.getByLabel('等待助手完成后发送').count(), 0);
+    assert.equal(await page.getByText('排队消息', { exact: true }).count(), 1);
+    assert.equal(await page.locator('section[aria-label="指令等候中"]').count(), 0);
+    rejectQueue = true;
+    releaseQueue();
+    await page.getByText('发送失败，请重试').waitFor();
+    await page.getByLabel('等待助手完成后发送').waitFor();
+    assert.equal(await page.getByText('排队消息', { exact: true }).count(), 1);
+    rejectQueue = false;
+    releaseQueue = undefined;
+    await page.getByRole('button', { name: '直接发送' }).click();
+    await page.waitForFunction(() => document.querySelector('[data-message-id="optimistic-queued"]'));
+    for (let i = 0; i < 100 && !releaseQueue; i++) await page.waitForTimeout(10);
+    assert.ok(releaseQueue);
+    queue = [{ ...queue[0], state: 'dispatching', dispatchSubmissionId: 'dispatch', sentAt: new Date().toISOString() }];
+    await page.evaluate(items => window.fixtureEvent({ type: 'queue_changed', threadId: 'thread-00', items }), queue);
+    await page.evaluate(() => window.fixtureEvent({ type: 'user_message_submitted', threadId: 'thread-00', submissionId: 'dispatch', messageId: 'optimistic-dispatch', text: '排队消息', attachments: [], createdAt: new Date().toISOString() }));
+    await page.waitForFunction(() => document.querySelector('[data-message-id="optimistic-dispatch"]'));
+    assert.equal(await page.getByText('排队消息', { exact: true }).count(), 1);
     await page.evaluate(() => window.fixtureEvent({ type: 'user_message_accepted', threadId: 'thread-00', turnId: 'new-turn', submissionId: 'dispatch' }));
     await page.getByLabel('等待助手完成后发送').waitFor({ state: 'detached' });
     queue = [];
+    releaseQueue?.();
+    assert.equal(await page.getByText('排队消息', { exact: true }).count(), 1);
   });
   await check('edit original thread and receipt before HTTP response', async () => {
     await page.locator('[data-message-id="old"]').getByRole('button', { name: '重新编辑' }).click();
@@ -109,10 +140,11 @@ try {
   });
   await check('compaction quota error appears inline', async () => {
     latestExecution = { type: 'execution_status', threadId: 'thread-00', turnId: 'new-turn', phase: 'failed', active: false, activities: [], startedAt: '2026-10-29T01:00:00.000Z', label: '执行失败', detail: '额度不足，无法压缩', notices: ['额度不足，无法压缩'], commentary: '', updatedAt: new Date().toISOString() };
-    await page.evaluate(status => {
+    latestContext = { ...context('thread-00'), phase: 'failed', message: '额度不足，无法压缩', updatedAt: new Date().toISOString() };
+    await page.evaluate(({ status, context }) => {
       window.fixtureEvent(status);
-      window.fixtureEvent({ type: 'context_status', threadId: 'thread-00', model: '', reasoningEffort: '', phase: 'failed', message: '额度不足，无法压缩', updatedAt: new Date().toISOString() });
-    }, latestExecution);
+      window.fixtureEvent(context);
+    }, { status: latestExecution, context: latestContext });
     await page.getByText('额度不足，无法压缩', { exact: true }).first().waitFor();
     const timeline = page.getByLabel('Codex 工作过程');
     await timeline.getByText('额度不足，无法压缩').waitFor();

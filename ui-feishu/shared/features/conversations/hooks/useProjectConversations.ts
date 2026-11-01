@@ -49,9 +49,9 @@ export function useProjectConversations() {
   const selection = useConversationSession(initial);
   const serverThreadId = isPendingThread(selection.selectedId) ? "" : selection.selectedId;
 
-  const execution = useCodexExecution(serverThreadId);
-  const followUpQueue = useFollowUpQueue(serverThreadId);
-  const goal = useThreadGoal(serverThreadId);
+  const execution = useCodexExecution(serverThreadId, selection.store);
+  const followUpQueue = useFollowUpQueue(serverThreadId, selection.store);
+  const goal = useThreadGoal(serverThreadId, selection.store);
   const [forkingMessageId, setForkingMessageId] = useState("");
   const [editingMessage, setEditingMessage] = useState<SessionMessage | null>(null);
   const editingMessageRef = useRef<SessionMessage | null>(null);
@@ -60,16 +60,20 @@ export function useProjectConversations() {
   const [retryingMessageId, setRetryingMessageId] = useState("");
   const [localSendVersion, setLocalSendVersion] = useState(0);
   const [historyEdit, setHistoryEdit] = useState<{ threadId: string; revision: number } | null>(null);
-  const [userInputRequest, setUserInputRequest] = useState<UserInputRequest | null>(null);
+  const userInputRequest = selection.store.get(serverThreadId).userInputRequest;
+  const setUserInputRequest = useCallback((value: UserInputRequest | null | ((current: UserInputRequest | null) => UserInputRequest | null)) => {
+    const id = selection.selectedIdRef.current;
+    selection.store.update(id, { userInputRequest: typeof value === 'function' ? value(selection.store.get(id).userInputRequest) : value });
+  }, [selection.store]);
   const [userInputBusy, setUserInputBusy] = useState(false);
   const [userInputError, setUserInputError] = useState("");
   const reconcilingSubmissionsRef = useRef(new Set<string>());
   const reconciledSubmissionsRef = useRef(new Set<string>());
   const submittingThreads = useRef(new Set<string>());
   const draftNames = useRef(new Map<string, string>());
-  const contextManagement = useContextManagement(serverThreadId);
+  const contextManagement = useContextManagement(serverThreadId, selection.store);
   const catalog = useConversationCatalog(initial, {
-    cachedSessions: selection.cachedSessions,
+    setArchived: selection.store.setArchived,
     selectedIdRef: selection.selectedIdRef,
     loadSession: selection.loadSession,
     adoptSelection: selection.adoptSelection,
@@ -113,7 +117,7 @@ export function useProjectConversations() {
     recordedEffort,
     contextSettled: contextManagement.status.threadId === selection.selectedId
       && !selection.loadingSession
-      && (Boolean(contextManagement.status.updatedAt) || contextManagement.status.phase === "failed"),
+      && (selection.store.synced.has(selection.selectedId) || Boolean(contextManagement.status.updatedAt) || contextManagement.status.phase === "failed"),
   };
   const catalogModelsRef = useRef(modelManager.models);
   catalogModelsRef.current = modelManager.models;
@@ -137,27 +141,10 @@ export function useProjectConversations() {
     return true;
   }, [modelManager.change, modelManager.changeReasoningEffort, selection.selectedIdRef]);
 
-  const refreshUserInput = useCallback(async (signal?: AbortSignal) => {
-    const threadId = selection.selectedIdRef.current;
-    if (!threadId) {
-      setUserInputRequest(null);
-      return;
-    }
-    try {
-      const result = await executionApi.pendingUserInput(threadId, signal);
-      if (selection.selectedIdRef.current === threadId) setUserInputRequest(result.request);
-    } catch (error) {
-      if (!(error instanceof DOMException && error.name === "AbortError")) setUserInputRequest(null);
-    }
-  }, [selection.selectedIdRef]);
-
-  useEffect(() => {
-    setUserInputRequest(null);
-    setUserInputError("");
-    const controller = new AbortController();
-    void refreshUserInput(controller.signal);
-    return () => controller.abort();
-  }, [refreshUserInput, selection.selectedId]);
+  const refreshUserInput = useCallback(async (_signal?: AbortSignal) => {
+    const id = selection.selectedIdRef.current;
+    if (id && !isPendingThread(id)) await selection.loadSession(id);
+  }, [selection.loadSession]);
 
   const answerUserInput = useCallback(async (answers: Record<string, { answers: string[] }>) => {
     const request = userInputRequest;
@@ -166,7 +153,7 @@ export function useProjectConversations() {
     setUserInputError("");
     try {
       await executionApi.answerUserInput(request.threadId, request.requestId, answers);
-      setUserInputRequest((current) => String(current?.requestId) === String(request.requestId) ? null : current);
+      selection.store.update(request.threadId, current => ({ userInputRequest: String(current.userInputRequest?.requestId) === String(request.requestId) ? null : current.userInputRequest }));
       return true;
     } catch (error) {
       setUserInputError(error instanceof Error ? error.message : "提交失败，请重试");
@@ -202,6 +189,7 @@ export function useProjectConversations() {
   const syncLocationRef = useRef(syncLocation);
   syncLocationRef.current = syncLocation;
   const locationKeyRef = useRef(conversationLocationKey());
+  locationKeyRef.current = conversationLocationKey();
 
   useEffect(() => {
     const handleNavigation = () => {
@@ -597,15 +585,20 @@ export function useProjectConversations() {
   }, [execution.refreshStatus, execution.status.active, selection.selectedIdRef, selection.session?.archived]);
 
   const onSessionsChanged = useCallback((threadId?: string) => {
-    const selected = selection.selectedIdRef.current;
-    if (selected && (!threadId || threadId === selected)) {
-      void selection.loadSession(selected);
-    }
-    void catalog.refreshSessions(false, threadId, false);
-  }, [catalog.refreshSessions, selection.loadSession, selection.selectedIdRef]);
+    if (threadId) selection.store.invalidate(threadId);
+    else { for (const id of selection.store.committed.keys()) selection.store.invalidate(id, false); selection.store.notify(); }
+    window.dispatchEvent(new Event('negus:directory-changed'));
+    return catalog.refreshSessions(false, threadId, false);
+  }, [catalog.refreshSessions, selection.store]);
 
   const handleEvent = useCallback((event: ProjectEvent) => {
+    if (!selection.store.acceptEvent(event)) return;
+    if (event.type === 'sessions_changed') {
+      for (const id of event.threadId ? [event.threadId] : selection.store.committed.keys()) selection.store.freshBodies.add(id);
+    }
     execution.handleEvent(event);
+    if (event.type === 'execution_status' && event.threadId !== selection.selectedIdRef.current) selection.store.update(event.threadId, { executionStatus: event }, true);
+    if ((event as { type: string }).type === 'employee_status' || (event as { type: string }).type === 'employee_message_completed') window.dispatchEvent(new Event('negus:directory-changed'));
     const acceptedQueueItem = followUpQueue.handleEvent(event);
     goal.handleEvent(event);
     if (event.type === "context_status") contextManagement.handleEvent(event);
@@ -626,27 +619,20 @@ export function useProjectConversations() {
         event.submissionId,
         event.createdAt,
       );
-      const message = { ...generated, id: event.messageId || generated.id, deliveryState: "pending" as const, serverTimestamp: true };
+      const message = { ...generated, id: event.messageId || generated.id, deliveryState: reconciledSubmissionsRef.current.has(event.submissionId) ? undefined : "pending" as const, serverTimestamp: true };
       selection.addOptimisticMessage(event.threadId, message);
     }
-    if (event.type === "user_input_requested" && event.threadId === selection.selectedIdRef.current) {
-      setUserInputError("");
-      setUserInputRequest(event.request);
+    if (event.type === 'user_input_requested') {
+      if (event.threadId === selection.selectedIdRef.current) setUserInputError('');
+      selection.store.update(event.threadId, { userInputRequest: event.request }, true);
     }
-    if (event.type === "user_input_resolved" && event.threadId === selection.selectedIdRef.current) {
-      setUserInputRequest((current) => String(current?.requestId) === String(event.requestId) ? null : current);
-    }
+    if (event.type === 'user_input_resolved') selection.store.update(event.threadId, current => ({
+      userInputRequest: String(current.userInputRequest?.requestId) === String(event.requestId) ? null : current.userInputRequest }), true);
   }, [contextManagement.handleEvent, execution.handleEvent, followUpQueue.handleEvent, goal.handleEvent, selection.addOptimisticMessage, selection.updateOptimisticMessage, selection.selectedIdRef]);
   const recoverRealtime = useCallback((_reason: RealtimeRecoveryReason) => {
-    const selected = selection.selectedIdRef.current;
-    if (selected) void selection.loadSession(selected, { retry: false, recovery: true });
-    if (selected) void goal.refresh();
-    void execution.refreshStatus(undefined, true).then(() => {
-      onSessionsChanged(selection.selectedIdRef.current || undefined);
-    });
-    void followUpQueue.refresh();
-    void refreshUserInput();
-  }, [execution.refreshStatus, followUpQueue.refresh, goal.refresh, onSessionsChanged, refreshUserInput, selection.selectedIdRef]);
+    onSessionsChanged();
+    window.dispatchEvent(new Event('negus:realtime-recovered'));
+  }, [onSessionsChanged]);
   const connected = useConversationEvents(
     onSessionsChanged,
     handleEvent,
@@ -663,14 +649,8 @@ export function useProjectConversations() {
     catalog.selectLatestSession(desktopThreadId);
   }, [catalog.selectLatestSession]);
 
-  const prefetchSession = useCallback(async (threadId: string, conversationId?: string) => {
-    const loaded = await selection.loadSession(threadId, { prefetch: true, retry: false, conversationId });
-    if (!loaded) throw new Error(selection.sessionErrors.get(threadId) || '对话同步失败，保留已有内容');
-    return true;
-  }, [selection.loadSession, selection.sessionErrors]);
-
   return {
-    prefetchSession,
+    store: selection.store,
     project: catalog.project,
     sessions: catalog.sessions,
     archivedView: catalog.archivedView,
@@ -783,6 +763,6 @@ export function useProjectConversations() {
     },
     clearGoal: () => goal.clear(),
     archivedByThread: catalog.archivedByThread,
-    refresh: () => catalog.refreshSessions(),
+    refresh: () => onSessionsChanged(),
   };
 }

@@ -45,6 +45,7 @@ export interface SessionMessage {
 }
 
 export interface SessionSummary {
+  sourceRevision?: string;
   model?: string;
   modelProviderId?: string;
   threadId: string;
@@ -65,6 +66,7 @@ export interface SessionSummary {
 }
 
 export interface SessionDetail extends SessionSummary {
+  sourceSignature?: string;
   messages: SessionMessage[];
   contentVersion?: number;
   hasMore?: boolean;
@@ -91,6 +93,7 @@ export type SessionResponse = SessionDetail | SessionDelta;
 
 // FEAT-001 (2026-10-30): persist associated conversation display fields with its history snapshot.
 export interface ConversationPresentation {
+  syncSignature?: string;
   executionStatus: import('../../execution/model/types').ExecutionStatus;
   contextStatus: import('../../context-management/model/types').ContextStatus;
   visibleModel: string;

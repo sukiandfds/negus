@@ -47,10 +47,29 @@ const validSnapshot = (value: ConversationSnapshot | null): ConversationSnapshot
   // Keep selection/list state and unrelated cached conversations intact.
   const hasLegacyAttachmentText = (session: SessionDetail) => session.messages.some((message) =>
     message.role === "user" && message.text?.includes("[附件正文：") && message.text.includes("[附件正文结束]"));
+  const sanitized = new Set<string>();
+  const cleanSession = (session: SessionDetail) => {
+    const messages = session.messages.filter(message => !message.id.startsWith("stream-")
+      && (!message.id.startsWith("optimistic-") || message.deliveryState === "failed" || message.deliveryState === "occupied"));
+    if (messages.length === session.messages.length && !messages.some(message => message.id.startsWith("optimistic-"))) return session;
+    sanitized.add(session.threadId);
+    return { ...session, messages, sourceSignature: undefined };
+  };
+  const session = value.session && !hasLegacyAttachmentText(value.session) ? cleanSession(value.session) : null;
+  const recent = recentSessions.filter((entry) => !hasLegacyAttachmentText(entry.session)).map(entry => {
+    const session = cleanSession(entry.session);
+    return { ...entry, session, isPartial: Boolean(entry.isPartial || sanitized.has(session.threadId)) };
+  });
   return {
     ...value,
-    session: value.session && hasLegacyAttachmentText(value.session) ? null : value.session,
-    recentSessions: recentSessions.filter((entry) => !hasLegacyAttachmentText(entry.session)),
+    sessions: value.sessions.map(({ messages: _messages, ...summary }: SessionSummary & { messages?: unknown }) => summary),
+    session,
+    isPartial: Boolean(value.isPartial || (session && sanitized.has(session.threadId))),
+    recentSessions: recent,
+    presentation: value.presentation && Object.fromEntries(Object.entries(value.presentation).map(([id, view]) => [id, {
+      ...view, ...(sanitized.has(id) ? { syncSignature: undefined } : {}), streamingText: "", commentaryText: "",
+      executionStatus: { ...view.executionStatus, streamingText: "", streamingItemId: "", commentary: "" },
+    }])),
   };
 };
 
@@ -110,7 +129,7 @@ export const writeConversationSnapshot = ({ selectedId, sessions, session, cache
       return latest ? { savedAt, isPartial: Boolean(entry.isPartial || latest.hasMore || latest.messages.length > maxCachedMessages),
         session: { ...latest, messages: latest.messages.slice(-maxCachedMessages) } } : entry;
     });
-    const snapshot: ConversationSnapshot = {
+    const snapshot: ConversationSnapshot = validSnapshot({
       version: 1,
       savedAt,
       isPartial: Boolean(selectedPrevious?.isPartial || (cachedSession && cachedMessageCount > cachedSession.messages.length)),
@@ -122,7 +141,7 @@ export const writeConversationSnapshot = ({ selectedId, sessions, session, cache
         const value = presentation?.[id];
         return value ? [[id, value]] : [];
       })),
-    };
+    })!;
     let serialized = JSON.stringify(snapshot);
     while (serialized.length > maxSnapshotCharacters && snapshot.recentSessions?.length) {
       const oldest = snapshot.recentSessions[snapshot.recentSessions.length - 1];

@@ -101,3 +101,53 @@ test('prefetched recent conversations survive reload without opening each one', 
   assert.equal(restored.cachedSessions.length, 10);
   assert.equal(restored.cachedSessions.some(item => item.threadId === 'prefetch-0'), false);
 });
+
+test('persisted snapshots keep confirmed messages and exclude pending and live overlays', () => {
+  storage.clear();
+  const original = session('A', 'confirmed', '09');
+  original.messages.push(
+    { id: 'optimistic-one', submissionId: 'one', role: 'user', text: 'same', blocks: [{ type: 'image', id: 'img', source: 'image' }] },
+    { id: 'optimistic-two', submissionId: 'two', role: 'user', text: 'same' },
+    { id: 'stream-segment:1', role: 'assistant', text: 'in progress' },
+  );
+  const presentation = { A: { executionStatus: { commentary: 'working', streamingText: 'partial', streamingItemId: 'item' },
+    streamingText: 'partial', commentaryText: 'working', syncSignature: 'old' } };
+  writeConversationSnapshot({ selectedId: 'A', sessions: [original], session: original, cachedSessions: new Map([['A', original]]), presentation });
+  const stored = JSON.parse(storage.get('negus-conversation-snapshot-v1'));
+  assert.deepEqual(stored.session.messages.map(message => message.id), ['A-09']);
+  assert.equal(stored.isPartial, true);
+  assert.equal(stored.presentation.A.streamingText, '');
+  assert.equal(stored.presentation.A.executionStatus.streamingText, '');
+  assert.equal(stored.presentation.A.syncSignature, undefined);
+  assert.equal(stored.sessions[0].messages, undefined, 'the summary must not persist message bodies');
+  assert.equal(original.messages.length, 4, 'writing must not alter visible pending messages');
+  window.location.search = '?thread=A';
+  assert.deepEqual(readInitialConversationState().session.messages.map(message => message.id), ['A-09']);
+});
+
+test('legacy snapshots remove pending overlays and require a fresh read', () => {
+  storage.clear();
+  const legacy = session('B', 'confirmed', '10');
+  legacy.sourceSignature = 'old';
+  legacy.messages.push({ id: 'optimistic-previous', role: 'user', text: 'pending' });
+  storage.set('negus-conversation-snapshot-v1', JSON.stringify({ version: 1, savedAt: time('11'), selectedId: 'B', sessions: [legacy], session: legacy }));
+  window.location.search = '?thread=B';
+  const restored = readInitialConversationState();
+  assert.deepEqual(restored.session.messages.map(message => message.id), ['B-10']);
+  assert.equal(restored.session.sourceSignature, undefined);
+  assert.equal(restored.sessionIsPartial, true);
+});
+
+test('failed and occupied messages keep their attachments and error across refresh', () => {
+  storage.clear();
+  const original = session('A', 'confirmed', '09');
+  const failed = { id: 'optimistic-failed', submissionId: 'failed', role: 'user', text: 'photo',
+    deliveryState: 'failed', deliveryError: 'upload failed', blocks: [{ type: 'image', id: 'img', source: '/api/media/photo' }] };
+  const occupied = { ...failed, id: 'optimistic-occupied', submissionId: 'occupied', deliveryState: 'occupied', deliveryError: 'busy' };
+  original.messages.push(failed, occupied);
+  writeConversationSnapshot({ selectedId: 'A', sessions: [original], session: original });
+  window.location.search = '?thread=A';
+  const restored = readInitialConversationState();
+  assert.deepEqual(restored.session.messages.slice(1), [failed, occupied]);
+  assert.equal(restored.sessionIsPartial, true);
+});

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Desktop } from "../desktop/Desktop";
 import { useDesktopWorkspace } from "../desktop/useDesktopWorkspace";
 import { useProjectConversations } from "../conversations/hooks/useProjectConversations";
+import { usePageSnapshot } from "../../../src/usePageSnapshot";
 import { useProjectDirectory } from "../project-directory/hooks/useProjectDirectory";
 import { ProjectProgressApp } from "../project-progress/ProjectProgressApp";
 import { ProjectManagementApp } from "../project-management/ProjectManagementApp";
@@ -14,8 +15,9 @@ import styles from "./SettingsPage.module.css";
 type Feature = "workspace" | "progress" | "management" | "system";
 
 function WorkspacePanel({ onClose }: { onClose: () => void }) {
-  const conversations = useProjectConversations();
-  const directory = useProjectDirectory(conversations.executionStatus);
+  const source = useProjectConversations();
+  const page = usePageSnapshot(source, useProjectDirectory(source.store));
+  const conversations = page.conversations, directory = page.directory;
   const workspace = useDesktopWorkspace(conversations.session, conversations.executionStatus);
   const [editing, setEditing] = useState(false);
   const [ready, setReady] = useState(false);

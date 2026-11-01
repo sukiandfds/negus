@@ -5,12 +5,11 @@ import { conversationApi } from "../data/conversationApi";
 import type { ProjectInfo, SessionDetail, SessionSummary } from "../model/types";
 import type { InitialConversationState } from "../state/initialConversation";
 import { readLocalCache } from "../../../shared/state/localCache";
-import { seedIdleExecution } from "../../execution/hooks/useCodexExecution";
 import { readModelCatalog } from "../../models/data/modelCatalogCache";
 import { providerIdOf, readModelDefaults, resolveVisibleModel } from "../../models/model/modelDefaults";
 
 interface ConversationSelection {
-  cachedSessions: ReadonlyMap<string, SessionDetail>;
+  setArchived: (threadId: string, archived: boolean) => void;
   selectedIdRef: MutableRefObject<string>;
   loadSession: (threadId: string, options?: { older?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean }) => Promise<boolean>;
   adoptSelection: (threadId: string) => Promise<boolean>;
@@ -18,7 +17,7 @@ interface ConversationSelection {
   selectSession: (threadId: string) => void;
   setCreatedSession: (detail: SessionDetail, preserveComposer?: boolean) => void;
   setSessionError: (message: string) => void;
-  cacheCreatedSession: (detail: SessionDetail) => void;
+  cacheCreatedSession: (detail: SessionDetail, previousId?: string) => void;
 }
 
 interface RemovedSession {
@@ -34,6 +33,7 @@ const waitForArchiveIconFeedback = () => new Promise<void>((resolve) => {
 
 const sameSessionSummary = (left: SessionSummary, right: SessionSummary) => (
   left.threadId === right.threadId
+  && left.sourceRevision === right.sourceRevision
   && left.source === right.source
   && left.title === right.title
   && left.updatedAt === right.updatedAt
@@ -205,13 +205,9 @@ export function useConversationCatalog(
     let cancelled = false;
     const controller = new AbortController();
     const hasCachedList = Boolean(initial.sessions.length);
-    const initialSessionRequest = initial.selectedId
-      ? selection.loadSession(initial.selectedId, { recovery: initial.sessionIsPartial })
-      : Promise.resolve(false);
     void Promise.allSettled([
       conversationApi.project(controller.signal).then(setProject),
-      refreshSessions(!hasCachedList, undefined, !initial.selectedId),
-      initialSessionRequest,
+      refreshSessions(!hasCachedList, undefined, false),
     ]).then((results) => {
       if (cancelled || controller.signal.aborted) return;
       const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
@@ -256,11 +252,10 @@ export function useConversationCatalog(
       const providerId = requestedProviderId || (catalogEntry ? providerIdOf(catalogEntry) : readModelDefaults().providerId);
       const created = await conversationApi.create(model, projectRoot, providerId);
       const detail: SessionDetail = { ...created, messages: [] };
-      selection.cacheCreatedSession(detail);
+      selection.cacheCreatedSession(detail, pendingId);
       transientSessionsRef.current.set(created.threadId, created);
       const stillCurrent = !pendingId || selection.selectedIdRef.current === pendingId;
       if (stillCurrent) {
-        seedIdleExecution(created.threadId);
         selection.setCreatedSession(detail, preserveComposer);
       }
       const nextSessions = [created, ...sessionsRef.current.filter((item) => item.threadId !== created.threadId)];
@@ -352,6 +347,7 @@ export function useConversationCatalog(
       removed = removeSessionOptimistically(threadId);
       await request;
       if (requestFailed) throw requestError;
+      selection.setArchived(threadId, true);
       setArchivedByThread(previous => ({ ...previous, [threadId]: true }));
       window.dispatchEvent(new CustomEvent("negus:conversation-archived", { detail: { threadId } }));
       transientSessionsRef.current.delete(threadId);
@@ -382,6 +378,7 @@ export function useConversationCatalog(
       removed = removeSessionOptimistically(threadId);
       await request;
       if (requestFailed) throw requestError;
+      selection.setArchived(threadId, false);
       setArchivedByThread(previous => ({ ...previous, [threadId]: false }));
       if (selection.selectedIdRef.current === threadId) selection.clearSelection();
       return true;

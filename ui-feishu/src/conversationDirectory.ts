@@ -30,7 +30,7 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
       projectId: entry.targetProjectId || project.projectId || project.id,
       time: directoryIsNewer ? entry.lastActivityAt || entry.updatedAt || sessionTime : sessionTime,
       active: Boolean(status?.active), label: conversationStatus(status, directory.contextByThread[entry.threadId || '']),
-      preview: previewIsNewer && visibleTaskPreview(entry.latestMessage) ? entry.latestMessage : session?.latestMessage, session,
+      preview: cached?.latestMessage ?? (previewIsNewer && visibleTaskPreview(entry.latestMessage) ? entry.latestMessage : session?.latestMessage), session,
     };
   };
   const all: Conversation[] = [];

@@ -3,7 +3,6 @@ import type { SessionDelta, SessionDetail, SessionMessage } from "../model/types
 const isOptimisticMessage = (message: SessionMessage) => message.id.startsWith("optimistic-");
 
 const timestampOf = (message: SessionMessage) => {
-  if (isOptimisticMessage(message) && !message.serverTimestamp) return null;
   const timestamp = Date.parse(message.createdAt || "");
   return Number.isFinite(timestamp) ? timestamp : null;
 };
@@ -36,11 +35,14 @@ export const orderMessageList = (messages: SessionMessage[]) => {
   return ordered;
 };
 
-const sameSubmission = (left: SessionMessage, right: SessionMessage) => (
+const submissionIdOf = (message: SessionMessage) => message.submissionId
+  || (isOptimisticMessage(message) ? message.id.slice('optimistic-'.length) : '');
+
+export const sameSubmission = (left: SessionMessage, right: SessionMessage) => (
   left.role === "user"
   && right.role === "user"
-  && Boolean(left.submissionId)
-  && left.submissionId === right.submissionId
+  && Boolean(submissionIdOf(left))
+  && submissionIdOf(left) === submissionIdOf(right)
 );
 
 const sameUserMessage = sameSubmission;

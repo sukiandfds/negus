@@ -1,25 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ConversationState, DirectoryState } from './types';
-import { conversationReads } from '../shared/shared/state/conversationReads';
-import { readConversationSnapshot, writeConversationSnapshot } from '../shared/features/conversations/data/conversationSnapshot';
+import { writeConversationSnapshot } from '../shared/features/conversations/data/conversationSnapshot';
 import { isPendingThread } from '../shared/features/conversations/model/pendingThread';
-import { mergeMessageList } from '../shared/features/conversations/state/conversationMerge';
 import { readConversationBatches } from '../shared/features/conversations/state/conversationBatch';
-import { idleStatus } from '../shared/features/execution/hooks/useCodexExecution';
-import { emptyStatus } from '../shared/features/context-management/hooks/useContextManagement';
-import { contextApi } from '../shared/features/context-management/data/contextApi';
-import { executionApi } from '../shared/features/execution/data/executionApi';
-import { goalApi } from '../shared/features/goals/data/goalApi';
-import { followUpQueueApi } from '../shared/features/conversations/data/followUpQueueApi';
+import { withStreamingStatus, type ThreadSnapshot } from '../shared/features/conversations/state/conversationStore';
 import { readModelDefaults, resolveVisibleModel, resolveVisibleEffort } from '../shared/features/models/model/modelDefaults';
-import { buildConversationDirectory, byLatest } from './conversationDirectory';
-
-const keys = ['session', 'executionStatus', 'contextStatus', 'visibleModel', 'visibleEffort', 'usageModel',
-  'models', 'goal', 'queueItems', 'userInputRequest', 'streamingText', 'commentaryText'] as const;
-type ThreadView = Pick<ConversationState, typeof keys[number]>;
-const pick = (value: ConversationState): ThreadView => Object.fromEntries(keys.map(key => [key, value[key]])) as ThreadView;
-const directoryView = (value: DirectoryState) => ({ projects: value.projects, statusByThread: value.statusByThread,
-  contextByThread: value.contextByThread, goalByThread: value.goalByThread });
+import { buildConversationDirectory } from './conversationDirectory';
+import { isVisibleTaskMessage } from './taskNotice';
 
 // Empty employee/project entries have no thread to read. Existing threads keep their batch snapshot.
 const mergeProjects = (previous: DirectoryState['projects'], next: DirectoryState['projects'], good: Set<string>) => next.map(project => {
@@ -31,201 +18,130 @@ const mergeProjects = (previous: DirectoryState['projects'], next: DirectoryStat
     conversations: [...children.values()] };
 });
 
-// FEAT-001 2026-10-30: this is the sole display commit point, not another data reader.
-// Source hooks own actions/protocol state; all remote display fields cross this batch boundary together.
+// FEAT-001: batch scheduling commits directly to the action store; it owns no detail cache.
 export function usePageSnapshot(conversations: ConversationState, directory: DirectoryState) {
+  const c = conversations, store = c.store;
   const live = useRef({ conversations, directory });
   live.current = { conversations, directory };
-  const [restored] = useState(readConversationSnapshot);
-  // A missing cache must never borrow the previously selected conversation's metadata.
-  const seed = (id: string, cache = conversations.cachedSessions): ThreadView => ({
-    session: cache.get(id) || null, models: conversations.models,
-    executionStatus: idleStatus(id), contextStatus: emptyStatus(id),
-    visibleModel: cache.get(id)?.model || '', visibleEffort: '', usageModel: '',
-    goal: null, queueItems: [], userInputRequest: null, streamingText: '', commentaryText: '',
-    ...restored?.presentation?.[id],
-  });
-  const [shown, setShown] = useState(() => ({
-    sessions: conversations.sessions, cachedSessions: new Map(conversations.cachedSessions),
-    directory: directoryView(directory), project: conversations.project,
-    threads: new Map<string, ThreadView>([...conversations.cachedSessions].filter(([id]) => id === conversations.selectedId || restored?.presentation?.[id]).map(([id, session]) => [id, { ...seed(id), session }])),
-    errors: new Map<string, string>(), committed: false,
-  }));
+  const [shown, setShown] = useState(() => ({ sessions: c.sessions, projects: directory.projects, project: c.project, committed: false }));
   const observed = useRef(new Map<string, string>());
-  const running = useRef(false);
-  const mounted = useRef(true);
-  const generation = useRef(0);
-  const archiveView = useRef(conversations.archivedView);
-  if (archiveView.current !== conversations.archivedView) {
-    archiveView.current = conversations.archivedView;
-    observed.current.clear();
-  }
-  const [, wake] = useState(0);
+  const running = useRef(false), priorityPublished = useRef(false), activeSource = useRef('');
+  const priorityIds = useRef(new Set<string>());
+  const [syncing, setSyncing] = useState(true);
+  const mounted = useRef(true), generation = useRef(0);
   const controller = useRef<AbortController | null>(null);
-  const optimistic = useRef(new Map<string, ThreadView['session']>());
-  const selectedId = conversations.selectedId;
-  const seeds = useRef(new Map<string, ThreadView>());
-  if (!seeds.current.has(selectedId)) seeds.current.set(selectedId, seed(selectedId, shown.cachedSessions));
-  const selectedView = shown.threads.get(selectedId) || seeds.current.get(selectedId)!;
-  const editRevision = useRef(conversations.historyEdit);
+  const [, wake] = useState(0);
+  const archiveView = useRef(c.archivedView);
+  if (archiveView.current !== c.archivedView) { archiveView.current = c.archivedView; observed.current.clear(); }
+  const editRevision = useRef(c.historyEdit);
   useEffect(() => {
-    if (editRevision.current === conversations.historyEdit) return;
-    editRevision.current = conversations.historyEdit;
-    const edit = conversations.historyEdit;
-    if (!edit) return;
-    controller.current?.abort();
-    ++generation.current;
-    observed.current.delete(edit.threadId);
-    optimistic.current.delete(edit.threadId);
-    setShown(previous => {
-      const threads = new Map(previous.threads), cachedSessions = new Map(previous.cachedSessions);
-      const detail = conversations.cachedSessions.get(edit.threadId);
-      if (detail) cachedSessions.set(edit.threadId, detail);
-      if (conversations.selectedId === edit.threadId) threads.set(edit.threadId, pick(conversations));
-      return { ...previous, threads, cachedSessions };
-    });
-  }, [conversations.historyEdit]);
-  // Keep locally submitted messages visible even after their native acknowledgement arrives mid-batch.
-  const localMessages = conversations.session?.messages.filter(message => message.id.startsWith('optimistic-')) || [];
-  if (conversations.session && localMessages.length) {
-    const previous = optimistic.current.get(selectedId);
-    optimistic.current.set(selectedId, { ...conversations.session,
-      messages: mergeMessageList(previous?.messages || [], localMessages) });
-  }
+    if (editRevision.current === c.historyEdit) return;
+    editRevision.current = c.historyEdit;
+    controller.current?.abort(); ++generation.current; running.current = false;
+    if (c.historyEdit) observed.current.delete(c.historyEdit.threadId);
+  }, [c.historyEdit]);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; controller.current?.abort(); }; }, []);
 
   useEffect(() => {
-    mounted.current = true;
-    return () => { mounted.current = false; controller.current?.abort(); };
-  }, []);
-
-  useEffect(() => {
-    if (running.current || !conversations.initialSyncReady || directory.loading) return;
-    const c = conversations;
-    const rows = buildConversationDirectory(directory, c.sessions, c.archivedView, c.project?.root, c.cachedSessions, c.archivedByThread).all.sort(byLatest);
-    const entries = rows.filter(row => row.threadId && !row.pending && !isPendingThread(row.threadId)).map(row => {
-      const id = row.threadId!;
-      const session = c.cachedSessions.get(id);
-      // Read/probe timestamps are not new content; comparing them would trigger the same read again.
-      return { id, conversationId: row.conversationId || undefined, signature: JSON.stringify([
-        row.name, row.time, row.preview, row.session, directory.statusByThread[id], directory.contextByThread[id],
-        directory.goalByThread[id], session?.contentVersion,
-        id === c.selectedId ? pick(c) : null,
-      ], (key, value) => ['updatedAt', 'lastProbeAt', 'lastEventAt', 'eventEpoch', 'eventSeq', 'durationMs'].includes(key) ? undefined : value) };
+    const source = JSON.stringify([c.sessions, directory.projects, [...store.revisions]],
+      (key, value) => ['updatedAt', 'lastProbeAt', 'lastEventAt', 'eventEpoch', 'eventSeq', 'durationMs'].includes(key) ? undefined : value);
+    if (running.current && priorityPublished.current && activeSource.current !== source) {
+      controller.current?.abort(); ++generation.current; running.current = false;
+    }
+    if (running.current || !c.initialSyncReady || directory.loading) return;
+    const rows = buildConversationDirectory(directory, c.sessions, c.archivedView, c.project?.root, undefined, c.archivedByThread).all
+      .filter(row => row.threadId && !row.pending && !isPendingThread(row.threadId));
+    // URL/employee navigation can select a thread that has not reached the directory yet.
+    if (c.selectedId && !isPendingThread(c.selectedId) && !rows.some(row => row.threadId === c.selectedId)) {
+      rows.push({ id: c.selectedId, threadId: c.selectedId, name: '', subtitle: '' });
+    }
+    priorityIds.current = new Set(rows.slice(0, 10).map(row => row.threadId!));
+    const entries = rows.map(row => {
+      const id = row.threadId!, revision = store.revisions.get(id) || 0;
+      return { id, revision, conversationId: row.conversationId || undefined, priority: priorityIds.current.has(id),
+        sourceRevision: row.session?.sourceRevision || '', sourceSignature: row.session?.sourceRevision ? JSON.stringify(row.session) : '',
+        signature: JSON.stringify([row.name, row.time, row.preview, row.session, revision]) };
     }).filter(entry => observed.current.get(entry.id) !== entry.signature);
     if (!entries.length) {
-      const projects = mergeProjects(shown.directory.projects, directory.projects, new Set());
-      if (!shown.committed || JSON.stringify(projects) !== JSON.stringify(shown.directory.projects)
+      setSyncing(false);
+      const projects = mergeProjects(shown.projects, directory.projects, new Set());
+      if (!shown.committed || JSON.stringify(projects) !== JSON.stringify(shown.projects)
         || shown.sessions.some(item => !c.sessions.some(next => next.threadId === item.threadId))) {
-        setShown(previous => ({ ...previous, committed: true, project: c.project,
-          directory: { ...previous.directory, projects },
+        setShown(previous => ({ ...previous, committed: true, project: c.project, projects,
           sessions: previous.sessions.filter(item => c.sessions.some(next => next.threadId === item.threadId)) }));
       }
       return;
     }
-    running.current = true;
-    const run = ++generation.current;
-    const abort = new AbortController();
+    running.current = true; activeSource.current = source; priorityPublished.current = false;
+    const pendingPriority = new Set(entries.filter(entry => entry.priority).map(entry => entry.id));
+    setSyncing(pendingPriority.size > 0);
+    const run = ++generation.current, abort = new AbortController();
     controller.current = abort;
-    const ready = new Map<string, ThreadView>();
-    // Membership and timeout are fixed. New source changes are noticed by the following run.
-    void readConversationBatches(entries, async entry => {
-      // Selected-thread hooks already read all its resources and receive live events.
-      // Reuse those reads rather than launching six extra requests per progress event.
-      if (entry.id === c.selectedId) {
-        if (!await c.prefetchSession(entry.id, entry.conversationId)) throw new Error('对话同步失败，保留已有内容');
-        await conversationReads.wait(new Set([entry.id]));
-        await new Promise(resolve => window.setTimeout(resolve, 0));
-        const latest = live.current.conversations;
-        if (latest.selectedId === entry.id) {
-          if (latest.sessionError || latest.modelError) throw new Error(latest.sessionError || latest.modelError);
-          ready.set(entry.id, { ...pick(latest), session: latest.cachedSessions.get(entry.id) || null });
-          return;
-        }
-      }
-      const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]);
-      const [loaded, context, status, goal, queue, input] = await Promise.all([
-        c.prefetchSession(entry.id, entry.conversationId),
-        contextApi.status(entry.id, signal, entry.conversationId),
-        executionApi.status(entry.id, signal, false, entry.conversationId),
-        goalApi.get(entry.id, signal, entry.conversationId),
-        followUpQueueApi.list(entry.id, signal),
-        executionApi.pendingUserInput(entry.id, signal, entry.conversationId),
-      ]);
-      if (!loaded) throw new Error('对话同步失败，保留已有内容');
-      await conversationReads.wait(new Set([entry.id]));
-      await new Promise(resolve => window.setTimeout(resolve, 0));
-      const latest = live.current.conversations;
-      const detail = latest.cachedSessions.get(entry.id) || null;
-      const defaults = readModelDefaults();
-      const model = resolveVisibleModel(latest.models, defaults, context.model, detail?.model || '');
-      ready.set(entry.id, { session: detail, contextStatus: context, executionStatus: status, goal: goal.goal,
-        queueItems: queue.items, userInputRequest: input.request, models: latest.models,
-        visibleModel: model, visibleEffort: resolveVisibleEffort(latest.models, defaults, model, context.reasoningEffort),
-        usageModel: model, streamingText: '', commentaryText: status.commentary || '' });
-      if (latest.selectedId === entry.id) {
-        if (latest.sessionError) throw new Error(latest.sessionError);
-        ready.set(entry.id, { ...pick(latest), session: detail });
-      }
+    const candidate = new Map<string, ThreadSnapshot>();
+    void readConversationBatches(entries, async (entry, signal) => {
+      const cached = store.committed.get(entry.id)?.session;
+      const reuse = Boolean(!store.freshBodies.has(entry.id) && entry.sourceSignature && cached?.sourceSignature === entry.sourceSignature);
+      const view = await store.read(entry.id, reuse ? entry.sourceRevision : '', signal, entry.conversationId);
+      if (signal.aborted) return;
+      candidate.set(entry.id, { ...view,
+        session: view.session ? { ...view.session, sourceSignature: view.session.sourceRevision === entry.sourceRevision ? entry.sourceSignature : '' } : null });
     }, results => {
       if (!mounted.current || generation.current !== run) return;
-      const source = { conversations: c, directory };
+      priorityPublished.current = true;
       const good = new Set(results.filter(result => !result.error).map(result => result.entry.id));
-      for (const { entry, error } of results) {
-        observed.current.set(entry.id, entry.signature);
-        if (error) console.error('[negus:conversation-sync]', { threadId: entry.id, reason: error, at: new Date().toISOString() });
+      for (const { entry, error, retry } of results) if (!error || !retry) pendingPriority.delete(entry.id);
+      setSyncing(pendingPriority.size > 0);
+      for (const { entry, error, retry } of results) {
+        if (retry) observed.current.delete(entry.id); else observed.current.set(entry.id, entry.signature);
+        if (error) {
+          store.finish(entry.id, error);
+          console.error('[negus:conversation-sync]', { threadId: entry.id, reason: error, at: new Date().toISOString() });
+        } else store.commit(entry.id, candidate.get(entry.id)!, entry.revision);
       }
       setShown(previous => {
-        const cachedSessions = new Map(previous.cachedSessions);
-        const threads = new Map(previous.threads);
-        const errors = new Map(previous.errors);
-        for (const { entry, error } of results) {
-          if (error) { errors.set(entry.id, error); continue; }
-          errors.delete(entry.id);
-          const detail = ready.get(entry.id)?.session;
-          if (detail) cachedSessions.set(entry.id, detail);
-          const view = ready.get(entry.id);
-          if (view) threads.set(entry.id, view);
-          else if (threads.has(entry.id) && detail) threads.set(entry.id, { ...threads.get(entry.id)!, session: detail });
-          const local = optimistic.current.get(entry.id);
-          if (local && detail) {
-            const remaining = local.messages.filter(message => !detail.messages.some(item => item.id === message.id || (message.submissionId && item.submissionId === message.submissionId)));
-            if (remaining.length) optimistic.current.set(entry.id, { ...local, messages: remaining });
-            else optimistic.current.delete(entry.id);
-          }
+        const current = live.current.conversations;
+        const sessions = new Map(previous.sessions.filter(session => current.sessions.some(item => item.threadId === session.threadId)).map(session => [session.threadId, session]));
+        for (const summary of current.sessions) if (good.has(summary.threadId)) {
+          const detail = store.committed.get(summary.threadId)?.session;
+          const last = detail?.messages.filter(isVisibleTaskMessage).at(-1);
+          const latestMessage = last ? `${last.authorName || (last.role === 'user' ? '用户' : '助手')}：${last.text || '[附件]'}`.replace(/\s+/g, ' ').slice(0, 260) : '';
+          const { messages: _messages, sourceSignature: _signature, ...fields } = detail || { ...summary, messages: [], sourceSignature: undefined };
+          sessions.set(summary.threadId, { ...summary, ...fields, latestMessage });
         }
-        const mergeRecord = <T,>(old: Record<string, T>, next: Record<string, T>) => ({ ...old,
-          ...Object.fromEntries([...good].filter(id => id in next).map(id => [id, next[id]])) });
-        const sessions = new Map(previous.sessions.filter(session => live.current.conversations.sessions.some(item => item.threadId === session.threadId)).map(session => [session.threadId, session]));
-        for (const session of source.conversations.sessions) if (good.has(session.threadId) && live.current.conversations.sessions.some(item => item.threadId === session.threadId)) sessions.set(session.threadId, session);
-        const projects = mergeProjects(previous.directory.projects, source.directory.projects, good);
-        return { sessions: [...sessions.values()], cachedSessions, threads, errors, committed: true,
-          project: source.conversations.project, directory: { projects,
-            statusByThread: mergeRecord(previous.directory.statusByThread, { ...source.directory.statusByThread, ...Object.fromEntries([...ready].map(([id, view]) => [id, view.executionStatus])) }),
-            contextByThread: mergeRecord(previous.directory.contextByThread, { ...source.directory.contextByThread, ...Object.fromEntries([...ready].map(([id, view]) => [id, view.contextStatus.phase])) }),
-            goalByThread: mergeRecord(previous.directory.goalByThread, { ...source.directory.goalByThread, ...Object.fromEntries([...ready].map(([id, view]) => [id, view.goal])) }) } };
+        return { sessions: [...sessions.values()], committed: true, project: current.project,
+          projects: mergeProjects(previous.projects, live.current.directory.projects, good) };
       });
-    }, abort.signal).finally(() => {
+      store.notify();
+    }, abort.signal, 10000, entries.filter(entry => entry.priority).length).finally(() => {
+      if (generation.current !== run) return;
       running.current = false;
       if (mounted.current) wake(value => value + 1);
     });
   });
 
-  const frozen = selectedView;
-  const local = optimistic.current.get(selectedId);
-  const base = frozen.session;
-  const session = local ? { ...(base || local), messages: mergeMessageList(base?.messages || [], local.messages) } : base;
-  const pending = isPendingThread(selectedId);
-  const error = shown.errors.get(selectedId) || '';
-  const display = { ...conversations, ...(pending ? {} : frozen), session: pending ? conversations.session : session,
-    project: shown.project, sessions: shown.sessions, cachedSessions: shown.cachedSessions,
-    sessionError: error || conversations.sessionError,
-    listError: conversations.listError || [...shown.errors].map(([id, message]) => `${id}：${message}`).join('；'),
-    loadingSession: !session && conversations.loadingSession,
-    refresh: () => { controller.current?.abort(); ++generation.current; observed.current.clear(); return conversations.refresh(); } };
+  const selected = store.get(c.selectedId, false), session = selected.session;
+  const executionStatus = withStreamingStatus(selected.executionStatus, c.executionStatus);
+  const model = resolveVisibleModel(c.models, readModelDefaults(), selected.contextStatus.model, session?.model || '');
+  const effort = resolveVisibleEffort(c.models, readModelDefaults(), model, selected.contextStatus.reasoningEffort);
+  const states = [...store.committed];
+  const display = { ...c, ...selected, session, executionStatus, goal: selected.goal || (c.goal?.status === 'complete' ? c.goal : null), visibleModel: model, visibleEffort: effort, usageModel: selected.executionStatus.active ? c.usageModel : model,
+    streamingText: executionStatus.streamingText || '', commentaryText: executionStatus.commentary || '',
+    syncing,
+    project: shown.project, sessions: shown.sessions,
+    sessionError: store.errors.get(c.selectedId) || c.sessionError,
+    listError: c.listError || (store.errors.size ? `${store.errors.size} 个对话同步失败，保留已有内容；可刷新重试。` : ''),
+    loadingSession: c.loadingSession,
+    refresh: () => {
+      controller.current?.abort(); ++generation.current; running.current = false; observed.current.clear();
+      return c.refresh();
+    } };
   useEffect(() => {
-    if (!shown.committed || !selectedId || !session || pending) return;
-    writeConversationSnapshot({ selectedId, sessions: shown.sessions, session, cachedSessions: shown.cachedSessions,
-      presentation: Object.fromEntries([...shown.threads].map(([id, { session: _session, models: _models, ...view }]) => [id, view])) });
-  }, [shown, selectedId, session, pending]);
-  return { committed: shown.committed, conversations: display, directory: { ...directory, ...shown.directory } };
+    if (!shown.committed || !c.selectedId || !session || isPendingThread(c.selectedId)) return;
+    writeConversationSnapshot({ selectedId: c.selectedId, sessions: shown.sessions, session, cachedSessions: c.cachedSessions,
+      presentation: Object.fromEntries(states.map(([id, { session: _session, ...view }]) => [id, { ...view, visibleModel: '', visibleEffort: '', usageModel: '', streamingText: '', commentaryText: '' }])) });
+  }, [shown, c.selectedId, store.getSnapshot()]);
+  return { committed: shown.committed, conversations: display, directory: { ...directory, projects: shown.projects,
+    statusByThread: Object.fromEntries(states.map(([id, view]) => [id, view.executionStatus])),
+    contextByThread: Object.fromEntries(states.map(([id, view]) => [id, view.contextStatus.phase])),
+    goalByThread: Object.fromEntries(states.map(([id, view]) => [id, view.goal])) } };
 }

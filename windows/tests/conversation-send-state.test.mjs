@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import { ConversationStore } from "./frontend-conversation-store.mjs";
 import ts from '../../ui-feishu/node_modules/typescript/lib/typescript.js';
 
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
@@ -13,14 +14,17 @@ async function harness(file, dependencies) {
     useCallback: fn => fn, useEffect() {},
   };
   const key = `__conversationState${Math.random().toString(36).slice(2)}`;
-  globalThis[key] = { ...hooks, ...dependencies };
+  globalThis[key] = { ...hooks, goalCompletionKey: goal => JSON.stringify([goal.createdAt, goal.updatedAt, goal.objective]), ...dependencies };
   const source = ts.transpileModule(await fs.readFile(new URL(`../../ui-feishu/shared/${file}`, import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
   }).outputText.replace(/import \{([^}]+)\} from "[^"]+";/g, (_, names) => `const {${names}} = globalThis.${key};`);
   const module = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
   delete globalThis[key];
   globalThis.window = { setTimeout, clearTimeout };
-  return (name, id) => { cursor = 0; return module[name](id); };
+  const store = new ConversationStore({ cachedSessions: [], partialSessionIds: [] });
+  const render = (name, id) => { cursor = 0; return module[name](id, store); };
+  render.store = store;
+  return render;
 }
 
 test('closing a completed goal ignores a delayed completion event', async () => {
@@ -38,6 +42,8 @@ test('closing a completed goal ignores a delayed completion event', async () => 
   assert.equal(await clearing, true);
   hook.handleEvent({ type: 'goal_status', threadId: 't', goal });
   assert.equal(render('useThreadGoal', 't').goal, null);
+  render.store.commit('t', { ...render.store.empty('t'), goal }, 0);
+  assert.equal(render('useThreadGoal', 't').goal, null, 'a late batch cannot restore a dismissed completion');
   hook.handleEvent({ type: 'goal_status', threadId: 't', goal: { ...goal, objective: 'new' } });
   assert.equal(render('useThreadGoal', 't').goal.objective, 'new');
 });
@@ -74,27 +80,18 @@ test('switching conversations keeps both sends alive and independent', async () 
   assert.equal(render('useCodexExecution', 'b').sending, false);
 });
 
-test('last successful settings survive an early runtime event and deliberate choice wins late reads', async () => {
-  let gate = deferred();
-  const render = await harness('features/context-management/hooks/useContextManagement.ts', {
-    readLocalCache: () => null, writeLocalCache() {}, readModelCatalog: () => [], readModelDefaults: () => ({}),
-    resolveVisibleModel: (_models, _defaults, model) => model,
-    resolveVisibleEffort: (_models, _defaults, _model, effort) => effort,
-    contextApi: { status: () => gate.promise },
-  });
-  const saved = { type: 'context_status', threadId: 'a', model: 'wrong', reasoningEffort: 'low', lastSuccessfulSettings: { model: 'group::saved', reasoningEffort: 'high' } };
+test('last successful settings survive runtime events and local model choice wins a late batch', async () => {
+  const render = await harness('features/context-management/hooks/useContextManagement.ts', { contextApi: {} });
+  const store = render.store;
+  const saved = { ...store.empty('a').contextStatus, model: 'group::saved', reasoningEffort: 'high' };
   let hook = render('useContextManagement', 'a');
-  const first = hook.refresh();
-  hook.handleEvent({ ...saved, lastSuccessfulSettings: undefined });
-  gate.resolve(saved); await first;
-  hook = render('useContextManagement', 'a');
-  assert.equal(hook.status.model, 'group::saved');
+  hook.handleEvent({ ...saved, model: 'wrong', reasoningEffort: 'low' });
+  store.commit('a', { ...store.empty('a'), contextStatus: saved }, 0);
+  assert.equal(render('useContextManagement', 'a').status.model, 'group::saved');
   hook.handleEvent({ ...saved, reasoningEffort: 'low' });
   assert.equal(render('useContextManagement', 'a').status.reasoningEffort, 'high');
-  gate = deferred();
-  const late = hook.refresh();
   hook.applyModelSettings('a', { model: 'group::chosen', reasoningEffort: 'medium' });
-  gate.resolve(saved); await late;
+  store.commit('a', { ...store.empty('a'), contextStatus: saved }, 0);
   assert.equal(render('useContextManagement', 'a').status.model, 'group::chosen');
 });
 
@@ -105,12 +102,13 @@ test('first send creates one draft with final settings and survives navigating a
   const select = id => { selectedId = id; selectedIdRef.current = id; };
   const calls = []; const gate = deferred(); let receiveEvent;
   const noop = () => {};
+  const testStore = new ConversationStore({ cachedSessions: [], partialSessionIds: [] });
   const context = { status: { threadId: 'a', model: 'default', reasoningEffort: 'high' }, applyModelSettings: noop, markSubmitted: noop };
   const render = await harness('features/conversations/hooks/useProjectConversations.ts', {
     currentConversationId: () => 'scope-a', HttpError: Error,
     modelApi: { update: async (...args) => { calls.push(['model', ...args]); await gate.promise; return { threadId: args[0] }; }, updateReasoningEffort: async () => ({}) },
     useContextManagement: () => context,
-    useConversationSession: () => ({ selectedId, selectedIdRef, session: sessions.get(selectedId), loadingSession: false,
+    useConversationSession: () => ({ store: testStore, selectedId, selectedIdRef, session: sessions.get(selectedId), loadingSession: false,
       setCreatedSession(detail) { sessions.set(detail.threadId, detail); select(detail.threadId); },
       updateCurrentSession(id, update) { sessions.set(id, update(sessions.get(id))); },
       addOptimisticMessage(id, message) { if (!sessions.get(id).messages.some(item => item.id === message.id)) sessions.get(id).messages.push(message); },

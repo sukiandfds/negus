@@ -7,11 +7,9 @@ import type { ExecutionStatus, ProjectEvent } from "../model/types";
 const SEND_CONFIRM_TIMEOUT_MS = 20000;
 const SEND_SLOW_NOTICE_MS = 3000;
 const MAX_RETIRED_TURNS = 20;
-const MAX_CACHED_STATUSES = 100;
-const statusCache = new Map<string, ExecutionStatus>();
 const sendingThreads = new Set<string>();
 
-type RefreshStatus = (signal?: AbortSignal, reconcile?: boolean) => Promise<ExecutionStatus | null>;
+import type { ConversationStore } from "../../conversations/state/conversationStore";
 
 export const idleStatus = (threadId: string): ExecutionStatus => ({
   type: "execution_status",
@@ -30,66 +28,25 @@ export const idleStatus = (threadId: string): ExecutionStatus => ({
   durationMs: null,
 });
 
-const recoveringStatus = (threadId: string): ExecutionStatus => ({
-  ...idleStatus(threadId),
-  phase: "recovering",
-  label: "正在确认任务状态",
-});
-
-export const seedIdleExecution = (threadId: string) => {
-  rememberStatus(idleStatus(threadId));
-};
-
-const rememberStatus = (status: ExecutionStatus) => {
-  if (!status.threadId) return status;
-  statusCache.delete(status.threadId);
-  statusCache.set(status.threadId, status);
-  while (statusCache.size > MAX_CACHED_STATUSES) {
-    const oldest = statusCache.keys().next().value;
-    if (!oldest) break;
-    statusCache.delete(oldest);
-  }
-  return status;
-};
-
-export const preloadExecutionStatus = async (threadId: string, signal?: AbortSignal, conversationId?: string) => {
-  const previous = statusCache.get(threadId);
-  try {
-    const next = await executionApi.status(threadId, signal, false, conversationId);
-    if (!signal?.aborted && next.threadId === threadId && statusCache.get(threadId) === previous) rememberStatus(next);
-  } catch { /* Keep the last known status; opening the conversation retries. */ }
-};
-
-export function useCodexExecution(threadId: string) {
+export function useCodexExecution(threadId: string, store: ConversationStore) {
   const scopeRef = useRef({ threadId, generation: 0 });
   if (scopeRef.current.threadId !== threadId) {
     scopeRef.current = { threadId, generation: scopeRef.current.generation + 1 };
   }
   const generation = scopeRef.current.generation;
   const isCurrent = useCallback(() => scopeRef.current.generation === generation, [generation]);
-  const [storedStatus, setStoredStatus] = useState<ExecutionStatus>(() => statusCache.get(threadId) ?? idleStatus(threadId));
-  const status = storedStatus.threadId === threadId
-    ? storedStatus
-    : statusCache.get(threadId) ?? recoveringStatus(threadId);
+  const status = store.get(threadId).executionStatus;
   const setStatus = useCallback((value: ExecutionStatus | ((current: ExecutionStatus) => ExecutionStatus)) => {
     if (!isCurrent()) return;
-    setStoredStatus((current) => {
-      if (!isCurrent()) return current;
-      const base = current.threadId === threadId ? current : statusCache.get(threadId) ?? idleStatus(threadId);
-      const next = typeof value === "function" ? value(base) : value;
-      return next.threadId === threadId ? rememberStatus(next) : current;
-    });
-  }, [isCurrent, threadId]);
+    const next = typeof value === 'function' ? value(store.get(threadId).executionStatus) : value;
+    if (next.threadId === threadId) store.update(threadId, { executionStatus: next }, true);
+  }, [isCurrent, store, threadId]);
   const streamingItemId = useRef("");
   const streamingBuffer = useRef("");
   const streamingTimer = useRef(0);
   const currentTurnIdRef = useRef("");
   const retiredTurnIdsRef = useRef(new Set<string>());
   const stateRevisionRef = useRef(0);
-  const statusRequestRef = useRef(0);
-  const statusInFlightRef = useRef<{ threadId: string; promise: Promise<ExecutionStatus | null> } | null>(null);
-  const pendingReconcileRef = useRef(false);
-  const refreshStatusRef = useRef<RefreshStatus>(async () => null);
   const activeEventEpochRef = useRef("");
   const knownEventEpochsRef = useRef(new Set<string>());
   const lastEventSeqRef = useRef(0);
@@ -150,37 +107,11 @@ export function useCodexExecution(threadId: string) {
     return true;
   }, [clearStreaming, retireTurn, isCurrent, setStatus, threadId]);
 
-  const refreshStatus = useCallback(async (signal?: AbortSignal, reconcile = false) => {
+  const refreshStatus = useCallback(async (_signal?: AbortSignal, _reconcile = false) => {
     if (!threadId || !isCurrent()) return null;
-    const inFlight = statusInFlightRef.current;
-    if (inFlight?.threadId === threadId) {
-      if (reconcile) pendingReconcileRef.current = true;
-      return inFlight.promise;
-    }
-    const requestId = ++statusRequestRef.current;
-    const revision = stateRevisionRef.current;
-    const request = (async () => {
-      try {
-        const next = await executionApi.status(threadId, signal, reconcile);
-        if (requestId !== statusRequestRef.current || revision !== stateRevisionRef.current) return null;
-        return applyStatus(next, revision) ? next : null;
-      } catch {
-        return null;
-      }
-    })();
-    const entry = { threadId, promise: request };
-    statusInFlightRef.current = entry;
-    void request.finally(() => {
-      if (statusInFlightRef.current !== entry) return;
-      statusInFlightRef.current = null;
-      if (pendingReconcileRef.current) {
-        pendingReconcileRef.current = false;
-        window.setTimeout(() => { void refreshStatusRef.current(undefined, true); }, 0);
-      }
-    }).catch(() => {});
-    return request;
-  }, [applyStatus, isCurrent, threadId]);
-  refreshStatusRef.current = refreshStatus;
+    await store.request(threadId);
+    return store.get(threadId).executionStatus;
+  }, [isCurrent, store, threadId]);
 
   const acceptEventSequence = useCallback((event: ProjectEvent) => {
     const sequencedEvent = event as ProjectEvent & { eventEpoch?: unknown; eventSeq?: unknown };
@@ -209,23 +140,29 @@ export function useCodexExecution(threadId: string) {
   }, []);
 
   useEffect(() => {
-    statusRequestRef.current += 1;
     stateRevisionRef.current += 1;
-    pendingReconcileRef.current = false;
-    currentTurnIdRef.current = "";
+    const current = store.get(threadId).executionStatus;
+    currentTurnIdRef.current = current.turnId || '';
+    window.clearTimeout(streamingTimer.current);
+    streamingTimer.current = 0;
+    streamingItemId.current = current.streamingItemId || '';
+    streamingBuffer.current = current.streamingText || '';
     retiredTurnIdsRef.current.clear();
-    activeEventEpochRef.current = "";
+    activeEventEpochRef.current = '';
     knownEventEpochsRef.current.clear();
     lastEventSeqRef.current = 0;
-    clearStreaming();
-    setStatus(statusCache.get(threadId) ?? (threadId ? recoveringStatus(threadId) : idleStatus(threadId)));
-    if (!threadId) {
-      return;
+  }, [store, threadId]);
+
+  const committedStatus = store.committed.get(threadId)?.executionStatus;
+  useEffect(() => {
+    const next = store.get(threadId).executionStatus;
+    if (next.turnId && next.turnId !== currentTurnIdRef.current) {
+      retireTurn(currentTurnIdRef.current);
+      currentTurnIdRef.current = next.turnId;
     }
-    const controller = new AbortController();
-    void refreshStatus(controller.signal);
-    return () => controller.abort();
-  }, [clearStreaming, refreshStatus, threadId]);
+    streamingItemId.current = next.streamingItemId || '';
+    streamingBuffer.current = next.streamingText || '';
+  }, [committedStatus, store, threadId, retireTurn]);
 
   useEffect(() => () => {
     window.clearTimeout(streamingTimer.current);
@@ -325,7 +262,6 @@ export function useCodexExecution(threadId: string) {
     } catch (reason) {
       const receipt = await executionApi.submissionStatus(targetThreadId, acceptedSubmissionId, undefined, conversationId).catch(() => null);
       if (receipt?.status === "accepted") return { outcome: "accepted", result: { threadId: receipt.threadId, turnId: receipt.turnId || "", status: "accepted" } };
-      if (!isCurrent()) return { outcome: "uncertain", result: null };
       const uncertain = receipt?.status !== "failed" && (receipt?.status === "pending" || controller.signal.aborted || reason instanceof TypeError);
       const detail = uncertain
         ? "发送确认超时，未重复提交；请确认任务状态后重试"

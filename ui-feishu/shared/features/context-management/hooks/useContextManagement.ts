@@ -1,28 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { readLocalCache, writeLocalCache } from "../../../shared/state/localCache";
+import { useCallback, useRef } from "react";
 import { contextApi } from "../data/contextApi";
 import type { ContextStatus } from "../model/types";
-import { readModelCatalog } from "../../models/data/modelCatalogCache";
-import { readModelDefaults, resolveVisibleModel, resolveVisibleEffort } from "../../models/model/modelDefaults";
 
-const MAX_CACHED_STATUSES = 100;
-const contextStatusCacheKey = "negus-context-status-v1";
-const statusCache = new Map<string, ContextStatus>();
-const validStatus = (value: unknown): value is ContextStatus => {
-  if (!value || typeof value !== "object") return false;
-  const status = value as Partial<ContextStatus>;
-  return typeof status.threadId === "string"
-    && typeof status.model === "string"
-    && typeof status.reasoningEffort === "string";
-};
-const validStatusRecord = (value: unknown): value is Record<string, ContextStatus> => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  return Object.values(value as Record<string, unknown>).every(validStatus);
-};
-let persistedStatuses = readLocalCache(contextStatusCacheKey, validStatusRecord) || {};
-const uncommittedChoice = new Map<string, { model: string; reasoningEffort: string }>();
-const serverModelReady = new Set<string>();
-const submittedChoices = new Map<string, { model: string; reasoningEffort: string }>();
+import type { ConversationStore } from "../../conversations/state/conversationStore";
 
 export const emptyStatus = (threadId: string): ContextStatus => ({
   type: "context_status",
@@ -38,125 +18,35 @@ export const emptyStatus = (threadId: string): ContextStatus => ({
   updatedAt: null,
 });
 
-const rememberStatus = (status: ContextStatus) => {
-  if (!status.threadId) return status;
-  statusCache.delete(status.threadId);
-  statusCache.set(status.threadId, status);
-  while (statusCache.size > MAX_CACHED_STATUSES) {
-    const oldest = statusCache.keys().next().value;
-    if (!oldest) break;
-    statusCache.delete(oldest);
-  }
-  persistedStatuses = { ...persistedStatuses, ...Object.fromEntries([...statusCache].map(([id, value]) => [id, value])) };
-  writeLocalCache(contextStatusCacheKey, persistedStatuses);
-  return status;
-};
-
-const keepUncommittedChoice = (current: ContextStatus, next: ContextStatus): ContextStatus => {
-  if (!uncommittedChoice.has(next.threadId) || current.threadId !== next.threadId) return next;
-  return { ...next, ...uncommittedChoice.get(next.threadId)! };
-};
-
-const cachedStatus = (threadId: string) => {
-  const cached = statusCache.get(threadId) || persistedStatuses[threadId];
-  if (!cached) return emptyStatus(threadId);
-  return cached;
-};
-
-export const readCachedContextPhases = () => Object.fromEntries(
-  Object.entries({ ...persistedStatuses, ...Object.fromEntries(statusCache) }).map(([id, status]) => [id, status.phase]),
-);
-
-export function useContextManagement(threadId: string) {
-  const [settledThread, setSettledThread] = useState("");
-  const refreshVersion = useRef(0);
+export function useContextManagement(threadId: string, store: ConversationStore) {
   const activeThread = useRef(threadId);
   activeThread.current = threadId;
-  const [storedStatus, setStoredStatus] = useState<ContextStatus>(() => cachedStatus(threadId));
-  const status = storedStatus.threadId === threadId
-    ? storedStatus
-    : cachedStatus(threadId);
+  const submittedChoices = useRef(new Map<string, { model: string; reasoningEffort: string }>());
+  const status = store.get(threadId).contextStatus;
   const setStatus = useCallback((value: ContextStatus | ((current: ContextStatus) => ContextStatus)) => {
-    setStoredStatus((current) => {
-      const next = typeof value === "function" ? value(current) : value;
-      return rememberStatus(keepUncommittedChoice(current, next));
-    });
-  }, []);
-
-  const refresh = useCallback(async (signal?: AbortSignal) => {
-    if (!threadId) return null;
-    const version = ++refreshVersion.current;
-    try {
-      let next = await contextApi.status(threadId, signal);
-      if (signal?.aborted || version !== refreshVersion.current || activeThread.current !== threadId) return null;
-      if (!uncommittedChoice.has(threadId) && next.lastSuccessfulSettings) {
-        const models = readModelCatalog();
-        const defaults = readModelDefaults();
-        const saved = next.lastSuccessfulSettings;
-        const model = resolveVisibleModel(models, defaults, saved?.model || "", "");
-        const reasoningEffort = resolveVisibleEffort(models, defaults, model, saved?.reasoningEffort || "");
-        next = { ...next, model, reasoningEffort };
-        // Restoring the selection is local; the next send applies it to the runtime.
-        rememberStatus(next);
-        setStoredStatus(next);
-      } else {
-        setStatus(next);
-      }
-      serverModelReady.add(threadId);
-      return next;
-    } catch (reason) {
-      if (!signal?.aborted && version === refreshVersion.current && activeThread.current === threadId) {
-        setStatus((current) => ({
-          ...current,
-          phase: "failed",
-          message: reason instanceof Error ? reason.message : String(reason),
-        }));
-      }
-      return null;
-    } finally {
-      if (!signal?.aborted && version === refreshVersion.current && activeThread.current === threadId) setSettledThread(threadId);
-    }
-  }, [threadId]);
-
-  useEffect(() => {
-    setSettledThread("");
-    setStatus(cachedStatus(threadId));
-    if (!threadId) return;
-    const controller = new AbortController();
-    void refresh(controller.signal);
-    return () => { controller.abort(); uncommittedChoice.delete(threadId); serverModelReady.delete(threadId); };
-  }, [refresh, threadId]);
-
+    const next = typeof value === 'function' ? value(store.get(threadId).contextStatus) : value;
+    store.update(threadId, { contextStatus: next });
+  }, [store, threadId]);
+  const refresh = useCallback(async (_signal?: AbortSignal) => {
+    await store.request(threadId);
+    return store.get(threadId).contextStatus;
+  }, [store, threadId]);
   const handleEvent = useCallback((event: ContextStatus) => {
-    if (event.type === "context_status" && event.threadId === activeThread.current) {
-      setStatus((current) => {
-        if (current.threadId !== event.threadId) return event;
-        if (current.updatedAt && event.updatedAt && Date.parse(event.updatedAt) < Date.parse(current.updatedAt)) return current;
-        if (serverModelReady.has(event.threadId) || uncommittedChoice.has(event.threadId)) {
-          return { ...event, model: current.model, reasoningEffort: current.reasoningEffort };
-        }
-        return event;
-      });
-    }
-  }, [threadId]);
+    const current = store.get(event.threadId).contextStatus;
+    if (current.updatedAt && event.updatedAt && Date.parse(event.updatedAt) < Date.parse(current.updatedAt)) return;
+    store.update(event.threadId, { contextStatus: store.synced.has(event.threadId) || store.modelChoices.has(event.threadId)
+      ? { ...event, model: current.model, reasoningEffort: current.reasoningEffort } : event }, true);
+  }, [store]);
 
   const applyModelSettings = useCallback((changedThreadId: string, settings: { model: string; reasoningEffort: string; committed?: boolean }) => {
-    if (activeThread.current === changedThreadId) ++refreshVersion.current;
-    const current = cachedStatus(changedThreadId);
+    const current = store.get(changedThreadId).contextStatus;
     const { committed, ...visible } = settings;
-    if (committed) uncommittedChoice.delete(changedThreadId);
-    else {
-      uncommittedChoice.set(changedThreadId, { model: visible.model, reasoningEffort: visible.reasoningEffort });
-    }
+    if (committed) store.modelChoices.delete(changedThreadId);
+    else store.modelChoices.set(changedThreadId, visible);
     const modelChanged = Boolean(visible.model && current.model && visible.model !== current.model);
-    const next = rememberStatus({
-      ...current,
-      ...visible,
-      ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null } : {}),
-      updatedAt: new Date().toISOString(),
-    });
-    if (activeThread.current === changedThreadId) setStoredStatus(next);
-  }, []);
+    store.update(changedThreadId, { contextStatus: { ...current, ...visible,
+      ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null } : {}), updatedAt: new Date().toISOString() } });
+  }, [store]);
 
   const compact = useCallback(async () => {
     if (!threadId || status.phase === "compacting") return false;
@@ -188,13 +78,13 @@ export function useContextManagement(threadId: string) {
     }
   }, [threadId]);
 
-  const markSubmitted = useCallback((id: string, settings: { model: string; reasoningEffort: string }) => { submittedChoices.set(id, settings); }, []);
+  const markSubmitted = useCallback((id: string, settings: { model: string; reasoningEffort: string }) => { submittedChoices.current.set(id, settings); }, []);
   const completeSettings = useCallback((id: string) => {
-    const sent = submittedChoices.get(id);
-    const choice = uncommittedChoice.get(id);
-    if (sent && choice?.model === sent.model && choice?.reasoningEffort === sent.reasoningEffort) uncommittedChoice.delete(id);
-    submittedChoices.delete(id);
+    const sent = submittedChoices.current.get(id);
+    const choice = store.modelChoices.get(id);
+    if (sent && choice?.model === sent.model && choice?.reasoningEffort === sent.reasoningEffort) store.modelChoices.delete(id);
+    submittedChoices.current.delete(id);
     if (activeThread.current === id) void refresh();
   }, [refresh]);
-  return { status, ready: !threadId || settledThread === threadId, handleEvent, compact, setThreshold, refresh, applyModelSettings, markSubmitted, completeSettings };
+  return { status, ready: !threadId || store.synced.has(threadId), handleEvent, compact, setThreshold, refresh, applyModelSettings, markSubmitted, completeSettings };
 }

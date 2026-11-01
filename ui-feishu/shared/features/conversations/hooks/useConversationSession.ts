@@ -1,386 +1,94 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { InitialConversationState } from "../state/initialConversation";
-import { conversationApi } from "../data/conversationApi";
-import { mergeMessageList, mergeOlderMessages, mergePendingOptimisticMessages, mergeSessionDelta, mergeSessionRefresh } from "../state/conversationMerge";
-import { isPendingThread } from "../model/pendingThread";
-import { preloadExecutionStatus } from "../../execution/hooks/useCodexExecution";
-import type { ContentSyncState, SessionDelta, SessionDetail, SessionMessage, SessionResponse } from "../model/types";
-
-type LoadOptions = { older?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean; conversationId?: string };
+import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
+import type { InitialConversationState } from '../state/initialConversation';
+import { conversationApi } from '../data/conversationApi';
+import { mergeOlderMessages } from '../state/conversationMerge';
+import { isPendingThread } from '../model/pendingThread';
+import type { SessionDetail, SessionMessage } from '../model/types';
+import { ConversationStore } from '../state/conversationStore';
 
 export const presentConversationError = (reason: unknown) => {
   const detail = reason instanceof Error ? reason.message : String(reason);
-  if (/thread not loaded|no rollout found|session not found|rollout path missing/i.test(detail)) return "会话记录暂时无法读取，请稍后重试";
-  return detail.includes("同步超时") ? "同步较慢，正在重试" : detail;
+  if (/thread not loaded|no rollout found|session not found|rollout path missing/i.test(detail)) return '会话记录暂时无法读取，请稍后重试';
+  return detail.includes('同步超时') ? '同步较慢，正在重试' : detail;
 };
-
-const blockSignature = (message: SessionMessage) => (message.blocks || [])
-  .map((block) => `${block.type}:${block.id}:${"text" in block ? block.text.length : ""}:${"source" in block ? block.source : ""}`)
-  .join("|");
-
-const sameVisibleSession = (left: SessionDetail, right: SessionDetail) => {
-  if (left === right) return true;
-  if (
-    left.threadId !== right.threadId
-    || left.title !== right.title
-    || left.updatedAt !== right.updatedAt
-    || left.archived !== right.archived
-    || left.messageCount !== right.messageCount
-    || left.contentVersion !== right.contentVersion
-    || left.hasMore !== right.hasMore
-    || left.nextCursor !== right.nextCursor
-    || left.nextBefore !== right.nextBefore
-    || left.messages.length !== right.messages.length
-  ) return false;
-  return left.messages.every((message, index) => {
-    const other = right.messages[index];
-    return message.id === other.id
-      && message.role === other.role
-      && message.text === other.text
-      && message.createdAt === other.createdAt
-      && message.turnId === other.turnId
-      && message.turnItemIndex === other.turnItemIndex
-      && message.turnStatus === other.turnStatus
-      && message.deliveryState === other.deliveryState
-      && message.deliveryError === other.deliveryError
-      && message.superseded === other.superseded
-      && message.submissionId === other.submissionId
-      && message.authorName === other.authorName
-      && message.displaySourceAgentId === other.displaySourceAgentId
-      && blockSignature(message) === blockSignature(other);
-  });
-};
-
-const isSessionDelta = (response: SessionResponse): response is SessionDelta => (
-  !Array.isArray((response as SessionDetail).messages)
-  && Array.isArray((response as SessionDelta).upserts)
-  && Array.isArray((response as SessionDelta).deletes)
-);
+export type ConversationSession = ReturnType<typeof useConversationSession>;
 
 export function useConversationSession(initial: InitialConversationState) {
+  const [store] = useState(() => new ConversationStore(initial));
+  useSyncExternalStore(store.subscribe, store.getSnapshot);
   const [selectedId, setSelectedId] = useState(initial.selectedId);
-  const [session, setSession] = useState<SessionDetail | null>(initial.session);
-  const [loadingSession, setLoadingSession] = useState(Boolean(initial.selectedId && !initial.session));
-  const [loadingOlder, setLoadingOlder] = useState(false);
-  const [syncing, setSyncing] = useState(Boolean(initial.session));
-  const [contentSyncState, setContentSyncState] = useState<ContentSyncState>(
-    initial.session ? initial.sessionIsPartial ? "recovering" : "syncing" : "stable",
-  );
-  const [sessionError, setSessionError] = useState("");
-  const [composerKey, setComposerKey] = useState(initial.selectedId);
   const selectedIdRef = useRef(initial.selectedId);
-  const requestRef = useRef<AbortController | null>(null);
-  const retryTimerRef = useRef(0);
-  const sessionLoadsRef = useRef(new Map<string, Promise<boolean>>());
-  const sessionErrors = useRef(new Map<string, string>());
-  const sessionRequestControllersRef = useRef(new Map<string, AbortController>());
-  const pendingSessionSyncRef = useRef(new Map<string, boolean>());
-  const pendingOptimisticMessagesRef = useRef(new Map<string, SessionMessage[]>());
-  const sessionCache = useRef(new Map<string, SessionDetail>(
-    initial.cachedSessions.map((cached) => [cached.threadId, cached]),
-  ));
-  const partialSessionIdsRef = useRef(new Set(initial.partialSessionIds));
-  const loadSessionRef = useRef<(threadId: string, options?: LoadOptions) => Promise<boolean>>(async () => false);
+  const [composerKey, setComposerKey] = useState(initial.selectedId);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const olderRequests = useRef(new Map<string, AbortController>());
+  const [sessionError, setSessionError] = useState('');
 
-  const loadSessionOnce = useCallback(async (threadId: string, {
-    older = false,
-    retry = true,
-    recovery = false,
-    prefetch = false,
-    conversationId,
-  }: LoadOptions = {}) => {
-    const cached = sessionCache.current.get(threadId);
-    const isSelected = () => selectedIdRef.current === threadId;
-    if (!older && !prefetch && isSelected()) {
-      if (cached) {
-        setSession(cached);
-        setLoadingSession(false);
-      } else if (!cached) {
-        setLoadingSession(true);
-      }
-      setSyncing(true);
-      setContentSyncState(recovery ? "recovering" : "syncing");
-      setSessionError("");
-    } else if (older) {
-      if (!cached?.hasMore || (!cached.nextCursor && (cached.nextBefore === null || cached.nextBefore === undefined))) return false;
-      if (isSelected()) setLoadingOlder(true);
-    }
+  const loadSession = useCallback(async (id: string, options: { older?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean; conversationId?: string } = {}) => {
+    if (!id || isPendingThread(id)) return false;
+    if (!options.older) { if (options.recovery) store.freshBodies.add(id); return store.request(id); }
+    const cached = store.get(id, false).session;
+    if (!cached?.hasMore || (!cached.nextCursor && cached.nextBefore == null) || olderRequests.current.has(id)) return false;
     const controller = new AbortController();
-    if (!older) {
-      requestRef.current = controller;
-      sessionRequestControllersRef.current.set(threadId, controller);
-    }
-    let loadSucceeded = false;
+    olderRequests.current.set(id, controller);
+    setLoadingOlder(true);
     try {
-      const [response] = await Promise.all([conversationApi.session(threadId, older ? {
-        before: cached?.nextCursor ? undefined : cached?.nextBefore ?? undefined,
-        cursor: cached?.nextCursor ?? undefined,
-      } : {
-        // Recovery must receive a fresh page. A partial local snapshot must
-        // never be allowed to turn into an "unchanged" delta.
-        ...(recovery ? {} : { contentVersion: cached?.contentVersion }),
-      }, controller.signal, conversationId), older ? null : preloadExecutionStatus(threadId, controller.signal, conversationId)]);
-      if (controller.signal.aborted) return false;
-      const latest = sessionCache.current.get(threadId);
-      const pendingOptimistic = pendingOptimisticMessagesRef.current.get(threadId) || [];
-      const latestWithPending = latest
-        ? mergePendingOptimisticMessages(latest, pendingOptimistic)
-        : latest;
-      const latestVersion = latest?.contentVersion ?? 0;
-      const responseVersion = response.contentVersion ?? 0;
-      if (!older && latest && responseVersion > 0 && latestVersion > responseVersion) {
-        loadSucceeded = true;
-        return true;
-      }
-      const deltaResponse = isSessionDelta(response);
-      const detail = deltaResponse
-        ? latestWithPending ? mergeSessionDelta(latestWithPending, response) : null
-        : response;
-      if (!detail) throw new Error("会话增量缺少本地快照，正在重新读取");
-      const next = older && latestWithPending
-        ? {
-          ...latestWithPending,
-          hasMore: detail.hasMore,
-          nextBefore: detail.nextBefore,
-          nextCursor: detail.nextCursor,
-          contentVersion: latestWithPending.contentVersion ?? detail.contentVersion,
-          messages: mergeOlderMessages(detail.messages, latestWithPending.messages),
-        }
-        : !deltaResponse && latestWithPending ? mergeSessionRefresh(latestWithPending, detail) : detail;
-      const resolved = mergePendingOptimisticMessages(next, pendingOptimistic);
-      partialSessionIdsRef.current.delete(threadId);
-      if (pendingOptimistic.length) pendingOptimisticMessagesRef.current.delete(threadId);
-      if (latest && sameVisibleSession(latest, resolved)) {
-        loadSucceeded = true;
-        if (isSelected()) setSessionError("");
-        return true;
-      }
-      sessionCache.current.set(threadId, resolved);
-      if (isSelected()) {
-        setSession(resolved);
-        setSessionError("");
-      }
-      loadSucceeded = true;
+      const response = await conversationApi.session(id, { cursor: cached.nextCursor || undefined,
+        before: cached.nextCursor ? undefined : cached.nextBefore ?? undefined }, controller.signal, options.conversationId);
+      if (controller.signal.aborted || !('messages' in response)) return false;
+      const current = store.get(id, false).session;
+      if (current) store.update(id, { session: { ...current, hasMore: response.hasMore, nextBefore: response.nextBefore,
+        nextCursor: response.nextCursor, messages: mergeOlderMessages(response.messages, current.messages) } });
       return true;
     } catch (reason) {
-      if (!controller.signal.aborted) sessionErrors.current.set(threadId, reason instanceof Error ? reason.message : String(reason));
-      if (!controller.signal.aborted && isSelected()) {
-        setSessionError(presentConversationError(reason));
-        if (!older && retry) {
-          window.clearTimeout(retryTimerRef.current);
-          retryTimerRef.current = window.setTimeout(() => {
-            if (!isSelected()) return;
-            setSyncing(true);
-            void loadSessionRef.current(threadId, { retry: false, recovery: true });
-          }, 10000);
-        }
-        if (!older) setContentSyncState("degraded");
-      }
+      if (!controller.signal.aborted) { store.errors.set(id, presentConversationError(reason)); store.notify(); }
       return false;
     } finally {
-      if (loadSucceeded) sessionErrors.current.delete(threadId);
-      if (!controller.signal.aborted && isSelected()) {
-        if (older) {
-          setLoadingOlder(false);
-        } else {
-          setLoadingSession(false);
-          setSyncing(false);
-          if (loadSucceeded) setContentSyncState("stable");
-        }
-      }
-      if (!older && sessionRequestControllersRef.current.get(threadId) === controller) {
-        sessionRequestControllersRef.current.delete(threadId);
-        if (requestRef.current === controller) requestRef.current = null;
-      }
+      olderRequests.current.delete(id);
+      setLoadingOlder(olderRequests.current.has(selectedIdRef.current));
     }
-  }, []);
-
-  const loadSession = useCallback((threadId: string, options: LoadOptions = {}) => {
-    if (isPendingThread(threadId)) return Promise.resolve(false);
-    options = { ...options, recovery: options.recovery || partialSessionIdsRef.current.has(threadId) };
-    if (options.older) return loadSessionOnce(threadId, options);
-    const inFlight = sessionLoadsRef.current.get(threadId);
-    if (inFlight) {
-      const controller = sessionRequestControllersRef.current.get(threadId);
-      if (controller?.signal.aborted) sessionLoadsRef.current.delete(threadId);
-      else {
-        if (!options.prefetch) pendingSessionSyncRef.current.set(
-          threadId,
-          Boolean(pendingSessionSyncRef.current.get(threadId) || options.recovery),
-        );
-        return inFlight;
-      }
-    }
-    const request = loadSessionOnce(threadId, options);
-    sessionLoadsRef.current.set(threadId, request);
-    void request.finally(() => {
-      if (sessionLoadsRef.current.get(threadId) === request) sessionLoadsRef.current.delete(threadId);
-      const pendingRecovery = pendingSessionSyncRef.current.get(threadId);
-      if (pendingRecovery !== undefined) {
-        pendingSessionSyncRef.current.delete(threadId);
-      }
-      if (pendingRecovery !== undefined && selectedIdRef.current === threadId) {
-        window.setTimeout(() => {
-          void loadSessionRef.current(threadId, { retry: false, recovery: pendingRecovery });
-        }, 0);
-      }
-    }).catch(() => {});
-    return request;
-  }, [loadSessionOnce]);
-  loadSessionRef.current = loadSession;
-
-  const selectSession = useCallback((threadId: string) => {
-    if (threadId === selectedIdRef.current) return;
-    selectedIdRef.current = threadId;
-    setSelectedId(threadId);
-    setComposerKey(threadId);
-    const cached = sessionCache.current.get(threadId);
-    setSession(cached || null);
-    setLoadingSession(!cached);
-    setSessionError("");
-    setLoadingOlder(false);
-    setSyncing(Boolean(cached));
-    setContentSyncState("syncing");
+  }, [store]);
+  const updateRoute = useCallback((id: string) => {
     const params = new URLSearchParams(window.location.search);
-    params.set("thread", threadId);
-    params.delete("agent");
-    params.delete("employee");
-    params.delete("employeeId");
-    params.delete("conversation");
-    window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
-    void loadSession(threadId, { recovery: partialSessionIdsRef.current.has(threadId) });
-  }, [loadSession]);
-
-  const adoptSelection = useCallback(async (threadId: string) => {
-    selectedIdRef.current = threadId;
-    setSelectedId(threadId);
-    setComposerKey(threadId);
-    const cached = sessionCache.current.get(threadId);
-    setSession(cached || null);
-    setLoadingSession(!cached);
-    setSessionError("");
-    setLoadingOlder(false);
-    setSyncing(Boolean(cached));
-    setContentSyncState(cached ? "syncing" : "stable");
-    return loadSession(threadId);
-  }, [loadSession]);
-
-  const clearSelection = useCallback(() => {
-    requestRef.current?.abort();
-    requestRef.current = null;
-    selectedIdRef.current = "";
-    setSelectedId("");
-    setComposerKey("");
-    setSession(null);
-    setLoadingSession(false);
-    setLoadingOlder(false);
-    setSyncing(false);
-    setSessionError("");
-    setContentSyncState("stable");
-    const params = new URLSearchParams(window.location.search);
-    params.delete("thread");
-    params.delete("agent");
-    params.delete("employee");
-    params.delete("employeeId");
-    params.delete("conversation");
+    if (id && !isPendingThread(id)) params.set('thread', id); else params.delete('thread');
+    for (const key of ['agent', 'employee', 'employeeId', 'conversation']) params.delete(key);
     const query = params.toString();
-    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+    window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
   }, []);
-
+  const selectSession = useCallback((id: string, writeRoute = true) => {
+    selectedIdRef.current = id; setSelectedId(id); setComposerKey(id); setSessionError('');
+    setLoadingOlder(olderRequests.current.has(id));
+    if (writeRoute) updateRoute(id);
+    // Selection reads committed state. The batch coordinator loads absent/failed records.
+    if (store.errors.has(id)) store.invalidate(id);
+  }, [store, updateRoute]);
+  const adoptSelection = useCallback(async (id: string) => { selectSession(id, false); return true; }, [selectSession]);
+  const clearSelection = useCallback(() => selectSession(''), [selectSession]);
+  const cacheCreatedSession = useCallback((detail: SessionDetail, previousId = '') => {
+    if (isPendingThread(previousId) && store.committed.has(previousId)) store.migrate(previousId, detail.threadId, detail);
+    else store.update(detail.threadId, { session: detail });
+  }, [store]);
   const setCreatedSession = useCallback((detail: SessionDetail, preserveComposer = false) => {
-    const previousId = selectedIdRef.current;
-    const replacingPending = isPendingThread(previousId) && !isPendingThread(detail.threadId);
-    if (replacingPending) {
-      detail = mergePendingOptimisticMessages(detail, sessionCache.current.get(previousId)?.messages || []);
-      sessionCache.current.delete(previousId);
-    }
-    pendingOptimisticMessagesRef.current.delete(detail.threadId);
-    sessionCache.current.set(detail.threadId, detail);
-    selectedIdRef.current = detail.threadId;
-    setSelectedId(detail.threadId);
-    if (!replacingPending && !preserveComposer) setComposerKey(detail.threadId);
-    setSession(detail);
-    setSessionError("");
-    setLoadingSession(false);
-    setLoadingOlder(false);
-    setSyncing(false);
-    setContentSyncState("stable");
-    const params = new URLSearchParams(window.location.search);
-    if (isPendingThread(detail.threadId)) params.delete("thread");
-    else params.set("thread", detail.threadId);
-    params.delete("agent");
-    params.delete("employee");
-    params.delete("employeeId");
-    params.delete("conversation");
-    window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
-  }, []);
-
-  const updateCurrentSession = useCallback((threadId: string, update: (current: SessionDetail) => SessionDetail) => {
-    const current = sessionCache.current.get(threadId);
-    if (!current) return;
-    const next = update(current);
-    if (next === current) return;
-    sessionCache.current.set(threadId, next);
-    if (selectedIdRef.current === threadId) setSession(next);
-  }, []);
-
-  const addOptimisticMessage = useCallback((threadId: string, message: SessionMessage) => {
-    const current = sessionCache.current.get(threadId);
-    if (current) {
-      if (current.messages.some((item) => item.id === message.id)) return;
-      const next = { ...current, messages: mergeMessageList(current.messages, [message]) };
-      sessionCache.current.set(threadId, next);
-      if (selectedIdRef.current === threadId) setSession(next);
-      return;
-    }
-    const pending = pendingOptimisticMessagesRef.current.get(threadId) || [];
-    if (pending.some((item) => item.id === message.id)) return;
-    pendingOptimisticMessagesRef.current.set(threadId, [...pending, message]);
-  }, []);
-
-  const removeOptimisticMessage = useCallback((threadId: string, messageId: string) => {
-    const pending = pendingOptimisticMessagesRef.current.get(threadId);
-    if (pending) {
-      const nextPending = pending.filter((message) => message.id !== messageId);
-      if (nextPending.length) pendingOptimisticMessagesRef.current.set(threadId, nextPending);
-      else pendingOptimisticMessagesRef.current.delete(threadId);
-    }
-    updateCurrentSession(threadId, (current) => ({
-      ...current,
-      messages: current.messages.filter((message) => message.id !== messageId),
-    }));
-  }, [updateCurrentSession]);
-
-  const updateOptimisticMessage = useCallback((threadId: string, messageId: string, patch: Partial<SessionMessage>) => {
-    const update = (messages: SessionMessage[]) => messages.map(message => message.id === messageId ? { ...message, ...patch } : message);
-    const pending = pendingOptimisticMessagesRef.current.get(threadId);
-    if (pending) pendingOptimisticMessagesRef.current.set(threadId, update(pending));
-    updateCurrentSession(threadId, current => ({ ...current, messages: update(current.messages) }));
-  }, [updateCurrentSession]);
-
-  const cacheCreatedSession = useCallback((detail: SessionDetail) => {
-    sessionCache.current.set(detail.threadId, mergePendingOptimisticMessages(detail, pendingOptimisticMessagesRef.current.get(detail.threadId) || []));
-  }, []);
-
-  const cancelSessionLoad = useCallback((threadId: string) => sessionRequestControllersRef.current.get(threadId)?.abort(), []);
-  const invalidate = useCallback((threadId: string) => sessionCache.current.delete(threadId), []);
-  const markSyncing = useCallback((value: boolean) => {
-    setSyncing(value);
-    if (value) setContentSyncState((current) => current === "recovering" ? current : "syncing");
-    else setContentSyncState((current) => current === "degraded" ? current : "stable");
-  }, []);
-  const loadOlder = useCallback(async () => {
-    if (selectedIdRef.current) await loadSession(selectedIdRef.current, { older: true });
-  }, [loadSession]);
-
-  useEffect(() => () => {
-    for (const controller of sessionRequestControllersRef.current.values()) controller.abort();
-    window.clearTimeout(retryTimerRef.current);
-  }, []);
-
-  return {
-    sessionErrors: sessionErrors.current, selectedId, selectedIdRef, session, cachedSessions: sessionCache.current, loadingSession, loadingOlder, syncing, contentSyncState, sessionError, composerKey,
-    setSyncing: markSyncing, loadSession, selectSession, adoptSelection, clearSelection, setCreatedSession, setSessionError,
-    cacheCreatedSession, updateOptimisticMessage, updateCurrentSession, addOptimisticMessage, removeOptimisticMessage, cancelSessionLoad, invalidate, loadOlder,
-  };
+    const previous = selectedIdRef.current;
+    const replacing = isPendingThread(previous) && !isPendingThread(detail.threadId);
+    if (replacing && store.committed.has(previous)) store.migrate(previous, detail.threadId, detail); else cacheCreatedSession(detail);
+    selectedIdRef.current = detail.threadId; setSelectedId(detail.threadId);
+    if (!replacing && !preserveComposer) setComposerKey(detail.threadId);
+    setSessionError(''); updateRoute(detail.threadId);
+  }, [store, cacheCreatedSession, updateRoute]);
+  const updateCurrentSession = useCallback((id: string, update: (current: SessionDetail) => SessionDetail) => {
+    const current = store.committed.get(id)?.session;
+    if (current) store.update(id, { session: update(current) });
+  }, [store]);
+  const removeOptimisticMessage = useCallback((id: string, messageId: string) => store.changeMessages(id, messages => messages.filter(message => message.id !== messageId)), [store]);
+  const updateOptimisticMessage = useCallback((id: string, messageId: string, patch: Partial<SessionMessage>) => store.changeMessages(id, messages => messages.map(message => message.id === messageId ? { ...message, ...patch } : message)), [store]);
+  const session = store.get(selectedId, false).session;
+  return { store, selectedId, selectedIdRef, composerKey, session,
+    cachedSessions: new Map([...store.committed.keys()].flatMap(id => { const detail = store.get(id, false).session; return detail ? [[id, detail] as const] : []; })),
+    sessionErrors: store.errors, sessionError: sessionError || store.errors.get(selectedId) || '', setSessionError,
+    loadingSession: Boolean(selectedId && !store.committed.get(selectedId)?.session), loadingOlder,
+    syncing: store.dirty.has(selectedId), contentSyncState: store.errors.has(selectedId) ? 'degraded' as const : !store.synced.has(selectedId) && initial.partialSessionIds.includes(selectedId) ? 'recovering' as const : store.dirty.has(selectedId) ? 'syncing' as const : 'stable' as const,
+    selectSession, adoptSelection, clearSelection, loadSession, setCreatedSession, cacheCreatedSession,
+    updateCurrentSession, addOptimisticMessage: store.addMessage, removeOptimisticMessage, updateOptimisticMessage,
+    cancelSessionLoad: (id: string) => { olderRequests.current.get(id)?.abort(); store.invalidate(id); },
+    loadOlder: async () => { await loadSession(selectedIdRef.current, { older: true }); } };
 }
