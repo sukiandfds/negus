@@ -1002,6 +1002,7 @@ test("an empty native body falls back only to the current store history", async 
 test("an empty native body remains empty when the same store has no messages", async () => {
   const thread = { id: "actually-empty", cwd: process.cwd(), source: "appServer", updatedAt: 100 };
   let fallbackCalls = 0;
+  let history = null;
   const store = createAppServerConversationStore({ projectRoot: process.cwd(), registerMedia: () => null,
     autoTitleEnabled: false,
     client: {
@@ -1013,12 +1014,38 @@ test("an empty native body remains empty when the same store has no messages", a
         throw new Error(`Unexpected request: ${method}`);
       },
     },
-    historyFallback: async () => { fallbackCalls += 1; return null; },
+    historyFallback: async () => { fallbackCalls += 1; return history; },
   });
   try {
     const session = await store.findSession(thread.id, "all", { limit: 60 });
     assert.equal(session.threadId, thread.id);
     assert.deepEqual(session.messages, []);
+    assert.equal(fallbackCalls, 1);
+    history = { messages: [] };
+    assert.deepEqual((await store.findSession(thread.id, "all", { limit: 60 })).messages, []);
+    assert.equal(fallbackCalls, 2);
+  } finally {
+    store.close();
+  }
+});
+
+test("an empty native body propagates a history read failure without retrying the fallback", async () => {
+  const thread = { id: "empty-history-error", cwd: process.cwd(), source: "appServer", updatedAt: 100 };
+  let fallbackCalls = 0;
+  const store = createAppServerConversationStore({ projectRoot: process.cwd(), registerMedia: () => null,
+    autoTitleEnabled: false,
+    client: {
+      subscribe: () => () => {}, close() {},
+      request: async (method) => {
+        if (method === "thread/read") return { thread: { ...thread, turns: [] } };
+        if (method === "thread/turns/list") throw new Error("thread not loaded");
+        throw new Error(`Unexpected request: ${method}`);
+      },
+    },
+    historyFallback: async () => { fallbackCalls++; throw new Error("history read failed"); },
+  });
+  try {
+    await assert.rejects(store.findSession(thread.id, "all", { limit: 60 }), /history read failed/);
     assert.equal(fallbackCalls, 1);
   } finally {
     store.close();

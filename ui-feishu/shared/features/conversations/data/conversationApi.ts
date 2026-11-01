@@ -1,4 +1,4 @@
-import type { ProjectInfo, SessionDetail, SessionResponse, SessionSummary } from "../model/types";
+import type { ProjectInfo, SessionDetail, SessionSummary } from "../model/types";
 import type { ContextStatus } from "../../context-management/model/types";
 import type { ExecutionStatus, UserInputRequest } from "../../execution/model/types";
 import type { ThreadGoal } from "../../goals/model/types";
@@ -49,17 +49,15 @@ export const conversationApi = {
   revert: (threadId: string, beforeTurnId: string) => postJson<{ threadId: string }>("/api/session/revert", withConversation({ threadId, beforeTurnId })),
   archive: (threadId: string, signal?: AbortSignal) => postJson<{ threadId: string; archived: boolean }>("/api/session/archive", withConversation({ threadId }), signal),
   unarchive: (threadId: string, signal?: AbortSignal) => postJson<SessionSummary>("/api/session/unarchive", withConversation({ threadId }), signal),
-  session: async (threadId: string, { before, cursor, contentVersion }: {
+  session: async (threadId: string, { before, cursor }: {
     before?: number;
     cursor?: string;
-    contentVersion?: number;
   } = {}, signal?: AbortSignal, conversationId = currentConversationId(threadId)) => {
     conversationId ||= await resolveConversationId(threadId);
     const beforeQuery = before === undefined ? "" : `&before=${before}`;
     const cursorQuery = cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`;
-    const contentVersionQuery = contentVersion === undefined ? "" : `&contentVersion=${contentVersion}`;
-    return fetchConversationJson<SessionResponse>(
-      `/api/session?threadId=${encodeURIComponent(threadId)}&limit=${PAGE_SIZE}${conversationQuery(conversationId)}${beforeQuery}${cursorQuery}${contentVersionQuery}`,
+    return fetchConversationJson<SessionDetail>(
+      `/api/session?threadId=${encodeURIComponent(threadId)}&limit=${PAGE_SIZE}${conversationQuery(conversationId)}${beforeQuery}${cursorQuery}`,
       signal,
     );
   },

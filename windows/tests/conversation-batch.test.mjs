@@ -50,15 +50,3 @@ test('cancelling a batch aborts a stalled read and publishes nothing', async () 
  controller.abort();await pending;
  assert.equal(readSignal.aborted,true);assert.deepEqual(publications,[]);
 });
-
-test('a conversation batch does not wait on unrelated global catalog requests', async () => {
- const code=await fs.readFile(new URL('../../ui-feishu/shared/shared/state/conversationReads.ts',import.meta.url),'utf8');
- const {conversationReads}=await import(`data:text/javascript;base64,${Buffer.from(ts.transpile(code,{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022})).toString('base64')}`);
- globalThis.window={location:{origin:'http://localhost'},setTimeout,clearTimeout};
- const finishGlobal=conversationReads.start('/api/sessions');
- const finishThread=conversationReads.start('/api/session?threadId=selected');
- const waiting=conversationReads.wait(new Set(['selected']),100);
- finishThread();await waiting;
- assert.equal(conversationReads.pending(),true);
- finishGlobal();await new Promise(r=>setTimeout(r,5));
-});

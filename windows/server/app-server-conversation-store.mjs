@@ -594,12 +594,14 @@ export const createAppServerConversationStore = ({
     if (freshThreadRuntime.has(threadId) && threadCache.has(threadId)) {
       return detailFromMessages(threadCache.get(threadId), [], { messageCount: 0 });
     }
+    let nativeReadCompleted = false;
     try {
       const session = await readNativeSession(threadId, source, options);
+      nativeReadCompleted = true;
       // A successful empty native read can mean the thread is not loaded, not
       // that its persisted history is empty. Recheck only this store's owner.
       if (historyFallback && session && Array.isArray(session.messages) && session.messages.length === 0 && options.cursor === undefined) {
-        const fallback = await historyFallback(threadId, source, options).catch(() => null);
+        const fallback = await historyFallback(threadId, source, options);
         if (fallback?.messages?.length) return fallback;
       }
       if (historyFallback && session?.messages.some((message) => (message.role === 'user' || message.phase === "commentary") && !message.createdAt)) {
@@ -616,7 +618,7 @@ export const createAppServerConversationStore = ({
       return session;
     }
     catch (error) {
-      if (!historyFallback || options.cursor !== undefined) throw error;
+      if (nativeReadCompleted || !historyFallback || options.cursor !== undefined) throw error;
       const fallback = await historyFallback(threadId, source, options);
       if (!fallback) throw error;
       return fallback;

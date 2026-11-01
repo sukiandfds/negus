@@ -12,10 +12,13 @@ const first=new Promise(r=>releaseFirst=r),rest=new Promise(r=>releaseRest=r);
 const calls=[],errors=[],syncErrors=[];
 let archived=false;
 let currentReply='';
+let activeStatus=null;
 let failNinth=process.env.NEGUS_TEST_BATCH_FAILURE==='1'||process.env.NEGUS_TEST_AUTO_RETRY==='1', ninthAttempts=0;
 page.on('console',message=>{if(message.type()==='error'&&message.text().includes('negus:conversation-sync'))syncErrors.push(message.text());});
 page.on('pageerror',e=>errors.push(e.message));
 await page.addInitScript(({summaries,details,stamp})=>{
+  const setItem=Storage.prototype.setItem; window.snapshotWrites=0;
+  Storage.prototype.setItem=function(key,value){if(key==='negus-conversation-snapshot-v1')window.snapshotWrites++;return setItem.call(this,key,value);};
   if (!localStorage.getItem('negus-conversation-snapshot-v1')) localStorage.setItem('negus-conversation-snapshot-v1',JSON.stringify({version:1,savedAt:stamp,selectedId:'t0',sessions:summaries,session:details[0],recentSessions:details.slice(1).map(session=>({savedAt:stamp,session}))}));
   const sources=[];window.EventSource=class{constructor(){sources.push(this);setTimeout(()=>this.onopen?.(),0);}close(){}};
   window.emitFixture=e=>sources.forEach(s=>s.onmessage?.({data:JSON.stringify(e)}));
@@ -48,7 +51,7 @@ await page.route('**/api/**',async route=>{
    if(process.env.NEGUS_TEST_REMAINDER_FAILURE==='1'&&id==='t10')return route.fulfill({status:503,json:{error:'fixture older conversation failure'}});
    data={session:u.searchParams.get('sourceRevision')===summaries[n]?.sourceRevision?null:data,
      context:{type:'context_status',threadId:id,model:id==='t0'?'model-a':'model-b',reasoningEffort:id==='t0'?'high':'low',phase:'idle',usedTokens:10,contextWindow:100,percentage:10,autoCompactThreshold:80,updatedAt:stamp,message:''},
-     status:{type:'execution_status',threadId:id,phase:'idle',active:false,activities:[],turnId:'',startedAt:null,updatedAt:stamp,label:'',detail:'',commentary:''},goal:null,queue:[],input:null,sourceRevision:summaries[n]?.sourceRevision};
+     status:id==='t0'&&activeStatus?activeStatus:{type:'execution_status',threadId:id,phase:'idle',active:false,activities:[],turnId:'',startedAt:null,updatedAt:stamp,label:'',detail:'',commentary:''},goal:null,queue:[],input:null,sourceRevision:summaries[n]?.sourceRevision,historyFormatVersion:1};
  }
  await route.fulfill({json:data});
 });
@@ -87,6 +90,46 @@ try{
    releaseRest();await browser.close();process.exit(0);
  }
  releaseRest();await page.getByText('最新标题11',{exact:true}).waitFor();
+ if(process.env.NEGUS_TEST_STREAM_PERSIST==='1'){
+   activeStatus={type:'execution_status',threadId:'t0',phase:'working',active:true,turnId:'r1',activities:[],startedAt:stamp,updatedAt:stamp,label:'运行',detail:'',commentary:''};
+   await page.evaluate(status=>window.emitFixture(status),activeStatus);
+   await page.waitForFunction(()=>JSON.parse(localStorage.getItem('negus-conversation-snapshot-v1'))?.presentation?.t0?.executionStatus?.turnId==='r1');
+   await page.waitForTimeout(500);
+   await page.evaluate(()=>{
+     const root=document.getElementById('root');
+     const key=Object.keys(root).find(name=>name.startsWith('__reactContainer$'));
+     const stack=[root[key].stateNode.current];
+     while(stack.length){const fiber=stack.pop();for(let hook=fiber.memoizedState;hook;hook=hook.next){
+       const store=hook.memoizedState;
+       if(store?.committed instanceof Map&&typeof store.getPersistSnapshot==='function'){
+         window.fixtureStoreState=()=>({status:store.get('t0').executionStatus,version:store.getSnapshot()});return;
+       }
+     } if(fiber.child)stack.push(fiber.child);if(fiber.sibling)stack.push(fiber.sibling);}
+     throw new Error('fixture could not find conversation store');
+   });
+   const stateBefore=await page.evaluate(()=>window.fixtureStoreState());
+   assert.equal(stateBefore.status.active,true);assert.equal(stateBefore.status.turnId,'r1');
+   const writes=await page.evaluate(()=>window.snapshotWrites), before=calls.length;
+   await page.evaluate(async()=>{for(let i=0;i<20;i++){window.emitFixture({type:'assistant_delta',threadId:'t0',turnId:'r1',itemId:'stream-item',delta:'x'});await new Promise(resolve=>setTimeout(resolve,25));}});
+   await page.waitForFunction(()=>window.fixtureStoreState().status.streamingText==='x'.repeat(20));
+   assert.ok((await page.evaluate(()=>window.fixtureStoreState().version))-stateBefore.version>=2,'dispersed events must notify the store');
+   await page.waitForTimeout(500);
+   assert.equal(await page.evaluate(()=>window.snapshotWrites),writes,'pure streaming must not persist snapshots');
+   assert.equal(calls.slice(before).filter(([path])=>path==='/api/session').length,0,'pure streaming must not read details');
+   summaries[0].sourceRevision='r2';
+   await page.evaluate(()=>window.emitFixture({type:'sessions_changed',threadId:'t0'}));
+   await page.getByText('最新正文t0-更新',{exact:true}).waitFor();
+   assert.ok(calls.slice(before).some(([path,id])=>path==='/api/session'&&id==='t0'),'real changes still synchronize');
+   await page.waitForTimeout(500);
+   const beforeClick=calls.length;
+   await page.getByRole('button',{name:'打开最新标题5',exact:true}).click();
+   await page.getByText('最新正文t5',{exact:true}).waitFor();
+   await page.waitForTimeout(300);
+   assert.equal(calls.slice(beforeClick).filter(([path,id])=>path==='/api/session'&&id==='t5').length,0,'cached clicks must not read details');
+   assert.deepEqual(errors,[]);
+   console.log('PASS 20 streaming events: zero snapshot writes and detail requests; real changes and cached clicks');
+   await browser.close();process.exit(0);
+ }
  if(failNinth&&process.env.NEGUS_TEST_AUTO_RETRY!=='1'){
    await page.waitForFunction(()=>document.querySelector('button[aria-label="刷新会话"]')?.getAttribute('aria-busy')==='false');
    assert.equal(await page.getByRole('status',{name:'正在同步对话'}).count(),0,'exhausted retries must stop the spinner');

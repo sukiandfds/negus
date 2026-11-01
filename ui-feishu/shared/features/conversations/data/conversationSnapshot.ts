@@ -1,4 +1,4 @@
-import type { ConversationPresentation, SessionDetail, SessionSummary } from "../model/types";
+import type { ConversationPresentation, SessionDetail, SessionMessage, SessionSummary } from "../model/types";
 import { readStorage, writeStorage } from "../../../shared/state/storage";
 
 const storageKey = "negus-conversation-snapshot-v1";
@@ -6,6 +6,14 @@ const legacyStorageKey = "codex-collab-conversation-snapshot-v1";
 const maxSnapshotCharacters = 1024 * 1024;
 const maxCachedConversations = 10;
 const maxCachedMessages = 60;
+
+const isProtectedMessage = (message: SessionMessage) => message.id.startsWith("optimistic-")
+  && (message.deliveryState === "failed" || message.deliveryState === "occupied");
+
+const trimMessages = (messages: SessionMessage[], limit: number) => {
+  let remaining = Math.max(0, limit - messages.filter(isProtectedMessage).length);
+  return [...messages].reverse().filter(message => isProtectedMessage(message) || remaining-- > 0).reverse();
+};
 
 export interface CachedConversation {
   savedAt: string;
@@ -106,7 +114,7 @@ export const writeConversationSnapshot = ({ selectedId, sessions, session, cache
     const savedAt = new Date().toISOString();
     const cachedMessageCount = session?.threadId === selectedId ? session.messages.length : 0;
     const cachedSession = session && session.threadId === selectedId
-      ? { ...session, messages: session.messages.slice(-maxCachedMessages) }
+      ? { ...session, messages: trimMessages(session.messages, maxCachedMessages) }
       : null;
     const previousEntries: CachedConversation[] = [
       ...[...(cachedSessions?.values() || [])].sort((a, b) => Date.parse(b.updatedAt || "") - Date.parse(a.updatedAt || "")).map(session => ({ savedAt, isPartial: Boolean(session.hasMore), session })),
@@ -126,8 +134,10 @@ export const writeConversationSnapshot = ({ selectedId, sessions, session, cache
       return true;
     }).slice(0, maxCachedConversations - 1).map(entry => {
       const latest = cachedSessions?.get(entry.session.threadId);
-      return latest ? { savedAt, isPartial: Boolean(entry.isPartial || latest.hasMore || latest.messages.length > maxCachedMessages),
-        session: { ...latest, messages: latest.messages.slice(-maxCachedMessages) } } : entry;
+      if (!latest) return entry;
+      const messages = trimMessages(latest.messages, maxCachedMessages);
+      return { savedAt, isPartial: Boolean(entry.isPartial || latest.hasMore || latest.messages.length > messages.length),
+        session: { ...latest, messages } };
     });
     const snapshot: ConversationSnapshot = validSnapshot({
       version: 1,
@@ -143,25 +153,42 @@ export const writeConversationSnapshot = ({ selectedId, sessions, session, cache
       })),
     })!;
     let serialized = JSON.stringify(snapshot);
-    while (serialized.length > maxSnapshotCharacters && snapshot.recentSessions?.length) {
-      const oldest = snapshot.recentSessions[snapshot.recentSessions.length - 1];
-      if (oldest.session.messages.length <= 1) {
-        snapshot.recentSessions.pop();
-        if (snapshot.presentation) delete snapshot.presentation[oldest.session.threadId];
-      } else {
-        oldest.isPartial = true;
-        oldest.session = {
-          ...oldest.session,
-          messages: oldest.session.messages.slice(Math.ceil(oldest.session.messages.length / 2)),
-        };
+    while (serialized.length > maxSnapshotCharacters) {
+      let progress = false;
+      for (let i = (snapshot.recentSessions?.length || 0) - 1; i >= 0; i--) {
+        const entry = snapshot.recentSessions![i];
+        const current = entry.session.messages;
+        if (current.length <= 1 && !current.some(isProtectedMessage)) {
+          snapshot.recentSessions!.splice(i, 1);
+          if (snapshot.presentation) delete snapshot.presentation[entry.session.threadId];
+        } else {
+          const messages = trimMessages(current, Math.floor(current.length / 2));
+          if (messages.length === current.length) continue;
+          entry.isPartial = true;
+          entry.session = { ...entry.session, messages };
+        }
+        progress = true;
+        break;
+      }
+      if (!progress && snapshot.session && snapshot.session.messages.length > 1) {
+        const current = snapshot.session.messages;
+        const messages = trimMessages(current, Math.max(1, Math.floor(current.length * 3 / 4)));
+        if (messages.length < current.length) {
+          snapshot.isPartial = true;
+          snapshot.session.messages = messages;
+          progress = true;
+        }
+      }
+      if (!progress) {
+        console.error("[negus:conversation-cache] Snapshot exceeds storage limit; previous snapshot retained");
+        return false;
       }
       serialized = JSON.stringify(snapshot);
     }
-    while (serialized.length > maxSnapshotCharacters && snapshot.session && snapshot.session.messages.length > 1) {
-      snapshot.isPartial = true;
-      snapshot.session.messages = snapshot.session.messages.slice(Math.ceil(snapshot.session.messages.length / 4));
-      serialized = JSON.stringify(snapshot);
-    }
-    if (serialized.length <= maxSnapshotCharacters) writeStorage(storageKey, snapshot);
-  } catch {}
+    if (writeStorage(storageKey, snapshot)) return true;
+    console.error("[negus:conversation-cache] Snapshot storage failed; previous snapshot retained");
+  } catch {
+    console.error("[negus:conversation-cache] Snapshot preparation failed; previous snapshot retained");
+  }
+  return false;
 };

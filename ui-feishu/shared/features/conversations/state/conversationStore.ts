@@ -12,6 +12,8 @@ export type ThreadSnapshot = Pick<ConversationPresentation, 'executionStatus' | 
   session: SessionDetail | null;
 };
 type Patch = Partial<ThreadSnapshot>;
+const persistedPending = (messages: SessionMessage[]) => JSON.stringify(messages.filter(message => message.id.startsWith('optimistic-')
+  && (message.deliveryState === 'failed' || message.deliveryState === 'occupied')));
 const signature = (value: unknown, omitStream = false) => JSON.stringify(value,
   (key, field) => ['updatedAt', 'lastProbeAt', 'lastEventAt', 'eventEpoch', 'eventSeq', 'durationMs'].includes(key)
     || (omitStream && ['streamingItemId', 'streamingText', 'commentary'].includes(key)) ? undefined : field);
@@ -56,10 +58,12 @@ export class ConversationStore {
   };
   private listeners = new Set<() => void>();
   private version = 0;
+  private persistVersion = 0;
   private reads = new Map<string, { signal: AbortSignal; promise: Promise<ThreadSnapshot> }>();
   private waiters = new Map<string, ((success: boolean) => void)[]>();
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   getSnapshot = () => this.version;
+  getPersistSnapshot = () => this.persistVersion;
   notify = () => { ++this.version; this.listeners.forEach(listener => listener()); };
 
   constructor(initial: InitialConversationState) {
@@ -116,6 +120,7 @@ export class ConversationStore {
       this.fieldRevisions.set(id, { ...this.fieldRevisions.get(id),
         ...Object.fromEntries(Object.keys(next).map(key => [key, this.revisions.get(id)])) });
       this.committed.set(id, { ...(this.committed.get(id) || this.empty(id)), ...next });
+      ++this.persistVersion;
       const live = this.live.get(id);
       if (live) for (const key of Object.keys(next) as (keyof Patch)[]) delete live[key];
       this.notify();
@@ -174,6 +179,7 @@ export class ConversationStore {
       snapshot = { ...snapshot, session: { ...merged, messages: merged.messages.filter(message => ids.has(message.id)) } };
     }
     this.committed.set(id, snapshot);
+    ++this.persistVersion;
     const local = this.localPending.get(id);
     if (local && snapshot.session) {
       const remaining = mergePendingOptimisticMessages(snapshot.session, local).messages.filter(message => message.id.startsWith('optimistic-'));
@@ -194,11 +200,13 @@ export class ConversationStore {
     if ([...(this.committed.get(id)?.session?.messages || []), ...(this.localPending.get(id) || [])].some(item => item.id === message.id || sameSubmission(item, message))) return;
     if (!this.committed.has(id)) this.committed.set(id, this.empty(id));
     this.localPending.set(id, mergeMessageList(this.localPending.get(id) || [], [message]));
+    if (message.id.startsWith('optimistic-') && (message.deliveryState === 'failed' || message.deliveryState === 'occupied')) ++this.persistVersion;
     this.notify();
   };
   changeMessages = (id: string, update: (messages: SessionMessage[]) => SessionMessage[]) => {
-    const current = this.localPending.get(id) || [], next = update(current);
+    const current = this.localPending.get(id) || [], before = persistedPending(current), next = update(current);
     if (current.length === next.length && current.every((message, index) => message === next[index])) return;
+    if (before !== persistedPending(next)) ++this.persistVersion;
     if (next.length) this.localPending.set(id, next); else this.localPending.delete(id);
     this.notify();
   };
@@ -218,6 +226,7 @@ export class ConversationStore {
     this.committed.delete(from); this.live.delete(from); this.localPending.delete(from); this.modelChoices.delete(from);
     this.dirty.delete(from); this.revisions.delete(from); this.errors.delete(from); this.synced.delete(from);
     this.fieldRevisions.delete(from); this.freshBodies.delete(from);
+    ++this.persistVersion;
     this.notify();
   };
 }

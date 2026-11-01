@@ -19,7 +19,7 @@ test('connection placeholder stays hidden while submitted, but errors and notice
   assert.equal(executionHandoff('a', [], { ...status, phase: 'working' }).showExecution, true);
 });
 const { advanceLiveTranscript, createLiveTranscriptMemory } = await load('liveTranscript');
-const { mergeMessageList, mergePendingOptimisticMessages, mergeSessionRefresh, mergeSessionDelta } = await load('conversationMerge');
+const { mergeMessageList, mergePendingOptimisticMessages, mergeSessionRefresh } = await load('conversationMerge');
 const { createOptimisticMessage } = await load('optimisticMessage');
 const status = {threadId:'a',turnId:'protocol',startedAt:'2026-10-27T05:55:04Z',phase:'completed',hasFinalAnswer:true};
 const commentary = {id:'comment',role:'assistant',text:'checking',turnId:'internal',protocolTurnId:'protocol',phase:'commentary',createdAt:'2026-10-27T05:55:57.434Z'};
@@ -88,8 +88,6 @@ test('server turn order survives skewed device clocks, steers, images and delaye
     const refresh = mergeSessionRefresh(current,incoming).messages;
     assert.deepEqual(refresh.map(m=>m.text), ['older','text with image','working','additional','done','later']);
     assert.deepEqual(refresh[1].blocks.map(b=>b.type), ['markdown','image']);
-    const delta = mergeSessionDelta(current,{upserts:[...persisted,later],deletes:[],contentVersion:2,sessionPatch:{}}).messages;
-    assert.deepEqual(delta.map(m=>m.text), refresh.map(m=>m.text));
     const waiting = mergeSessionRefresh(current,{threadId:'t',messages:[earlier]}).messages;
     assert.equal(waiting.at(-1).submissionId,id);
     assert.equal(waiting.at(-1).blocks[1].type,'image');

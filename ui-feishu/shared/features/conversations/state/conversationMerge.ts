@@ -1,4 +1,4 @@
-import type { SessionDelta, SessionDetail, SessionMessage } from "../model/types";
+import type { SessionDetail, SessionMessage } from "../model/types";
 
 const isOptimisticMessage = (message: SessionMessage) => message.id.startsWith("optimistic-");
 
@@ -126,34 +126,5 @@ export const mergeSessionRefresh = (current: SessionDetail, incoming: SessionDet
   return {
     ...incoming,
     messages: mergeMessageList(mergeMessageList(retained, incoming.messages), pending),
-  };
-};
-
-export const mergeSessionDelta = (cached: SessionDetail, delta: SessionDelta): SessionDetail => {
-  const upserts = new Map(delta.upserts.map((message) => [message.id, message]));
-  const deleted = new Set(delta.deletes);
-  const resolved = cached.messages
-    .filter((message) => !deleted.has(message.id))
-    .map((message) => upserts.get(message.id) || message);
-  const persistedUsers = delta.upserts.filter((message) => message.role === "user" && !isOptimisticMessage(message));
-  const consumed = new Set<number>();
-  const withoutOptimisticDuplicates = resolved.filter((message) => (
-    !isOptimisticMessage(message)
-    || (() => {
-      const match = persistedUsers.findIndex((persisted, index) => (
-        !consumed.has(index) && persistedMatchesOptimistic(persisted, message)
-      ));
-      if (match < 0) return true;
-      consumed.add(match);
-      return false;
-    })()
-  ));
-  const resolvedIds = new Set(withoutOptimisticDuplicates.map((message) => message.id));
-  const appended = delta.upserts.filter((message) => !resolvedIds.has(message.id));
-  return {
-    ...cached,
-    ...delta.sessionPatch,
-    contentVersion: delta.contentVersion,
-    messages: mergeMessageList(withoutOptimisticDuplicates, appended),
   };
 };

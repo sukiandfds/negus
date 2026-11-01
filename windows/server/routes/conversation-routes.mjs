@@ -761,9 +761,10 @@ export const createConversationRoutes = ({
     }
     if (view) {
       const source = sessionSource(binding);
-      const [context, goal, input, finalRevision] = await Promise.all([
-        contextManagement.load(threadId), source.getGoal(threadId), source.getPendingUserInput(threadId), readRevision(),
+      const [context, goal, input] = await Promise.all([
+        contextManagement.load(threadId), source.getGoal(threadId), source.getPendingUserInput(threadId),
       ]);
+      const finalRevision = await readRevision();
       if (currentRevision !== finalRevision) throw Object.assign(new Error("对话更新中，请重试同步"), { statusCode: 409 });
       sendJson(response, { session, context, goal: goal.goal, status: execution.getStatus(threadId),
         queue: followUpQueue.list(threadId), input: publicUserInputRequest(input), sourceRevision: finalRevision, historyFormatVersion: 1 });

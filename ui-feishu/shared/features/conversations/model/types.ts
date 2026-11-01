@@ -75,23 +75,6 @@ export interface SessionDetail extends SessionSummary {
   nextCursor?: string | null;
 }
 
-export type SessionPatch = Partial<SessionSummary> & {
-  hasMore?: boolean;
-  nextBefore?: number | null;
-  nextCursor?: string | null;
-};
-
-export interface SessionDelta {
-  threadId: string;
-  contentVersion: number;
-  unchanged: boolean;
-  upserts: SessionMessage[];
-  deletes: string[];
-  sessionPatch?: SessionPatch;
-}
-
-export type SessionResponse = SessionDetail | SessionDelta;
-
 // FEAT-001 (2026-10-30): persist associated conversation display fields with its history snapshot.
 export interface ConversationPresentation {
   syncSignature?: string;

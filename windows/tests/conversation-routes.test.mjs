@@ -111,6 +111,37 @@ test("combined session view rejects a revision change during the read", async ()
   assert.equal(call.response.body, "");
 });
 
+test("combined ordinary and employee views check revision after slow context completes", async () => {
+  for (const employee of [false, true]) {
+    let revision = "r1", revisionReads = 0, releaseContext, contextStarted;
+    const started = new Promise(resolve => { contextStarted = resolve; });
+    const waiting = new Promise(resolve => { releaseContext = resolve; });
+    const session = { threadId: "t1", messages: [{ id: "old" }] };
+    const reader = {
+      findSession: async () => session,
+      readSession: async (_agentId, options) => { assert.equal(options.readOnly, true); return session; },
+      getSourceRevision: async () => { revisionReads++; return revision; },
+      getGoal: async () => ({ goal: null }), getPendingUserInput: async () => null,
+      supportsEmployee: () => true, ownsConversation: () => true,
+    };
+    const route = createConversationRoutes({
+      conversations: employee ? {} : reader, employeeRuntime: employee ? reader : null,
+      agentConversationStore: employee ? { resolve: async () => ({ runtimeSessionId: "t1", conversationKind: "direct", agentId: "engineer" }) } : null,
+      contextManagement: { load: async () => { contextStarted(); await waiting; return {}; } },
+      execution: { getStatus: () => ({}) }, followUpQueue: { list: () => [] },
+    });
+    const call = invokeGet(route, `/api/session?threadId=t1&view=1${employee ? "&conversationId=employee-chat" : ""}`);
+    await started;
+    await new Promise(resolve => setImmediate(resolve));
+    revision = "r2";
+    releaseContext();
+    await assert.rejects(call.promise, error => error.statusCode === 409 && /对话更新中/.test(error.message));
+    assert.equal(revisionReads, 2);
+    assert.equal(call.response.body, "");
+    assert.equal(call.response.status, 0);
+  }
+});
+
 test("reads and answers the matching Codex user-input request", async () => {
   const pending = {
     id: 41,

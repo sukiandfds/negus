@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ConversationState, DirectoryState } from './types';
 import { writeConversationSnapshot } from '../shared/features/conversations/data/conversationSnapshot';
 import { isPendingThread } from '../shared/features/conversations/model/pendingThread';
@@ -30,7 +30,11 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
   const [syncing, setSyncing] = useState(true);
   const mounted = useRef(true), generation = useRef(0);
   const controller = useRef<AbortController | null>(null);
-  const [, wake] = useState(0);
+  const [wakeVersion, wake] = useState(0);
+  const revisionKey = JSON.stringify([...store.revisions]);
+  const source = useMemo(() => JSON.stringify([c.sessions, directory.projects, revisionKey],
+    (key, value) => ['updatedAt', 'lastProbeAt', 'lastEventAt', 'eventEpoch', 'eventSeq', 'durationMs'].includes(key) ? undefined : value),
+  [c.sessions, directory.projects, revisionKey]);
   const archiveView = useRef(c.archivedView);
   if (archiveView.current !== c.archivedView) { archiveView.current = c.archivedView; observed.current.clear(); }
   const editRevision = useRef(c.historyEdit);
@@ -43,8 +47,6 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; controller.current?.abort(); }; }, []);
 
   useEffect(() => {
-    const source = JSON.stringify([c.sessions, directory.projects, [...store.revisions]],
-      (key, value) => ['updatedAt', 'lastProbeAt', 'lastEventAt', 'eventEpoch', 'eventSeq', 'durationMs'].includes(key) ? undefined : value);
     if (running.current && priorityPublished.current && activeSource.current !== source) {
       controller.current?.abort(); ++generation.current; running.current = false;
     }
@@ -117,7 +119,7 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
       running.current = false;
       if (mounted.current) wake(value => value + 1);
     });
-  });
+  }, [source, wakeVersion, c.initialSyncReady, directory.loading, c.selectedId, c.archivedView, c.historyEdit, c.archivedByThread, c.project]);
 
   const selected = store.get(c.selectedId, false), session = selected.session;
   const executionStatus = withStreamingStatus(selected.executionStatus, c.executionStatus);
@@ -139,7 +141,7 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
     if (!shown.committed || !c.selectedId || !session || isPendingThread(c.selectedId)) return;
     writeConversationSnapshot({ selectedId: c.selectedId, sessions: shown.sessions, session, cachedSessions: c.cachedSessions,
       presentation: Object.fromEntries(states.map(([id, { session: _session, ...view }]) => [id, { ...view, visibleModel: '', visibleEffort: '', usageModel: '', streamingText: '', commentaryText: '' }])) });
-  }, [shown, c.selectedId, store.getSnapshot()]);
+  }, [shown, c.selectedId, store.getPersistSnapshot()]);
   return { committed: shown.committed, conversations: display, directory: { ...directory, projects: shown.projects,
     statusByThread: Object.fromEntries(states.map(([id, view]) => [id, view.executionStatus])),
     contextByThread: Object.fromEntries(states.map(([id, view]) => [id, view.contextStatus.phase])),

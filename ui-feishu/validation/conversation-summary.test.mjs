@@ -167,3 +167,102 @@ test('failed and occupied messages keep their attachments and error across refre
   assert.deepEqual(restored.session.messages.slice(1), [failed, occupied]);
   assert.equal(restored.sessionIsPartial, true);
 });
+
+test('message limit retains old local failures in selected and recent conversations', () => {
+  storage.clear();
+  const failed = { id: 'optimistic-failed', submissionId: 'failed', role: 'user', text: 'photo',
+    deliveryState: 'failed', deliveryError: 'upload failed', blocks: [{ type: 'image', id: 'img', source: '/photo' }] };
+  const occupied = { ...failed, id: 'optimistic-occupied', submissionId: 'occupied', deliveryState: 'occupied', deliveryError: 'busy' };
+  const ordinary = Array.from({ length: 60 }, (_, i) => ({ id: `server-${i}`, role: 'user', text: `message-${i}`,
+    ...(i === 0 ? { deliveryState: 'failed' } : {}) }));
+  const selected = { ...session('selected', '', '10'), messages: [failed, occupied, ...ordinary] };
+  const recent = { ...session('recent', '', '09'), messages: [failed, occupied, ...ordinary] };
+  assert.equal(writeConversationSnapshot({ selectedId: 'selected', sessions: [selected, recent], session: selected,
+    cachedSessions: new Map([['selected', selected], ['recent', recent]]) }), true);
+  const stored = JSON.parse(storage.get('negus-conversation-snapshot-v1'));
+  for (const detail of [stored.session, stored.recentSessions[0].session]) {
+    assert.deepEqual(detail.messages, [failed, occupied, ...ordinary.slice(2)]);
+    assert.equal(detail.messages.some(message => message.id === 'server-0'), false);
+  }
+  assert.equal(stored.isPartial, true);
+  assert.equal(stored.recentSessions[0].isPartial, true);
+  window.location.search = '?thread=selected';
+  assert.deepEqual(readInitialConversationState().session.messages, stored.session.messages);
+});
+
+test('61 ordinary messages still keep the newest 60 and mark the snapshot partial', () => {
+  storage.clear();
+  const original = { ...session('ordinary', '', '10'), messages: Array.from({ length: 61 }, (_, i) => ({ id: `m-${i}`, role: 'user', text: '' })) };
+  assert.equal(writeConversationSnapshot({ selectedId: 'ordinary', sessions: [original], session: original }), true);
+  const stored = JSON.parse(storage.get('negus-conversation-snapshot-v1'));
+  assert.equal(stored.isPartial, true);
+  assert.deepEqual(stored.session.messages, original.messages.slice(1));
+});
+
+test('budget skips protected-only recent conversations and trims other recent and selected history', () => {
+  storage.clear();
+  const failed = id => ({ id: `optimistic-${id}`, submissionId: id, role: 'user', text: 'failed', deliveryState: 'failed',
+    deliveryError: 'error', blocks: [{ type: 'image', id: 'img', source: '/photo' }] });
+  const ordinary = id => ({ id, role: 'assistant', text: 'x'.repeat(400000) });
+  const blocked = { ...session('blocked', '', '07'), messages: [{ ...failed('blocked'), text: 'b'.repeat(400000) }] };
+  const recent = { ...session('recent', '', '08'), messages: [failed('recent'), ordinary('r1'), ordinary('r2')] };
+  const selected = { ...session('selected', '', '09'), messages: [failed('selected'), ordinary('s1'), ordinary('s2')] };
+  assert.equal(writeConversationSnapshot({ selectedId: 'selected', sessions: [selected, recent, blocked], session: selected,
+    cachedSessions: new Map([['selected', selected], ['recent', recent], ['blocked', blocked]]) }), true);
+  const stored = JSON.parse(storage.get('negus-conversation-snapshot-v1'));
+  const storedRecent = stored.recentSessions.find(entry => entry.session.threadId === 'recent');
+  assert.deepEqual(stored.recentSessions.find(entry => entry.session.threadId === 'blocked').session.messages, blocked.messages);
+  assert.deepEqual(storedRecent.session.messages[0], recent.messages[0]);
+  assert.ok(storedRecent.session.messages.length < recent.messages.length);
+  assert.deepEqual(stored.session.messages[0], selected.messages[0]);
+  assert.ok(stored.session.messages.length < selected.messages.length);
+  assert.ok(storage.get('negus-conversation-snapshot-v1').length <= 1024 * 1024);
+});
+
+test('oversized protected messages retain the old snapshot and report failure', () => {
+  storage.clear();
+  const old = session('selected', 'previous', '09');
+  assert.equal(writeConversationSnapshot({ selectedId: 'selected', sessions: [old], session: old }), true);
+  const previous = storage.get('negus-conversation-snapshot-v1');
+  const oversized = { ...old, messages: [{ id: 'optimistic-large', submissionId: 'large', role: 'user',
+    text: 'x'.repeat(600000), deliveryState: 'occupied', deliveryError: 'busy' }] };
+  const recent = { ...session('recent', '', '08'), messages: [{ ...oversized.messages[0], id: 'optimistic-recent', submissionId: 'recent' }] };
+  const errors = [], log = console.error;
+  console.error = message => errors.push(message);
+  try {
+    assert.equal(writeConversationSnapshot({ selectedId: 'selected', sessions: [oversized, recent], session: oversized,
+      cachedSessions: new Map([['selected', oversized], ['recent', recent]]) }), false);
+    assert.equal(storage.get('negus-conversation-snapshot-v1'), previous);
+    assert.match(errors[0], /exceeds storage limit/);
+    assert.ok(!errors[0].includes(oversized.messages[0].text));
+  } finally { console.error = log; }
+});
+
+test('storage write failure is reported without throwing or overwriting the snapshot', () => {
+  storage.clear();
+  const original = session('selected', 'previous', '09');
+  assert.equal(writeConversationSnapshot({ selectedId: 'selected', sessions: [original], session: original }), true);
+  const previous = storage.get('negus-conversation-snapshot-v1');
+  const setItem = window.localStorage.setItem, log = console.error, errors = [];
+  window.localStorage.setItem = () => { throw new Error('quota'); };
+  console.error = message => errors.push(message);
+  try {
+    assert.equal(writeConversationSnapshot({ selectedId: 'selected', sessions: [original], session: original }), false);
+    assert.equal(storage.get('negus-conversation-snapshot-v1'), previous);
+    assert.match(errors[0], /storage failed/);
+  } finally { window.localStorage.setItem = setItem; console.error = log; }
+});
+
+test('an oversized single ordinary message never replaces the old snapshot with an empty body', () => {
+  storage.clear();
+  const old = session('selected', 'previous', '09');
+  assert.equal(writeConversationSnapshot({ selectedId: 'selected', sessions: [old], session: old }), true);
+  const previous = storage.get('negus-conversation-snapshot-v1');
+  const oversized = { ...old, messages: [{ id: 'large', role: 'assistant', text: 'x'.repeat(1024 * 1024) }] };
+  const log = console.error;
+  console.error = () => {};
+  try {
+    assert.equal(writeConversationSnapshot({ selectedId: 'selected', sessions: [oversized], session: oversized }), false);
+    assert.equal(storage.get('negus-conversation-snapshot-v1'), previous);
+  } finally { console.error = log; }
+});
