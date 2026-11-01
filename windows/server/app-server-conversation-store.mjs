@@ -603,13 +603,14 @@ export const createAppServerConversationStore = ({
         if (fallback?.messages?.length) return fallback;
       }
       if (historyFallback && session?.messages.some((message) => (message.role === 'user' || message.phase === "commentary") && !message.createdAt)) {
-        const history = await historyFallback(threadId, source).catch(() => null);
-        const times = new Map((history?.messages || []).filter((message) => message.itemId && message.createdAt).map((message) => [message.itemId, message.createdAt]));
+        const history = await historyFallback(threadId, source, { includeEventTimes: true }).catch(() => null);
         session.messages = session.messages.map((message) => {
           if (message.createdAt || (message.role !== 'user' && message.phase !== 'commentary')) return message;
-          const matches = (history?.messages || []).filter(item => item.role === message.role && item.text === message.text
-            && (item.protocolTurnId || item.turnId) === message.turnId && item.createdAt);
-          return { ...message, createdAt: times.get(message.itemId) || (matches.length === 1 ? matches[0].createdAt : undefined) };
+          const matches = message.role === 'user'
+            ? (history?.userMessageEvents || []).filter(item => item.turnId === message.turnId && ((message.itemId && item.itemId === message.itemId) || (message.submissionId && item.submissionId === message.submissionId)))
+            : (history?.messages || []).filter(item => item.itemId && item.itemId === message.itemId && item.createdAt);
+          const times = [...new Set(matches.map(item => item.createdAt).filter(Boolean))];
+          return times.length === 1 ? { ...message, createdAt: times[0] } : message;
         });
       }
       return session;

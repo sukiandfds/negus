@@ -27,6 +27,22 @@ async function harness(file, dependencies) {
   return render;
 }
 
+test('committing server history retains matching local send time across later reads', () => {
+  const store = new ConversationStore({ cachedSessions: [], partialSessionIds: [] });
+  const local = { id: 'optimistic-send', role: 'user', text: 'same', submissionId: 'send', createdAt: '2026-11-01T15:43:23.000Z' };
+  const official = { id: 'native', role: 'user', text: 'same', submissionId: 'send' };
+  store.addMessage('t', local);
+  store.commit('t', { ...store.empty('t'), session: { threadId: 't', messages: [] } }, 0);
+  assert.equal(store.committed.get('t').session.messages.length, 0);
+  assert.equal(store.get('t').session.messages.length, 1);
+  store.commit('t', { ...store.empty('t'), session: { threadId: 't', messages: [official] } }, 0);
+  assert.equal(store.get('t').session.messages.length, 1);
+  assert.equal(store.get('t').session.messages[0].createdAt, local.createdAt);
+  assert.equal(store.localPending.has('t'), false);
+  store.commit('t', { ...store.empty('t'), session: { threadId: 't', messages: [official] } }, 0);
+  assert.equal(store.get('t').session.messages[0].createdAt, local.createdAt);
+});
+
 test('closing a completed goal ignores a delayed completion event', async () => {
   const gate = deferred();
   const render = await harness('features/goals/hooks/useThreadGoal.ts', {

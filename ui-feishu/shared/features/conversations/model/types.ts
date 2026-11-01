@@ -66,6 +66,7 @@ export interface SessionSummary {
 }
 
 export interface SessionDetail extends SessionSummary {
+  historyFormatVersion?: number;
   sourceSignature?: string;
   messages: SessionMessage[];
   contentVersion?: number;

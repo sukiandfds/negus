@@ -150,7 +150,7 @@ export class ConversationStore {
       const model = saved ? resolveVisibleModel(models, defaults, saved.model, '') : result.context.model;
       const contextStatus = saved ? { ...result.context, model,
         reasoningEffort: resolveVisibleEffort(models, defaults, model, saved.reasoningEffort) } : result.context;
-      return { session: { ...session, sourceRevision: result.sourceRevision || session.sourceRevision }, contextStatus,
+      return { session: { ...session, ...(incoming && result.historyFormatVersion ? { historyFormatVersion: result.historyFormatVersion } : {}), sourceRevision: result.sourceRevision || session.sourceRevision }, contextStatus,
         executionStatus: result.status, goal: result.goal, queueItems: result.queue, userInputRequest: result.input };
     });
     const entry = { signal, promise };
@@ -167,6 +167,12 @@ export class ConversationStore {
     }
     const current = latest?.session;
     if (current && snapshot.session) snapshot = { ...snapshot, session: refreshSession(current, snapshot.session) };
+    const pending = this.localPending.get(id);
+    if (pending && snapshot.session) {
+      const ids = new Set(snapshot.session.messages.map(message => message.id));
+      const merged = mergePendingOptimisticMessages(snapshot.session, pending);
+      snapshot = { ...snapshot, session: { ...merged, messages: merged.messages.filter(message => ids.has(message.id)) } };
+    }
     this.committed.set(id, snapshot);
     const local = this.localPending.get(id);
     if (local && snapshot.session) {

@@ -102,6 +102,22 @@ test('prefetched recent conversations survive reload without opening each one', 
   assert.equal(restored.cachedSessions.some(item => item.threadId === 'prefetch-0'), false);
 });
 
+test('old history format is refreshed once while new format reuses the cache', () => {
+  storage.clear();
+  const legacy = session('legacy', 'old', '09');
+  const updated = { ...session('updated', 'new', '10'), historyFormatVersion: 1 };
+  writeConversationSnapshot({ selectedId: 'legacy', sessions: [legacy, updated], session: legacy,
+    cachedSessions: new Map([['legacy', legacy], ['updated', updated]]) });
+  window.location.search = '?thread=legacy';
+  const initial = readInitialConversationState();
+  assert.ok(initial.partialSessionIds.includes('legacy'));
+  assert.ok(!initial.partialSessionIds.includes('updated'));
+  assert.equal(initial.session.messages[0].text, 'old');
+  const refreshed = { ...legacy, historyFormatVersion: 1 };
+  writeConversationSnapshot({ selectedId: 'legacy', sessions: [refreshed], session: refreshed, cachedSessions: new Map([['legacy', refreshed]]) });
+  assert.ok(!readInitialConversationState().partialSessionIds.includes('legacy'));
+});
+
 test('persisted snapshots keep confirmed messages and exclude pending and live overlays', () => {
   storage.clear();
   const original = session('A', 'confirmed', '09');

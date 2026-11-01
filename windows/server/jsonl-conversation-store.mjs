@@ -136,6 +136,7 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
     lastKey: "",
     messageSequence: 0,
     messages: [],
+    userMessageEvents: [],
     pendingAssistantMedia: [],
     decoder: new StringDecoder("utf8"),
   });
@@ -157,6 +158,12 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
     if (!line.trim()) return;
     try {
       const item = JSON.parse(line);
+      if (item.type === "event_msg" && item.payload?.type === "item_completed" && item.payload.item?.type === "UserMessage") {
+        const event = item.payload;
+        const completed = new Date(event.completed_at_ms);
+        const time = Number.isFinite(event.completed_at_ms) && Number.isFinite(completed.getTime()) ? completed.toISOString() : item.timestamp;
+        if (time && Number.isFinite(Date.parse(time))) state.userMessageEvents.push({ itemId: event.item.id, submissionId: event.item.client_id, turnId: event.turn_id, createdAt: time });
+      }
       if (item.type === "event_msg" && item.payload?.type === "task_started") state.currentTurnId = item.payload.turn_id;
       if (item.type === "event_msg" && ["task_complete", "turn_aborted"].includes(item.payload?.type)) {
         const turnId = item.payload.turn_id || state.currentTurnId;
@@ -272,13 +279,14 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   };
 
-  const findSession = async (threadId, source = "all", { before, limit, metadataOnly = false } = {}) => {
+  const findSession = async (threadId, source = "all", { before, limit, metadataOnly = false, includeEventTimes = false } = {}) => {
     await initialize();
     const header = [...projectHeaders.values()].find((item) => item.threadId === threadId);
     if (!header) return null;
     if (metadataOnly) return { id: header.threadId, path: header.file, cwd: header.cwd, name: header.title };
-    const session = await readSession(header);
+    let session = await readSession(header);
     if (source !== "all" && session.source !== source) return null;
+    if (includeEventTimes) session = { ...session, userMessageEvents: sessionCache.get(header.file).userMessageEvents };
     if (!limit) return session;
     const end = Math.min(Number.isSafeInteger(before) ? before : session.messages.length, session.messages.length);
     const start = Math.max(0, end - limit);

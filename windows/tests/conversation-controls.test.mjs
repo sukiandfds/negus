@@ -1131,12 +1131,38 @@ test('steered user messages recover actual recorded times without borrowing the 
   ]}]};
   const store = createAppServerConversationStore({projectRoot:process.cwd(),registerMedia:()=>null,
     client:{subscribe:()=>()=>{},close(){},request:async()=>({thread})},
-    historyFallback:async()=>({messages:[{role:'user',itemId:'different-native-id',protocolTurnId:'turn',text:'追加消息',createdAt:'2026-10-29T14:42:32.230Z'}]})});
+    historyFallback:async()=>({userMessageEvents:[{itemId:'steered',turnId:'turn',createdAt:'2026-10-29T14:42:32.230Z'}]})});
   try {
     const result=await store.findSession(thread.id);
     assert.equal(result.messages[1].createdAt,'2026-10-29T14:42:32.230Z');
     assert.equal(result.messages[2].createdAt,undefined);
   } finally {store.close();}
+});
+
+test('repeated steers recover timestamps from owner events without adding messages', async () => {
+  const { createJsonlConversationStore } = await import('../server/jsonl-conversation-store.mjs');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'negus-steer-time-'));
+  const thread = { id: 'thread-time', cwd: root, turns: [{ id: 'turn', items: [
+    { type: 'userMessage', id: 'native-1', clientId: 'send-1', content: [{ type: 'text', text: 'same' }] },
+    { type: 'userMessage', id: 'native-2', clientId: 'send-2', content: [{ type: 'text', text: 'same' }] },
+  ] }] };
+  const event = (id, client, time) => ({ type: 'event_msg', timestamp: time, payload: { type: 'item_completed', turn_id: 'turn', completed_at_ms: Date.parse(time), item: { type: 'UserMessage', id, client_id: client } } });
+  await writeFile(path.join(root, 'test.jsonl'), [
+    { type: 'session_meta', payload: { id: thread.id, cwd: root } },
+    event('native-1', 'send-1', '2026-11-01T15:43:23.838Z'),
+    event('native-2', 'send-2', '2026-11-01T15:43:33.799Z'),
+    event('native-2', 'send-2', '2026-11-01T15:43:33.799Z'),
+  ].map(JSON.stringify).join('\n') + '\n');
+  const history = createJsonlConversationStore({ sessionRoot: root, projectRoot: root, registerMedia: () => null, onChange: () => {} });
+  const store = createAppServerConversationStore({ projectRoot: root, registerMedia: () => null,
+    historyFallback: (...args) => history.findSession(...args),
+    client: { subscribe: () => () => {}, close() {}, request: async () => ({ thread }) } });
+  try {
+    const result = await store.findSession(thread.id);
+    assert.equal(result.messages.length, 2);
+    assert.deepEqual(result.messages.map(message => message.createdAt), ['2026-11-01T15:43:23.838Z', '2026-11-01T15:43:33.799Z']);
+    assert.equal((await history.findSession(thread.id)).messages.length, 0);
+  } finally { store.close(); history.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 

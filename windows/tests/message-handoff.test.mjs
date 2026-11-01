@@ -19,7 +19,7 @@ test('connection placeholder stays hidden while submitted, but errors and notice
   assert.equal(executionHandoff('a', [], { ...status, phase: 'working' }).showExecution, true);
 });
 const { advanceLiveTranscript, createLiveTranscriptMemory } = await load('liveTranscript');
-const { mergeMessageList, mergeSessionRefresh, mergeSessionDelta } = await load('conversationMerge');
+const { mergeMessageList, mergePendingOptimisticMessages, mergeSessionRefresh, mergeSessionDelta } = await load('conversationMerge');
 const { createOptimisticMessage } = await load('optimisticMessage');
 const status = {threadId:'a',turnId:'protocol',startedAt:'2026-10-27T05:55:04Z',phase:'completed',hasFinalAnswer:true};
 const commentary = {id:'comment',role:'assistant',text:'checking',turnId:'internal',protocolTurnId:'protocol',phase:'commentary',createdAt:'2026-10-27T05:55:57.434Z'};
@@ -45,6 +45,20 @@ test('submission identity confirms quick repeated text individually', () => {
   assert.deepEqual(messages.map(m=>m.id),['native-one','optimistic-two']);
   assert.deepEqual(mergeMessageList(messages,[history('two')]).map(m=>m.id),['native-one','native-two']);
   assert.equal(mergeMessageList([local('one')],[{id:'unidentified',role:'user',text:'same',turnId:'protocol'}]).length,2);
+});
+
+test('history handoff preserves the matching send time, preferring a server time', () => {
+  const pending = { id: 'optimistic-one', role: 'user', text: 'same', submissionId: 'one', createdAt: '2026-11-01T15:43:23.000Z' };
+  const official = { id: 'native-one', role: 'user', text: 'same', submissionId: 'one' };
+  for (const messages of [mergeMessageList([pending], [official]), mergePendingOptimisticMessages({ messages: [official] }, [pending]).messages]) {
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].id, official.id);
+    assert.equal(messages[0].createdAt, pending.createdAt);
+  }
+  const serverTime = '2026-11-01T15:43:23.838Z';
+  assert.equal(mergeMessageList([pending], [{ ...official, createdAt: serverTime }])[0].createdAt, serverTime);
+  assert.equal(mergeSessionRefresh({ messages: [{ ...official, createdAt: serverTime }] }, { messages: [official] }).messages[0].createdAt, serverTime);
+  assert.equal(mergeMessageList([official], [pending])[0].createdAt, pending.createdAt);
 });
 
 test('server turn order survives skewed device clocks, steers, images and delayed queue handoff', () => {

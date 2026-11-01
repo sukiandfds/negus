@@ -34,7 +34,7 @@ export const conversationApi = {
   snapshot: async (threadId: string, sourceRevision: string, signal?: AbortSignal, conversationId = currentConversationId(threadId)) => {
     conversationId ||= await resolveConversationId(threadId);
     return fetchConversationJson<{ session: SessionDetail | null; context: ContextStatus; status: ExecutionStatus;
-      goal: ThreadGoal | null; queue: FollowUpQueueItem[]; input: UserInputRequest | null; sourceRevision: string | null }>(
+      goal: ThreadGoal | null; queue: FollowUpQueueItem[]; input: UserInputRequest | null; sourceRevision: string | null; historyFormatVersion?: number }>(
       `/api/session?threadId=${encodeURIComponent(threadId)}&limit=${PAGE_SIZE}&view=1${sourceRevision ? `&sourceRevision=${encodeURIComponent(sourceRevision)}` : ''}${conversationQuery(conversationId)}`, signal);
   },
   project: (signal?: AbortSignal) => fetchConversationJson<ProjectInfo>("/api/project", signal),

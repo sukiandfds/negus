@@ -60,16 +60,19 @@ export const mergeMessageList = (baseMessages: SessionMessage[], incomingMessage
   const addOrReplace = (message: SessionMessage) => {
     const knownIndex = indexes.get(message.id);
     if (knownIndex !== undefined) {
-      merged[knownIndex] = message;
+      merged[knownIndex] = { ...message, createdAt: message.createdAt || merged[knownIndex].createdAt };
       return;
     }
 
     const replacementIndex = merged.findIndex((current) => sameUserMessage(current, message));
     if (replacementIndex >= 0) {
       const current = merged[replacementIndex];
-      if (isOptimisticMessage(message) && !isOptimisticMessage(current)) return;
+      if (isOptimisticMessage(message) && !isOptimisticMessage(current)) {
+        if (!current.createdAt && message.createdAt) merged[replacementIndex] = { ...current, createdAt: message.createdAt };
+        return;
+      }
       indexes.delete(current.id);
-      merged[replacementIndex] = message;
+      merged[replacementIndex] = { ...message, createdAt: message.createdAt || current.createdAt };
       indexes.set(message.id, replacementIndex);
       return;
     }
@@ -102,15 +105,15 @@ export const mergeOlderMessages = (olderMessages: SessionMessage[], currentMessa
 
 export const mergePendingOptimisticMessages = (incoming: SessionDetail, pending: SessionMessage[]) => {
   if (!pending.length) return incoming;
-  const incomingIds = new Set(incoming.messages.map((message) => message.id));
-  const unresolved = unresolvedOptimisticMessages(incoming, { ...incoming, messages: pending })
-    .filter((message) => !incomingIds.has(message.id));
-  return unresolved.length
-    ? { ...incoming, messages: mergeMessageList(incoming.messages, unresolved) }
-    : incoming;
+  return { ...incoming, messages: mergeMessageList(pending, incoming.messages) };
 };
 
 export const mergeSessionRefresh = (current: SessionDetail, incoming: SessionDetail): SessionDetail => {
+  incoming = { ...incoming, messages: incoming.messages.map(message => {
+    if (message.createdAt) return message;
+    const previous = current.messages.find(item => item.id === message.id || sameSubmission(item, message));
+    return previous?.createdAt ? { ...message, createdAt: previous.createdAt } : message;
+  }) };
   const incomingIds = new Set(incoming.messages.map((message) => message.id));
   const firstOverlap = current.messages.findIndex((message) => !isOptimisticMessage(message) && incomingIds.has(message.id));
   const olderPrefix = firstOverlap > 0
