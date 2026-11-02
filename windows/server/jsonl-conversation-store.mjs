@@ -66,6 +66,9 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
               threadId: item.payload?.id || item.payload?.session_id || threadIdFromFile(file),
               title: item.payload?.name || item.payload?.title || null,
               archived: isArchivedFile(file),
+              nativeSubagent: Boolean(item.payload?.source?.subagent || item.payload?.source?.subAgent),
+              parentThreadId: item.payload?.source?.subagent?.thread_spawn?.parent_thread_id
+                || item.payload?.source?.subAgent?.thread_spawn?.parent_thread_id || null,
             };
             headerCache.set(file, header);
             return header;
@@ -279,6 +282,16 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   };
 
+  const listNativeSubagents = async (archived = false) => {
+    await initialize();
+    return Promise.all([...projectHeaders.values()].filter(header => header.nativeSubagent && header.parentThreadId
+      && header.archived === archived).map(async header => ({
+      threadId: header.threadId, source: 'codex', title: header.title || `新对话 · ${header.threadId.slice(-6)}`,
+      cwd: header.cwd, archived, nativeSubagent: true, parentThreadId: header.parentThreadId,
+      updatedAt: (await fsp.stat(header.file)).mtime.toISOString(), messageCount: null,
+    })));
+  };
+
   const findSession = async (threadId, source = "all", { before, limit, metadataOnly = false, includeEventTimes = false } = {}) => {
     await initialize();
     const header = [...projectHeaders.values()].find((item) => item.threadId === threadId);
@@ -299,5 +312,5 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
     watcher?.close();
   };
 
-  return { listSessions, findSession, close };
+  return { listSessions, listNativeSubagents, findSession, close };
 };

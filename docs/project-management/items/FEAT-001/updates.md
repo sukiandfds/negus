@@ -400,3 +400,78 @@
 - 08:57核对本地及公网 `/api/version` 均200、版本同为 `feishu-mvy5qxll`；watchdog确认后端、前端、隧道健康。两个后端修改文件与运行快照逐文件哈希相同；证据 `/tmp/negus-director-20261102/final-runtime-result.json`。内核仍为原版本，未升级0.166；滚动保护入口哈希与开工一致。
 - 关键验证按批通过34项、65项、24项（存在重复覆盖，不相加为独立用例）；TypeScript及生产构建通过。浏览器夹具覆盖20次流式零额外写盘/详情请求、真实变化继续同步、已加载点击零详情请求、默认批次、过期剩余读取、有限重试恢复及耗尽停转圈/手动刷新。未发送真实供应商生成请求，未用夹具代替人工体验验收。
 - 业务提交 `615690e9b2f5a231281bb43b3d678b4b167283ca` 已推送并核对远端develop一致；本次只追加最终记录。相对基线 `253e379` 去重共19文件：业务10文件 +80/-128（净删48），测试7文件 +239/-17，文档2文件 +150/-0；总计 +469/-145。暂缓事项、原因和后续决定见item.md表格；无新UI，实际体验变化为减少流式重复持久化、保护失败附件/原因，并把历史回读失败明确呈现为同步失败而非假空正文。
+### 2026-11-02 后台来源与派工署名澄清记录
+
+- 修改前：用户正在逐项确认后台对话体验；本步只把本次原话和有效决定补入现有条目。预计文档2文件新增约30至45行，不改业务代码、不发布或重启。
+- 交互范围：统一登记各种来源的后台对话；原生子代理使用特殊标签；助手派工及追加气泡显示来源助手名称、位于左侧。预计效果是后续开发与验收有明确依据，本步不改变线上体验。
+- 实际只更新文档2文件，新增28行、删除1行；已核对原话与摘要分开、保留历史和滚动保护。差异格式检查通过；未改业务或测试、未发布、未重启，线上行为不变。
+
+### 2026-11-02 实施批 A：后台入口登记
+
+- 群聊独立后台线程复用统一登记及绑定，保存实际 Provider、模型、强度和助手来源；普通群聊线程不强制登记。旧后台入口传助手来源和强度。登记失败后保存已建线程，重建服务时补登记并仅在有明确未启动标记时首次启动，不重建线程或重发已有 turn。
+- 相对批 A 开工工作区：业务5文件 +30/-11，测试2文件 +95/-2，文档2文件 +17/-0；总监已有需求澄清保留。定向测试22项通过，追加的重建恢复和旧入口2项通过，最终群聊定向2项通过；日志 `/tmp/negus-director-20261102/implementation-batch-a-tests.log`、`implementation-batch-a-recheck.log`、`implementation-batch-a-final.log`。MJS 语法及差异检查通过。
+- 后端源码已改，待总监最后安排受控重启，未运行态验收。显式 DeepSeek 不能被已有 VIP 默认策略覆盖仍待下一批；普通来源派工、逐条署名、原生子代理投影及两条已知线程的定向修复均未实施。未修改运行数据、发布、重启、提交或推送。
+
+### 2026-11-02 实施批 BC1：消息账本字段
+
+- 员工账本归一化保留发送编号与可信展示来源；原生 `userMessage.clientId` 映射为发送编号，署名只接受服务端显式提供的关联，不读取消息自带作者字段。
+- 相对 BC1 开工：业务1文件 +7/-1，测试1文件 +21/-0，文档2文件 +9/-0。定向测试1/1通过，源码语法及差异检查通过；日志 `/tmp/negus-director-20261102/implementation-bc1-tests.log`。现有 runtime 已透传 `turnOptions`，未修改；真实 native `clientId` 往返尚未验证，不能仅凭本地夹具宣称闭环。普通来源派工、实际 actor 接入及原生子代理投影仍待后续；后端未重启、未发布。
+
+### 2026-11-02 实施批 BC2a：普通来源底层契约
+
+- kernel 仅对明确 `source.kind=conversation` 的入队允许无员工 ID；现有 MCP 后台创建工具可传显式 Provider、模型和推理强度。定向 kernel 回归1/1、语法和差异检查通过，证据 `/tmp/negus-director-20261102/implementation-bc-2a-tests.log`。
+- 这是底层子批，不是 B/C 完成交付。普通对话 capability/adapter、实际路由与 followup、逐条 actor 和原生往返确认仍未接入；后端源码未重启生效，未发布。
+
+### 2026-11-02 实施批 BC2：普通来源派工及逐条署名
+
+- 普通主对话经现有 `negus_handoffs` capability 进入同一 task kernel：服务端核实已登记 thread、活动 turn 和来源 Provider；显式 Provider/模型/强度优先于 VIP 默认。无员工来源不伪造绑定；后台执行者不得再派工。任务登记、目录及 `/api/tasks` 共用现有路径。
+- 首发与追加要求在任务记录中保存稳定 submission 与可信助手身份；原生回读仅按 `clientId` 匹配，真人同 turn 输入不贴助手标签。追加沿原线程进入既有 queue：活动 turn 使用 steer，终态使用新 turn 观察；重复请求只核对已有 queue/原生历史，不盲重发。结果通知沿原 delivery 去重并标记执行助手。登记待完成的已建线程恢复时不再次创建线程。
+- 定向服务/群聊测试14/14、共享 kernel 测试11/11通过；隔离临时 Codex Home、本地不可达模型端点的当前 0.165 协议探针确认 `turn/start.clientUserMessageId` 回读为 `userMessage.clientId`，没有真实供应商调用。TypeScript、语法、`git diff --check` 通过。日志：`/tmp/negus-director-20261102/implementation-bc2-final-tests.log`、`implementation-bc2-kernel.log`、`implementation-bc2-native.log`、`implementation-bc2-ts.log`、`implementation-bc2-diffcheck.log`；累计差异见 `implementation-bc2-cumulative.diff` 和 `implementation-bc2-cumulative-numstat.txt`。
+- 相对 BC2 开工、从既有 A/BC1/BC2a 差异扣除：业务9文件 +183/-48，测试1文件 +161/-5，文档2文件 +11/-0；累计去重数以最终 numstat 为准。既有浏览器夹具验证带 `displaySourceAgentId` 的用户协议消息呈左侧助手气泡，真人消息保持右侧，日志 `implementation-bc2-ui.log`；运行态仍待受控发布/后端重启。两条已知历史线程的定向登记及可证历史署名须总监在发布后执行，未修改在线数据；D1 原生子代理投影不在本批。
+
+### 2026-11-02 总监定向核验：版本读取失败
+
+- 实际复现：正文版本不可读时，仅署名版本被返回为可复用标识；下一次请求可能跳过正文读取。路由改1行，仅在原生正文版本有效时组合署名版本。
+- 关键回归3/3通过：助手报告的等候/发送署名一致且忽略真人伪造字段、署名变化才重读、正文版本不可用时继续读正文。队列编号校正已由Sol同时完成，本次总监未重复修改。实际业务1文件 +1/-1、测试1文件新增59行；证据 `/tmp/negus-director-20261102/implementation-director-projection-{before,tests}.log`。后端尚未重启。
+
+### 2026-11-02 实施批 BC3：审阅阻断修正
+
+- fresh 普通线程在 `thread/start` 注入 MCP 能力并绑定真实 thread ID，已有线程只在 `thread/resume` 注入；`turn/start` 不再收到不支持的 config，员工 managed 创建不套普通能力。助手 followup 以原生 `clientId` 与持久 input 精确对应，才按原 delivery 回源一次；真人私聊续轮不回源。普通来源 actor ID 为 `assistant:<sourceThreadId>`，结果作者为实际执行助手。旧后台首发/通知沿已有 task ID 与稳定 dispatch ID 装饰，未知 ID 不贴标签。
+- followup input 先保存 actor，queue item 以 held 状态落盘；接受标记持久化后释放。明确未入队可用同 submission 重试；已接受但 queue 已消失只查原生历史，未知不盲重发。活动线程仍走现有 steer，无新执行器。定向测试：MCP 2/2、普通/queue/恢复 7/7、旧后台 1/1；TypeScript、语法、diff 检查通过。证据 `/tmp/negus-director-20261102/implementation-bc3-mcp.log`、`implementation-bc3-followup.log`、`implementation-bc3-legacy.log`、`implementation-bc3-ts.log`。
+- 相对 BC3 开工、按 BC2 保存的累计 numstat 对照：业务7文件 +86/-9，测试3文件 +65/-0，文档2文件 +10/-0。群聊独立任务首发稳定署名已在 BC2；群聊工具尚无可信的助手 followup 输入账本，不能仅凭消息属于同一 turn 推断发送人，后续署名不算完成。当前无发布或重启，历史两线程修复仍待总监后续受控执行，D1 未实施。
+
+### 2026-11-02 按用户限时停止
+
+用户要求“给你5分钟弄不完别弄了”。本轮完整交付尚缺两条历史线程安全补登、最终生产构建和正式发布核验，无法在限时内保证完成，已停止开发任务和临时验证服务，不安排发布或重启。群聊服务与专属测试恢复本轮基线；未获授权的群聊扩展和不适合在线执行的补登脚本已移出工作区，仅在 /tmp/negus-director-20261102/withdrawn-group-scope 保留追溯。
+
+现有改动保留为未交付草稿，未提交、未推送。定向回归110项首次109通过；唯一失败为新增子代理字段的旧预期，补齐后该文件37项通过。浏览器夹具实际断言助手左/真人右、队列署名及原生任务标签通过（final-ui.log）；两个保护文件哈希与基线一致，diff检查通过。线上仍为旧版本，不将源码或局部测试通过记为交付。
+### 2026-11-02 消息交接收尾验证（本次主对话）
+
+用户重新授权两项完整开发。发送事件带既有排队编号，ConversationStore 保存排队/发送尝试关联，接受先到及旧批次后到不恢复等待气泡；延迟映射到达时保留已接受正文，正式历史也可确认交接。移除接受时用旧 committed 队列覆盖 live 队列的更新。ChatWorkspace 先放等待消息再合并正式记录，保留正式时间/助手署名；不按文字去重，不改变发送/重试协议与滚动测量。业务5文件本次 +41/-9，测试2文件 +45/-2（均不包含前轮署名/后台改动）。
+
+消息交接及加载单测26/26通过，工作台浏览器7/7通过（新增submitted/accepted先于队列映射、延迟旧队列、助手署名断言），既有conversation-store浏览器7组通过（同文两次、失败附件、切换/重载及运行中队列）。TypeScript与diff检查通过，两个滚动保护文件与HEAD无差异。证据 `/tmp/negus-handoff-{unit,types,workspace,store-browser}.log`。前端已于13:03:01受控发布 `feishu-mvysm8h4`，backendRestarted=false，本地/api/version为200且版本一致；后台新事件字段及补登/子代理修复待本轮统一重启后真实验收，不将前端发布等同两项已完成。
+
+本次统一候选已准备：`1793595790314-01e46644`，可恢复版本 `1793592398300-7e47643f`，隔离准备通过，日志 `/tmp/negus-two-requirements-prepare.log`。重启后先核对本次status/result，再执行 `/tmp/negus-director-20261102/finish-background-registration.mjs` 和 `verify-live-handoffs.mjs`；后者保存request/thread/task身份，超时续跑不得重复创建。真实验收后再提交同步develop并核对健康，当前目标保持进行中。
+
+### 2026-11-02 原生子代理归属过滤定向修复
+
+只读核验：真实 native child `01a19a65-c6ca-7840-863a-16aeeed2d88b` 的原生 `source.subagent.thread_spawn.parent_thread_id` 指向 `01a199c7-a3fe-70b1-9161-1960ac80c287`；父 route 为 `current`，child 原生文件位于已知隔离 Provider；线上 `/api/session` 暂仍 404。业务仅改 `provider-conversation-store.mjs` 的列表 owner 判定，允许 current 父与唯一具体 Provider child 关联，明确不同父 Provider 或多 Home 同 ID 时拒绝；同一 owner 用于打开。相对开工业务1文件 +15/-7，测试1文件 +32/-0，文档2文件实际计数见本批证据。定向测试2/2、`git diff --check` 通过，保护文件哈希未变。已 `prepare` 候选 `1793592398300-7e47643f`，fallback/active `1793591345542-a235c150`；候选运行文件与 active 仅此业务文件不同。未重启、未发布，线上效果待总监受控切换后核验。
+
+定向复验：总监已受控重启 `1793592398300-7e47643f`，但线上 `/api/sessions` 和目录仍缺真实 child，直达仍404。实际两个指定 Home 的 `thread/list` 即使传全部 `subAgent*` 均未返回该 child，而 child Provider 的 `thread/read` 可读原生 source、parent 与 path。补用现有具体 Provider JSONL 项目 header 索引投影子代理，与 native list 合并后沿原 owner 校验。相对本批开工业务3文件 +21/-3、测试1文件 +25/-0；定向测试3/3、语法和 diff check 通过。用真实 routes/Provider 的修改后只读服务实例验证 list 返回该 child、owner 为实际 Provider、findSession 打开同一原线程。新候选 `1793593573715-9652a1b7` 已 prepare，fallback 为当前运行 `1793592398300-7e47643f`；未重启，线上尚未生效。详见 `/tmp/negus-director-20261102/native-owner-hotfix-followup-evidence.json`。
+
+### 2026-11-02 本轮收尾：已知历史线程在线补登（修改前）
+
+用户重新授权“请你把我的两个需求都开发完整好。最小代码改动，多复用已有代码逻辑。”现象：已有 Terra 对话登记为 current/缺助手来源，DeepSeek 对话未登记而不可见。停服直写脚本不能与运行中内存路由安全共存；改为现有鉴权任务路由调用活跃 Provider store 的参数化补登方法，先从指定 Provider 只读核验原线程及设置，再复用 registerSession，保留既有元数据并拒绝并发变化/跨具体 Provider 覆盖；不创建线程、不发送消息。预计业务3文件 +约35/-0、测试1文件 +约45/-0。未知历史消息无精确派工身份不猜；首发/续派新路径沿现有 task.inputs。子代理已有真实只读验证及3项定向测试复用，不重复运行。
+
+本批结果：业务3文件新增28行（Provider store 18、任务扩展5、现有鉴权路由5），测试1文件新增29行；既有改动全部保留。定向回归1/1覆盖空路由补登、current错误归属修正、最新模型/强度和自定标题保留、具体Provider冲突、并发变化拒绝，原生适配器仅提供只读方法因而不会创建或发送。日志 `/tmp/negus-director-20261102/background-registration-tests.log`，语法和差异检查通过。补登后广播现有sessions_changed。已准备 `/tmp/negus-director-20261102/finish-background-registration.mjs`，由总监重启加载后执行，核验两条旧对话的来源/Provider/目录/打开及两条真实child的sessions/目录/tasks标签/打开。此刻仅源码完成，未修改线上数据、未发布或重启。旧桥接脚本没有保存可核对的原生派工消息ID；按已确认规则，旧消息身份不猜测，新派工及续派继续按task.inputs稳定ID标注。
+
+补登并发复核：将预期路由快照比较移到registerSession内部、await ready之后与赋值同一同步段，关闭检查后微任务间隙；最终本批业务3文件 +31/-1，测试1文件 +29/-0。未知Provider由model-provider-service.resolveRoute明确400拒绝；readOnly经过thread/read/JSONL fallback而非resume。另交付真实首发/续派验证脚本 `/tmp/negus-director-20261102/verify-live-handoffs.mjs`，用独立验收主对话实际调用现有MCP工具、后台短回复、沿原task/thread续派，核对首次和追加署名及真人消息不误标；持久保存验收thread/task/requestId，重复执行复用已提交请求。尚未运行，安排统一重启后执行，不能将脚本准备计为真实验收通过。
+
+### 2026-11-02 两项需求最终上线验收
+
+- 受控重启任务 `1793595832491-51720` 于13:04:14一次成功，运行版本 `1793595790314-01e46644`，未回退。重启尚scheduled时一次补登请求落到旧服务404，未写入；核对本次started后再执行成功。验收必须先核对当前jobId/release再调用新版入口，旧result不能作为已生效证据。
+- 两条既有Terra/DeepSeek线程通过活跃服务安全补登，实际Provider和“来自助手”正确，列表/目录可见且原线程可打开。两条原生child在sessions、项目目录和tasks中均可见且可打开。证据 `background-live-completion.json`。
+- 真实DeepSeek来源主对话通过MCP创建后台task `27b8a77d-4b06-4a1a-bd84-b29da8264ede`；首次和followup均实际运行、回读署名正确，沿用同一线程，真人补充没有助手身份。证据 `live-handoffs-evidence.json`，均位于 `/tmp/negus-director-20261102/`。
+- 真实页面验收补齐当前Feishu列表/标题的原生标签：业务6文件 +9/-6，直接复用ConversationOrigin，无新组件和控制。13:30:48前端发布 `feishu-mvytlyvz`，不重启后端。浏览器确认两条派工气泡为左侧来源助手、真人为右侧“我”；后台列表出现Codex子代理标签，点击进入原线程，页面异常0。证据 `live-browser-evidence.json`、`live-attribution.png`、`live-native-task-list.png`。旧组件夹具不能替代当前用户入口，验收应从实际导航路径打开页面。
+- 消息交接单测26/26、工作台浏览器7/7、共享store浏览器7组通过；接受先到/旧快照、正常steer同turn、同文两次、失败及附件保留均有覆盖。TypeScript、构建、diff检查通过。两个受保护滚动文件未改；无群聊扩展、内核升级或子代理额外控制。后端/前端/公网健康，公网HTTP200。
+- 相对本轮基线944179d，累计业务31文件 +480/-103，测试12文件 +581/-9，文档2文件；含上午已有改动，不与凌晨19文件维护混算。当前两项实现及运行验收已收口。旧桥接消息无可靠身份的历史保持原样，不猜署名；不属于新派工署名失效。

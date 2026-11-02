@@ -74,6 +74,30 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
     task.updatedAt = now();
     return task;
   });
+  const recordInput = (id, input) => mutate(data => {
+    const task = requireTask(data, id);
+    task.inputs ||= [];
+    const existing = task.inputs.find(item => item.requestId === input.requestId);
+    if (existing) {
+      if (existing.text !== input.text) throw fail('交接标识已用于其他内容', 409);
+      return existing;
+    }
+    task.inputs.push(copy(input));
+    task.updatedAt = now();
+    return input;
+  });
+  const acceptInput = (id, requestId) => mutate(data => {
+    const input = requireTask(data, id).inputs?.find(item => item.requestId === requestId);
+    if (!input) throw fail('交接输入不存在', 404);
+    input.accepted = true;
+    return input;
+  });
+  const attributeFollowup = (id, parentTaskId, submissionId, sourceTaskId) => mutate(data => {
+    const task = requireTask(data, id);
+    if (task.kind !== 'followup') throw fail('不是续派任务');
+    task.assistantFollowup = { parentTaskId, submissionId, sourceTaskId };
+    return task;
+  });
   const execute = async (id, recovering) => {
     const controller = new AbortController();
     const entry = { controller, promise: null };
@@ -175,11 +199,16 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
   }
   const enqueue = async input => {
     if (closed) throw fail('任务服务已关闭');
-    if (!input.requestKey || !input.lane || !input.conversationId || !input.agentId) throw fail('任务来源或执行员工不完整', 400);
+    if (!input.requestKey || !input.lane || !input.conversationId || (!input.agentId && input.source?.kind !== 'conversation')) throw fail('任务来源或执行员工不完整', 400);
     await validate(copy(input));
     const task = await mutate(data => {
       const existing = data.tasks.find(task => task.requestKey === input.requestKey);
-      if (existing) return existing;
+      if (existing) {
+        if (input.source?.kind === 'conversation' && (existing.title !== input.title || existing.instructions !== input.instructions
+          || existing.modelProviderId !== input.modelProviderId || existing.model !== input.model
+          || (existing.reasoningEffort || '') !== (input.reasoningEffort || ''))) throw fail('交接标识已用于其他任务', 409);
+        return existing;
+      }
       if (input.kind === 'delegation') {
         const parent = requireTask(data, input.parentTaskId);
         if (terminalStates.has(parent.state) || parent.cancelRequested) throw fail('来源任务已结束或正在停止');
@@ -245,7 +274,7 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
   recoveryTimer.unref?.();
   schedule();
   return {
-    enqueue, delegate, cancel,
+    enqueue, delegate, recordInput, acceptInput, attributeFollowup, cancel,
     list: () => copy(state.tasks), deliveries: () => copy(state.deliveries), get: id => copy(find(id)),
     hasPendingWork: () => state.tasks.some(task => !terminalStates.has(task.state)),
     retryDelivery: async id => { await mutate(data => {

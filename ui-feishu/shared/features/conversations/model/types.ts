@@ -45,6 +45,7 @@ export interface SessionMessage {
 }
 
 export interface SessionSummary {
+  nativeSubagent?: boolean;
   sourceRevision?: string;
   model?: string;
   modelProviderId?: string;

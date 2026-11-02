@@ -3,6 +3,9 @@ import type { MediaFile } from "../../../shared/model/media";
 export type FollowUpQueueState = "pending" | "dispatching" | "failed";
 
 export interface FollowUpQueueItem {
+  authorId?: string;
+  authorName?: string;
+  displaySourceAgentId?: string;
   id: string;
   threadId: string;
   submissionId: string;

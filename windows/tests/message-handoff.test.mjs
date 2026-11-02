@@ -1,10 +1,71 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import ts from '../../ui-feishu/node_modules/typescript/lib/typescript.js';
 import { createExecutionTracker } from '../server/execution-tracker.mjs';
 import { messagesFromTurns } from '../server/codex-thread-history.mjs';
 import { createFollowUpQueueService } from '../server/follow-up-queue-service.mjs';
+import { ConversationStore } from './frontend-conversation-store.mjs';
+
+test('queue acceptance survives late mapping and stale batches without hiding a second identical send', () => {
+  const store = new ConversationStore({ cachedSessions: [], partialSessionIds: [] });
+  const queued = { id: 'q', submissionId: 'queued', text: 'same', attachments: [], state: 'pending' };
+  store.update('t', { queueItems: [queued] });
+  store.acceptQueuedMessage('t', 'attempt');
+  store.update('t', { queueItems: [{ ...queued, state: 'dispatching', dispatchSubmissionId: 'attempt' }] }, true);
+  assert.deepEqual(store.get('t').queueItems, []);
+  assert.equal(store.get('t', false).session.messages[0].submissionId, 'attempt');
+  const snapshot = { ...store.empty('t'), queueItems: [queued], session: { threadId: 't', messages: [] } };
+  store.commit('t', snapshot, store.revisions.get('t'));
+  store.update('t', { queueItems: [queued, { ...queued, id: 'q2', submissionId: 'queued2' }] }, true);
+  assert.deepEqual(store.get('t').queueItems.map(item => item.id), ['q2']);
+  store.addMessage('t', { id: 'optimistic-attempt', submissionId: 'attempt', role: 'user', text: 'same' });
+  store.addMessage('t', { id: 'optimistic-attempt2', submissionId: 'attempt2', role: 'user', text: 'same' });
+  store.linkQueuedMessage('t', 'queued2', 'attempt2');
+  store.commit('t', { ...snapshot, queueItems: [queued, { ...queued, id: 'q2', submissionId: 'queued2' }],
+    session: { threadId: 't', messages: ['attempt', 'attempt2'].map(id => ({ id: `native-${id}`, submissionId: id, role: 'user', text: 'same' })) } }, store.revisions.get('t'));
+  assert.deepEqual(store.get('t').queueItems, []);
+  assert.deepEqual(store.get('t', false).session.messages.map(message => message.id), ['native-attempt', 'native-attempt2']);
+});
+
+test('submitted queue identity is retained across stale reads and failed attempts remain retryable', () => {
+  const store = new ConversationStore({ cachedSessions: [], partialSessionIds: [] });
+  const queued = { id: 'q', submissionId: 'queued', text: 'same', attachments: [{ id: 'image' }], state: 'pending' };
+  store.update('t', { queueItems: [queued] });
+  store.linkQueuedMessage('t', 'queued', 'attempt');
+  store.update('t', { queueItems: [{ ...queued, state: 'failed', error: 'unavailable', dispatchSubmissionId: 'attempt' }] }, true);
+  assert.equal(store.get('t').queueItems[0].state, 'failed');
+  assert.deepEqual(store.get('t').queueItems[0].attachments, queued.attachments);
+  store.update('t', { queueItems: [{ ...queued, state: 'dispatching', dispatchSubmissionId: 'retry-attempt' }] }, true);
+  store.commit('t', { ...store.empty('t'), queueItems: [{ ...queued, dispatchSubmissionId: 'attempt' }] }, store.revisions.get('t'));
+  assert.equal(store.get('t').queueItems[0].dispatchSubmissionId, 'retry-attempt');
+  store.acceptQueuedMessage('t', 'retry-attempt');
+  assert.deepEqual(store.get('t').queueItems, []);
+});
+
+test('queue projects only trusted submission actor to items and submitted event', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-queue-actor-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const events = [];
+  const queue = createFollowUpQueueService({ stateFile: path.join(root, 'queue.json'),
+    execution: { getStatus: () => ({ active: true, turnId: 'turn' }) },
+    conversations: { steerMessage: async () => {} }, media: { resolveMany: () => [] },
+    sourceActorFor: (_threadId, id) => id === 'assistant-input'
+      ? { authorId: 'assistant:source', authorName: '总监', displaySourceAgentId: 'assistant:source' } : null,
+    publishThreadEvent: (_threadId, event) => events.push(event) });
+  t.after(() => queue.close());
+  const assistant = await queue.enqueue({ threadId: 'task', text: '要求', submissionId: 'assistant-input', held: true });
+  const human = await queue.enqueue({ threadId: 'task', text: '补充', submissionId: 'human-input', held: true, authorName: '伪造' });
+  assert.equal(assistant.displaySourceAgentId, 'assistant:source');
+  assert.equal(human.authorName, undefined);
+  assert.equal(queue.list('task')[0].authorName, '总监');
+  assert.equal(events.find(event => event.type === 'queue_changed').items[0].displaySourceAgentId, 'assistant:source');
+  await queue.release('task', assistant.id);
+  await queue.sendNow('task', assistant.id);
+  assert.equal(events.find(event => event.type === 'user_message_submitted').authorName, '总监');
+});
 const load = async name => {
   const source = await fs.readFile(new URL(`../../ui-feishu/shared/features/conversations/state/${name}.ts`, import.meta.url), 'utf8');
   return import(`data:text/javascript;base64,${Buffer.from(ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText).toString('base64')}`);
@@ -103,6 +164,7 @@ test('queued image message remains present from dispatch through acceptance and 
     media:{resolveMany:()=>[attachment]},
     publishThreadEvent:(_thread,event)=>events.push(event),
     conversations:{steerMessage:async (threadId,turnId,_text,_attachments,clientId)=>{
+      assert.equal(threadId, 't'); assert.equal(turnId, 'turn');
       tracker.handleProtocolMessage({method:'item/started',params:{threadId,turnId,item:{type:'userMessage',id:'native',clientId}}});
     }},
   });
@@ -115,6 +177,7 @@ test('queued image message remains present from dispatch through acceptance and 
     assert.ok(events.indexOf(submitted) < events.indexOf(accepted));
     assert.ok(events.indexOf(accepted) < events.indexOf(completed));
     assert.notEqual(submitted.submissionId,item.submissionId);
+    assert.equal(submitted.queueSubmissionId,item.submissionId);
     const local = {...createOptimisticMessage(submitted.text,submitted.attachments,submitted.submissionId,submitted.createdAt),turnId:accepted.turnId};
     const beforeHistory = mergeSessionRefresh({threadId:'t',messages:[local]}, {threadId:'t',messages:[]});
     assert.equal(beforeHistory.messages[0].blocks[1].source,attachment.url);

@@ -8,6 +8,8 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
   const active = new Map();
   const trace = event => { try { log(event); } catch {} };
   const run = async (task, controls, recovering) => {
+    // This checkpoint is written before registration and before any turn/start.
+    if (recovering && task.runtime.registrationPending && task.runtime.threadId && !task.runtime.starting && !task.runtime.turnId) recovering = false;
     if (recovering && !task.runtime.turnId) {
       if (!task.runtime.starting) return { status: 'interrupted', text: '', error: '服务在任务启动前退出' };
       if (!Array.isArray(task.runtime.previousTurnIds)) return { status: 'unknown', error: '缺少本次执行前的历史记录，无法确认执行结果' };
@@ -113,7 +115,7 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
       } else {
         if (controls.signal.aborted) return { status: 'interrupted', text: '' };
         // Persist intent before the side effect. Lost RPC acknowledgment is reconciled, never replayed.
-        await controls.checkpoint({ threadId, starting: true, previousTurnIds });
+        await controls.checkpoint({ threadId, starting: true, registrationPending: false, previousTurnIds });
         startRequested = true;
         try {
           const response = await client.request('turn/start', { ...turnOptions, threadId, input });

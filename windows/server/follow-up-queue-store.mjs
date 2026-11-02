@@ -13,6 +13,8 @@ const normalizeItem = (threadId, item, index = 0) => {
     id: String(item?.id || `queued-${randomUUID()}`),
     threadId,
     submissionId: String(item?.submissionId || randomUUID()),
+    ...(item?.stableDispatchId ? { stableDispatchId: String(item.stableDispatchId) } : {}),
+    ...(item?.held ? { held: true } : {}),
     text: String(item?.text || "").trim(),
     ...(item?.modelSettings?.model ? { modelSettings: { model: String(item.modelSettings.model), reasoningEffort: String(item.modelSettings.reasoningEffort || "") } } : {}),
     attachmentIds: [...new Set(Array.isArray(item?.attachmentIds) ? item.attachmentIds.map(String) : [])].slice(0, 6),
@@ -82,7 +84,7 @@ export const createFollowUpQueueStore = ({ stateFile = "" } = {}) => {
   const find = (threadId, itemId) => itemsFor(threadId).find((item) => item.id === itemId) || null;
   const findBySubmissionId = (threadId, submissionId) => itemsFor(threadId).find((item) => item.submissionId === submissionId) || null;
 
-  const enqueue = ({ threadId, text, attachmentIds = [], attachments = [], submissionId = "", modelSettings }) => {
+  const enqueue = ({ threadId, text, attachmentIds = [], attachments = [], submissionId = "", modelSettings, stableDispatchId = "", held = false }) => {
     const existing = submissionId ? findBySubmissionId(threadId, submissionId) : null;
     if (existing) return { ...existing };
     if (itemsFor(threadId).length >= maxItemsPerThread) throw Object.assign(new Error("排队消息已满，请先处理已有消息"), { statusCode: 409 });
@@ -90,6 +92,8 @@ export const createFollowUpQueueStore = ({ stateFile = "" } = {}) => {
     const item = normalizeItem(threadId, {
       id: `queued-${randomUUID()}`,
       submissionId: submissionId || randomUUID(),
+      stableDispatchId,
+      held,
       text,
       attachmentIds,
       attachments,
@@ -146,7 +150,7 @@ export const createFollowUpQueueStore = ({ stateFile = "" } = {}) => {
 
   const claimNext = (threadId) => {
     const items = itemsFor(threadId);
-    const index = items.findIndex((item) => item.state === "pending");
+    const index = items.findIndex((item) => item.state === "pending" && !item.held);
     if (index < 0) return null;
     const now = new Date().toISOString();
     const item = {
@@ -154,7 +158,7 @@ export const createFollowUpQueueStore = ({ stateFile = "" } = {}) => {
       state: "dispatching",
       error: "",
       sentAt: now,
-      dispatchSubmissionId: dispatchSubmissionId(),
+      dispatchSubmissionId: items[index].stableDispatchId || dispatchSubmissionId(),
       updatedAt: now,
     };
     const nextItems = [...items];
@@ -166,14 +170,14 @@ export const createFollowUpQueueStore = ({ stateFile = "" } = {}) => {
   const claim = (threadId, itemId) => {
     const items = itemsFor(threadId);
     const index = items.findIndex((item) => item.id === itemId);
-    if (index < 0 || items[index].state === "dispatching") return null;
+    if (index < 0 || items[index].state === "dispatching" || items[index].held) return null;
     const now = new Date().toISOString();
     const item = {
       ...items[index],
       state: "dispatching",
       error: "",
       sentAt: now,
-      dispatchSubmissionId: dispatchSubmissionId(),
+      dispatchSubmissionId: items[index].stableDispatchId || dispatchSubmissionId(),
       updatedAt: now,
     };
     const nextItems = [...items];
@@ -193,6 +197,7 @@ export const createFollowUpQueueStore = ({ stateFile = "" } = {}) => {
     sentAt: "",
     dispatchSubmissionId: "",
   });
+  const release = (threadId, itemId) => update(threadId, itemId, { held: false });
 
   const complete = (threadId, itemId) => remove(threadId, itemId, { allowDispatching: true });
 
@@ -216,6 +221,7 @@ export const createFollowUpQueueStore = ({ stateFile = "" } = {}) => {
     claimNext,
     markFailed,
     markPending,
+    release,
     complete,
     threadIds,
     close,

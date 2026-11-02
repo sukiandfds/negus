@@ -42,6 +42,17 @@ try {
   assert.match(await userMessage.getAttribute('class'), /user/);
   assert.equal(await sourceMessage.locator('span').first().evaluate(element => getComputedStyle(element).textAlign), 'start');
   assert.equal(await userMessage.locator('span').first().evaluate(element => getComputedStyle(element).textAlign), 'right');
+  const queued = page.getByRole('region', { name: '指令等候中' }).locator('article');
+  assert.equal(await queued.count(), 2);
+  assert.match(await queued.nth(0).getAttribute('class'), /assistant/);
+  assert.equal(await queued.nth(0).locator('span').first().innerText(), '总监');
+  assert.match(await queued.nth(1).getAttribute('class'), /user/);
+  assert.equal(await queued.nth(1).locator('span').first().innerText(), '我');
+  await page.getByRole('region', { name: '当前任务' }).getByRole('button').first().click();
+  await page.getByRole('dialog', { name: '当前任务' }).getByRole('button', { name: /查看全部任务/ }).click();
+  await page.getByRole('button', { name: /暂停与异常/ }).click();
+  assert.match(await page.getByRole('dialog', { name: '任务列表' }).innerText(), /Codex 子代理 · 原生研究/);
+  await page.getByRole('button', { name: '关闭当前任务' }).click();
   await input().fill('源草稿');
   await fileInput().setInputFiles({ name: 'source.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') });
   const preview = await page.locator('.chat-composer > div:visible img').getAttribute('src');

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ChatWorkspace } from '../src/components/ChatWorkspace';
+import { CurrentTasksWidget } from '../shared/features/desktop/CurrentTasksWidget';
 import { openAgentConversation } from '../shared/features/agent-sharing/navigation/openAgentConversation';
 import '../src/style.css';
 
@@ -24,7 +25,11 @@ function Fixture() {
   const executionStatus = { type: 'execution_status', threadId, turnId: '', phase: 'idle', active: false, activities: [], startedAt: null, label: '', detail: '', commentary: '', updatedAt: null };
   const contextStatus = { type: 'context_status', threadId, model: '', reasoningEffort: '', usedTokens: null, contextWindow: null, percentage: null, autoCompactThreshold: null, phase: 'idle', message: '', updatedAt: null };
   const send = async (text: string, attachments: unknown[]) => { submissions.push({ threadId, text, attachments }); return sendResult; };
-  const c = { session, selectedId: threadId, composerKey: threadId, connected: true, executionStatus, contextStatus, queueItems: [], queueError: '', queueBusy: false,
+  const queueItems = threadId === 'source' ? [
+    { id: 'assistant-queue', threadId, submissionId: 'assistant-queue', text: '助手追加要求', attachments: [], state: 'pending', createdAt: '2026-10-28T01:03:00Z', authorId: 'assistant:source', authorName: '总监', displaySourceAgentId: 'assistant:source' },
+    { id: 'human-queue', threadId, submissionId: 'human-queue', text: '本人追加要求', attachments: [], state: 'pending', createdAt: '2026-10-28T01:04:00Z' },
+  ] : [];
+  const c = { session, selectedId: threadId, composerKey: threadId, connected: true, executionStatus, contextStatus, queueItems, queueError: '', queueBusy: false,
     loadingSession: false, contentSyncState: 'stable', loadingOlder: false, sessionError: '', listError: '', streamingText: '', goal: null,
     visibleModel: '', visibleEffort: '', models: [], modelsLoading: false, modelChanging: false, modelError: '', editingMessage: null,
     editingMessageId: '', forkingMessageId: '', retryingMessageId: '', goalBusy: false, goalError: '', goalResumePrompt: false,
@@ -33,7 +38,10 @@ function Fixture() {
     review: ok, dismissGoalResumePrompt: noop, changeGoalStatus: ok, clearGoal: ok, setGoal: ok, editGoal: ok, compactContext: ok,
     setAutoCompactThreshold: ok, changeModel: ok, changeReasoningEffort: ok, renameSession: ok };
   (window as any).fixture = { select: setThreadId, fail: (value: boolean) => { sendResult = !value; }, submissions: () => submissions, clear: () => { submissions = []; } };
-  return <><nav>{targets.map(item => <button key={item.id} onClick={() => setThreadId(item.id)}>打开 {item.id}</button>)}</nav>
+  const taskDirectory = { projects: [{ id: 'project', name: '验证项目', conversations: [
+    { id: 'native-child', threadId: 'native-child', title: '原生研究', nativeSubagent: true, status: { phase: 'idle', active: false } },
+  ] }], statusByThread: {}, goalByThread: {}, loading: false, error: '', refresh: async () => {} };
+  return <><CurrentTasksWidget directory={taskDirectory as any} active={false} connected onSelect={noop} /><nav>{targets.map(item => <button key={item.id} onClick={() => setThreadId(item.id)}>打开 {item.id}</button>)}</nav>
     <div className="fixture-workspace show-chat"><ChatWorkspace visible c={c as any} usage={{} as any} initialReady tab={tab} setTab={setTab} details={details} setDetails={setDetails}
       agentId="" selectedName="助手" selected={targets.find(item => item.threadId === threadId) as any} onBack={noop} onShare={noop}
       targets={targets as any} onOpenTarget={async item => { if (item.agentId) await openAgentConversation({ agentId: item.agentId, threadId: item.threadId, conversationId: item.conversationId }); else history.pushState({}, '', `?thread=${item.threadId}`); setThreadId(item.threadId!); return true; }} /></div></>;

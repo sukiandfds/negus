@@ -25,7 +25,8 @@ export const createProviderConversationStore = ({ current, providers, createStor
     }
     return stores.get(providerId);
   };
-  const owner = (id) => routes[id]?.providerId || providerForThread(id) || "current";
+  const childOwners = new Map();
+  const owner = (id) => routes[id]?.providerId || providerForThread(id) || childOwners.get(id) || "current";
   const decorate = (session) => session && ({ ...session,
     createdBy: routes[session.threadId]?.createdBy || session.createdBy,
     ...(routes[session.threadId]?.manualTitle ? { title: routes[session.threadId].manualTitle } : {}),
@@ -34,6 +35,16 @@ export const createProviderConversationStore = ({ current, providers, createStor
   });
   const service = {};
   service.getRecordedProviderForThread = async id => { await ready; return routes[id]?.providerId || null; };
+  service.getVerifiedProviderForThread = async id => {
+    await ready;
+    if (routes[id]?.providerId) return routes[id].providerId;
+    const info = await current.getSessionResumeInfo(id, { readOnly: true }).catch(() => null);
+    return info?.path && info?.cwd ? 'current' : null;
+  };
+  service.getSessionResumeInfo = async (id, options = { readOnly: true }) => {
+    await ready;
+    return (await storeFor(owner(id))).getSessionResumeInfo(id, options);
+  };
   service.findSessionForProvider = async (providerId, ...args) => (await storeFor(providerId)).findSession(...args);
   service.getSourceRevisionForProvider = async (providerId, id) => {
     const info = await (await storeFor(providerId)).getSessionResumeInfo(id, { readOnly: true });
@@ -198,13 +209,31 @@ export const createProviderConversationStore = ({ current, providers, createStor
   }
   service.listSessions = async (...args) => {
     await ready;
+    childOwners.clear();
     const ids = [...new Set(["current", ...Object.values(routes).map((route) => route.providerId)])];
-    const lists = await Promise.all(ids.map(async (providerId) => {
-      const sessions = await (await storeFor(providerId)).listSessions(...args);
-      return sessions.filter((session) => owner(session.threadId) === providerId && (providerId === 'current' || routes[session.threadId]))
-        .map(decorate);
-    }));
-    const result = lists.flat();
+    const childConflicts = new Set();
+    const lists = [];
+    for (const providerId of ids) {
+      const store = await storeFor(providerId);
+      const native = providerId === 'current' ? [] : await store.listNativeSubagents?.(args[1]) || [];
+      const listed = await store.listSessions(...args);
+      const knownIds = new Set(listed.map(session => session.threadId));
+      const sessions = [...listed, ...native.filter(session => !knownIds.has(session.threadId))];
+      for (const session of sessions) if (session.nativeSubagent && !routes[session.threadId]) {
+        const parentOwner = session.parentThreadId && (routes[session.parentThreadId]?.providerId || providerForThread(session.parentThreadId));
+        const matchesParent = parentOwner === providerId || (parentOwner === 'current' && providerId !== 'current')
+          || (!parentOwner && providerId === 'current');
+        if (!matchesParent) continue;
+        if (childOwners.has(session.threadId) && childOwners.get(session.threadId) !== providerId) childConflicts.add(session.threadId);
+        else childOwners.set(session.threadId, providerId);
+      }
+      lists.push({ providerId, sessions });
+    }
+    for (const id of childConflicts) childOwners.delete(id);
+    const visible = lists.map(({ providerId, sessions }) => sessions.filter((session) => owner(session.threadId) === providerId
+      && (routes[session.threadId] || (session.nativeSubagent ? !childConflicts.has(session.threadId) && childOwners.get(session.threadId) === providerId : providerId === 'current')))
+      .map(decorate));
+    const result = visible.flat();
     const known = new Set(result.map((session) => session.threadId));
     for (const route of Object.values(routes)) {
       const session = route.summary;
@@ -221,11 +250,31 @@ export const createProviderConversationStore = ({ current, providers, createStor
   };
   service.listModels = async () => providers.listModels(await current.listModels());
   // FEAT-001: new chats and forks share registration; native start/fork stay distinct.
-  const registerSession = service.registerSession = async (session, providerId, model, metadata = {}) => {
+  const registerSession = service.registerSession = async (session, providerId, model, metadata = {}, expectedRoute) => {
     await ready;
+    if (expectedRoute !== undefined && JSON.stringify(routes[session.threadId] || null) !== expectedRoute)
+      throw Object.assign(Error('对话登记已变化，未覆盖'), { statusCode: 409 });
     routes[session.threadId] = { providerId, model, createdBy: 'user', summary: session, ...metadata };
     await save();
     return decorate(session);
+  };
+  // Repair a known assistant-created thread in the live store, never by rewriting its state file externally.
+  service.registerExistingBackground = async ({ threadId, providerId, expectedProviderId = null }) => {
+    await ready;
+    const previous = routes[threadId];
+    const before = JSON.stringify(previous || null);
+    if (!threadId || !providerId || (previous?.providerId || null) !== expectedProviderId
+      || (previous?.providerId && !['current', providerId].includes(previous.providerId)) || previous?.pendingProviderId)
+      throw Object.assign(Error('对话供应商已变化，未修改登记'), { statusCode: 409 });
+    const info = await (await storeFor(providerId)).getSessionResumeInfo(threadId, { readOnly: true });
+    if (!info?.path || !info.cwd || info.summary?.threadId !== threadId || info.summary?.nativeSubagent)
+      throw Object.assign(Error('无法核实已有独立对话'), { statusCode: 409 });
+    const settings = await latestAssistantReplyAtFromRollout(info.path, 'latest');
+    const model = settings?.model || info.model;
+    if (!model) throw Object.assign(Error('对话设置不可核实'), { statusCode: 409 });
+    return registerSession(info.summary, providerId, providerId === 'current' || model.includes('::') ? model : `${providerId}::${model}`,
+      { ...previous, providerId, model: providerId === 'current' || model.includes('::') ? model : `${providerId}::${model}`,
+        summary: info.summary, resumeInfo: info, createdBy: 'assistant', reasoningEffort: settings?.reasoningEffort ?? info.reasoningEffort ?? previous?.reasoningEffort ?? '' }, before);
   };
   service.createSession = async (model = "", cwd = "", modelProviderId = "", options = {}) => {
     await ready;
@@ -237,7 +286,8 @@ export const createProviderConversationStore = ({ current, providers, createStor
     const session = await (await storeFor(route.modelProviderId)).createSession(effectiveModel, cwd, options);
     return registerSession(session, route.modelProviderId,
       route.modelProviderId === 'current' ? effectiveModel : `${route.modelProviderId}::${effectiveModel}`,
-      { createdBy: options.createdBy === 'assistant' ? 'assistant' : 'user', lastSuccessfulSettings: null });
+      { createdBy: options.createdBy === 'assistant' ? 'assistant' : 'user', lastSuccessfulSettings: null,
+        ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}) });
   };
   service.forkSession = async (id, ...args) => {
     await ready;

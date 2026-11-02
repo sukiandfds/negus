@@ -78,8 +78,10 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
   const [renameDraft, setRenameDraft] = useState('');
   const projectRoot = c.session?.cwd || selected?.session?.cwd || c.project?.root;
   const displaySession = useMemo(() => c.session ? {
-    ...c.session, messages: mergeMessageList(c.session.messages.filter(m => isVisibleTaskMessage(m) && (!m.submissionId || !c.queueItems.some(item => item.state !== 'dispatching' && (m.submissionId === item.submissionId || m.submissionId === item.dispatchSubmissionId)))),
-      c.queueItems.filter(item => item.state === 'dispatching' && !isInternalTaskResult(item.text)).map(item => ({ ...createOptimisticMessage(item.text, item.attachments, item.dispatchSubmissionId || item.submissionId, item.sentAt || item.createdAt), deliveryState: 'sending' as const })))
+    ...c.session, messages: mergeMessageList(
+      c.queueItems.filter(item => item.state === 'dispatching' && !isInternalTaskResult(item.text)).map(item => ({ ...createOptimisticMessage(item.text, item.attachments, item.dispatchSubmissionId || item.submissionId, item.sentAt || item.createdAt), deliveryState: 'sending' as const,
+        authorId: item.authorId, authorName: item.authorName, displaySourceAgentId: item.displaySourceAgentId })),
+      c.session.messages.filter(m => isVisibleTaskMessage(m) && (!m.submissionId || !m.id.startsWith('optimistic-') || !c.queueItems.some(item => item.state !== 'dispatching' && (m.submissionId === item.submissionId || m.submissionId === item.dispatchSubmissionId)))))
       .map(m => ({ ...m, authorName: m.authorName || (m.role === 'user' ? '我' : selectedName) })),
   } : null, [c.session, c.queueItems, selectedName]);
   const files = c.session?.messages.filter(m => m.blocks?.some(b => b.type !== 'markdown' && b.type !== 'options')) || [];
@@ -115,7 +117,7 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
   };
   return <section className="chat-workspace" aria-label="聊天工作区">
       <ChatHeader avatar={<Avatar name={selectedName} projectRoot={projectRoot} agentId={agentId} active={c.executionStatus.active && c.executionStatus.phase !== 'submitted'} size="small" />}
-        title={<><ConversationOrigin origin={selected?.origin} /><span>{agentId ? selectedName : selected?.name || c.session?.title || selectedName}</span></>}
+        title={<><ConversationOrigin origin={selected?.origin} nativeSubagent={selected?.nativeSubagent} /><span>{agentId ? selectedName : selected?.name || c.session?.title || selectedName}</span></>}
         subtitle={selected?.label || conversationStatus(c.executionStatus, c.contextStatus.threadId === c.selectedId ? c.contextStatus.phase : undefined, projectRoot || '未关联')}
         onBack={onBack} tab={tab} onTabChange={setTab} fileCount={files.length}
         actions={<>

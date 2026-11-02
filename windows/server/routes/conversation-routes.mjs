@@ -133,13 +133,17 @@ export const createConversationRoutes = ({
     const session = await conversations.findSession(binding.runtimeSessionId, source, pagination);
     return binding.conversationKind === "task" ? agentTasks?.decorateTaskSession?.(binding.runtimeSessionId, session) ?? session : session;
   };
+  const readOrdinarySession = async (threadId, source, pagination) => {
+    const session = await conversations.findSession(threadId, source, pagination);
+    return agentTasks?.decorateTaskSession?.(threadId, session) ?? session;
+  };
 
   return async (request, response, url) => {
   if (url.pathname === "/api/session/file" && request.method === "GET") {
     const threadId = url.searchParams.get("threadId") || "";
     const conversationId = url.searchParams.get("conversationId") || "";
     const binding = await authorizeAgentThread({ threadId, conversationId, allowGroup: true });
-    const session = binding ? await readAgentSession(binding, "all", {}) : await conversations.findSession(threadId, "all", {});
+    const session = binding ? await readAgentSession(binding, "all", {}) : await readOrdinarySession(threadId, "all", {});
     const file = await resolveConversationFile(session, url.searchParams.get("messageId"), url.searchParams.get("href"));
     await media.serve(request, response, media.register(file).id, { text: true });
     return true;
@@ -747,14 +751,18 @@ export const createConversationRoutes = ({
     const view = url.searchParams.get("view") === "1";
     const requestedRevision = view ? url.searchParams.get("sourceRevision") : null;
     const revisionSource = sessionSource(binding);
-    const readRevision = () => Promise.resolve().then(() => revisionSource.getSourceRevision(threadId)).catch(() => null);
+    const readRevision = async () => {
+      const revision = await Promise.resolve().then(() => revisionSource.getSourceRevision(threadId)).catch(() => null);
+      const actorRevision = agentTasks?.actorRevisionFor?.(threadId);
+      return revision && actorRevision ? `${revision}|actor:${actorRevision}` : revision;
+    };
     const currentRevision = view ? await readRevision() : null;
     const reuseBody = Boolean(requestedRevision && currentRevision === requestedRevision);
     const session = reuseBody ? null : binding
       ? view && isEmployeeDirectBinding(binding)
         ? await employeeRuntime.readSession(binding.agentId, { ...pagination, readOnly: true })
         : await readAgentSession(binding, source, pagination)
-      : await conversations.findSession(threadId, source, pagination);
+      : await readOrdinarySession(threadId, source, pagination);
     if (!session && !reuseBody) {
       sendJson(response, { error: "session not found" }, 404);
       return true;

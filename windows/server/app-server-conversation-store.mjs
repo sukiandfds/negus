@@ -343,6 +343,7 @@ export const createAppServerConversationStore = ({
           sortKey: "updated_at",
           sortDirection: "desc",
           cwd: root,
+          sourceKinds: ["cli", "vscode", "exec", "appServer", "unknown", "subAgent", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther"],
         };
         // Older app-server versions omit the archived filter and return active threads by default.
         // Only send the new field when the caller explicitly requests the archive view.
@@ -373,6 +374,8 @@ export const createAppServerConversationStore = ({
     latestAssistant: "",
     archived,
     forkedFromId: thread.forkedFromId || null,
+    parentThreadId: thread.parentThreadId || thread.source?.subAgent?.thread_spawn?.parent_thread_id || null,
+    nativeSubagent: Boolean(thread.source && typeof thread.source === 'object' && Object.hasOwn(thread.source, 'subAgent')),
     cwd: thread.cwd || null,
     ...(thread.model ? { model: thread.model } : {}),
   });
@@ -399,7 +402,9 @@ export const createAppServerConversationStore = ({
     const cwd = requestedProjectRoot ? path.resolve(requestedProjectRoot) : projectRoot;
     if (!options.managed && !isAllowedProjectRoot(cwd)) throw new Error("This project folder is not registered in Negus.");
     const profilePrompt = await getUserProfilePrompt();
-    const params = { cwd, sandbox: options.sandbox || "danger-full-access", approvalPolicy: options.approvalPolicy || "never", developerInstructions: [profilePrompt, options.developerInstructions].filter(Boolean).join("\n") };
+    const runtimeOptions = options.managed ? null : await threadRuntimeOptions({ id: "", cwd, fresh: true });
+    const params = { cwd, sandbox: options.sandbox || "danger-full-access", approvalPolicy: options.approvalPolicy || "never", developerInstructions: [profilePrompt, options.developerInstructions].filter(Boolean).join("\n"),
+      ...(runtimeOptions?.resume || {}) };
     if (model) params.model = model;
     const result = await client.request("thread/start", params);
     let thread = result.thread;
@@ -411,6 +416,7 @@ export const createAppServerConversationStore = ({
     if (!isSameProjectRoot(thread.cwd, cwd)) {
       throw Object.assign(new Error("新对话未创建在所选项目中，请检查项目路径后重试。"), { statusCode: 502 });
     }
+    runtimeOptions?.bindThread?.(thread.id);
     threadCache.set(thread.id, thread);
     freshThreadRuntime.set(thread.id, {
       ...result,
@@ -668,13 +674,16 @@ export const createAppServerConversationStore = ({
   const forkSession = async (threadId, lastTurnId) => {
     const { thread, runtimeOptions } = await ensureProjectThread(threadId);
     if (!lastTurnId) throw new Error("请选择一个已完成的对话位置再继续");
+    const forkOptions = await threadRuntimeOptions({ id: "", cwd: thread.cwd || projectRoot, fresh: true });
     const result = await client.request("thread/fork", {
       threadId,
       lastTurnId,
       cwd: thread.cwd || projectRoot,
       ...(runtimeOptions?.resume || {}),
+      ...(forkOptions?.resume || {}),
     });
     if (!result?.thread) throw new Error("Codex 未返回新的分支会话");
+    forkOptions?.bindThread?.(result.thread.id);
     threadCache.set(result.thread.id, result.thread);
     return summaryFromThread(result.thread, false);
   };

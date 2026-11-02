@@ -32,6 +32,8 @@ export interface DirectoryProject {
 }
 
 export interface DirectoryConversation {
+  nativeSubagent?: boolean;
+  parentThreadId?: string | null;
   id: string;
   threadId?: string | null;
   conversationId?: string | null;

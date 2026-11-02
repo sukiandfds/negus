@@ -22,6 +22,14 @@ test("idle and failures are never mistaken for completed; fallback uses explicit
   assert.equal(tasks.find((item) => item.id === "bad").category, "other");
   assert.ok(!tasks.some((item) => item.id === "idle"));
 });
+test("idle native child remains in other while an ordinary fork stays out", () => {
+  const projects = project([["child", "idle"], ["fork", "idle"]]);
+  projects[0].conversations[0].nativeSubagent = true;
+  projects[0].conversations[0].parentThreadId = "parent";
+  projects[0].conversations[1].parentThreadId = "parent";
+  const tasks = collectCurrentTasks(projects, {}, {});
+  assert.deepEqual(tasks.map(task => [task.id, task.category, task.conversation.nativeSubagent]), [["child", "other", true]]);
+});
 test("active goal survives turn gap; paused or budget-limited goals are not completed turns", () => {
   const tasks = collectCurrentTasks(project([["long", "completed"], ["paused", "completed"], ["limited", "idle"], ["finished", "idle"]]), {}, { long: goal("active"), paused: goal("paused"), limited: goal("budgetLimited"), finished: goal("complete") });
   assert.equal(tasks.find((item) => item.id === "long").category, "running");

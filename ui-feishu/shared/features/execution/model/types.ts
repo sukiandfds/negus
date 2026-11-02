@@ -86,10 +86,14 @@ export interface UserMessageSubmittedEvent {
   type: "user_message_submitted";
   threadId: string;
   submissionId: string;
+  queueSubmissionId?: string;
   messageId: string;
   text: string;
   attachments?: MediaFile[];
   createdAt: string;
+  authorId?: string;
+  authorName?: string;
+  displaySourceAgentId?: string;
 }
 
 export interface QueueChangedEvent {

@@ -31,7 +31,7 @@ registerHooks({ load(url, context, nextLoad) {
   if (url.endsWith('/request-handler.mjs')) {
     const marker = '  const routes = [';
     if (!source.includes(marker)) throw new Error('Group extension: route integration point changed');
-    source = `import { createGroupCreationRoute } from ${JSON.stringify(extension)};\nimport { createTaskRoutes } from ${JSON.stringify(taskRoutes)};\n` + source.replace(marker, `${marker}\n    ...(roomDirectory?.create ? [createGroupCreationRoute({ roomDirectory }), createTaskRoutes({ roomDirectory, multiAgentDirectory, groupRoom, media, agentTasks })] : []),`);
+    source = `import { createGroupCreationRoute } from ${JSON.stringify(extension)};\nimport { createTaskRoutes } from ${JSON.stringify(taskRoutes)};\n` + source.replace(marker, `${marker}\n    ...(roomDirectory?.create ? [createGroupCreationRoute({ roomDirectory }), createTaskRoutes({ roomDirectory, multiAgentDirectory, groupRoom, media, agentTasks, employeeProjectDirectory })] : []),`);
   } else {
     const projectsMarker = 'const businessProjects = await loadBusinessProjects(path.join(projectRoot, "runtime", "business-projects.json"));';
     const conversationsMarker = 'followUpQueue = createFollowUpQueueService({';
@@ -49,6 +49,7 @@ registerHooks({ load(url, context, nextLoad) {
       stateRoot: path.join(process.env.NEGUS_UI_STATE_ROOT || path.join(projectRoot, 'runtime', 'ui-feishu'), 'employee-tasks'),
       registry: employeeRegistry, modelProviders, appServerClient, bindings: employeeConversationStore,
       providerForThread: threadId => appServerConversations.getRecordedProviderForThread(threadId),
+      conversations: appServerConversations,
       registerSession: appServerConversations.registerSession,
       execution, queue: followUpQueue, broadcast: realtime.broadcast,
     });\n${employeeMarker}`);

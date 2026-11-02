@@ -29,7 +29,8 @@ export function FollowUpQueue({ items, isHidden, busy, error, onEdit, onRemove, 
         const locked = busy || item.state === "dispatching";
         return (
           <Message key={item.id}
-            message={{ ...createOptimisticMessage(item.text, item.attachments, item.submissionId, item.createdAt), authorName: "我",
+            message={{ ...createOptimisticMessage(item.text, item.attachments, item.submissionId, item.createdAt),
+              authorName: item.authorName || "我", authorId: item.authorId, displaySourceAgentId: item.displaySourceAgentId,
               deliveryState: item.state === "dispatching" ? "sending" : item.state === "failed" ? "failed" : undefined, deliveryError: item.error }}
             threadId={item.threadId} queued={item.state === "pending"}
             onFork={async () => false} onEdit={() => void onEdit(item)}

@@ -1,19 +1,21 @@
 import { createFollowUpQueueStore } from "./follow-up-queue-store.mjs";
 
-const publicItem = (item) => ({
-  ...item,
-  attachments: (item.attachments || []).map((attachment) => ({ ...attachment })),
-});
-
 export const createFollowUpQueueService = ({
   stateFile,
   execution,
   conversations,
   media,
   publishThreadEvent,
+  sourceActorFor = () => null,
 }) => {
   const store = createFollowUpQueueStore({ stateFile });
   const locks = new Map();
+  const actorFor = item => sourceActorFor(item.threadId, item.submissionId)
+    || (item.stableDispatchId ? sourceActorFor(item.threadId, item.stableDispatchId) : null);
+  const publicItem = (item) => ({ ...item,
+    attachments: (item.attachments || []).map(attachment => ({ ...attachment })),
+    ...(actorFor(item) || {}),
+  });
 
   const broadcastQueue = (threadId, reason) => {
     publishThreadEvent(threadId, {
@@ -52,10 +54,12 @@ export const createFollowUpQueueService = ({
       type: "user_message_submitted",
       threadId,
       submissionId,
+      queueSubmissionId: item.submissionId,
       messageId: `optimistic-${submissionId}`,
       text: item.text,
       attachments: item.attachments,
       createdAt: sentAt,
+      ...(actorFor(item) || {}),
     });
     try {
       if (status.active) await conversations.steerMessage(threadId, status.turnId, item.text, attachments, submissionId);
@@ -91,12 +95,20 @@ export const createFollowUpQueueService = ({
     return dispatchClaimed(threadId, item, status);
   });
 
-  const enqueue = async ({ threadId, text, attachmentIds = [], attachments = [], submissionId = "", modelSettings }) => {
-    const item = store.enqueue({ threadId, text, attachmentIds, attachments, submissionId, modelSettings });
+  const enqueue = async ({ threadId, text, attachmentIds = [], attachments = [], submissionId = "", modelSettings, stableDispatchId = "", held = false }) => {
+    const item = store.enqueue({ threadId, text, attachmentIds, attachments, submissionId, modelSettings, stableDispatchId, held });
     await store.flush();
     broadcastQueue(threadId, "queued");
     const status = execution.getStatus(threadId);
-    if (!status.active) void dispatchNext(threadId);
+    if (!status.active && !item.held) void dispatchNext(threadId);
+    return publicItem(item);
+  };
+  const release = async (threadId, itemId) => {
+    const item = store.release(threadId, itemId);
+    if (!item) throw Object.assign(Error('排队指令不存在'), { statusCode: 404 });
+    try { await store.flush(); }
+    catch (error) { store.update(threadId, itemId, { held: true }); throw error; }
+    if (!execution.getStatus(threadId).active) void dispatchNext(threadId);
     return publicItem(item);
   };
 
@@ -162,6 +174,7 @@ export const createFollowUpQueueService = ({
       store.list(id).some((item) => item.state === "pending" || item.state === "dispatching")),
     list: (threadId) => store.list(threadId).map(publicItem),
     enqueue,
+    release,
     edit,
     remove,
     move,

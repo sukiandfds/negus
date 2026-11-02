@@ -164,7 +164,8 @@ const appServerConversations = createProviderConversationStore({
     autoTitleStateFile: path.join(projectRoot, "runtime", `conversation-titles-${providerId}.json`),
     autoTitleEnabled: false,
     });
-    return { ...store, close: () => { store.close(); history.close(); } };
+    return { ...store, listNativeSubagents: history.listNativeSubagents,
+      close: () => { store.close(); history.close(); } };
   },
 });
 const conversationVersions = createConversationVersionStore({
@@ -209,6 +210,7 @@ followUpQueue = createFollowUpQueueService({
   },
   media,
   publishThreadEvent: execution.publishThreadEvent,
+  sourceActorFor: (threadId, submissionId) => agentTasks?.sourceActorFor?.(threadId, submissionId),
 });
 
 contextManagement = await createContextManagementService({

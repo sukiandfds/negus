@@ -32,6 +32,17 @@ async function setup(t, options = {}) {
 }
 const input = (key, agentId = 'a', conversationId = 'room') => ({ requestKey: key, lane: `${conversationId}:${agentId}`, conversationId, agentId, title: key, instructions: key });
 
+test('only a declared conversation source can enqueue without an employee', async t => {
+  const { kernel, turns } = await setup(t);
+  const ordinary = { ...input('ordinary'), agentId: undefined, source: { kind: 'conversation', threadId: 'source-thread' } };
+  const accepted = await kernel.enqueue(ordinary);
+  assert.equal(accepted.source.threadId, 'source-thread');
+  assert.equal((await kernel.enqueue(ordinary)).id, accepted.id);
+  await assert.rejects(kernel.enqueue({ ...ordinary, requestKey: 'missing', source: undefined }), /任务来源或执行员工不完整/);
+  await until(() => turns.has(accepted.id));
+  turns.get(accepted.id).resolve({ status: 'completed', text: 'done' });
+});
+
 test('routing honors explicit recipients, constrains model selection, and falls back without new employees', async () => {
   const options = { members: [{ id: 'a' }, { id: 'b' }], receptionId: 'a' };
   assert.deepEqual(await routeMessage({ ...options, explicitIds: ['b'], requestedIds: ['a'], select: () => { throw Error('must not call'); } }), { agentIds: ['b'], reason: 'explicit' });

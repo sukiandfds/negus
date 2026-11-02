@@ -2,8 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { readJson, sendJson } from '../../windows/server/http/request-utils.mjs';
 
 // Inserted behind the host's existing authentication and maintenance gate.
-export function createTaskRoutes({ roomDirectory, multiAgentDirectory, groupRoom, media, agentTasks }) {
+export function createTaskRoutes({ roomDirectory, multiAgentDirectory, groupRoom, media, agentTasks, employeeProjectDirectory }) {
   return async (request, response, url) => {
+    if (url.pathname === '/api/tasks/register-existing' && request.method === 'POST') {
+      const { threadId, providerId, expectedProviderId } = await readJson(request);
+      sendJson(response, await agentTasks.registerExistingBackground({ threadId, providerId, expectedProviderId }));
+      return true;
+    }
     if (url.pathname === '/api/tasks' && request.method === 'GET') {
       const selected = url.searchParams.get('roomId');
       const tasks = [];
@@ -16,7 +21,11 @@ export function createTaskRoutes({ roomDirectory, multiAgentDirectory, groupRoom
       }
       if (!selected) for (const task of agentTasks?.tasks?.() || []) tasks.push({ ...task,
         delivery: agentTasks.deliveries().find(item => item.taskId === task.id) });
-      sendJson(response, { tasks }); return true;
+      const directory = selected ? null : await employeeProjectDirectory?.list?.();
+      const nativeSubagents = (directory?.projects || []).flatMap(project => (project.conversations || [])
+        .filter(conversation => conversation.nativeSubagent)
+        .map(conversation => ({ ...conversation, projectId: project.id, label: 'Codex 子代理' })));
+      sendJson(response, { tasks, nativeSubagents }); return true;
     }
     if (url.pathname === '/api/tasks/action' && request.method === 'POST') {
       const body = await readJson(request);

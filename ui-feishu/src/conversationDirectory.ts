@@ -26,7 +26,8 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
       id: entry.id, name: entry.main && project.employeeId ? project.name : session?.title || entry.title,
       subtitle: project.name, agentId: project.employeeId, threadId: entry.threadId,
       conversationId: entry.conversationId, main: entry.main, pending: entry.pendingOpen,
-      origin: isTask ? 'assistant' : session?.createdBy,
+      origin: isTask || entry.nativeSubagent ? 'assistant' : session?.createdBy,
+      nativeSubagent: entry.nativeSubagent || session?.nativeSubagent,
       projectId: entry.targetProjectId || project.projectId || project.id,
       time: directoryIsNewer ? entry.lastActivityAt || entry.updatedAt || sessionTime : sessionTime,
       active: Boolean(status?.active), label: conversationStatus(status, directory.contextByThread[entry.threadId || '']),
@@ -65,7 +66,7 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
     if (session.conversationKind === 'group' || all.some(row => row.threadId === session.threadId)) continue;
     all.push({ id: session.threadId, name: session.title || '未命名对话', subtitle: '项目对话',
       threadId: session.threadId, time: session.updatedAt, session,
-      origin: session.createdBy || 'user',
+      origin: session.nativeSubagent ? 'assistant' : session.createdBy || 'user', nativeSubagent: session.nativeSubagent,
       active: Boolean(directory.statusByThread[session.threadId]?.active),
       label: conversationStatus(directory.statusByThread[session.threadId], directory.contextByThread[session.threadId]), preview: session.latestMessage });
   }

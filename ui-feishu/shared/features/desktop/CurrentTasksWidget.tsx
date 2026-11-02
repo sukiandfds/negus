@@ -86,7 +86,7 @@ export function CurrentTasksWidget({ directory, active, connected, onSelect }: {
       event.preventDefault(); open(task);
     }}>
       <span className={`${styles.dot} ${task.category === "running" ? task.attention ? styles.attention : styles.running : ""}`} />
-      <span className={styles.text}><strong>{previews[task.id]?.title || task.title}</strong><p className={styles.instruction}>{previews[task.id]?.instruction || "…"}</p>{detailed && <span>{task.project.name}{task.goal ? " · Goal" : ""}</span>}
+      <span className={styles.text}><strong>{task.conversation.nativeSubagent ? 'Codex 子代理 · ' : ''}{previews[task.id]?.title || task.title}</strong><p className={styles.instruction}>{previews[task.id]?.instruction || "…"}</p>{detailed && <span>{task.project.name}{task.goal ? " · Goal" : ""}</span>}
         {detailed && task.updatedAt && <time dateTime={task.updatedAt}>更新于 {new Date(task.updatedAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</time>}
       </span><span className={styles.status} title={task.label}>{detailed ? task.label : shortStatus(task)}</span><ArrowUpRight size={14} aria-hidden="true" />
     </a>

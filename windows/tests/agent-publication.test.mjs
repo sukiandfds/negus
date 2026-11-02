@@ -8,6 +8,7 @@ import { createAgentPublicationService } from "../server/agent-publication-servi
 import { createGroupRoomStore } from "../server/group-room-store.mjs";
 import { createPublicationStore } from "../server/publication-store.mjs";
 import { createGroupRoomDirectory } from "../server/group-room-directory.mjs";
+import { messageFromThreadItem } from '../server/content-blocks.mjs';
 
 const fixture = async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "negus-agent-publication-"));
@@ -48,6 +49,26 @@ const fixture = async (t) => {
   });
   return { service, conversationStore, conversationStateFile, groupRoom, roomDirectory, publicationStore, events };
 };
+
+test('runtime ledger preserves trusted attribution and native submission identity without labeling human input', async t => {
+  const { conversationStore } = await fixture(t);
+  await conversationStore.bindRuntime({ conversationId: 'task-chat', agentId: 'manager', runtimeSessionId: 'thread-task', conversationKind: 'task' });
+  const item = { id: 'native-task', type: 'userMessage', clientId: 'submission-task', content: [{ type: 'text', text: 'work' }] };
+  assert.equal(messageFromThreadItem(item).submissionId, 'submission-task');
+  await conversationStore.recordRuntimeEvent({ method: 'item/completed', params: { threadId: 'thread-task', turnId: 'turn', item } },
+    { authorId: 'source', authorName: 'Source Assistant', displaySourceAgentId: 'source' });
+  await conversationStore.recordRuntimeEvent({ method: 'item/completed', params: { threadId: 'thread-task', turnId: 'turn', item: {
+    id: 'human', type: 'userMessage', clientId: 'submission-human', content: [{ type: 'text', text: 'human' }],
+    authorName: 'untrusted', displaySourceAgentId: 'untrusted',
+  } } });
+  const [task, human] = await conversationStore.readMessages('task-chat');
+  assert.equal(task.submissionId, 'submission-task');
+  assert.equal(task.itemId, 'native-task'); assert.equal(task.turnId, 'turn');
+  assert.equal(task.authorId, 'source'); assert.equal(task.authorName, 'Source Assistant');
+  assert.equal(task.displaySourceAgentId, 'source'); assert.equal(task.role, 'user');
+  assert.equal(human.submissionId, 'submission-human'); assert.equal(human.role, 'user');
+  assert.equal(human.authorName, undefined); assert.equal(human.displaySourceAgentId, undefined);
+});
 
 test("history reads wait for runtime writes without blocking other conversations", { timeout: 5000 }, async (t) => {
   const { conversationStore } = await fixture(t);

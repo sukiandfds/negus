@@ -4,6 +4,83 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createProviderConversationStore } from "../server/provider-conversation-store.mjs";
+import { createJsonlConversationStore } from "../server/jsonl-conversation-store.mjs";
+import { createBackgroundTaskService } from '../server/background-tasks/service.mjs';
+
+test('native child follows the registered parent provider without acquiring a route', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-native-child-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const calls = [];
+  const child = { threadId: 'child', parentThreadId: 'parent', nativeSubagent: true, cwd: root, title: 'child', updatedAt: new Date().toISOString() };
+  const store = provider => ({ listSessions: async () => provider === 'external' ? [child] : [],
+    findSession: async id => { calls.push([provider, id]); return { ...child, messages: [] }; } });
+  const service = createProviderConversationStore({ current: store('current'),
+    providers: { getClient: async ({ modelProviderId }) => modelProviderId }, createStore: store,
+    stateFile: path.join(root, 'routes.json') });
+  await service.registerSession({ threadId: 'parent', cwd: root, title: 'parent' }, 'external', 'model');
+  const sessions = await service.listSessions('all', false);
+  assert.equal(sessions.find(session => session.threadId === 'child')?.nativeSubagent, true);
+  assert.equal((await service.findSession('child')).modelProviderId, 'external');
+  assert.deepEqual(calls, [['external', 'child']]);
+});
+
+test('current parent permits a single native child owner, but rejects mismatches and duplicate homes', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-native-owner-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const seen = [];
+  const child = { threadId: 'child', parentThreadId: 'parent', nativeSubagent: true, cwd: root, title: 'native', updatedAt: new Date().toISOString() };
+  const fork = { ...child, threadId: 'fork', nativeSubagent: false };
+  let duplicate = false, otherChild = false;
+  const store = provider => ({ listSessions: async () => provider === 'vip' ? [child, fork]
+    : provider === 'other' && otherChild ? [child] : provider === 'current' && duplicate ? [child] : [],
+  findSession: async id => { seen.push([provider, id]); return { ...child, messages: [] }; } });
+  const service = createProviderConversationStore({ current: store('current'),
+    providers: { getClient: async ({ modelProviderId }) => modelProviderId }, createStore: store,
+    stateFile: path.join(root, 'routes.json') });
+  await service.registerSession({ threadId: 'parent', cwd: root }, 'current', 'model');
+  await service.registerSession({ threadId: 'known-vip', cwd: root }, 'vip', 'model');
+  await service.registerSession({ threadId: 'known-other', cwd: root }, 'other', 'model');
+  assert.equal((await service.listSessions('all', false)).find(item => item.threadId === 'child')?.modelProviderId, 'vip');
+  assert.equal((await service.findSession('child')).modelProviderId, 'vip');
+  assert.deepEqual(seen, [['vip', 'child']]);
+  otherChild = true;
+  assert.equal((await service.listSessions('all', false)).some(item => item.threadId === 'child'), false,
+    'two concrete providers with the same native id must not be guessed');
+  otherChild = false;
+  duplicate = true;
+  assert.equal((await service.listSessions('all', false)).some(item => item.threadId === 'child'), false,
+    'a current-home duplicate is also ambiguous');
+  assert.equal((await service.listSessions('all', false)).some(item => item.threadId === 'fork'), false);
+  duplicate = false;
+  await service.registerSession({ threadId: 'parent', cwd: root }, 'other', 'model');
+  assert.equal((await service.listSessions('all', false)).some(item => item.threadId === 'child'), false,
+    'an explicitly different parent provider is not a current-home exception');
+});
+
+test('native header restores a child omitted by thread/list in its actual provider', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-native-header-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const sessionRoot = path.join(root, 'provider', 'sessions');
+  await fs.mkdir(sessionRoot, { recursive: true });
+  const id = '01a19a65-c6ca-7840-863a-16aeeed2d88b';
+  await fs.writeFile(path.join(sessionRoot, `rollout-${id}.jsonl`), JSON.stringify({ type: 'session_meta',
+    payload: { id, cwd: root, source: { subagent: { thread_spawn: { parent_thread_id: 'parent', depth: 1 } } } } }) + '\n');
+  const history = createJsonlConversationStore({ sessionRoot, projectRoot: root, registerMedia: () => null });
+  t.after(() => history.close());
+  const reads = [];
+  const service = createProviderConversationStore({ current: { listSessions: async () => [] },
+    providers: { getClient: async ({ modelProviderId }) => modelProviderId }, stateFile: path.join(root, 'routes.json'),
+    createStore: provider => ({ listSessions: async () => [], listNativeSubagents: history.listNativeSubagents,
+      findSession: async threadId => { reads.push([provider, threadId]); return { threadId, messages: [] }; } }) });
+  await service.registerSession({ threadId: 'parent', cwd: root }, 'current', 'model');
+  await service.registerSession({ threadId: 'known-provider', cwd: root }, 'isolated', 'model');
+  const found = (await service.listSessions('all', false)).find(item => item.threadId === id);
+  assert.equal(found?.nativeSubagent, true);
+  assert.equal(found?.parentThreadId, 'parent');
+  assert.equal(found?.modelProviderId, 'isolated');
+  assert.equal((await service.findSession(id)).modelProviderId, 'isolated');
+  assert.deepEqual(reads, [['isolated', id]]);
+});
 
 test("background task history and controls use its saved provider after reopening", async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-task-provider-"));
@@ -319,4 +396,68 @@ test("new chats and forks persist the same registration and reopen on their actu
   const reopened = createProviderConversationStore(options);
   assert.equal((await reopened.findSession('fork')).modelProviderId, 'external');
   assert.deepEqual(reads, ['fork']);
+});
+
+test('assistant background creation records the actual provider, model and effort', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-assistant-registration-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const stateFile = path.join(root, 'routes.json');
+  const service = createProviderConversationStore({ stateFile, current: {},
+    providers: { resolveRoute: ({ model, modelProviderId }) => ({ model, modelProviderId }), getClient: async () => ({}) },
+    createStore: () => ({ createSession: async (model, cwd) => ({ threadId: 'background', model, cwd, title: 'task' }) }) });
+  await service.createSession('model', root, 'external', { createdBy: 'assistant', reasoningEffort: 'high' });
+  const route = JSON.parse(await fs.readFile(stateFile, 'utf8')).background;
+  assert.equal(route.providerId, 'external'); assert.equal(route.model, 'external::model');
+  assert.equal(route.createdBy, 'assistant'); assert.equal(route.reasoningEffort, 'high');
+  assert.equal(route.summary.threadId, 'background');
+});
+
+test('legacy background task requests assistant registration with its chosen effort', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-legacy-background-'));
+  const calls = [];
+  const employee = { id: 'employee', name: 'employee', projectRoot: root, mainThreadId: 'parent', model: 'model', modelProviderId: 'provider', reasoningEffort: 'high' };
+  const service = await createBackgroundTaskService({ stateFile: path.join(root, 'tasks.json'),
+    registry: { list: () => [employee], require: () => employee },
+    conversations: { createSession: async (...args) => { calls.push(args); return { threadId: 'child' }; },
+      renameSession: async () => {}, sendMessage: async () => {} },
+    bindings: { bindRuntime: async binding => binding }, queue: { enqueue: async () => ({}) },
+    execution: { getStatus: () => ({ active: true, turnId: 'turn' }) } });
+  t.after(async () => { await service.close(); await fs.rm(root, { recursive: true, force: true }); });
+  await service.create('employee', { title: 'task', instructions: 'work' });
+  for (let i = 0; i < 100 && !calls.length; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][2], 'provider');
+  assert.equal(calls[0][3].createdBy, 'assistant');
+  assert.equal(calls[0][3].reasoningEffort, 'high');
+  const task = service.list('employee')[0];
+  assert.deepEqual(service.actorFor('child', `task-${task.id}`), { id: 'employee', name: 'employee' });
+  assert.equal(service.actorFor('child', 'human-submission'), null);
+});
+
+test('existing background registration repairs only the verified route without starting or resending', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-register-existing-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, 'history.jsonl');
+  await fs.writeFile(file, JSON.stringify({ type: 'turn_context', payload: { model: 'actual', effort: 'low' } }) + '\n');
+  const calls = [];
+  let duringRead = () => {};
+  const service = createProviderConversationStore({ current: {},
+    providers: { getClient: async ({ modelProviderId }) => modelProviderId },
+    createStore: provider => ({ getSessionResumeInfo: async (threadId, options) => {
+      calls.push([provider, threadId, options]); await duringRead();
+      return { path: file, cwd: root, model: 'old', summary: { threadId, cwd: root, title: 'existing' } };
+    } }), stateFile: path.join(root, 'routes.json') });
+  await service.registerSession({ threadId: 'known', cwd: root }, 'current', 'old', { manualTitle: '保留标题' });
+  const repaired = await service.registerExistingBackground({ threadId: 'known', providerId: 'vip', expectedProviderId: 'current' });
+  assert.equal(repaired.createdBy, 'assistant'); assert.equal(repaired.modelProviderId, 'vip');
+  assert.equal(repaired.model, 'vip::actual'); assert.equal(repaired.title, '保留标题');
+  const saved = JSON.parse(await fs.readFile(path.join(root, 'routes.json'), 'utf8'));
+  assert.equal(saved.known.reasoningEffort, 'low');
+  assert.deepEqual(calls, [['vip', 'known', { readOnly: true }]]);
+  await assert.rejects(service.registerExistingBackground({ threadId: 'known', providerId: 'other', expectedProviderId: 'vip' }), /供应商已变化/);
+  await assert.rejects(service.registerExistingBackground({ threadId: 'known', providerId: 'vip', expectedProviderId: 'current' }), /供应商已变化/);
+  assert.equal((await service.registerExistingBackground({ threadId: 'missing', providerId: 'deepseek' })).modelProviderId, 'deepseek');
+  duringRead = () => service.registerSession({ threadId: 'racing', cwd: root }, 'other', 'new');
+  await assert.rejects(service.registerExistingBackground({ threadId: 'racing', providerId: 'vip' }), /已变化/);
+  assert.equal(await service.getRecordedProviderForThread('racing'), 'other');
 });

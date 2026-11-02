@@ -280,6 +280,8 @@ export const createEmployeeProjectDirectory = ({
           lastActivityAt: session?.updatedAt || null,
           messageCount: Number.isSafeInteger(session?.messageCount) ? session.messageCount : null,
           archived: session?.archived === true,
+          nativeSubagent: session?.nativeSubagent === true,
+          parentThreadId: session?.parentThreadId || null,
           status: conversationStatuses[clean(session?.threadId, 120)] || idleStatus(),
         })).filter((conversation) => conversation.threadId),
       };

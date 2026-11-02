@@ -7,6 +7,27 @@ import { createAppServerConversationStore } from '../server/app-server-conversat
 import { createJsonlConversationStore } from '../server/jsonl-conversation-store.mjs';
 import { createConversationService } from '../server/conversation-service.mjs';
 
+test('native list asks for all subagent sources and labels only native source, not fork parent', async () => {
+  const root = process.cwd();
+  const seen = [];
+  const store = createAppServerConversationStore({ projectRoot: root, autoTitleEnabled: false,
+    client: { subscribe: () => () => {}, close() {}, request: async (method, params) => {
+      assert.equal(method, 'thread/list'); seen.push(params.sourceKinds);
+      return { data: [
+        { id: 'native', cwd: root, updatedAt: 1, source: { subAgent: { thread_spawn: { parent_thread_id: 'parent', depth: 1 } } } },
+        { id: 'fork', cwd: root, updatedAt: 1, source: 'appServer', parentThreadId: 'parent' },
+      ] };
+    } },
+  });
+  try {
+    const sessions = await store.listSessions();
+    assert.equal(sessions.find(item => item.threadId === 'native').nativeSubagent, true);
+    assert.equal(sessions.find(item => item.threadId === 'native').parentThreadId, 'parent');
+    assert.equal(sessions.find(item => item.threadId === 'fork').nativeSubagent, false);
+    assert.ok(['subAgent', 'subAgentReview', 'subAgentCompact', 'subAgentThreadSpawn', 'subAgentOther', 'appServer'].every(kind => seen[0].includes(kind)));
+  } finally { store.close(); }
+});
+
 test('supplemental messages prevent reuse of an incomplete history-file revision', async () => {
   let extra = [];
   const service = createConversationService({ primary: { getSourceRevision: async () => 'r1' }, fallback: {},

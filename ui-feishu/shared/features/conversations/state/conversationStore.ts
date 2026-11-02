@@ -5,6 +5,7 @@ import { idleStatus } from '../../execution/hooks/useCodexExecution';
 import { emptyStatus } from '../../context-management/hooks/useContextManagement';
 import { conversationApi } from '../data/conversationApi';
 import { mergeMessageList, mergePendingOptimisticMessages, mergeSessionRefresh, sameSubmission } from './conversationMerge';
+import { createOptimisticMessage } from './optimisticMessage';
 import { readModelCatalog } from '../../models/data/modelCatalogCache';
 import { readModelDefaults, resolveVisibleModel, resolveVisibleEffort } from '../../models/model/modelDefaults';
 
@@ -34,8 +35,32 @@ export class ConversationStore {
   localPending = new Map<string, SessionMessage[]>();
   sendingQueue = new Map<string, string>();
   private acceptedSubmissions = new Set<string>();
-  private visibleQueue = (id: string, items: ThreadSnapshot['queueItems']) => items.filter(item => !this.acceptedSubmissions.has(JSON.stringify([id, item.submissionId]))
-    && !this.acceptedSubmissions.has(JSON.stringify([id, item.dispatchSubmissionId || ''])));
+  private rememberAccepted = (id: string, submissionId: string) => {
+    this.acceptedSubmissions.add(JSON.stringify([id, submissionId]));
+    if (this.acceptedSubmissions.size > 500) this.acceptedSubmissions.delete(this.acceptedSubmissions.values().next().value!);
+  };
+  private queueDispatches = new Map<string, string>();
+  linkQueuedMessage = (id: string, queueSubmissionId: string, submissionId: string) => {
+    this.queueDispatches.set(JSON.stringify([id, queueSubmissionId]), submissionId);
+    if (this.queueDispatches.size > 500) this.queueDispatches.delete(this.queueDispatches.keys().next().value!);
+  };
+  private rememberQueue = (id: string, items: ThreadSnapshot['queueItems'], snapshot = false) => {
+    for (const item of items) {
+      if (item.dispatchSubmissionId && (!snapshot || !this.queueDispatches.has(JSON.stringify([id, item.submissionId])))) this.linkQueuedMessage(id, item.submissionId, item.dispatchSubmissionId);
+      const dispatchId = this.queueDispatches.get(JSON.stringify([id, item.submissionId]));
+      if (dispatchId && this.acceptedSubmissions.has(JSON.stringify([id, dispatchId]))) this.addMessage(id, {
+        ...createOptimisticMessage(item.text, item.attachments, dispatchId, item.sentAt || item.createdAt),
+        authorId: item.authorId, authorName: item.authorName, displaySourceAgentId: item.displaySourceAgentId,
+      });
+    }
+  };
+  private visibleQueue = (id: string, items: ThreadSnapshot['queueItems']) => items.flatMap(item => {
+    const key = JSON.stringify([id, item.submissionId]);
+    const dispatchSubmissionId = this.queueDispatches.get(key) || item.dispatchSubmissionId;
+    if (this.acceptedSubmissions.has(JSON.stringify([id, dispatchSubmissionId || '']))) this.rememberAccepted(id, item.submissionId);
+    if (this.acceptedSubmissions.has(key)) return [];
+    return [{ ...item, dispatchSubmissionId }];
+  });
   modelChoices = new Map<string, { model: string; reasoningEffort: string }>();
   revisions = new Map<string, number>();
   synced = new Set<string>();
@@ -99,15 +124,14 @@ export class ConversationStore {
   };
   acceptQueuedMessage = (id: string, submissionId: string) => {
     const item = this.get(id).queueItems.find(item => item.submissionId === submissionId || item.dispatchSubmissionId === submissionId);
-    this.acceptedSubmissions.add(JSON.stringify([id, submissionId]));
-    if (item) this.acceptedSubmissions.add(JSON.stringify([id, item.submissionId]));
-    if (this.acceptedSubmissions.size > 500) this.acceptedSubmissions.delete(this.acceptedSubmissions.values().next().value!);
-    if (item) this.update(id, { queueItems: this.get(id, false).queueItems });
+    this.rememberAccepted(id, submissionId);
+    if (item) this.rememberAccepted(id, item.submissionId);
     return item;
   };
   update = (id: string, patch: Patch | ((current: ThreadSnapshot) => Patch), remote = false) => {
     if (!id) return;
     const next = typeof patch === 'function' ? patch(this.get(id)) : patch;
+    this.rememberQueue(id, next.queueItems || []);
     if (remote) {
       const current = this.get(id);
       const keys = Object.keys(next) as (keyof Patch)[];
@@ -164,6 +188,8 @@ export class ConversationStore {
     return promise;
   };
   commit = (id: string, snapshot: ThreadSnapshot, revision: number) => {
+    this.rememberQueue(id, snapshot.queueItems, true);
+    for (const message of snapshot.session?.messages || []) if (message.role === 'user' && message.submissionId && !message.id.startsWith('optimistic-')) this.rememberAccepted(id, message.submissionId);
     snapshot = { ...snapshot, queueItems: this.visibleQueue(id, snapshot.queueItems) };
     if (snapshot.goal?.status === 'complete' && this.dismissedGoals.get(id) === goalCompletionKey(snapshot.goal)) snapshot = { ...snapshot, goal: null };
     const latest = this.committed.get(id);

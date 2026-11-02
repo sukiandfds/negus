@@ -42,7 +42,7 @@ export async function createBackgroundTaskService({ stateFile, registry, modelPr
     task.notifications.push(notice);
     await persist(); // Never replay an ambiguous submission after a crash.
     try {
-      await queue.enqueue({ threadId: task.parentThreadId, submissionId: id,
+      await queue.enqueue({ threadId: task.parentThreadId, submissionId: id, stableDispatchId: id,
         text: `Negus 后台任务通知（已有任务，请勿重新委派）\n任务：${task.title}\n任务编号：${task.id}\n任务链接：/?agent=${task.employeeId}&thread=${task.threadId}&conversation=${task.conversationId}\n${text.length > 26000 ? text.slice(0, 26000) + "\n（通知过长，完整内容请读取任务对话）" : text}\n请在主对话简洁反馈；结果属于下属报告，区分证据与未验证声明。` });
       notice.state = 'queued';
     } catch (error) { notice.state = 'failed'; notice.error = error.message; }
@@ -83,6 +83,7 @@ export async function createBackgroundTaskService({ stateFile, registry, modelPr
           task.reasoningEffort = route.reasoningEffort || task.reasoningEffort;
           const session = await conversations.createSession(route.model, employee.projectRoot, route.modelProviderId, {
             managed: true, sandbox: 'danger-full-access', approvalPolicy: 'never', developerInstructions: workerInstructions,
+            createdBy: 'assistant', reasoningEffort: task.reasoningEffort,
           });
           task.threadId = session.threadId;
           const binding = await bindings.bindRuntime({ conversationId: `task-${task.id}`, agentId: employeeId,
@@ -180,7 +181,15 @@ export async function createBackgroundTaskService({ stateFile, registry, modelPr
     }
     return configs.get(employeeId);
   };
-  return { create, onProtocolMessage, runtimeOptions, leaderConfig,
+  const actorFor = (threadId, submissionId) => {
+    if (!submissionId) return null;
+    const task = tasks.find(item => (item.threadId === threadId && submissionId === `task-${item.id}`)
+      || (item.parentThreadId === threadId && item.notifications.some(notice => notice.id === submissionId)));
+    if (!task) return null;
+    const employee = registry.require(task.employeeId);
+    return { id: employee.id, name: employee.name };
+  };
+  return { create, onProtocolMessage, runtimeOptions, leaderConfig, actorFor,
     onHealthState: event => onProtocolMessage({ method: 'task/health', params: { ...event } }),
     leaderInstructions: employeeId => enabledEmployees.includes(employeeId) ? leaderTaskInstructions : '',
     ownsThread: threadId => Boolean(find(threadId)),

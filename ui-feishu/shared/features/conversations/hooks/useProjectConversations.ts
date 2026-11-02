@@ -605,13 +605,15 @@ export function useProjectConversations() {
     if (event.type === "user_message_accepted") {
       if (acceptedQueueItem) {
         const message = createOptimisticMessage(acceptedQueueItem.text, acceptedQueueItem.attachments, event.submissionId, acceptedQueueItem.sentAt || undefined);
-        selection.addOptimisticMessage(event.threadId, { ...message, turnId: event.turnId, serverTimestamp: Boolean(acceptedQueueItem.sentAt) });
+        selection.addOptimisticMessage(event.threadId, { ...message, turnId: event.turnId, serverTimestamp: Boolean(acceptedQueueItem.sentAt),
+          authorId: acceptedQueueItem.authorId, authorName: acceptedQueueItem.authorName, displaySourceAgentId: acceptedQueueItem.displaySourceAgentId });
       }
       reconciledSubmissionsRef.current.add(event.submissionId);
       selection.updateOptimisticMessage(event.threadId, `optimistic-${event.submissionId}`, { deliveryState: undefined, deliveryError: undefined, turnId: event.turnId, protocolTurnId: event.turnId });
     }
     if (event.type === "execution_status" && event.phase === "completed") contextManagement.completeSettings(event.threadId);
     if (event.type === "user_message_submitted") {
+      if (event.queueSubmissionId) selection.store.linkQueuedMessage(event.threadId, event.queueSubmissionId, event.submissionId);
       selection.updateOptimisticMessage(event.threadId, event.messageId || `optimistic-${event.submissionId}`, { createdAt: event.createdAt, serverTimestamp: true });
       const generated = createOptimisticMessage(
         event.text,
@@ -619,7 +621,8 @@ export function useProjectConversations() {
         event.submissionId,
         event.createdAt,
       );
-      const message = { ...generated, id: event.messageId || generated.id, deliveryState: reconciledSubmissionsRef.current.has(event.submissionId) ? undefined : "pending" as const, serverTimestamp: true };
+      const message = { ...generated, id: event.messageId || generated.id, deliveryState: reconciledSubmissionsRef.current.has(event.submissionId) ? undefined : "pending" as const, serverTimestamp: true,
+        ...(event.displaySourceAgentId ? { authorId: event.authorId, authorName: event.authorName, displaySourceAgentId: event.displaySourceAgentId } : {}) };
       selection.addOptimisticMessage(event.threadId, message);
     }
     if (event.type === 'user_input_requested') {

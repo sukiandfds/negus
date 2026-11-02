@@ -29,6 +29,13 @@ export async function createTaskTools({ invoke, background = false }) {
       } };
     },
     release: taskId => { scopes.delete(byTask.get(taskId)); byTask.delete(taskId); },
+    bind: (pending, actual) => {
+      const token = byTask.get(pending);
+      if (!token || byTask.has(actual)) throw Error('来源能力绑定失败');
+      scopes.set(token, actual);
+      byTask.delete(pending);
+      byTask.set(actual, token);
+    },
     close: () => new Promise(resolve => { server.close(resolve); server.closeIdleConnections?.(); }),
   };
 }

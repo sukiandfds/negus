@@ -107,12 +107,16 @@ try {
     for (let i = 0; i < 100 && !releaseQueue; i++) await page.waitForTimeout(10);
     assert.ok(releaseQueue);
     queue = [{ ...queue[0], state: 'dispatching', dispatchSubmissionId: 'dispatch', sentAt: new Date().toISOString() }];
-    await page.evaluate(items => window.fixtureEvent({ type: 'queue_changed', threadId: 'thread-00', items }), queue);
-    await page.evaluate(() => window.fixtureEvent({ type: 'user_message_submitted', threadId: 'thread-00', submissionId: 'dispatch', messageId: 'optimistic-dispatch', text: '排队消息', attachments: [], createdAt: new Date().toISOString() }));
+    await page.evaluate(() => window.fixtureEvent({ type: 'user_message_submitted', threadId: 'thread-00', submissionId: 'dispatch', queueSubmissionId: 'queued', messageId: 'optimistic-dispatch', text: '排队消息', attachments: [], createdAt: new Date().toISOString(), authorName: '来源助手', displaySourceAgentId: 'assistant:source' }));
     await page.waitForFunction(() => document.querySelector('[data-message-id="optimistic-dispatch"]'));
     assert.equal(await page.getByText('排队消息', { exact: true }).count(), 1);
     await page.evaluate(() => window.fixtureEvent({ type: 'user_message_accepted', threadId: 'thread-00', turnId: 'new-turn', submissionId: 'dispatch' }));
     await page.getByLabel('等待助手完成后发送').waitFor({ state: 'detached' });
+    await page.evaluate(items => window.fixtureEvent({ type: 'queue_changed', threadId: 'thread-00', items }), queue);
+    await page.evaluate(items => window.fixtureEvent({ type: 'queue_changed', threadId: 'thread-00', items }), [{ ...queue[0], state: 'pending', dispatchSubmissionId: '' }]);
+    assert.equal(await page.getByText('排队消息', { exact: true }).count(), 1);
+    await page.locator('[data-message-id="optimistic-dispatch"]').getByText('来源助手', { exact: true }).waitFor();
+    assert.equal(await page.getByLabel('等待助手完成后发送').count(), 0);
     queue = [];
     releaseQueue?.();
     assert.equal(await page.getByText('排队消息', { exact: true }).count(), 1);

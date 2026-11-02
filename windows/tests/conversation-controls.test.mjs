@@ -652,6 +652,8 @@ test("forks, archives, and restores a project thread through app-server actions"
     latestAssistant: "",
     archived: false,
     forkedFromId: null,
+    parentThreadId: null,
+    nativeSubagent: false,
     cwd: "D:\\project",
   });
   assert.deepEqual(calls.slice(-2).map((call) => call.method), ["thread/archive", "thread/unarchive"]);
@@ -1093,6 +1095,31 @@ test('managed research retains read-only policy inside a registered project on f
   assert.equal(resume.params.sandbox, 'read-only');
   assert.equal(resume.params.developerInstructions, 'Only research');
   for (const c of calls.filter(c => c.method === 'turn/start')) assert.equal(c.params.sandboxPolicy.type, 'readOnly');
+});
+
+test('fresh and resumed ordinary threads get MCP at thread level, never turn level', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'negus-fresh-mcp-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const calls = []; const bound = [];
+  const thread = { id: 'ordinary-thread', cwd: root };
+  const store = createAppServerConversationStore({ projectRoot: root, registerMedia: () => null, autoTitleEnabled: false,
+    threadRuntimeOptions: value => value.fresh
+      ? { resume: { config: { 'mcp_servers.negus_handoffs': { command: 'test-fresh' } } }, bindThread: id => bound.push(id) }
+      : { resume: { config: { 'mcp_servers.negus_handoffs': { command: 'test-existing' } } }, turn: {} },
+    client: { subscribe: () => () => {}, close() {}, request: async (method, params) => {
+      calls.push({ method, params });
+      return method === 'turn/start' ? { turn: { id: 'turn' } } : { thread };
+    } },
+  });
+  t.after(() => store.close());
+  await store.createSession('model', root);
+  await store.sendMessage(thread.id, 'first');
+  await store.sendMessage(thread.id, 'second');
+  assert.deepEqual(bound, [thread.id]);
+  assert.equal(calls.find(call => call.method === 'thread/start').params.config['mcp_servers.negus_handoffs'].command, 'test-fresh');
+  assert.equal(calls.filter(call => call.method === 'thread/resume').length, 1);
+  assert.equal(calls.find(call => call.method === 'thread/resume').params.config['mcp_servers.negus_handoffs'].command, 'test-existing');
+  assert.ok(calls.filter(call => call.method === 'turn/start').every(call => !Object.hasOwn(call.params, 'config')));
 });
 
 test("reading runtime settings never resumes an occupied original thread", async () => {

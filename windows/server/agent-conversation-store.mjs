@@ -66,11 +66,13 @@ const normalizeHistoryMessage = (message, binding) => {
     text,
     ...(message.turnId ? { turnId: clean(message.turnId, 160) } : {}),
     ...(message.itemId ? { itemId: clean(message.itemId, 160) } : {}),
+    ...(message.submissionId ? { submissionId: clean(message.submissionId, 160) } : {}),
     createdAt: message.createdAt || new Date().toISOString(),
     runtimeKind: clean(message.runtimeKind, 40) || binding?.runtimeKind || "codex",
     runtimeSessionId: clean(message.runtimeSessionId, 120) || binding?.runtimeSessionId || "",
     ...(message.authorId ? { authorId: clean(message.authorId, 80) } : {}),
     ...(message.authorName ? { authorName: clean(message.authorName, 80) } : {}),
+    ...(message.displaySourceAgentId ? { displaySourceAgentId: clean(message.displaySourceAgentId, 80) } : {}),
     ...(Number.isSafeInteger(message.sequence) ? { sequence: message.sequence } : {}),
     ...(message.source ? { source: clean(message.source, 40) } : {}),
     ...(message.projectId ? { projectId: clean(message.projectId, 200) } : {}),
@@ -333,7 +335,7 @@ export const createAgentConversationStore = async ({ stateFile, groupRoom, roomD
     });
   };
 
-  const recordRuntimeEvent = async (event) => {
+  const recordRuntimeEvent = async (event, attribution = {}) => {
     if (event?.method !== "item/completed") return null;
     const threadId = clean(event.params?.threadId, 120);
     const item = event.params?.item;
@@ -346,6 +348,10 @@ export const createAgentConversationStore = async ({ stateFile, groupRoom, roomD
       text,
       turnId: event.params?.turnId || item.turnId,
       itemId: item.id,
+      ...(item.type === "userMessage" && item.clientId ? { submissionId: item.clientId } : {}),
+      ...(attribution.authorId ? { authorId: attribution.authorId } : {}),
+      ...(attribution.authorName ? { authorName: attribution.authorName } : {}),
+      ...(attribution.displaySourceAgentId ? { displaySourceAgentId: attribution.displaySourceAgentId } : {}),
     });
   };
 
