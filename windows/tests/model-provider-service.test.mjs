@@ -358,3 +358,24 @@ test('new native GPT capabilities apply across configurations while explicit sup
     } finally { service.close(); }
   });
 });
+
+test('current and an isolated provider sharing CODEX_HOME reuse one writer without rewriting config', async () => {
+  await withTemporaryRoot(async root => {
+    const home = path.join(root, 'runtime/model-providers', GROK_MODEL_PROVIDER_ID, 'codex-home');
+    await fs.mkdir(home, { recursive: true });
+    await fs.writeFile(path.join(home, 'config.toml'), '# existing runtime config');
+    let closed = false;
+    const client = { close() { closed = true; } };
+    const service = createModelProviderService({ projectRoot: root, defaultClient: client, defaultCodexHome: home,
+      currentApiConfiguration: async () => null,
+      credentialStore: { isConfigured: async () => true },
+      createClient: () => { throw new Error('duplicate writer'); },
+    });
+    const clients = await Promise.all([service.getClient({ modelProviderId: 'current' }),
+      service.getClient({ modelProviderId: GROK_MODEL_PROVIDER_ID }), service.getClient({ modelProviderId: GROK_MODEL_PROVIDER_ID })]);
+    assert.ok(clients.every(value => value === client));
+    assert.equal(await fs.readFile(path.join(home, 'config.toml'), 'utf8'), '# existing runtime config');
+    service.close();
+    assert.equal(closed, false, 'borrowed default client must not be closed');
+  });
+});

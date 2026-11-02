@@ -461,3 +461,29 @@ test('existing background registration repairs only the verified route without s
   await assert.rejects(service.registerExistingBackground({ threadId: 'racing', providerId: 'vip' }), /已变化/);
   assert.equal(await service.getRecordedProviderForThread('racing'), 'other');
 });
+
+test('persisted pending switch between aliases sends through the original store without releasing its writer', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-writer-alias-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const stateFile = path.join(root, 'routes.json');
+  await fs.writeFile(stateFile, JSON.stringify({ thread: { providerId: 'alias', pendingProviderId: 'current',
+    model: 'model', runtimeModel: 'model', lastSuccessfulSettings: null } }));
+  const client = {};
+  const sent = [];
+  const current = {
+    getRuntimeContext: async () => ({ model: 'model' }),
+    getSessionResumeInfo: async () => ({ path: path.join(root, 'rollout.jsonl'), cwd: root, model: 'model' }),
+    releaseSession: async () => { throw new Error('must preserve existing writer'); },
+    resumeProviderSession: async () => { throw new Error('must not reacquire writer'); },
+    sendMessage: async (id, text) => { sent.push([id, text]); return { turn: { id: 'turn' } }; },
+  };
+  const service = createProviderConversationStore({ current, stateFile,
+    providers: { getClient: async () => client, resolveRoute: ({ model }) => ({ modelProviderId: 'current', model }) },
+    createStore: () => { throw new Error('duplicate event subscription'); },
+  });
+  await service.sendMessage('thread', 'continue');
+  assert.deepEqual(sent, [['thread', 'continue']]);
+  const route = JSON.parse(await fs.readFile(stateFile, 'utf8')).thread;
+  assert.equal(route.providerId, 'current');
+  assert.equal(route.pendingProviderId, undefined);
+});

@@ -475,3 +475,38 @@
 - 真实页面验收补齐当前Feishu列表/标题的原生标签：业务6文件 +9/-6，直接复用ConversationOrigin，无新组件和控制。13:30:48前端发布 `feishu-mvytlyvz`，不重启后端。浏览器确认两条派工气泡为左侧来源助手、真人为右侧“我”；后台列表出现Codex子代理标签，点击进入原线程，页面异常0。证据 `live-browser-evidence.json`、`live-attribution.png`、`live-native-task-list.png`。旧组件夹具不能替代当前用户入口，验收应从实际导航路径打开页面。
 - 消息交接单测26/26、工作台浏览器7/7、共享store浏览器7组通过；接受先到/旧快照、正常steer同turn、同文两次、失败及附件保留均有覆盖。TypeScript、构建、diff检查通过。两个受保护滚动文件未改；无群聊扩展、内核升级或子代理额外控制。后端/前端/公网健康，公网HTTP200。
 - 相对本轮基线944179d，累计业务31文件 +480/-103，测试12文件 +581/-9，文档2文件；含上午已有改动，不与凌晨19文件维护混算。当前两项实现及运行验收已收口。旧桥接消息无可靠身份的历史保持原样，不猜署名；不属于新派工署名失效。
+
+### 2026-11-02 真实署名缺口复核（未完成）
+
+- 运行 API 全量读取旧 DeepSeek `01a19839-dee3-76d0-b842-fbf737fe99bc` 和开发 `01a1983a-77e7-7ea3-9592-e522e6cce926`，分别17和20条 UserMessage 无 submission/作者；`/api/tasks` 均无对应 task。原始 bridge `agent-turn.mjs` / `research-turn.mjs` 未传 clientUserMessageId，也未保存 turn/start 返回 ID；JSONL 虽有 turn 和 item，缺少可将具体请求唯一关联到该 item 的返回证据。`developer-steer.mjs` 可见调用返回 no active turn，不能作为成功追加证据。此前将旧消息排除在失效之外的结论不成立，问题仍未修复。
+- 原生 child `01a19a9b-a906-7522-ba06-fc61353d662d` 完整 JSONL 有来自 `/root` 的3条 `agent_message`，ID 分别为 `amsg_01a19a9b-a939-78b1-b66d-365c65effca3`、`amsg_01a19aa0-2aa3-7b21-bbf6-425ceb13126c`、`amsg_01a19aa2-481c-7e20-9db0-5b5fd9153f53`；均含 encrypted_content。原生 `thread/read` 无这些 items，Negus 全量会话仅1条消息、无 user，因而首次及追加均未显示，不能用 recent10 说明身份正确。
+- 本任务真实 MCP 派工 `1718b252-e6d8-48c8-a9a5-e283de521e82` 的运行 API 返回 submissionId、`gpt-6-astra` 和 `assistant:01a19a93-16c3-7012-83e1-2630f7658e1e`，对应 task.inputs；先前独立测试首发、续派、真人及页面截图证据为 `/tmp/negus-director-20261102/live-handoffs-evidence.json`、`live-browser-evidence.json`、`live-attribution.png`，不替代本次旧线程验收。
+- 未修改业务代码或运行数据，未发布、重启、提交；没有修复任何旧记录。需找到保留请求返回 turn/item 的可信记录后通过运行服务复用 actor 账本定向补标；原生消息需可读取的受支持接口或发送时可信捕获，不能从 encrypted_content 恢复正文。本次未验证刷新/重开后的修复，也无可执行发布脚本。
+
+### 2026-11-02 同目录写锁冲突修复（待运行生效）
+
+基线 develop/b678d5e81b7f43aefb214bc07cbfc7062d71c3c1。业务2文件 +10/-3 行，复用默认连接、会话与既有 pending 切换收口逻辑。新增2项回归：同目录不新建进程、不改配置、不关闭借用连接；持久化 pending 别名切换直接发送并清理 pending，不释放/重抢锁、不重复订阅。模型供应商与会话路由测试30通过、1项原有平台测试跳过；两文件语法和 git diff --check 通过。证据：/tmp/negus-writer-tests.log。既有两份文档未提交改动保留。本次源码完成，未重启，线上尚未生效。
+
+同次补充验证：conversation-controls 37项通过，合计67通过、1项原有跳过。2026-11-02 14:51 +08:00 已执行受控 prepare，候选 `1793602282055-d89d225f`、回退 `1793595790314-01e46644`，命令成功返回 prepared；两份后端候选文件与工作区逐字节一致。status 确认 active 仍为旧版本，尚未重启或切换服务，等待用户重启授权。准备记录：runtime/negus-release-prepared.json。
+
+### 2026-11-02 插入消息排序修复
+
+同轮次本地消息被轮次开始时间替代排序时间，导致服务器接受前后位置跳动。业务 conversationMerge.ts 新增2行，测试 conversation-loading.test.mjs 新增三阶段位置回归，旧代码失败、修改后通过。相关27项测试通过；发布结果另记。此前占用修复已核对本次 jobId `1793602901070-55141` state=started，active=`1793602282055-d89d225f`，2026-11-02T07:02:33.648Z 生效。
+
+发布验收：TypeScript及差异检查通过；`node scripts/negus.mjs rebuild` workerPid=56080，本次 frontend result 于2026-11-02T07:51:10.754Z 返回 published，buildId=`feishu-mvyymh7w`，backendRestarted=false。本地 version.json 返回200且与结果一致；watchdog 后端/前端/隧道均healthy（隧道HTTP200）。额外未认证公网 version.json 请求返回403，不以该请求证明公网版本。修复源码已在前端生效；未更改滚动逻辑。
+
+### 2026-11-02 第一条加载缓存审计
+
+基线 `253e379181b0b9ac3a412783c60e8d62b75c469d` 与当前最新代码对比，第一条相关9文件去重为 +137/-93。核对确认：旧的 `conversationReads.ts` 已删除且无残留调用；正文、上下文、状态、队列和待确认问题通过现有会话视图读取；最终 `sourceRevision` 在慢读取结束后重新核对；晚到旧请求不能覆盖当前对话；失败/占用消息按预算保留；缓存写失败保留旧快照。
+
+定向加载、缓存、路由和历史读取测试 54/54 通过，覆盖晚到请求、失败回读、缓存版本变化、失败附件保留、裁剪预算及快照写失败。审计同时确认任务署名与原生子代理元数据属于加载和缓存数据，不应迁出；但 `ConversationStore` 中 `localPending`、`sendingQueue`、`acceptedSubmissions`、`queueDispatches` 仍需在其他功能审计中核对是否存在重复身份状态。本次仅记录，不改业务代码、不发布、不重启。
+
+### 2026-11-02 其余功能代码审计
+
+- 插入消息排序：`conversationMerge.ts` 相对基线为 +2/-29；新增条件仅处理“本地消息已有 turnId、尚无原生 itemIndex”的中间阶段，原生顺序号到达后回到服务端顺序。旧 `mergeSessionDelta` 已无调用方并删除。`conversation-loading.test.mjs` 13/13通过。
+- 供应商同目录写入：`model-provider-service.mjs` 在同 `CODEX_HOME` 时复用默认 writer；`provider-conversation-store.mjs` 在 provider/current 指向同一 client 时复用 current store，别名切换不释放或重新恢复。供应商、会话路由和目录相关测试59/59通过，1项Windows专用测试跳过。
+- 任务来源、追加、恢复与消息交接：`employee-task-extension.test.mjs`、`task-kernel.test.mjs`、`task-attribution-projection.test.mjs`、`message-handoff.test.mjs`、`agent-publication.test.mjs` 合计53/53通过。身份仅按 submission/client ID 精确匹配；held queue、活动 steer、终态新 turn、未加载线程 resume、commentary/final/无答复区分均有覆盖。
+- 后台目录、子代理、当前任务与列表刷新：元数据由后端透传到现有目录、来源标签和任务组件；真实消息时间用于排序，同 thread 去重。项目目录、桌面当前任务及会话摘要定向测试通过。
+- 未发现重复执行器、第二条正文缓存或第二套任务状态机。当前主要结构风险是 `ConversationStore` 的四种在途状态以及 `employee-task-extension.mjs` 的职责集中，尚无证据表明可直接删除；后续只允许在这两个边界内按现有测试收敛，不能继续新增并行的状态。
+- 已知缺口：任务摘要不可读取时缺少安全的排序时间回退；旧历史无可信 submission/actor 时不能补署名；维护 job 与原任务仍无精确关联。以上均不由本轮猜测补齐。
+- 本轮仅修改文档；`git diff --check`通过，未发布、未重启、未提交或推送。

@@ -19,7 +19,8 @@ export const createProviderConversationStore = ({ current, providers, createStor
   };
   const storeFor = (providerId) => {
     if (!stores.has(providerId)) {
-      const pending = providers.getClient({ modelProviderId: providerId }).then((client) => createStore(client, providerId));
+      const pending = providers.getClient({ modelProviderId: providerId }).then(async (client) =>
+        client === await providers.getClient({ modelProviderId: 'current' }) ? current : createStore(client, providerId));
       stores.set(providerId, pending);
       void pending.catch(() => stores.delete(providerId));
     }
@@ -103,10 +104,10 @@ export const createProviderConversationStore = ({ current, providers, createStor
     const source = await storeFor(owner(id));
     const target = await storeFor(route.pendingProviderId);
     const info = await source.getSessionResumeInfo(id);
-    await source.releaseSession(id);
+    if (source !== target) await source.releaseSession(id);
     restored.delete(`${owner(id)}:${id}`);
     const destinationInfo = providers.prepareResumeFile ? await providers.prepareResumeFile(route.pendingProviderId, info) : info;
-    await target.resumeProviderSession(id, { ...destinationInfo, model: route.runtimeModel,
+    if (source !== target) await target.resumeProviderSession(id, { ...destinationInfo, model: route.runtimeModel,
       modelProvider: route.pendingProviderId === 'current' ? undefined : route.pendingProviderId,
       reasoningEffort: route.reasoningEffort });
     routes[id] = { ...route, providerId: route.pendingProviderId, pendingProviderId: undefined, resumeInfo: destinationInfo, activeModel: route.runtimeModel };

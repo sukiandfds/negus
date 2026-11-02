@@ -25,6 +25,8 @@ export const orderMessageList = (messages: SessionMessage[]) => {
         }
         const local = (item: SessionMessage) => item.id.startsWith("stream-") || isOptimisticMessage(item);
         if (!local(message) && !local(current)) return false;
+        const currentTimestamp = timestampOf(current);
+        return timestamp !== null && currentTimestamp !== null && currentTimestamp > timestamp;
       }
       const turnTimestamp = message.turnId ? turnStarts.get(message.turnId) ?? timestamp : timestamp;
       const currentTimestamp = (current.turnId ? turnStarts.get(current.turnId) : undefined) ?? timestampOf(current);

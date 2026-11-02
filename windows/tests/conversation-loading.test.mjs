@@ -244,3 +244,18 @@ test("background receipt updates survive before the destination session is loade
   h.render().selectSession("b");
   assert.equal(h.render().session.messages[0].deliveryState, "failed");
 });
+
+test('inserted message keeps its position when acceptance adds the active turn id', async () => {
+  const { mergeMessageList } = await import(mergeUrl);
+  const time = seconds => new Date(1700000000000 + seconds * 1000).toISOString();
+  const history = [
+    { id: 'start', role: 'user', text: 'start', turnId: 't', turnItemIndex: 0, turnStartedAtMs: 1700000000000, createdAt: time(0) },
+    { id: 'progress', role: 'assistant', text: 'working', turnId: 't', turnItemIndex: 1, turnStartedAtMs: 1700000000000, createdAt: time(10) },
+  ];
+  const local = { id: 'optimistic-send', role: 'user', text: 'insert', submissionId: 'send', createdAt: time(20) };
+  const ids = list => list.map(item => item.id);
+  assert.deepEqual(ids(mergeMessageList([local], history)), ['start', 'progress', local.id]);
+  assert.deepEqual(ids(mergeMessageList([{ ...local, turnId: 't' }], history)), ['start', 'progress', local.id]);
+  const native = { ...local, id: 'native', turnId: 't', turnItemIndex: 2, turnStartedAtMs: 1700000000000 };
+  assert.deepEqual(ids(mergeMessageList([{ ...local, turnId: 't' }], [...history, native])), ['start', 'progress', 'native']);
+});

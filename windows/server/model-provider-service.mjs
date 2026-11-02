@@ -228,6 +228,7 @@ const ensureCodexHome = async ({ runtimeRoot, provider, credentialStore, credent
 export const createModelProviderService = ({
   projectRoot,
   defaultClient,
+  defaultCodexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex'),
   providers = defaultModelProviders(),
   runtimeRoot = path.join(projectRoot, "runtime", "model-providers"),
   credentialRoot = path.join(projectRoot, "runtime", "model-provider-credentials"),
@@ -431,6 +432,11 @@ export const createModelProviderService = ({
     }
     if (!await isProviderConfigured(route.provider.id)) {
       throw statusError(`${route.provider.displayName} credential is not configured.`, 503);
+    }
+    // An inherited CODEX_HOME can make current an alias of an isolated provider.
+    // Reuse its writer instead of starting two app-servers against the same home.
+    if (defaultClient && path.resolve(runtimeRoot, route.provider.id, 'codex-home') === path.resolve(defaultCodexHome)) {
+      return defaultClient;
     }
     if (!clientPromises.has(route.provider.id)) {
       const promise = ensureCodexHome({
