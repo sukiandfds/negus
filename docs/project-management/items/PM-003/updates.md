@@ -10,3 +10,7 @@
 - 边界：保留历史原话、未定方案和冲突；没有删除换肤代码、提交或推送。
 
 - 2026-11-04：共用Mac/Windows图片解析，保留两边入口，三个Mac安装/打包入口物化完整模块。业务+11/-129，净减118行。用户明确免验证，未运行测试；源码即时供后续启动/打包使用，未更改已安装换肤服务。
+
+- 2026-11-04：对话路由802行拆为100/242/223/130/146行，共841行，净增39行（新增文件计入）。25个路由分支AST提取后逐字一致；17项原路由测试通过，证据/tmp/negus-routes-split-tests.log与/tmp/verify-route-move.mjs。相关测试47通过2失败；原路由通过临时loader替换复跑同样2失败，分别是current::saved-model前缀与前端配置覆盖断言，证据/tmp/negus-routes-related-tests.log、/tmp/negus-routes-baseline-tests.log。本次未改这些行为。当前工具目录无Negus create_background_task/negus_handoffs入口，未派出DeepSeek任务；未绕用户入口。服务未重启，候选待指定验收。
+
+- 2026-11-04：用户同意“改用原生 DeepSeek 子代理验证”。实际派发deepseek-flash/high两次、deepseek-v4-pro/high一次，均在执行前被供应商503拒绝：astra特价分组无可用渠道。请求标识分别202611031629456265676318268d9d6a3d0CabQ、202611031630424344064588268d9d6BfyBdhl6、202611031631404492796778268d9d6KOVBJPD7。无DeepSeek审核结果；已停止重复请求，候选保留、未发布。

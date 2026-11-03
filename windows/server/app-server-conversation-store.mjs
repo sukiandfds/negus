@@ -1,6 +1,5 @@
 import { openRollout } from './rollout-file.mjs';
 import { communicationInstructions } from "./base-prompt.mjs";
-import { neutralThreadInstructions } from './model-catalog.mjs';
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -691,7 +690,6 @@ export const createAppServerConversationStore = ({
     if (freshRuntime) return freshRuntime;
     return client.request("thread/resume", {
       threadId, persistExtendedHistory: true,
-      ...await neutralThreadInstructions(thread.path),
       developerInstructions: await getUserProfilePrompt(), ...(runtimeOptions?.resume || {}),
     });
   };
@@ -939,7 +937,6 @@ export const createAppServerConversationStore = ({
     if (!isAllowedProjectRoot(options.cwd) || !path.isAbsolute(options.path)) throw new Error('无法验证原会话记录的位置');
     const params = {
       threadId, path: options.path, cwd: options.cwd, model: options.model,
-      ...await neutralThreadInstructions(options.path),
       developerInstructions: await getUserProfilePrompt(),
       ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
       ...(options.reasoningEffort ? { config: { model_reasoning_effort: options.reasoningEffort } } : {}),

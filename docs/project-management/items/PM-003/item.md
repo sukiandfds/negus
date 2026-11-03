@@ -56,3 +56,9 @@ product_base_commit: c8c7b66d686fb3a896c4c939fe6dec9bb2d8d8d4
 用户原话：“先做第一项。记得要保持mac和windows之后都能正常用”“也不用验证了，你快点弄好就行。”
 
 仅共用图片解析：Windows原实现为唯一来源，Mac原入口转导出。Mac安装、完整发行包、客户端发行包在复制时打包完整解析模块，独立使用无需Windows目录。按用户要求不运行测试，不安装、不重启。
+
+### 2026-11-04 对话接口完整拆分
+
+用户原话：“要不先做2？”；在说明拆分后端802行对话接口文件后，用户要求“快速全部完成吧。让后让negus里的deepseek验证。”本步仅完整拆分该接口文件，群聊重做和其他精简项不在本步。保留原权限、身份、提交幂等与25个接口处理分支；共享入口负责授权和依赖装配，消息/历史/设置/互动各自独立文件。用户要求Negus里的DeepSeek验证，不能用普通新建接口派工或冒充该验证已完成。
+
+相关文件：windows/server/routes/conversation-routes.mjs、conversation-message-routes.mjs、conversation-history-routes.mjs、conversation-settings-routes.mjs、conversation-interaction-routes.mjs。

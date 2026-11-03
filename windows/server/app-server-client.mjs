@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import TOML from "@iarna/toml";
-import { sharedModelCatalogArguments } from './model-catalog.mjs';
+import { requestWithNeutralIdentity, sharedModelCatalogArguments } from './model-catalog.mjs';
 
 export const streamRetryArguments = (home) => {
   let config;
@@ -315,10 +315,13 @@ export const createAppServerClient = ({
     return initializePromise;
   };
 
+  const neutralThreads = new Set();
   const request = async (method, params = {}, options = {}) => {
     if (restartPromise) await restartPromise;
     await initialize();
+    return requestWithNeutralIdentity(method, params, (method, params) => {
     return requestRaw(method, params, options.timeoutMs);
+    }, neutralThreads);
   };
 
   const restart = (reason = "health check failed", threadId = "") => {
@@ -328,6 +331,7 @@ export const createAppServerClient = ({
       const previous = child;
       child = undefined;
       initializePromise = undefined;
+      neutralThreads.clear();
       buffer = "";
       rejectPending(new Error(`Codex app-server restarting: ${reason}`));
       pendingUserInputs.clear();

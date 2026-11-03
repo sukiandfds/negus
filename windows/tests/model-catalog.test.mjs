@@ -7,6 +7,7 @@ import { neutralModelInstructions, neutralThreadInstructions } from '../server/m
 
 test('remove fixed identity without changing the rest of existing work instructions', () => {
   assert.equal(neutralModelInstructions('You are Codex, an agent based on GPT-6.\nKeep my tools and rules.'), 'You are a coding assistant.\nKeep my tools and rules.');
+  assert.equal(neutralModelInstructions('You are Codex, a coding agent based on GPT-5. Keep rules.'), 'You are a coding assistant. Keep rules.');
   assert.equal(neutralModelInstructions('Custom employee instructions'), 'Custom employee instructions');
 });
 
@@ -32,4 +33,22 @@ test('shared DeepSeek metadata has official context, modality and effort values 
   }
   assert.deepEqual(models[0].input_modalities, ['text', 'image']);
   assert.deepEqual(models[1].input_modalities, ['text']);
+});
+
+test('decimal model names and every shared resume/fork path lose only fixed identity', async () => {
+  const { requestWithNeutralIdentity } = await import('../server/model-catalog.mjs');
+  const file = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'negus-identity-')), 'rollout.jsonl');
+  const original = 'You are Codex, an agent based on GPT-6.1. Keep employee duties.';
+  await fs.writeFile(file, JSON.stringify({type:'session_meta',payload:{base_instructions:{text:original}}})+'\n');
+  try {
+    for (const method of ['thread/resume', 'thread/fork']) {
+      const calls = [], cleaned = new Set();
+      const send = async (method, params) => { calls.push({method,params}); return {thread:{id:'employee',path:file}}; };
+      await requestWithNeutralIdentity(method, {threadId:'employee'}, send, cleaned);
+      assert.equal(calls[1].params.baseInstructions, 'You are a coding assistant. Keep employee duties.');
+      await requestWithNeutralIdentity('thread/resume', {threadId:'employee'}, send, cleaned);
+      assert.equal(calls.length, 3, 'no duplicate cleanup during subsequent sends');
+    }
+    assert.equal(JSON.parse(await fs.readFile(file,'utf8')).payload.base_instructions.text,original);
+  } finally { await fs.rm(path.dirname(file),{recursive:true,force:true}); }
 });

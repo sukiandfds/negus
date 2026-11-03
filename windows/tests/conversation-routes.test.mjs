@@ -654,3 +654,27 @@ test('editing reverts the original thread and refuses to change an active conver
   await assert.rejects(invokePost(route, '/api/session/revert', { threadId: 'original', beforeTurnId: 'edited-turn' }).promise, /先停止/);
   assert.equal(calls.length, 1);
 });
+
+const callGoalWithAttachment = async (route, pathname, body) => {
+  const request = Readable.from([Buffer.from(JSON.stringify(body))]);
+  request.method = 'POST';
+  const response = { status: 0, body: '', writeHead(status) { this.status = status; }, end(value) { this.body = value || ''; } };
+  await route(request, response, new URL('http://127.0.0.1' + pathname));
+  return response;
+};
+
+test('goal submission with attachment records and broadcasts the submitted message', async () => {
+  const events = [];
+  const route = createConversationRoutes({
+    conversations: { setGoal: async () => ({ goal: { status: 'active' } }) },
+    media: { resolveMany: ids => ids?.length ? [{ id: 'file-1', name: 'note.txt', mimeType: 'text/plain', url: '/media/file-1', path: '/tmp/note.txt' }] : [] },
+    execution: { recordMessage: () => {} },
+    publishThreadEvent: (_threadId, event) => events.push(event),
+  });
+  const response = await callGoalWithAttachment(route, '/api/session/goal', {
+    threadId: 'thread-1', objective: 'Read note', status: 'active', submissionId: 'submission-1', attachmentIds: ['file-1'],
+  });
+  assert.equal(response.status, 200);
+  assert.equal(events[0].type, 'user_message_submitted');
+  assert.equal(events[0].attachments[0].id, 'file-1');
+});
