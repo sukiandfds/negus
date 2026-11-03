@@ -6,14 +6,14 @@ import type { ThreadGoal } from "./types";
 export function completedGoalMessageId(messages: SessionMessage[], goal?: ThreadGoal | null): string | null {
   if (!goal || goal.status !== "complete") return null;
   const cutoff = goal.updatedAt * 1000;
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index];
+  const turns = new Map<string, SessionMessage[]>();
+  for (const message of messages) {
     if (!message.turnId || (message.turnStartedAtMs != null && message.turnStartedAtMs > cutoff)) continue;
-    if (message.turnStatus !== "completed") return null;
-    for (let item = index; item >= 0 && messages[item].turnId === message.turnId; item--) {
-      if (messages[item].role === "assistant") return messages[item].id;
-    }
-    return null;
+    turns.set(message.turnId, [...(turns.get(message.turnId) || []), message]);
   }
-  return null;
+  const candidates = [...turns.values()].sort((left, right) =>
+    (right[0].turnStartedAtMs ?? 0) - (left[0].turnStartedAtMs ?? 0));
+  const latest = candidates[0];
+  if (!latest || !latest.some(message => message.turnStatus === "completed")) return null;
+  return latest.filter(message => message.role === "assistant").at(-1)?.id || null;
 }

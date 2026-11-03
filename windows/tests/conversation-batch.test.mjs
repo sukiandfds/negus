@@ -13,9 +13,10 @@ test('fixed ten publish together, remainder begins afterwards',async()=>{
 test('one slow read cannot hold nine successes or restart deadline; late completion never republishes',async()=>{
  const publications=[],signals=[];let release;const held=new Promise(resolve=>release=resolve);
  await readConversationBatches(Array.from({length:10},(_,i)=>i),(i,signal)=>{if(i===9){signals.push(signal);return held;}return Promise.resolve();},r=>publications.push(r),new AbortController().signal,20);
- assert.deepEqual(publications.map(p=>p.length),[10,1,1]);assert.equal(publications[0].filter(r=>!r.error).length,9);assert.match(publications[0][9].error,/同步超时/);
- assert.equal(publications[2][0].retry,false);assert.ok(signals.every(signal=>signal.aborted));
- release();await new Promise(r=>setTimeout(r,5));assert.equal(publications.length,3);
+ assert.equal(publications[0].filter(r=>!r.error).length,9);
+ const failures=publications.flat().filter(r=>r.error);assert.equal(failures.length,3);assert.ok(failures.every(r=>/同步超时/.test(r.error)));
+ assert.equal(failures.at(-1).retry,false);assert.ok(signals.every(signal=>signal.aborted));
+ const count=publications.length;release();await new Promise(r=>setTimeout(r,5));assert.equal(publications.length,count);
 });
 test('cancelled view cannot publish old batch',async()=>{
  const abort=new AbortController(),publications=[];let release;const held=new Promise(resolve=>release=resolve);
@@ -49,4 +50,18 @@ test('cancelling a batch aborts a stalled read and publishes nothing', async () 
  const pending=readConversationBatches([1],(_entry,signal)=>{readSignal=signal;return new Promise(()=>{});},r=>publications.push(r),controller.signal,1000);
  controller.abort();await pending;
  assert.equal(readSignal.aborted,true);assert.deepEqual(publications,[]);
+});
+
+test('deadline publishes successes without starving reads started near the deadline', async () => {
+ const publications=[],calls=[];let release;
+ const first=new Promise(resolve=>release=resolve);
+ const pending=readConversationBatches(Array.from({length:8},(_,i)=>i),async i=>{
+   calls.push(i);if(i<4)await first;else await new Promise(resolve=>setTimeout(resolve,60));
+ },results=>publications.push(results),new AbortController().signal,100);
+ await new Promise(resolve=>setTimeout(resolve,60));release();
+ await new Promise(resolve=>setTimeout(resolve,50));
+ assert.deepEqual(publications.flat().map(r=>r.entry),[0,1,2,3]);
+ await pending;
+ assert.equal(calls.length,8);assert.equal(publications.flat().length,8);
+ assert.ok(publications.flat().every(r=>!r.error));
 });

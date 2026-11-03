@@ -52,7 +52,7 @@ export function useThreadGoal(threadId: string, store: ConversationStore) {
   }, [store, threadId]);
 
   const update = useCallback(async (
-    patch: { objective?: string; status?: EditableGoalStatus; tokenBudget?: number; attachmentIds?: string[] },
+    patch: { objective?: string; status?: EditableGoalStatus; tokenBudget?: number; attachmentIds?: string[]; submissionId?: string },
     targetId = threadId,
   ) => {
     if (!targetId) return null;

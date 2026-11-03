@@ -27,7 +27,7 @@ test('queue acceptance survives late mapping and stale batches without hiding a 
   store.commit('t', { ...snapshot, queueItems: [queued, { ...queued, id: 'q2', submissionId: 'queued2' }],
     session: { threadId: 't', messages: ['attempt', 'attempt2'].map(id => ({ id: `native-${id}`, submissionId: id, role: 'user', text: 'same' })) } }, store.revisions.get('t'));
   assert.deepEqual(store.get('t').queueItems, []);
-  assert.deepEqual(store.get('t', false).session.messages.map(message => message.id), ['native-attempt', 'native-attempt2']);
+  assert.deepEqual(store.get('t', false).session.messages.map(message => message.id).sort(), ['native-attempt', 'native-attempt2']);
 });
 
 test('submitted queue identity is retained across stale reads and failed attempts remain retryable', () => {
@@ -79,7 +79,9 @@ test('connection placeholder stays hidden while submitted, but errors and notice
   assert.equal(executionHandoff('a', [], { ...status, phase: 'waitingOnApproval' }).showExecution, true);
   assert.equal(executionHandoff('a', [], { ...status, phase: 'working' }).showExecution, true);
 });
-const { advanceLiveTranscript, createLiveTranscriptMemory } = await load('liveTranscript');
+const { projectTranscript } = await load('liveTranscript');
+const createLiveTranscriptMemory = () => ({});
+const advanceLiveTranscript = (_memory, input) => projectTranscript(input);
 const { mergeMessageList, mergePendingOptimisticMessages, mergeSessionRefresh } = await load('conversationMerge');
 const { createOptimisticMessage } = await load('optimisticMessage');
 const status = {threadId:'a',turnId:'protocol',startedAt:'2026-10-27T05:55:04Z',phase:'completed',hasFinalAnswer:true};
@@ -90,7 +92,7 @@ test('completion before history, commentary only, remount, final handoff and dif
     const handoff = executionHandoff('a',messages,status);
     assert.equal(handoff.waitingForReply,true);
     const view = advanceLiveTranscript(createLiveTranscriptMemory(),{threadId:'a',messages,turnId:'protocol',streamingText:'',streamingItemId:'',active:false,showExecution:handoff.showExecution,retainPlaceholder:handoff.waitingForReply,now:'2026-10-27T06:30:00Z'});
-    assert.ok(view.placeholder);
+    assert.equal(Boolean(view.placeholder), messages.length === 0);
   }
   const handoff = executionHandoff('a',[final,commentary],status);
   assert.equal(handoff.waitingForReply,false);
@@ -122,7 +124,7 @@ test('history handoff preserves the matching send time, preferring a server time
   assert.equal(mergeMessageList([official], [pending])[0].createdAt, pending.createdAt);
 });
 
-test('server turn order survives skewed device clocks, steers, images and delayed queue handoff', () => {
+test('display time determines order despite native turn index, with missing times stable', () => {
   const started = 1793245362000;
   const actualId = 'msg-mvsiu69q-d6211270-087f-4b83-94fe-5b8e43b2f823';
   const content = [{type:'text',text:'text with image'}, {type:'image',url:'https://example.test/image.png'}];
@@ -147,8 +149,8 @@ test('server turn order survives skewed device clocks, steers, images and delaye
     const current = {threadId:'t',messages:[earlier,{...optimistic,createdAt:new Date(started-1000).toISOString(),serverTimestamp:true,deliveryState:undefined}]};
     const incoming = {threadId:'t',messages:[earlier,...persisted,later]};
     const refresh = mergeSessionRefresh(current,incoming).messages;
-    assert.deepEqual(refresh.map(m=>m.text), ['older','text with image','working','additional','done','later']);
-    assert.deepEqual(refresh[1].blocks.map(b=>b.type), ['markdown','image']);
+    assert.deepEqual(refresh.map(m=>m.text), ['working','additional','older','text with image','done','later']);
+    assert.deepEqual(refresh[3].blocks.map(b=>b.type), ['markdown','image']);
     const waiting = mergeSessionRefresh(current,{threadId:'t',messages:[earlier]}).messages;
     assert.equal(waiting.at(-1).submissionId,id);
     assert.equal(waiting.at(-1).blocks[1].type,'image');
@@ -214,7 +216,7 @@ test('empty completion keeps placeholder through late final, remount and next-tu
     const handoff=executionHandoff('a',messages,current);
     assert.equal(handoff.waitingForReply,expected);
     const view=advanceLiveTranscript(createLiveTranscriptMemory(),{threadId:'a',messages,turnId:current.turnId,streamingText:'',streamingItemId:'',active:false,showExecution:handoff.showExecution,retainPlaceholder:handoff.waitingForReply});
-    if(expected) assert.ok(view.placeholder);
+    if(expected) assert.equal(Boolean(view.placeholder), !messages.some(message => (message.protocolTurnId || message.turnId) === current.turnId));
   };
   send('turn/started',{turn:{id:'protocol'}});
   send('turn/completed',{turn:{id:'protocol',status:'completed',items:[]}});

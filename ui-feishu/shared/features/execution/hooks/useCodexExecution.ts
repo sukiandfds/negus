@@ -41,9 +41,6 @@ export function useCodexExecution(threadId: string, store: ConversationStore) {
     const next = typeof value === 'function' ? value(store.get(threadId).executionStatus) : value;
     if (next.threadId === threadId) store.update(threadId, { executionStatus: next }, true);
   }, [isCurrent, store, threadId]);
-  const streamingItemId = useRef("");
-  const streamingBuffer = useRef("");
-  const streamingTimer = useRef(0);
   const currentTurnIdRef = useRef("");
   const retiredTurnIdsRef = useRef(new Set<string>());
   const stateRevisionRef = useRef(0);
@@ -59,10 +56,6 @@ export function useCodexExecution(threadId: string, store: ConversationStore) {
   });
 
   const clearStreaming = useCallback(() => {
-    window.clearTimeout(streamingTimer.current);
-    streamingTimer.current = 0;
-    streamingBuffer.current = "";
-    streamingItemId.current = "";
     setStatus((current) => ({ ...current, streamingText: "", streamingItemId: "", commentary: "" }));
   }, [setStatus]);
 
@@ -87,23 +80,7 @@ export function useCodexExecution(threadId: string, store: ConversationStore) {
     }
     if (next.turnId) currentTurnIdRef.current = next.turnId;
     stateRevisionRef.current += 1;
-    const preserveTerminalStream = ["completed", "idle"].includes(next.phase)
-      && !next.streamingText
-      && Boolean(streamingBuffer.current)
-      && Boolean(streamingItemId.current);
-    setStatus({
-      ...next,
-      turnId: next.turnId || "",
-      activities: next.activities || [],
-      streamingItemId: preserveTerminalStream ? streamingItemId.current : next.streamingItemId || "",
-      streamingText: preserveTerminalStream ? streamingBuffer.current : next.streamingText || "",
-    });
-    if (next.streamingText !== undefined && !preserveTerminalStream) {
-      window.clearTimeout(streamingTimer.current);
-      streamingTimer.current = 0;
-      streamingItemId.current = next.streamingItemId || "";
-      streamingBuffer.current = next.streamingText;
-    }
+    setStatus({ ...next, turnId: next.turnId || "", activities: next.activities || [], streamingItemId: "", streamingText: "" });
     return true;
   }, [clearStreaming, retireTurn, isCurrent, setStatus, threadId]);
 
@@ -143,10 +120,6 @@ export function useCodexExecution(threadId: string, store: ConversationStore) {
     stateRevisionRef.current += 1;
     const current = store.get(threadId).executionStatus;
     currentTurnIdRef.current = current.turnId || '';
-    window.clearTimeout(streamingTimer.current);
-    streamingTimer.current = 0;
-    streamingItemId.current = current.streamingItemId || '';
-    streamingBuffer.current = current.streamingText || '';
     retiredTurnIdsRef.current.clear();
     activeEventEpochRef.current = '';
     knownEventEpochsRef.current.clear();
@@ -160,13 +133,7 @@ export function useCodexExecution(threadId: string, store: ConversationStore) {
       retireTurn(currentTurnIdRef.current);
       currentTurnIdRef.current = next.turnId;
     }
-    streamingItemId.current = next.streamingItemId || '';
-    streamingBuffer.current = next.streamingText || '';
   }, [committedStatus, store, threadId, retireTurn]);
-
-  useEffect(() => () => {
-    window.clearTimeout(streamingTimer.current);
-  }, []);
 
   const handleEvent = useCallback((event: ProjectEvent) => {
     if (!isCurrent() || !("threadId" in event) || event.threadId !== threadId) return;
@@ -184,23 +151,7 @@ export function useCodexExecution(threadId: string, store: ConversationStore) {
       setStatus((current) => ({ ...current, commentary: event.text }));
       return;
     }
-    if (event.type === "assistant_delta") {
-      if (!event.turnId || event.turnId !== currentTurnIdRef.current || retiredTurnIdsRef.current.has(event.turnId)) return;
-      stateRevisionRef.current += 1;
-      if (streamingItemId.current !== event.itemId) streamingBuffer.current = event.delta;
-      else streamingBuffer.current += event.delta;
-      streamingItemId.current = event.itemId;
-      setStatus((current) => current.turnId === event.turnId
-        ? { ...current, streamingItemId: event.itemId, streamingText: current.streamingItemId !== event.itemId ? streamingBuffer.current : current.streamingText, updatedAt: new Date().toISOString() }
-        : current);
-      if (!streamingTimer.current) {
-        streamingTimer.current = window.setTimeout(() => {
-          streamingTimer.current = 0;
-          setStatus((current) => ({ ...current, streamingText: streamingBuffer.current }));
-        }, 100);
-      }
-      return;
-    }
+
   }, [acceptEventSequence, applyStatus, clearStreaming, isCurrent, setStatus, threadId]);
 
   const sendMessage = useCallback(async (

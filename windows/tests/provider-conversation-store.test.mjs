@@ -513,3 +513,18 @@ test('persisted pending switch between aliases sends through the original store 
   assert.equal(route.providerId, 'current');
   assert.equal(route.pendingProviderId, undefined);
 });
+
+test('history reads carry the saved server path without resuming or changing provider', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-saved-history-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const stateFile = path.join(root, 'routes.json');
+  await fs.writeFile(stateFile, JSON.stringify({ retained: { providerId: 'current', resumeInfo: { path: '/saved/history.jsonl' } } }));
+  const calls = [];
+  const service = createProviderConversationStore({ stateFile, providers: {}, current: {
+    findSession: async (...args) => { calls.push(args); return { threadId: 'retained', messages: [] }; },
+    resumeProviderSession: () => assert.fail('reading history must never resume'),
+  } });
+  await service.findSession('retained', 'all', { limit: 30 });
+  assert.deepEqual(calls, [['retained', 'all', { limit: 30, historyFile: '/saved/history.jsonl' }]]);
+  assert.equal((await service.findSession('retained')).modelProviderId, 'current');
+});

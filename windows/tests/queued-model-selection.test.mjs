@@ -48,6 +48,25 @@ test("failed queued model application fails the item without sending a message",
  assert.equal(idle.list("t")[0].state,"failed");
 });
 
+test("authoritative idle dispatches an existing queued message", async t => {
+  const sent = [];
+  let status = { active: true, turnId: "old", phase: "working" };
+  const queue = createFollowUpQueueService({
+    execution: { getStatus: () => status },
+    media: { resolveMany: () => [] },
+    publishThreadEvent() {},
+    conversations: { sendMessage: async (_, text) => sent.push(text) },
+  });
+  t.after(() => queue.close());
+
+  await queue.enqueue({ threadId: "t", text: "continue" });
+  assert.deepEqual(sent, []);
+  status = { active: false, turnId: "", phase: "idle" };
+  queue.handleTurnTerminal({ threadId: "t", status: "idle" });
+  for (let i = 0; i < 50 && !sent.length; i++) await sleep(10);
+  assert.deepEqual(sent, ["continue"]);
+});
+
 test('queue ingress and actual ordinary provider store agree on max and ultra', async t => {
  const { createFollowUpQueueRoutes } = await import('../server/routes/follow-up-queue-routes.mjs');
  const { createProviderConversationStore } = await import('../server/provider-conversation-store.mjs');

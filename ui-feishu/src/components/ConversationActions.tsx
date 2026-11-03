@@ -134,7 +134,6 @@ export function ConversationActions({ conversationId, session, archived, disable
         <p>目标助手阅读原对话，简要反馈理解，然后等待你的下一步指令。忙碌时排队。</p>
         {!busy && !error && !targets.length ? <p>暂无其他可转发的对话，请先建立目标对话。</p> : null}
       </>
-      {busy ? <p role="status">正在读取并转发，请稍候…</p> : null}
       {error ? <p role="alert" className={styles.error}>{error}</p> : null}
       <footer><button disabled={!target || busy} onClick={() => void forward()}>转发</button>
         <button disabled={busy} onClick={close}>关闭</button></footer>

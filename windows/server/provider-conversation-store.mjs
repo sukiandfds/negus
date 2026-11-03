@@ -159,6 +159,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
         return { model: routes[id].model, modelProvider: routes[id].pendingProviderId, reasoningEffort: args[0] };
       }
       const source = await storeFor(owner(id));
+      if (method === 'findSession' && routes[id]?.resumeInfo?.path) args[1] = { ...args[1], historyFile: routes[id].resumeInfo.path };
       if (method === "updateReasoningEffort" || method === "getRuntimeContext") {
         await rememberPreviousSettings(id, source, method === "getRuntimeContext");
       }

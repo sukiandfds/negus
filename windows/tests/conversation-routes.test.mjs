@@ -68,7 +68,7 @@ test("combined session view reuses ordinary/employee readers and can skip unchan
     await full.promise;
     assert.equal(full.response.status, 200);
     assert.deepEqual(JSON.parse(full.response.body), { session, context: { model: "model-a", reasoningEffort: "high" },
-      status: { phase: "working", active: true }, goal: null, queue: [{ id: "queued" }], input: null, sourceRevision: "r1", historyFormatVersion: 1 });
+      status: { phase: "working", active: true }, goal: null, queue: [{ id: "queued" }], input: null, sourceRevision: "r1", historyFormatVersion: 3 });
     const reused = invokeGet(route, `${path}&sourceRevision=r1`);
     await reused.promise;
     assert.equal(JSON.parse(reused.response.body).session, null);

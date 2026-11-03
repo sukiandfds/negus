@@ -144,7 +144,7 @@ export const writeConversationSnapshot = ({ selectedId, sessions, session, cache
       savedAt,
       isPartial: Boolean(selectedPrevious?.isPartial || (cachedSession && cachedMessageCount > cachedSession.messages.length)),
       selectedId,
-      sessions: sessions.slice(0, 50),
+      sessions,
       session: cachedSession,
       recentSessions,
       presentation: Object.fromEntries([selectedId, ...recentSessions.map(entry => entry.session.threadId)].flatMap(id => {

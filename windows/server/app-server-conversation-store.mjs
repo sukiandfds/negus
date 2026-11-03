@@ -270,6 +270,16 @@ export const createAppServerConversationStore = ({
           nextProbeAt: 0,
           finalAnswerCompleted: false,
         });
+      } else if (method === "thread/status/changed" && params.status?.type === "active" && !current.turnId) {
+        // An unscoped active notification may be the only event a goal
+        // continuation emits. Monitor it so a missed terminal event cannot
+        // leave submission and follow-up state busy forever.
+        activeRuns.set(threadId, {
+          turnId: "",
+          lastEventAt: Date.now(),
+          nextProbeAt: 0,
+          finalAnswerCompleted: false,
+        });
       } else if (hasConflictingTurn) {
         // Keep the current run monitor alive; the tracker handles the same
         // stale protocol event for the browser-facing state.

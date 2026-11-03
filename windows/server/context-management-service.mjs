@@ -159,6 +159,14 @@ export const createContextManagementService = async ({
     const threadId = params.threadId;
     if (!threadId) return;
 
+    if (method === "turn/completed" && statusFor(threadId).phase === "compacting"
+      && ["completed", "interrupted"].includes(params.turn?.status)) {
+      const completed = params.turn.status === "completed";
+      publish(threadId, { phase: completed ? "completed" : "failed", message: completed ? "上下文压缩完成" : "上下文压缩已中断" });
+      broadcast({ type: "sessions_changed", threadId });
+      return;
+    }
+
     if (statusFor(threadId).phase === "compacting"
       && ((method === "error" && !params.willRetry) || (method === "turn/completed" && params.turn?.status === "failed"))) {
       publish(threadId, { phase: "failed", message: params.error?.message || params.turn?.error?.message || "上下文压缩失败" });

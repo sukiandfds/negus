@@ -158,7 +158,7 @@ export const createFollowUpQueueService = ({
   });
 
   const handleTurnTerminal = ({ threadId, status }) => {
-    if (status !== "completed") return;
+    if (!["completed", "idle"].includes(status)) return;
     if (!execution.getStatus(threadId).active) void dispatchNext(threadId);
   };
 

@@ -7,39 +7,15 @@ const timestampOf = (message: SessionMessage) => {
   return Number.isFinite(timestamp) ? timestamp : null;
 };
 
-// Preserve native item order within a turn; timestamps only supplement it.
-export const orderMessageList = (messages: SessionMessage[]) => {
-  const ordered: SessionMessage[] = [];
-  const turnStarts = new Map<string, number>();
-  for (const message of messages) {
-    if (message.turnId && message.turnStartedAtMs != null && Number.isFinite(message.turnStartedAtMs)) {
-      turnStarts.set(message.turnId, message.turnStartedAtMs);
-    }
-  }
-  for (const message of messages) {
-    const timestamp = timestampOf(message);
-    const insertAt = ordered.findIndex((current) => {
-      const local = (item: SessionMessage) => item.id.startsWith("stream-") || isOptimisticMessage(item);
-      if (message.turnId && message.turnId === current.turnId) {
-        if (message.turnItemIndex !== undefined && current.turnItemIndex !== undefined) {
-          return current.turnItemIndex > message.turnItemIndex;
-        }
-        if (!local(message) && !local(current)) return false;
-        const currentTimestamp = timestampOf(current);
-        return timestamp !== null && currentTimestamp !== null && currentTimestamp > timestamp;
-      }
-      if (local(message) || local(current)) {
-        const currentTimestamp = timestampOf(current);
-        return timestamp !== null && currentTimestamp !== null && currentTimestamp > timestamp;
-      }
-      const turnTimestamp = message.turnId ? turnStarts.get(message.turnId) ?? timestamp : timestamp;
-      const currentTimestamp = (current.turnId ? turnStarts.get(current.turnId) : undefined) ?? timestampOf(current);
-      return turnTimestamp !== null && currentTimestamp !== null && currentTimestamp > turnTimestamp;
-    });
-    ordered.splice(insertAt < 0 ? ordered.length : insertAt, 0, message);
-  }
-  return ordered;
-};
+// FEAT-001: the timestamp beside a bubble is its chronological position.
+export const orderMessageList = (messages: SessionMessage[]) => [...messages].sort((left, right) => {
+  const time = (timestampOf(left) ?? -Infinity) - (timestampOf(right) ?? -Infinity);
+  if (time && Number.isFinite(time)) return time;
+  if (timestampOf(left) === null && timestampOf(right) !== null) return -1;
+  if (timestampOf(right) === null && timestampOf(left) !== null) return 1;
+  return (left.sequence ?? 0) - (right.sequence ?? 0)
+    || (left.submissionId || left.itemId || left.id).localeCompare(right.submissionId || right.itemId || right.id);
+});
 
 const submissionIdOf = (message: SessionMessage) => message.submissionId
   || (isOptimisticMessage(message) ? message.id.slice('optimistic-'.length) : '');
@@ -59,6 +35,12 @@ const persistedMatchesOptimistic = (persisted: SessionMessage, optimistic: Sessi
     && sameUserMessage(persisted, optimistic);
 };
 
+const mergeTimestamp = (current: SessionMessage, incoming: SessionMessage): SessionMessage => ({
+  ...incoming,
+  createdAt: current.serverTimestamp ? current.createdAt : incoming.createdAt || current.createdAt,
+  serverTimestamp: current.serverTimestamp || incoming.serverTimestamp,
+});
+
 export const mergeMessageList = (baseMessages: SessionMessage[], incomingMessages: SessionMessage[]) => {
   const merged: SessionMessage[] = [];
   const indexes = new Map<string, number>();
@@ -66,7 +48,7 @@ export const mergeMessageList = (baseMessages: SessionMessage[], incomingMessage
   const addOrReplace = (message: SessionMessage) => {
     const knownIndex = indexes.get(message.id);
     if (knownIndex !== undefined) {
-      merged[knownIndex] = { ...message, createdAt: message.createdAt || merged[knownIndex].createdAt };
+      merged[knownIndex] = mergeTimestamp(merged[knownIndex], message);
       return;
     }
 
@@ -78,7 +60,7 @@ export const mergeMessageList = (baseMessages: SessionMessage[], incomingMessage
         return;
       }
       indexes.delete(current.id);
-      merged[replacementIndex] = { ...message, createdAt: message.createdAt || current.createdAt };
+      merged[replacementIndex] = mergeTimestamp(current, message);
       indexes.set(message.id, replacementIndex);
       return;
     }
@@ -116,9 +98,8 @@ export const mergePendingOptimisticMessages = (incoming: SessionDetail, pending:
 
 export const mergeSessionRefresh = (current: SessionDetail, incoming: SessionDetail): SessionDetail => {
   incoming = { ...incoming, messages: incoming.messages.map(message => {
-    if (message.createdAt) return message;
     const previous = current.messages.find(item => item.id === message.id || sameSubmission(item, message));
-    return previous?.createdAt ? { ...message, createdAt: previous.createdAt } : message;
+    return previous ? mergeTimestamp(previous, message) : message;
   }) };
   const incomingIds = new Set(incoming.messages.map((message) => message.id));
   const firstOverlap = current.messages.findIndex((message) => !isOptimisticMessage(message) && incomingIds.has(message.id));

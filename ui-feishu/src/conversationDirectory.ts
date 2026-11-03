@@ -14,7 +14,9 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
   const toConversation = (project: DirectoryProject, entry: Entry): Conversation => {
     const listed = summaries.get(entry.threadId || '');
     const cached = cachedSessions?.get(entry.threadId || '');
-    const session = cached && (!listed || (Date.parse(cached.updatedAt) || 0) > (Date.parse(listed.updatedAt) || 0)) ? cached : listed;
+    const session = cached && (!listed || (Date.parse(cached.updatedAt) || 0) > (Date.parse(listed.updatedAt) || 0))
+      ? { ...listed, ...cached, cwd: cached.cwd ?? listed?.cwd, createdBy: cached.createdBy ?? listed?.createdBy,
+        latestMessage: cached.latestMessage ?? listed?.latestMessage } : listed;
     const isTask = /^(task|handoff)-/.test(entry.conversationId || '');
     const messageTime = isTask && cached ? cached.messages.filter(message => message.role === 'user' || message.role === 'assistant')
       .map(message => message.createdAt).filter(Boolean).sort((a, b) => (Date.parse(b || '') || 0) - (Date.parse(a || '') || 0))[0] : undefined;
@@ -31,7 +33,7 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
       projectId: entry.targetProjectId || project.projectId || project.id,
       time: directoryIsNewer ? entry.lastActivityAt || entry.updatedAt || sessionTime : sessionTime,
       active: Boolean(status?.active), label: conversationStatus(status, directory.contextByThread[entry.threadId || '']),
-      preview: cached?.latestMessage ?? (previewIsNewer && visibleTaskPreview(entry.latestMessage) ? entry.latestMessage : session?.latestMessage), session,
+      preview: session?.latestMessage ?? (previewIsNewer && visibleTaskPreview(entry.latestMessage) ? entry.latestMessage : undefined), session,
     };
   };
   const all: Conversation[] = [];

@@ -10,7 +10,7 @@ import { ExecutionTimeline } from "../../execution/components/ExecutionTimeline"
 import type { ExecutionStatus } from "../../execution/model/types";
 import type { ContextStatus } from "../../context-management/model/types";
 import { formatConversationTimestamp } from "../../../shared/format/dateTime";
-import { advanceLiveTranscript, createLiveTranscriptMemory } from "../state/liveTranscript";
+import { projectTranscript } from "../state/liveTranscript";
 import { orderMessageList } from "../state/conversationMerge";
 import styles from "./ConversationView.module.css";
 import type { ThreadGoal } from "../../goals/model/types";
@@ -42,7 +42,6 @@ export function Message({
   executionStatus,
   contextStatus,
   executionPlaceholder = false,
-  showPriorReply = false,
   completedGoal,
   queued = false,
   actions,
@@ -66,7 +65,6 @@ export function Message({
   executionStatus?: ExecutionStatus;
   contextStatus?: ContextStatus;
   executionPlaceholder?: boolean;
-  showPriorReply?: boolean;
   completedGoal?: ThreadGoal | null;
   queued?: boolean;
   actions?: ReactNode;
@@ -78,14 +76,14 @@ export function Message({
   const assistantText = presentation.assistantText;
   const copyText = heartbeatUser?.instructions ?? assistantText ?? message.text;
   const richBlocks = message.blocks?.some((block) => block.type !== "markdown") ?? false;
-  const formattedTime = formatConversationTimestamp(message.createdAt);
+  const formattedTime = queued ? "等候中" : formatConversationTimestamp(message.createdAt);
   const reserveTimestamp = !executionPlaceholder && (message.role === "assistant" || Boolean(message.displaySourceAgentId));
   if (assistantText === "" && !streaming && !executionStatus && !executionPlaceholder && !richBlocks) return null;
   return (
     <article className={`${styles.message} ${message.role === "user" && !message.displaySourceAgentId ? styles.user : styles.assistant}`}>
       {message.authorName ? <span className={styles.authorName}>{message.authorName}</span> : null}
       {formattedTime || reserveTimestamp ? (
-        <time className={styles.timestamp} dateTime={message.createdAt} aria-hidden={!formattedTime}>
+        <time className={styles.timestamp} dateTime={queued ? undefined : message.createdAt} aria-hidden={!formattedTime}>
           {formattedTime || "\u00a0"}
         </time>
       ) : null}
@@ -96,10 +94,10 @@ export function Message({
         </div>
       ) : null}
       {!executionPlaceholder ? <div className={styles.body}>
-        {queued || message.deliveryState === "pending" ? <Clock3 className={styles.waiting} role="status" aria-label={queued ? "等待助手完成后发送" : "正在确认指令是否已送达"} /> : null}
+        {!queued && message.deliveryState === "pending" ? <Clock3 className={styles.waiting} role="status" aria-label="正在确认指令是否已送达" /> : null}
         {message.deliveryState === "sending" ? <LoaderCircle className={styles.sending} role="status" aria-label="发送中" /> : null}
         {message.role === "assistant" && message.turnStatus === "interrupted" ? <small>已中断</small> : null}
-        {streaming ? <><ContentRenderer message={shown} threadId={threadId} /><i className={styles.cursor} /></> : heartbeatUser ? <CollapsedMarkdown text={heartbeatUser.instructions} /> : <>{showPriorReply ? <div className={styles.priorReply}>追加指令前的回复</div> : null}<ContentRenderer message={shown} threadId={threadId} /></>}
+        {streaming ? <><ContentRenderer message={shown} threadId={threadId} /><i className={styles.cursor} /></> : heartbeatUser ? <CollapsedMarkdown text={heartbeatUser.instructions} /> : <ContentRenderer message={shown} threadId={threadId} />}
         {message.deliveryState === "occupied" ? <small>Codex 占用中，未发送</small> : message.deliveryState === "failed" ? <small>{message.deliveryError || "发送失败"}</small> : null}
       </div> : null}
       {!executionPlaceholder ? (
@@ -144,6 +142,7 @@ interface ConversationViewProps {
   assistantName?: string;
   onQuoteMessage?: (message: SessionMessage) => void;
   queue?: ReactNode;
+  queuedMessages?: { message: SessionMessage; content: ReactNode }[];
   completedGoal?: ThreadGoal | null;
   active?: boolean;
   session: SessionDetail | null;
@@ -152,7 +151,6 @@ interface ConversationViewProps {
   loadingOlder: boolean;
   error: string;
   listAvailable: boolean;
-  streamingText: string;
   executionStatus: ExecutionStatus;
   contextStatus: ContextStatus;
   onLoadOlder: () => Promise<void>;
@@ -171,45 +169,12 @@ type ConversationItem = {
   execution: boolean;
   executionPlaceholder?: boolean;
   local?: boolean;
+  content?: ReactNode;
 };
 
-const visibleText = (message: SessionMessage) => message.text.replace(/\s+/gu, " ").trim();
-
-const sameRenderedMessage = (left: SessionMessage, right: SessionMessage) => (
-  left.role === right.role
-  && Boolean(left.turnId && right.turnId && left.turnId === right.turnId)
-  && (
-    (Boolean(left.itemId && right.itemId) && left.itemId === right.itemId)
-    || (Boolean(left.submissionId && right.submissionId) && left.submissionId === right.submissionId)
-  )
-);
-
-const staysAtEnd = (item: ConversationItem) => (
-  item.streaming
-);
-
-const orderVisibleItems = (items: ConversationItem[], executionAnchor?: SessionMessage) => {
-  const placeholder = items.find(item => item.executionPlaceholder);
-  const ordered = items.filter((item, index) => !(
-    item.executionPlaceholder || (item.local
-    && visibleText(item.message)
-    && items.slice(0, index).some((current) => (
-      sameRenderedMessage(current.message, item.message)
-      && visibleText(current.message) === visibleText(item.message)
-    )))
-  ));
-  const byMessage = new Map(ordered.map((item) => [item.message, item]));
-  const result = [
-    ...orderMessageList(ordered.filter((item) => !staysAtEnd(item)).map((item) => item.message))
-      .map((message) => byMessage.get(message)!),
-    ...ordered.filter(staysAtEnd),
-  ];
-  if (placeholder) {
-    const anchorIndex = executionAnchor ? result.findIndex(item => messageListKey(item.message) === messageListKey(executionAnchor)) : -1;
-    const nextIndex = result.findIndex(item => Date.parse(item.message.createdAt || "") > Date.parse(placeholder.message.createdAt || ""));
-    result.splice(anchorIndex >= 0 ? anchorIndex + 1 : nextIndex >= 0 ? nextIndex : result.length, 0, placeholder);
-  }
-  return result;
+const orderVisibleItems = (items: ConversationItem[]) => {
+  const byMessage = new Map(items.map(item => [item.message, item]));
+  return orderMessageList(items.map(item => item.message)).map(message => byMessage.get(message)!);
 };
 
 export function ConversationView({
@@ -219,6 +184,7 @@ export function ConversationView({
   assistantName,
   onQuoteMessage,
   queue,
+  queuedMessages = [],
   completedGoal,
   active = true,
   session,
@@ -227,7 +193,6 @@ export function ConversationView({
   loadingOlder,
   error,
   listAvailable,
-  streamingText,
   executionStatus,
   contextStatus,
   onLoadOlder,
@@ -246,7 +211,6 @@ export function ConversationView({
   const [returnButtonThread, setReturnButtonThread] = useState("");
   const loadingOlderThreadsRef = useRef(new Set<string>());
   const olderLoadTimersRef = useRef(new Map<string, number>());
-  const transcriptMemoryRef = useRef(createLiveTranscriptMemory());
   const messages = session?.messages || [];
   const currentSessionRef = useRef(session);
   currentSessionRef.current = session;
@@ -260,16 +224,13 @@ export function ConversationView({
   const executionMatchesSession = executionStatus.threadId === session?.threadId;
   const completedExecution = ["completed", "failed", "interrupted", "systemError"].includes(executionStatus.phase);
   const { showExecution, waitingForReply } = executionHandoff(session?.threadId || "", messages, executionStatus);
-  const transcript = advanceLiveTranscript(transcriptMemoryRef.current, {
+  const transcript = projectTranscript({
     threadId: session?.threadId || "",
     messages,
-    streamingText: "",
-    streamingItemId: "",
     turnId: executionMatchesSession ? executionStatus.turnId || "" : "",
     active: showExecution && executionStatus.active && !completedExecution,
     retainPlaceholder: waitingForReply || (showExecution && (Boolean(executionStatus.notices?.length) || (completedExecution && executionStatus.phase !== "completed"))),
     showExecution,
-    now: new Date().toISOString(),
   });
   const executionOn = (message: SessionMessage) => showExecution && message.id === transcript.executionMessageId;
   const executionAnchor = executionMatchesSession && executionStatus.turnId ? messages.filter(message => (
@@ -280,29 +241,9 @@ export function ConversationView({
     ...transcript.persisted.map((message) => ({
       id: `message:${messageListKey(message)}`,
       message,
-      streaming: message.id === transcript.streamingMessageId,
-      execution: executionOn(message),
-    })),
-    ...transcript.preceding.map((message) => ({
-      id: `segment:${message.itemId || message.id}:${message.createdAt}`,
-      message,
       streaming: false,
       execution: executionOn(message),
-      local: true,
     })),
-    ...transcript.optimistic.map((message) => ({
-      id: `message:${messageListKey(message)}`,
-      message,
-      streaming: false,
-      execution: false,
-    })),
-    ...(transcript.live ? [{
-      id: `segment:${transcript.live.message.itemId || transcript.live.message.id}:${transcript.live.message.createdAt}`,
-      message: transcript.live.message,
-      streaming: transcript.live.streaming,
-      execution: executionOn(transcript.live.message),
-      local: true,
-    }] : []),
     ...(transcript.placeholder ? [{
       id: "message:execution-placeholder",
       message: { ...transcript.placeholder, authorName: assistantName,
@@ -312,7 +253,9 @@ export function ConversationView({
       executionPlaceholder: true,
       local: true,
     }] : []),
-  ], executionAnchor);
+  ]).concat(queuedMessages.filter(({ message }) => !messages.some(current => current.submissionId === message.submissionId)).map(({ message, content }) => ({
+    id: `message:${messageListKey(message)}`, message, content, streaming: false, execution: false,
+  })));
   const goalMessageId = completedGoalMessageId(visibleItems.map(item => {
     const message = item.message;
     return message.turnId === executionStatus.turnId && executionStatus.phase === "completed"
@@ -420,7 +363,7 @@ export function ConversationView({
             {visibleItems.map((item, index) => (
                 <div data-message-id={item.message.id} key={item.id}>
                   {selectedMessages && !item.executionPlaceholder && forwardableMessage(item.message).text.trim() ? <label className={styles.selectMessage}><input type="checkbox" aria-label={`选择消息 ${item.message.id}`} checked={selectedMessages.has(item.id)} onChange={() => onSelectMessage?.(item.id)} />选择</label> : null}
-                  <Message
+                  {item.content ?? <Message
                         message={item.message}
                         onSelect={!selectedMessages && !item.executionPlaceholder && forwardableMessage(item.message).text.trim() ? () => onSelectMessage?.(item.id) : undefined}
                         onQuote={!session.archived && onQuoteMessage ? () => onQuoteMessage(item.message) : undefined}
@@ -445,8 +388,7 @@ export function ConversationView({
                         executionStatus={item.execution ? executionStatus : undefined}
                         contextStatus={item.execution ? contextStatus : undefined}
                         executionPlaceholder={item.executionPlaceholder}
-                        showPriorReply={Boolean(item.message.superseded) && !visibleItems[index - 1]?.message.superseded}
-                      />
+                      />}
                 </div>
             ))}
             {queue}

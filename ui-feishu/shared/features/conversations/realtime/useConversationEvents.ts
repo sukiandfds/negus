@@ -19,14 +19,14 @@ const eventIdFrom = (value: unknown) => {
 
 const isConversationProgressEvent = (event: ProjectEvent, threadId: string) => {
   if (event.type === "sessions_changed") return !event.threadId || event.threadId === threadId;
-  if (["execution_status", "assistant_commentary", "assistant_delta", "context_status", "user_message_submitted", "queue_changed", "goal_status", "user_input_requested", "user_input_resolved"].includes(event.type)) {
+  if (["execution_status", "assistant_commentary", "assistant_delta", "assistant_message_completed", "context_status", "user_message_submitted", "queue_changed", "goal_status", "user_input_requested", "user_input_resolved"].includes(event.type)) {
     return "threadId" in event && event.threadId === threadId;
   }
   return false;
 };
 
 export function useConversationEvents(
-  onSessionsChanged: (threadId?: string) => void,
+  onSessionsChanged: (threadId?: string | string[]) => void,
   onEvent: (event: ProjectEvent) => void,
   onRecover: (reason: RealtimeRecoveryReason) => void,
   threadId: string,
@@ -167,8 +167,7 @@ export function useConversationEvents(
               const threadIds = [...pendingSessionIds];
               pendingSessionIds.clear();
               pendingAllSessions = false;
-              if (allSessions || threadIds.length !== 1) onSessionsChangedRef.current();
-              else onSessionsChangedRef.current(threadIds[0]);
+              onSessionsChangedRef.current(allSessions ? undefined : threadIds);
             }, 180);
           }
         } catch {

@@ -8,6 +8,7 @@ import { createOptimisticMessage } from "../state/optimisticMessage";
 
 interface FollowUpQueueProps {
   items: FollowUpQueueItem[];
+  onlyId?: string;
   isHidden?: (item: FollowUpQueueItem) => boolean;
   busy: boolean;
   error: string;
@@ -18,22 +19,21 @@ interface FollowUpQueueProps {
   onSendNow: (itemId: string) => Promise<boolean>;
 }
 
-export function FollowUpQueue({ items, isHidden, busy, error, onEdit, onRemove, onMove, onRetry, onSendNow }: FollowUpQueueProps) {
-  if (!items.some(item => !isHidden?.(item)) && !error && !busy) return null;
+export function FollowUpQueue({ items, onlyId, isHidden, busy, error, onEdit, onRemove, onMove, onRetry, onSendNow }: FollowUpQueueProps) {
+  if (!items.some(item => !isHidden?.(item)) && !error) return null;
 
   return (
     <section aria-label="指令等候中">
-      {busy && <p role="status">正在处理等候消息，请等待服务器确认…</p>}
       {error && <p className={styles.error}>{error}</p>}
       {items.map((item, index) => {
-        if (isHidden?.(item)) return null;
+        if ((onlyId && item.id !== onlyId) || isHidden?.(item)) return null;
         const locked = busy || item.state === "dispatching";
         return (
           <Message key={item.id}
             message={{ ...createOptimisticMessage(item.text, item.attachments, item.submissionId, item.createdAt),
               authorName: item.authorName || "我", authorId: item.authorId, displaySourceAgentId: item.displaySourceAgentId,
               deliveryState: item.state === "dispatching" ? "sending" : item.state === "failed" ? "failed" : undefined, deliveryError: item.error }}
-            threadId={item.threadId} queued={item.state === "pending"}
+            threadId={item.threadId} queued={item.state !== "dispatching"}
             onFork={async () => false} onEdit={() => void onEdit(item)}
             actions={<MessageActions text={item.text} forkable={false} forking={false} onFork={async () => false} editable editing={locked} onEdit={() => void onEdit(item)}>
                   <button className={actions.button} type="button" title="直接发送" aria-label="直接发送" disabled={locked} onClick={() => void onSendNow(item.id)}><Send aria-hidden="true" /></button>

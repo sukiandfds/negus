@@ -16,6 +16,13 @@ export async function readConversationBatches<T>(
     const results: { entry: T; error: string; retry?: boolean }[] = new Array(batch.length);
     let next = 0;
     const deadline = Date.now() + timeoutMs;
+    const published = new Set<number>();
+    const flush = () => {
+      const completed = results.filter((result, index) => result && !published.has(index) && published.add(index));
+      if (!signal.aborted && completed.length) publish(completed);
+    };
+    // Publish completed reads on time; queued time must not shorten an active request's timeout.
+    const publicationTimer = setTimeout(flush, timeoutMs);
     // Each conversation reads several resources. Bound reads, not the atomic publication.
     await Promise.all(Array.from({ length: Math.min(4, batch.length) }, async () => {
       while (next < batch.length && !signal.aborted && Date.now() < deadline) {
@@ -25,11 +32,10 @@ export async function readConversationBatches<T>(
         let timer: ReturnType<typeof setTimeout> | undefined;
         let cancel: (() => void) | undefined;
         try {
-          const remaining = deadline - Date.now();
           await Promise.race([read(entry, readSignal), new Promise<never>((_, reject) => {
             cancel = () => reject(readSignal.reason);
             readSignal.addEventListener('abort', cancel, { once: true });
-            timer = setTimeout(() => attempt.abort(new Error('同步超时，正在保留当前内容')), remaining);
+            timer = setTimeout(() => attempt.abort(new Error('同步超时，正在保留当前内容')), timeoutMs);
           })]);
           results[index] = { entry, error: '' };
         } catch (reason) {
@@ -39,7 +45,8 @@ export async function readConversationBatches<T>(
         } finally { clearTimeout(timer); if (cancel) readSignal.removeEventListener('abort', cancel); }
       }
     }));
-    if (!signal.aborted) publish(results.filter(Boolean));
+    clearTimeout(publicationTimer);
+    flush();
     if (next < batch.length) batches.splice(batchIndex + 1, 0, batch.slice(next));
     const retry = results.filter(result => result?.retry).map(result => result.entry);
     if (retry.length) batches.push(retry);

@@ -18,3 +18,8 @@ test("user-only completion cannot attach result to an older assistant turn", () 
  assert.equal(completedGoalMessageId([message("old", "old", 1000), message("user", "current", 10000, "completed", "user")], goal), null);
  assert.equal(completedGoalMessageId([message("old", "old", 1000)], { ...goal, status: "active" }), null);
 });
+
+test("interleaved timestamp order does not break turn ownership", () => {
+ const messages = [message("a", "old", 1000), message("b", "new", 10000), message("late-old", "old", 1000)];
+ assert.equal(completedGoalMessageId(messages, goal), "b");
+});

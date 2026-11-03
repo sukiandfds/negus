@@ -8,6 +8,7 @@ export const goalApi = {
     status?: GoalStatus;
     tokenBudget?: number;
     attachmentIds?: string[];
+    submissionId?: string;
   }, signal?: AbortSignal, conversationId = currentConversationId()) => postJson<GoalResponse>(
     "/api/session/goal",
     { threadId, ...patch, ...(conversationId ? { conversationId } : {}) },

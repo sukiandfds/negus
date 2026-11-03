@@ -128,11 +128,17 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
       <div className="chat-content-row">
         <div className="chat-primary">
           <div className="chat-messages" style={{ display: tab === 'messages' ? undefined : 'none' }}>
-            <ConversationView ref={viewRef} selectedMessages={selectedIds} onSelectMessage={toggleSelection} queue={c.queueItems.length || c.queueError || c.queueBusy ? <FollowUpQueue items={c.queueItems} isHidden={item => item.state === 'dispatching' || isInternalTaskResult(item.text)} busy={c.queueBusy} error={c.queueError}
-              onEdit={item => activeComposer()?.editQueuedMessage(item, c.removeQueueItem) ?? Promise.resolve(false)} onRemove={c.removeQueueItem} onMove={c.moveQueueItem} onRetry={c.retryQueueItem} onSendNow={c.sendQueueItem} /> : null} session={displaySession} key={c.composerKey || 'conversation'} active={visible && tab === 'messages'}
+            <ConversationView ref={viewRef} selectedMessages={selectedIds} onSelectMessage={toggleSelection} queue={c.queueError ? <FollowUpQueue items={[]} busy={c.queueBusy} error={c.queueError}
+              onEdit={async () => false} onRemove={c.removeQueueItem} onMove={c.moveQueueItem} onRetry={c.retryQueueItem} onSendNow={c.sendQueueItem} /> : null}
+              queuedMessages={c.queueItems.filter(item => item.state !== 'dispatching' && !isInternalTaskResult(item.text)).map(item => ({
+                message: createOptimisticMessage(item.text, item.attachments, item.submissionId, item.createdAt),
+                content: <FollowUpQueue items={c.queueItems} onlyId={item.id} busy={c.queueBusy} error=""
+                  onEdit={queued => activeComposer()?.editQueuedMessage(queued, c.removeQueueItem) ?? Promise.resolve(false)}
+                  onRemove={c.removeQueueItem} onMove={c.moveQueueItem} onRetry={c.retryQueueItem} onSendNow={c.sendQueueItem} />,
+              }))} session={displaySession} key={c.composerKey || 'conversation'} active={visible && tab === 'messages'}
               assistantName={selectedName} completedGoal={c.goal?.status === 'complete' ? c.goal : null}
               loading={c.loadingSession} contentSyncState={c.contentSyncState} loadingOlder={c.loadingOlder}
-              error={c.sessionError} listAvailable={initialReady && !c.listError} streamingText={c.streamingText}
+              error={c.sessionError} listAvailable={initialReady && !c.listError}
               executionStatus={c.executionStatus} contextStatus={c.contextStatus} onLoadOlder={c.loadOlder}
               onForkMessage={c.forkFromMessage} forkingMessageId={c.forkingMessageId} onEditMessage={c.beginEditMessage}
               onQuoteMessage={c.session?.readOnly ? undefined : message => activeComposer()?.quoteMessage(message)}

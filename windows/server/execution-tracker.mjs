@@ -5,6 +5,8 @@ import { writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTerminal = () => {} }) => {
   const statuses = new Map();
+  const completedMessages = new Map();
+  const messageTimes = new Map();
   const activeGoals = new Set();
   const messagePhases = new Map();
   const itemTurns = new Map();
@@ -26,6 +28,8 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
   if (stateFile) {
     try {
       const stored = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+      for (const entry of stored.messageTimes || []) messageTimes.set(...entry);
+      for (const entry of stored.completedMessages || []) completedMessages.set(...entry);
       for (const status of stored.statuses || []) {
         if (!status?.threadId) continue;
         const needsRestartNormalization = status.phase === "systemError"
@@ -50,7 +54,9 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
     if (!stateFile) return Promise.resolve();
     persistChain = persistChain.catch(() => {}).then(async () => {
       await writeJsonFileAtomic(stateFile, {
-        version: 1,
+        version: 2,
+        messageTimes: [...messageTimes],
+        completedMessages: [...completedMessages],
         statuses: [...statuses.values()].slice(-50),
       });
     }).catch((error) => console.warn(`[execution-tracker] state persistence failed: ${error.message}`));
@@ -106,6 +112,11 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
   };
 
   const broadcastThreadEvent = (threadId, value) => {
+    if (value.type === "user_message_submitted" && value.submissionId && value.createdAt) {
+      const key = itemKey(threadId, `submission:${value.submissionId}`);
+      if (!messageTimes.has(key)) messageTimes.set(key, value.createdAt);
+      schedulePersist();
+    }
     broadcast({ ...value, ...nextEventMetadata(threadId) });
   };
 
@@ -278,7 +289,7 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
       return;
     }
     const eventTurnId = turnIdFor(threadId, params, params.itemId || params.item?.id || "");
-    if (isRetiredTurn(threadId, eventTurnId)) return;
+    if (isRetiredTurn(threadId, eventTurnId) && method !== "item/completed") return;
     if (method === "error" || method === "warning") {
       if (eventTurnId && completedTurns.get(threadId)?.has(eventTurnId) && params.willRetry) return;
       const current = getStatus(threadId);
@@ -313,7 +324,7 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
         publish(threadId, { phase: "waitingOnApproval", label: "需要在电脑端确认" });
       } else if (status.type === "active" && status.activeFlags?.includes("waitingOnUserInput")) {
         publish(threadId, { phase: "waitingOnUserInput", label: "Codex 正在等待补充信息" });
-      } else if (status.type === "active") {
+      } else if (status.type === "active" && (current?.active || current?.phase === "submitted")) {
         publish(threadId, { phase: "working", label: "Codex 正在处理任务" });
       } else if (status.type === "idle" && !terminalPhases.has(statuses.get(threadId)?.phase)) {
         publish(threadId, { phase: "idle", label: "Codex 已就绪" });
@@ -338,7 +349,7 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
     if (method === "item/completed") {
       const itemId = String(params.item?.id || "");
       if (itemId) rememberItemTurn(threadId, itemId, eventTurnId);
-      if (params.item?.type === "agentMessage" && params.item.phase === "final_answer") {
+      if (params.item?.type === "agentMessage" && params.item.phase !== "commentary" && !isRetiredTurn(threadId, eventTurnId)) {
         const current = statuses.get(threadId);
         if (current) {
           const status = { ...current, hasFinalAnswer: Boolean(String(params.item.text || "").trim()), ...nextEventMetadata(threadId) };
@@ -347,59 +358,32 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
           broadcast(status);
         }
       }
-      if (isCompletedTurn) {
-        if (isConversationItem(params.item)) {
-          broadcastThreadEvent(threadId, { type: "sessions_changed", threadId });
-        }
-        if (params.item?.type === "agentMessage") messagePhases.delete(itemKey(threadId, itemId));
-        return;
-      }
-      if (params.item?.type === "agentMessage" && params.item.phase === "commentary") {
+      if (params.item?.type === "agentMessage") {
         const text = String(params.item.text || "").trim();
-        if (text) {
-          updateCommentary(threadId, text);
-          const current = statuses.get(threadId);
-          broadcastThreadEvent(threadId, {
-            type: "assistant_commentary",
-            threadId,
-            turnId: eventTurnId || current?.turnId || "",
-            itemId,
-            text,
-          });
+        if (text && itemId) {
+          const key = itemKey(threadId, itemId);
+          const createdAt = messageTimes.get(key) || new Date().toISOString();
+          messageTimes.set(key, createdAt);
+          const turnId = eventTurnId || statuses.get(threadId)?.turnId || "";
+          const message = { id: `codex:${encodeURIComponent(turnId || "unknown")}:${encodeURIComponent(itemId)}`,
+            itemId, turnId, role: "assistant", text, phase: params.item.phase || "final_answer", createdAt, serverTimestamp: true };
+          completedMessages.set(key, { threadId, message });
+          schedulePersist();
+          broadcastThreadEvent(threadId, { type: "assistant_message_completed", threadId, message });
+          if (!isCompletedTurn && !isRetiredTurn(threadId, eventTurnId) && params.item.phase === "commentary") updateCommentary(threadId, text);
+
         }
-      } else if (isConversationItem(params.item)) {
-        broadcastThreadEvent(threadId, { type: "sessions_changed", threadId });
-      } else {
-        completeActivity(threadId, params.item);
-      }
-      if (params.item?.type === "agentMessage") messagePhases.delete(itemKey(threadId, itemId));
+        messagePhases.delete(itemKey(threadId, itemId));
+      } else if (!isCompletedTurn && !isConversationItem(params.item)) completeActivity(threadId, params.item);
+      if (isConversationItem(params.item)) broadcastThreadEvent(threadId, { type: "sessions_changed", threadId });
       return;
     }
     if (method === "item/reasoning/summaryTextDelta") {
       addReasoningSummary(threadId, params.itemId || "reasoning", params.delta);
       return;
     }
-    if (method === "item/agentMessage/delta") {
-      const itemId = String(params.itemId || "");
-      if (messagePhases.get(itemKey(threadId, itemId)) !== "commentary") {
-        const previous = statuses.get(threadId);
-        if (previous) {
-          const streamingText = previous.streamingItemId === itemId
-            ? previous.streamingText + String(params.delta || "")
-            : String(params.delta || "");
-          statuses.set(threadId, {
-            ...previous,
-            streamingItemId: itemId,
-            streamingText,
-            updatedAt: new Date().toISOString(),
-            ...nextEventMetadata(threadId),
-          });
-          schedulePersist();
-        }
-        broadcastThreadEvent(threadId, { type: "assistant_delta", ...params, turnId: eventTurnId || previous?.turnId || "" });
-      }
-      return;
-    }
+    // FEAT-001: transport remains realtime, but text is published only at item completion.
+    if (method === "item/agentMessage/delta") return;
     if (method?.endsWith("/requestApproval")) {
       publish(threadId, { phase: "waitingOnApproval", label: "需要在电脑端确认" });
       return;
@@ -559,6 +543,41 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
     handleProtocolMessage,
     handleHealthState,
     getStatus,
+    recordMessage: (threadId, message) => {
+      completedMessages.set(itemKey(threadId, message.itemId || message.id), { threadId, message });
+      schedulePersist();
+    },
+    clearCompletedMessages: (threadId) => {
+      for (const [key, entry] of completedMessages) if (entry.threadId === threadId && entry.message.source !== "native-goal") completedMessages.delete(key);
+      schedulePersist();
+    },
+    completeSession: (session, append = false) => {
+      if (!session) return session;
+      const currentStatus = statuses.get(session.threadId);
+      const visible = session.messages.filter(message => !(currentStatus?.active
+        && message.role === "assistant" && message.turnId === currentStatus.turnId
+        && !messageTimes.has(itemKey(session.threadId, message.itemId))));
+      const byItem = new Set(visible.map(message => message.itemId || message.id));
+      const messages = visible.map(message => {
+        const createdAt = messageTimes.get(itemKey(session.threadId, message.role === "user" && message.submissionId ? `submission:${message.submissionId}` : message.itemId));
+        const complete = completedMessages.get(itemKey(session.threadId, message.itemId));
+        if (complete && message.text.length < complete.message.text.length) return { ...message, ...complete.message };
+        if (complete && !currentStatus?.active) {
+          completedMessages.delete(itemKey(session.threadId, message.itemId));
+          schedulePersist();
+        }
+        return createdAt ? { ...message, createdAt, serverTimestamp: true } : message;
+      });
+      if (append) for (const entry of completedMessages.values()) {
+        if (entry.threadId !== session.threadId || byItem.has(entry.message.itemId || entry.message.id)) continue;
+        // Do not resurrect replies removed by editing/reverting an existing turn.
+        const turn = messages.find(message => message.turnId === entry.message.turnId);
+        const current = statuses.get(session.threadId);
+        if (entry.message.source !== "native-goal" && !turn && current?.turnId !== entry.message.turnId) continue;
+        messages.push(entry.message);
+      }
+      return { ...session, messages };
+    },
     reconcile,
     publishThreadEvent: broadcastThreadEvent,
     close,

@@ -546,7 +546,20 @@ export const createConversationRoutes = ({
       sendJson(response, { error: "tokenBudget must be a positive integer" }, 400);
       return true;
     }
-    sendJson(response, await source.setGoal(threadId, { objective, status, tokenBudget }));
+    const result = await source.setGoal(threadId, { objective, status, tokenBudget });
+    if (objective !== undefined && body.submissionId) {
+      const submissionId = String(body.submissionId);
+      const createdAt = new Date().toISOString();
+      const message = { id: `goal:${submissionId}`, role: "user", text: "/goal " + objectiveText,
+        submissionId, createdAt, serverTimestamp: true, source: "native-goal",
+        blocks: [{ id: `goal:${submissionId}:text`, type: "markdown", text: "/goal " + objectiveText },
+          ...goalAttachments.map(file => ({ id: file.id, type: file.mimeType?.startsWith("image/") ? "image" : "file", source: file.url, file: publicAttachment(file) }))] };
+      execution.recordMessage?.(threadId, message);
+      publishThreadEvent(threadId, { type: "user_message_submitted", threadId, submissionId, messageId: message.id,
+        text: message.text, attachments: goalAttachments.map(publicAttachment), createdAt });
+      publishThreadEvent(threadId, { type: "sessions_changed", threadId });
+    }
+    sendJson(response, result);
     return true;
   }
   if (url.pathname === "/api/session/goal" && request.method === "DELETE") {
@@ -570,6 +583,7 @@ export const createConversationRoutes = ({
     if (execution.getStatus(threadId).active) throw Object.assign(new Error("请先停止当前回复再重新编辑"), { statusCode: 409 });
     if (isEmployeeDirectBinding(binding)) await employeeRuntime.revertSession(binding.agentId, beforeTurnId);
     else await conversations.revertSession(threadId, beforeTurnId);
+    execution.clearCompletedMessages?.(threadId);
     publishThreadEvent(threadId, { type: "sessions_changed", threadId });
     sendJson(response, { threadId });
     return true;
@@ -758,11 +772,13 @@ export const createConversationRoutes = ({
     };
     const currentRevision = view ? await readRevision() : null;
     const reuseBody = Boolean(requestedRevision && currentRevision === requestedRevision);
-    const session = reuseBody ? null : binding
+    let session = reuseBody ? null : binding
       ? view && isEmployeeDirectBinding(binding)
         ? await employeeRuntime.readSession(binding.agentId, { ...pagination, readOnly: true })
         : await readAgentSession(binding, source, pagination)
       : await readOrdinarySession(threadId, source, pagination);
+    if (session && execution.completeSession) session = execution.completeSession(session,
+      !url.searchParams.has("before") && !url.searchParams.has("cursor"));
     if (!session && !reuseBody) {
       sendJson(response, { error: "session not found" }, 404);
       return true;
@@ -775,7 +791,7 @@ export const createConversationRoutes = ({
       const finalRevision = await readRevision();
       if (currentRevision !== finalRevision) throw Object.assign(new Error("对话更新中，请重试同步"), { statusCode: 409 });
       sendJson(response, { session, context, goal: goal.goal, status: execution.getStatus(threadId),
-        queue: followUpQueue.list(threadId), input: publicUserInputRequest(input), sourceRevision: finalRevision, historyFormatVersion: 2 });
+        queue: followUpQueue.list(threadId), input: publicUserInputRequest(input), sourceRevision: finalRevision, historyFormatVersion: 3 });
       return true;
     }
     sendJson(response, session);

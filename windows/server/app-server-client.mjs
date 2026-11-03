@@ -13,7 +13,11 @@ export const streamRetryArguments = (home) => {
   try { config = TOML.parse(fs.readFileSync(path.join(home, "config.toml"), "utf8")); }
   catch (error) { if (error.code === "ENOENT") return []; throw error; }
   const providers = config.model_providers || {};
-  for (const provider of Object.values(providers)) provider.stream_max_retries = 2;
+  for (const provider of Object.values(providers)) {
+    provider.stream_max_retries = 2;
+    // Custom providers also need this gate to expose Codex's native web tool.
+    provider.supports_standalone_web_search = true;
+  }
   return Object.keys(providers).length ? ['-c', `model_providers=${TOML.stringify.value(providers)}`] : [];
 };
 
@@ -216,7 +220,7 @@ export const createAppServerClient = ({
     const logPrefix = label ? `[app-server-client:${label}]` : "[app-server-client]";
     console.log(`${logPrefix} using ${selected.entrypoint} (${selected.version})`);
     const effectiveHome = codexHome || environment.CODEX_HOME || process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
-    const spawned = spawn(selected.command, [...selected.prefixArgs, "app-server", ...streamRetryArguments(effectiveHome), ...sharedModelCatalogArguments(), ...imageMcpArguments(), ...computerMcpArguments(), ...nativeComputerMcpArguments()], {
+    const spawned = spawn(selected.command, [...selected.prefixArgs, "app-server", "-c", 'web_search="live"', ...streamRetryArguments(effectiveHome), ...sharedModelCatalogArguments(), ...imageMcpArguments(), ...computerMcpArguments(), ...nativeComputerMcpArguments()], {
       cwd: workingDirectory,
       env: buildAppServerEnvironment({
         environment,

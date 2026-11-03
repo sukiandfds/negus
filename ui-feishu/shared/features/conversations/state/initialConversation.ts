@@ -44,7 +44,7 @@ export const readInitialConversationState = (): InitialConversationState => {
     sessionIsPartial: Boolean(cachedEntries.find((entry) => entry.session.threadId === selectedId)?.isPartial),
     session,
     cachedSessions: cachedEntries.map((entry) => entry.session),
-    partialSessionIds: cachedEntries.filter((entry) => entry.isPartial || entry.session.historyFormatVersion !== 2).map((entry) => entry.session.threadId),
+    partialSessionIds: cachedEntries.filter((entry) => entry.isPartial || entry.session.historyFormatVersion !== 3).map((entry) => entry.session.threadId),
     sessions: snapshot?.sessions || [],
     presentation,
   };

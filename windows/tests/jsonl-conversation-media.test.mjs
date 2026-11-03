@@ -156,3 +156,29 @@ test('no-reply history evidence requires task_complete and survives reloading', 
     }
   } finally {store.close();}
 });
+
+test('reads legacy roots and trusted recorded paths with thread and project validation', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'negus-history-home-'));
+  const active = path.join(root, 'active', 'sessions'), legacy = path.join(root, 'legacy', 'sessions');
+  const external = path.join(root, 'provider', 'sessions'), projectRoot = path.join(root, 'project');
+  await Promise.all([active, legacy, external].map(dir => mkdir(dir, { recursive: true })));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const write = async (dir, id, cwd = projectRoot) => {
+    const file = path.join(dir, `rollout-${id}.jsonl`);
+    await writeFile(file, [
+      { type: 'session_meta', payload: { id, cwd } },
+      { timestamp: '2026-11-03T00:00:00Z', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'retained history' }] } },
+    ].map(JSON.stringify).join('\n') + '\n');
+    return file;
+  };
+  await write(legacy, 'legacy');
+  const recorded = await write(external, 'recorded');
+  const other = await write(external, 'other', path.join(root, 'other-project'));
+  const store = createJsonlConversationStore({ sessionRoot: active, fallbackSessionRoots: [legacy], projectRoot, registerMedia: () => null, onChange: () => {} });
+  t.after(() => store.close());
+  assert.equal((await store.findSession('legacy')).messages[0].text, 'retained history');
+  assert.equal((await store.findSession('recorded', 'all', { historyFile: recorded })).messages[0].text, 'retained history');
+  assert.equal(await store.findSession('wrong-id', 'all', { historyFile: recorded }), null);
+  assert.equal(await store.findSession('other', 'all', { historyFile: other }), null);
+  assert.equal(await store.findSession('recorded'), null, 'a recorded read does not change store ownership');
+});

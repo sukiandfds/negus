@@ -85,6 +85,7 @@ let employeeRegistry;
 let employeeRuntime;
 const jsonlConversations = createJsonlConversationStore({
   sessionRoot,
+  fallbackSessionRoots: [path.join(os.homedir(), '.codex', 'sessions')],
   projectRoot,
   projectRoots,
   registerMedia: media.register,
@@ -126,6 +127,7 @@ const conversationStoreOptions = {
   onFailed: execution.markFailed,
   onHealthState: event => {
     execution.handleHealthState(event);
+    if (event.phase === "authoritative") followUpQueue?.handleTurnTerminal({ threadId: event.threadId, status: event.status?.type });
     void agentTasks?.onHealthState(event).catch(error => console.error("[agent-tasks]", error.message));
   },
   threadRuntimeOptions: async (thread) => {

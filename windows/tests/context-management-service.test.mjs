@@ -33,6 +33,16 @@ test("accepted compaction reports asynchronous quota failure without treating re
   await service.close();
 });
 
+test("compaction settles on native turn completion or interruption without a compaction item", async () => {
+  const { service } = await createService();
+  for (const status of ["completed", "interrupted"]) {
+    await service.requestCompaction("thread-1");
+    service.handleProtocolMessage({ method: "turn/completed", params: { threadId: "thread-1", turn: { status } } });
+    assert.equal(service.getStatus("thread-1").phase, status === "completed" ? "completed" : "failed");
+  }
+  await service.close();
+});
+
 test("reports the real model and current context percentage", async () => {
   const { service } = await createService();
   await service.load("thread-1");

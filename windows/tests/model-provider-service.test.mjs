@@ -160,7 +160,7 @@ test("stream retry overrides preserve dotted and Chinese provider names", async 
     await fs.writeFile(path.join(root, "config.toml"), '[model_providers."other.provider"]\nname = "other"\n');
     assert.equal(TOML.parse(streamRetryArguments(root)[1]).model_providers["other.provider"].stream_max_retries, 2);
     await fs.writeFile(path.join(root, 'config.toml'), '[model_providers."ccswitch_折扣-1790603771586"]\nname = "折扣"\n');
-    assert.deepEqual(TOML.parse(streamRetryArguments(root)[1]).model_providers["ccswitch_折扣-1790603771586"], { name: "折扣", stream_max_retries: 2 });
+    assert.deepEqual(TOML.parse(streamRetryArguments(root)[1]).model_providers["ccswitch_折扣-1790603771586"], { name: "折扣", stream_max_retries: 2, supports_standalone_web_search: true });
   });
 });
 

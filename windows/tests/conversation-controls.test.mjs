@@ -713,6 +713,43 @@ test("supervises an active turn without depending on a browser request", async (
   assert.equal(healthEvents.some((event) => event.phase === "authoritative" && event.status.type === "idle"), true);
 });
 
+test("supervises an unscoped active status so a missed terminal event can recover", async () => {
+  let protocolListener = () => {};
+  const healthEvents = [];
+  const client = {
+    subscribe: (listener) => {
+      protocolListener = listener;
+      return () => {};
+    },
+    subscribeHealth: () => () => {},
+    close: () => {},
+    probe: async () => ({ thread: { id: "thread-1", status: { type: "idle" } } }),
+    request: async () => { throw new Error("Unexpected request"); },
+  };
+  const store = createAppServerConversationStore({
+    projectRoot: "D:\\project",
+    registerMedia: () => null,
+    client,
+    onHealthState: (event) => healthEvents.push(event),
+    supervision: {
+      intervalMs: 5,
+      staleAfterMs: 20,
+      finalizingAfterMs: 5,
+      retryAfterMs: 5,
+    },
+  });
+
+  protocolListener({
+    method: "thread/status/changed",
+    params: { threadId: "thread-1", status: { type: "active" } },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  store.close();
+
+  assert.equal(healthEvents.some((event) =>
+    event.phase === "authoritative" && event.threadId === "thread-1" && event.status.type === "idle"), true);
+});
+
 test("keeps newer turn supervision after an older turn completes late", async () => {
   let protocolListener = () => {};
   const probeCalls = [];

@@ -1,3 +1,4 @@
+import type { SessionMessage } from "../../conversations/model/types";
 import type { RealtimeConnectedEvent } from "../../../shared/model/realtime";
 import type { MediaFile } from "../../../shared/model/media";
 import type { ContextStatus } from "../../context-management/model/types";
@@ -153,4 +154,4 @@ export interface HeartbeatEvent {
   at: string;
 }
 
-export type ProjectEvent = { type: "user_message_accepted"; threadId: string; turnId: string; submissionId: string } | ExecutionStatus | AssistantDeltaEvent | AssistantCommentaryEvent | SessionsChangedEvent | UserMessageSubmittedEvent | QueueChangedEvent | GoalStatusEvent | UserInputRequestedEvent | UserInputResolvedEvent | ContextStatus | HeartbeatEvent | RealtimeConnectedEvent;
+export type ProjectEvent = { type: "assistant_message_completed"; threadId: string; message: SessionMessage; eventEpoch?: string; eventSeq?: number } | { type: "user_message_accepted"; threadId: string; turnId: string; submissionId: string } | ExecutionStatus | AssistantDeltaEvent | AssistantCommentaryEvent | SessionsChangedEvent | UserMessageSubmittedEvent | QueueChangedEvent | GoalStatusEvent | UserInputRequestedEvent | UserInputResolvedEvent | ContextStatus | HeartbeatEvent | RealtimeConnectedEvent;

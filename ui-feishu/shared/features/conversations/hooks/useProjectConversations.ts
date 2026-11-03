@@ -246,12 +246,16 @@ export function useProjectConversations() {
         await modelManager.applyPending(threadId);
       }
       if (selection.selectedIdRef.current !== threadId) return false;
-      const result = await goal.update({ objective, status: "active", attachmentIds: attachments.map((file) => file.id) }, threadId);
-      if (!result) return false;
-      if (appendTranscript) {
-        const message = { ...createOptimisticMessage("/goal " + objective, attachments, createSubmissionId()), source: "native-goal" };
+      const message = appendTranscript ? { ...createOptimisticMessage("/goal " + objective, attachments, createSubmissionId()), source: "native-goal" } : null;
+      if (message) {
         selection.addOptimisticMessage(threadId, message);
-        setLocalSendVersion((value) => value + 1);
+        setLocalSendVersion(value => value + 1);
+      }
+      const result = await goal.update({ objective, status: "active", attachmentIds: attachments.map(file => file.id),
+        ...(message ? { submissionId: message.submissionId } : {}) }, threadId);
+      if (!result) {
+        if (message) selection.updateOptimisticMessage(threadId, message.id, { deliveryState: "failed", deliveryError: "目标设置未确认" });
+        return false;
       }
       void catalog.refreshSessions(false, threadId, false);
       return true;
@@ -320,17 +324,23 @@ export function useProjectConversations() {
         submittingThreads.current.add(threadId);
         selection.addOptimisticMessage(threadId, optimisticMessage);
       }
-      if (!execution.status.active) {
-        const result = await modelApi.update(threadId, settings.model, undefined, settings.reasoningEffort, scope);
-        if (result.threadId && result.threadId !== threadId) {
-          selection.removeOptimisticMessage(threadId, optimisticMessage.id);
-          const previous = threadId;
-          threadId = result.threadId;
-          selection.addOptimisticMessage(threadId, optimisticMessage);
-          if (selection.selectedIdRef.current === previous) selection.selectSession(threadId);
+      if (!selection.store.get(threadId).executionStatus.active) {
+        try {
+          const result = await modelApi.update(threadId, settings.model, undefined, settings.reasoningEffort, scope);
+          if (result.threadId && result.threadId !== threadId) {
+            selection.removeOptimisticMessage(threadId, optimisticMessage.id);
+            const previous = threadId;
+            threadId = result.threadId;
+            selection.addOptimisticMessage(threadId, optimisticMessage);
+            if (selection.selectedIdRef.current === previous) selection.selectSession(threadId);
+          }
+          if (settings.reasoningEffort) await modelApi.updateReasoningEffort(threadId, settings.reasoningEffort, undefined, scope);
+          contextManagement.markSubmitted(threadId, settings);
+        } catch (error) {
+          // A turn may start between the two settings requests. The message endpoint
+          // decides whether to start or steer; settings contention is not send failure.
+          if (!(error instanceof Error) || !/^当前任务运行中，请在完成后(?:调整推理强度|切换模型)$/.test(error.message)) throw error;
         }
-        if (settings.reasoningEffort) await modelApi.updateReasoningEffort(threadId, settings.reasoningEffort, undefined, scope);
-        contextManagement.markSubmitted(threadId, settings);
       }
       selection.updateOptimisticMessage(threadId, optimisticMessage.id, { deliveryState: "sending" });
       const attempt = await execution.sendMessage(messageText, attachments.map(file => file.id), submissionId, threadId, scope);
@@ -392,6 +402,7 @@ export function useProjectConversations() {
     setForkingMessageId(target.id);
     try {
       await conversationApi.revert(threadId, target.protocolTurnId || target.turnId);
+      selection.store.clearCompletedMessages(threadId);
       selection.cancelSessionLoad(threadId);
       setHistoryEdit(previous => ({ threadId, revision: (previous?.revision || 0) + 1 }));
       selection.updateCurrentSession(threadId, current => {
@@ -584,11 +595,11 @@ export function useProjectConversations() {
     }
   }, [execution.refreshStatus, execution.status.active, selection.selectedIdRef, selection.session?.archived]);
 
-  const onSessionsChanged = useCallback((threadId?: string) => {
-    if (threadId) selection.store.invalidate(threadId);
-    else { for (const id of selection.store.committed.keys()) selection.store.invalidate(id, false); selection.store.notify(); }
+  const onSessionsChanged = useCallback((threadId?: string | string[]) => {
+    for (const id of typeof threadId === 'string' ? [threadId] : threadId || selection.store.committed.keys()) selection.store.invalidate(id, false);
+    selection.store.notify();
     window.dispatchEvent(new Event('negus:directory-changed'));
-    return catalog.refreshSessions(false, threadId, false);
+    return catalog.refreshSessions(false, typeof threadId === 'string' ? threadId : undefined, false);
   }, [catalog.refreshSessions, selection.store]);
 
   const handleEvent = useCallback((event: ProjectEvent) => {
@@ -596,6 +607,7 @@ export function useProjectConversations() {
     if (event.type === 'sessions_changed') {
       for (const id of event.threadId ? [event.threadId] : selection.store.committed.keys()) selection.store.freshBodies.add(id);
     }
+    if (event.type === "assistant_message_completed") selection.store.completeMessage(event.threadId, event.message);
     execution.handleEvent(event);
     if (event.type === 'execution_status' && event.threadId !== selection.selectedIdRef.current) selection.store.update(event.threadId, { executionStatus: event }, true);
     if ((event as { type: string }).type === 'employee_status' || (event as { type: string }).type === 'employee_message_completed') window.dispatchEvent(new Event('negus:directory-changed'));

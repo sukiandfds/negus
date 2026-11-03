@@ -22,7 +22,7 @@ const signature = (value: unknown, omitStream = false) => JSON.stringify(value,
         || (key === 'detail' && this.phase === 'working' && (this.type === 'execution_status' || this.id === 'reasoning-current')))) ? undefined : field;
   });
 export const withStreamingStatus = (status: ThreadSnapshot['executionStatus'], live?: ThreadSnapshot['executionStatus']) =>
-  status.active && status.turnId && live?.turnId === status.turnId ? { ...status,
+  status.turnId && live?.turnId === status.turnId ? { ...status,
     streamingItemId: live.streamingItemId ?? status.streamingItemId, streamingText: live.streamingText ?? status.streamingText,
     commentary: live.commentary ?? status.commentary } : status;
 const refreshSession = (current: SessionDetail, incoming: SessionDetail) => {
@@ -35,6 +35,13 @@ const refreshSession = (current: SessionDetail, incoming: SessionDetail) => {
 export class ConversationStore {
   committed = new Map<string, ThreadSnapshot>();
   live = new Map<string, Patch>();
+  private completedMessages = new Map<string, SessionMessage[]>();
+  clearCompletedMessages = (id: string) => { this.completedMessages.delete(id); };
+  completeMessage = (id: string, message: SessionMessage) => {
+    this.completedMessages.set(id, mergeMessageList(this.completedMessages.get(id) || [], [message]));
+    ++this.persistVersion;
+    this.notify();
+  };
   localPending = new Map<string, SessionMessage[]>();
   sendingQueue = new Map<string, string>();
   private acceptedSubmissions = new Set<string>();
@@ -115,6 +122,8 @@ export class ConversationStore {
     if (choice) value.contextStatus = { ...value.contextStatus, ...choice };
     if (!value.session && id) value.session = { threadId: id, source: 'codex', title: '', updatedAt: '', messageCount: null,
       latestUser: '', latestAssistant: '', messages: [] };
+    if (value.session && this.completedMessages.has(id)) value.session = { ...value.session,
+      messages: mergeMessageList(this.completedMessages.get(id)!, value.session.messages) };
     const pending = this.localPending.get(id);
     if (value.session && pending?.length) value.session = mergePendingOptimisticMessages(value.session, pending);
     value.queueItems = this.visibleQueue(id, value.queueItems).map(item => {

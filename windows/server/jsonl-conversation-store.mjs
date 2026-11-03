@@ -18,8 +18,9 @@ const walkJsonl = async (directory) => {
 
 const threadIdFromFile = (file) => path.basename(file).match(/[0-9a-f]{8}-[0-9a-f-]{27,}/iu)?.[0] || path.basename(file);
 
-export const createJsonlConversationStore = ({ sessionRoot, projectRoot, projectRoots = [projectRoot], registerMedia, onChange }) => {
-  const archivedRoot = path.join(path.dirname(sessionRoot), "archived_sessions");
+export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots = [], projectRoot, projectRoots = [projectRoot], registerMedia, onChange }) => {
+  const historyRoots = [...new Set([sessionRoot, ...fallbackSessionRoots])];
+  const archivedRoots = historyRoots.map(root => path.join(path.dirname(root), 'archived_sessions'));
   const headerCache = new Map();
   const projectHeaders = new Map();
   const sessionCache = new Map();
@@ -35,9 +36,11 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
   };
 
   const isArchivedFile = (file) => {
-    const root = path.resolve(archivedRoot).toLowerCase();
     const candidate = path.resolve(file).toLowerCase();
-    return candidate === root || candidate.startsWith(`${root}${path.sep}`);
+    return archivedRoots.some(directory => {
+      const root = path.resolve(directory).toLowerCase();
+      return candidate === root || candidate.startsWith(`${root}${path.sep}`);
+    });
   };
 
   const readHeader = async (file, refresh = false) => {
@@ -89,10 +92,7 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
   };
 
   const reconcile = async () => {
-    const files = [
-      ...(await walkJsonl(sessionRoot)),
-      ...(await walkJsonl(archivedRoot)),
-    ];
+    const files = (await Promise.all([...historyRoots, ...archivedRoots].map(walkJsonl))).flat();
     const existing = new Set(files);
     for (const file of projectHeaders.keys()) {
       if (!existing.has(file)) {
@@ -301,8 +301,12 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
     })));
   });
 
-  const findSession = async (threadId, source = "all", { before, limit, metadataOnly = false, includeEventTimes = false } = {}) => withCurrentIndex(async () => {
-    const header = [...projectHeaders.values()].find((item) => item.threadId === threadId);
+  const findSession = async (threadId, source = "all", { before, limit, metadataOnly = false, includeEventTimes = false, historyFile } = {}) => withCurrentIndex(async () => {
+    let header = [...projectHeaders.values()].find((item) => item.threadId === threadId);
+    if (!header && historyFile) {
+      const recorded = await readHeader(historyFile, true);
+      if (recorded?.threadId === threadId && sameProject(recorded.cwd)) header = recorded;
+    }
     if (!header) return null;
     if (metadataOnly) {
       await fsp.access(header.file);

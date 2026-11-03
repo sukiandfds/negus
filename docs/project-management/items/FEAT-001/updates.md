@@ -610,3 +610,141 @@ useContextManagement.ts、context-management/model/types.ts、conversationStore.
 
 - 3个后端/MCP文件：具体模型匹配已配置目录，优先已有成功完成任务的配置；配置名称选默认模型；显式配置保持；多候选不静默猜测，不换模型。复用已有任务账本成功记录，无新增持久化。
 - 3个文件 node --check 通过，未追加测试、未调用付费供应商。受控重启前状态正常，已有可恢复 active/previous 快照；安排重启加载本次源码，完成结果由 supervisor 核对。
+
+### 2026-11-03 分步修复第一步：加载完成即显示
+
+- 基线 develop@070e81e，开工工作区干净；业务仅 conversationBatch.ts 和 usePageSnapshot.ts。近期优先顺序保留，单条完成立即提交，不等同批其他对话；移除首次目录变化取消整轮，避免自己的单条提交打断剩余加载。
+- 同一对话历史字段仍一起提交，实时回复及运行中重读留到下一步。未追加测试，不改滚动/排序/后端。实际业务2文件 +5/-9行。受控前端发布成功：workerPid=81055，buildId=feishu-mw01fopj，at=2026-11-03T01:57:38.462Z，结果 runtime/negus-frontend-result.json；后端未重启。
+
+### 2026-11-03 第一步紧急回退
+
+- 用户报告发送后页面无响应、消息不更新。受控前端 rollback workerPid=81565 已完成，buildId=feishu-mvzba200，at=2026-11-03T02:02:53.766Z；runtime/negus-frontend-result.json。源码业务2文件恢复070e81e；无后端重启。
+- 健康检查 backend/frontend/tunnel 均healthy。隔离浏览器对真实API只读打开回退版与候选版均可响应、无pageerror；首次6秒分别发起201/180次session读取，显示首次加载工作量明显，尚不能以此认定发送卡死根因。证据脚本 /tmp/negus-ui-responsiveness.mjs。继续补一次拦截写请求的发送交互，不向供应商提交测试任务。
+- 补查完成：拦截POST、未实际提交的发送交互，两个版本都可继续响应，无pageerror；未复现用户截图的卡死，不能作为用户设备恢复证据。证据 /tmp/negus-ui-send-responsiveness.mjs。当前以已完成的前端回退为恢复动作，不继续发布候选版。
+
+### 2026-11-03 公网故障版真实输入验证
+
+- 用户纠正：回退版不能证明故障版发送正常，应走公网实际输入。隔离浏览器对公网 codex.negus.us.ci 加载故障版 feishu-mw01fopj 静态资源，API/SSE均走真实公网；线上继续保留回退版，不重新发布故障版。
+- 在用户先前指定线程01a18a60-397a-7773-918e-bc5c6d30d760实际输入并点击发送。故障版 model/effort/message 请求分别926/1269/906ms，均成功；后端本轮02:10:49.756Z启动、02:10:54.524Z完成。未复现页面卡死，不能宣布根因排除。
+- 首次发送观察脚本的全文包含判断会误把用户提示中的“收到测试”当作助手回复，已纠正为只检查assistant article，并仅观察已有发送、不重复提交。重新打开观察第6.7秒仍无assistant正文，第10.7秒出现历史及两条真实“收到测试”；证明首次展示等待存在，但不是原标签页实时到达耗时的测量。证据 /tmp/negus-public-faulty-send-result.json、/tmp/negus-public-faulty-observe-result.json、/tmp/negus-public-faulty-send.png。
+
+### 2026-11-03 当前打开对话提前提交并发布
+
+- 业务仅 usePageSnapshot.ts：新增18行、删除10行（含移动复用读取代码）；当前选择优先读取，首次完整快照提前提交，批次完成去重；提前提交不触发整轮取消标记。其他对话保留批次。
+- TypeScript 构建检查、隔离前端构建、git diff --check 通过。隔离前端连接真实公网 API/SSE，在指定线程输入框真实发送独有验证文本；同一页面助手气泡自动显示对应回复，无 pageerror，100ms 心跳持续推进。证据：/tmp/negus-public-selected-send-result.json。该次仍约17秒才显示回复，不代表实时延迟或此前用户页面卡死根因已解决。
+- 受控 rebuild workerPid 83067，runtime/negus-frontend-result.json 确认 published；buildId feishu-mw02gkz0，builtAt 2026-11-03T02:26:19.094Z，发布 2026-11-03T02:26:19.829Z，backendRestarted=false。未修改受保护滚动逻辑，未重启后端。
+
+### 2026-11-03 实时正文展示已发布
+
+- 本步3个业务文件：usePageSnapshot.ts 直接读取实时执行状态；ConversationView.tsx 接入真实streamingText/itemId；conversationStore.ts 同轮终态仍保留实时文字。复用已有liveTranscript交接，不改排序、滚动、定位、测量与后端。
+- TypeScript、隔离Vite构建、diff检查通过。现有liveTranscript独立行为断言通过：实时显示、终态保留、同ID正式接替、较短文本不覆盖完整历史。
+- 隔离候选前端连接真实公网API/SSE，经指定对话输入框实际发送20行回复指令；同页观察到25种递增正文长度，首delta 1793676842635，首个包含唯一标记的助手气泡1793676843300（665ms），完整结尾可见，最多1个对应气泡，心跳持续，无pageerror。证据 /tmp/negus-public-live-send-result.json。此证据覆盖本次实时显示，不等于已消除所有用户环境的卡住或运行中追加消息问题。
+- 受控rebuild workerPid 84591；本次结果 published，buildId feishu-mw04wa88，builtAt 2026-11-03T03:34:30.955Z，发布2026-11-03T03:34:31.705Z，backendRestarted=false。真实公网 /api/version 返回200且buildId一致。
+
+### 2026-11-03 合并读取期间变化已发布
+
+- 本步仅usePageSnapshot.ts，较上一步新增12行、删除12行。删除首次整轮按source变化取消与无用标记；日常在途读取仅目录移除取消，不因签名变化中断；归档范围切换显式取消首次。复用捕获签名、wake、修订比较做后续补读。未修改实时正文、排序、滚动、模型配置或后端。
+- TypeScript、隔离Vite构建、diff检查通过。可控hook测试执行真实usePageSnapshot及readConversationBatches源码，模拟首次及日常在途读取期间共6次修订变化：无取消、合并补读、最终提交revision=6，无后续多余读取。脚本/证据 /tmp/negus-scheduling-check.mjs。
+- 隔离候选连接公网API/SSE，当前对话每次读取延迟1500ms，通过真实输入框发送20行回复指令；回复逐步出现、完整结尾保留，最多1个对应气泡、无页面错误或无响应、未观察到当前线程读取失败。证据 /tmp/negus-public-scheduling-send-result.json。该次观察窗口的详情响应仅含初次读取，不将其称为已实测正式历史补读；补读期间变化不丢失由上述可控测试核对。
+- 受控rebuild workerPid 85607，结果published；buildId feishu-mw05g6mu，builtAt 2026-11-03T03:49:59.374Z，发布2026-11-03T03:50:00.116Z，backendRestarted=false。真实公网/api/version返回200且buildId一致。
+
+### 2026-11-03 删除队列处理中提示已生效
+
+- 按用户纠正，FollowUpQueue.tsx删除通用busy文字提示，不再因仅busy渲染空队列区域；本步1个业务文件新增1行、删除2行。操作保护、乐观展示和真实失败处理保留。
+- 核查其他会话组件未发现同类额外可见“等待服务器/正在处理等候”文字；未删除用户原有运行状态、消息时钟或真实失败提示，不扩大到其他功能。
+- 受控rebuild workerPid85889，结果published；buildId feishu-mw05iu49，builtAt2026-11-03T03:52:03.125Z，发布时间2026-11-03T03:52:03.873Z。公网版本200且一致，公网实际入口JS已确认不含删除的提示文字。未重启后端。
+
+### 2026-11-03 中间提示全面来源核查与旧回复标题清理
+
+- 同条目新增“全面对话中间提示来源核查”表：覆盖单聊/群聊/等候/执行/转发/自动任务/加载错误及动态供应商消息生产源；区分额外段落、原执行状态、真实错误与图标无障碍文本，列明未修改动态入口，未宣称所有状态均已删除。
+- 已删除“追加指令前的回复”的纯装饰标题与无用传参/CSS，保留原正文；删除转发busy额外段落。不改消息顺序、滚动、定位、测量、服务器状态或群聊。
+- 来源：标题最早651e86c（2026-09-22），转发额外段落09b66b1（2026-10-07），此前队列busy提示070e81e；提交署名不等于用户要求。构建及diff检查通过。
+- 受控rebuild workerPid86071；published，buildId feishu-mw05lglg，builtAt2026-11-03T03:54:05.523Z，发布时间2026-11-03T03:54:06.275Z。公网版本一致且实际入口JS中三个已删文案均不存在；后端未重启。
+
+### 2026-11-03 无轮次残留状态修复
+
+- 现场线程 threadId `01a19baa-60ec-73f1-9022-2209a9687fc1`：最后目标续轮03:55:51完成，但执行状态自03:52:40起 active=true、turnId=""，最后协议事件停在03:52:40；两条队列消息均为 pending。
+- 业务4文件：execution-tracker忽略已完成任务的迟到无轮次active状态；app-server任务监督登记无轮次active并在超时后读取权威状态；follow-up queue接受权威idle作为可派发终态；服务健康回调接通已有队列派发。
+- 回归3文件：新增“已完成不被覆盖”“无轮次active可探活”“权威idle派发等候消息”断言。execution-tracker 25/25、queued-model-selection 4/4、conversation-controls新增及监督相关均通过；conversation-controls既有“unloaded settings reuse project history metadata”单独复跑仍因 `current::saved-model` 与预期 `saved-model` 不同而失败，和本次改动路径无关。node --check、git diff --check通过。
+- 当前卡住运行状态已用现有 reconcile 读取权威空闲并落盘：06:08:48Z 返回 phase=idle、active=false，两条队列消息仍为 pending；随后受控重启加载源码，等候消息由新服务启动/权威空闲回调派发。未改滚动、排序、定位、测量和供应商配置。
+
+### 2026-11-03 目标与等候消息顺序修复已发布
+
+- 根因是等候队列固定在全部正文后绘制，未参与时间排序。修改3个业务文件，将等候消息元信息接入现有orderVisibleItems，气泡及操作复用FollowUpQueue；onlyId筛选单个气泡但仍使用完整队列索引，保持提前/发送/删除等行为。按submissionId避开已在正文中的重复。错误区域保持原入口。
+- TypeScript、隔离构建、diff检查通过。隔离浏览器夹具验证截图同一组时间：11:51:44等候→11:52:15目标→14:04:22等候→14:09:15运行占位；两条直接发送按钮均存在，第一条提前禁用、第二条可用，无pageerror。证据 /tmp/negus-order-check-result.json；此为受控数据渲染验证，不称为真实发送。原测试线程读取返回404，未向该线程发送或修改业务数据。
+- 受控rebuild workerPid88587，结果published；buildId feishu-mw0aksb8，builtAt2026-11-03T06:13:32.234Z，发布时间2026-11-03T06:13:32.982Z。未重启后端，未触碰工作区其他后端及测试改动。未改滚动、首次定位、底部跟随或测量逻辑。
+
+### 2026-11-03 流式结束后空完成占位修复
+
+- liveTranscript.ts本步新增2行删除1行：非active同轮已有冻结回复时不再创建空placeholder，完成状态沿既有选择附在冻结回复，正式历史同itemId接替后清理冻结副本。
+- 对真实liveTranscript源码做行为断言通过：流式正文→终态清空实时字段且等待历史→不生成空占位/状态指向保留回复→历史到达状态指向正式气泡→新轮仍有运行占位。diff检查通过；发布脚本TypeScript和Vite构建通过。
+- 受控rebuild workerPid89075，published，buildId feishu-mw0atx0j，builtAt2026-11-03T06:20:38.301Z，发布时间2026-11-03T06:20:39.032Z。公网版本200且一致；未重启后端。仅证明本次交接路径修复，不泛称所有顺序问题已消除。
+
+### 2026-11-03 按用户要求先完成全生命周期梳理
+
+- 仅更新同条目“全部消息生命周期及显示时间排序核对”章节。覆盖32类用户操作/显示情况，逐项列出本地、服务器、队列、流式、目标、历史与执行状态的时间/身份交接，以及当前五类冲突。
+- 读取当前发送、队列、目标、执行、合并/渲染、时间格式、缓存入口；执行真实orderMessageList源码的两个反例，证实轮内序号与跨轮开始时间会覆盖消息显示时间。
+- 本轮未改业务、未构建/发布/重启，未将统一设计记成已实现。暂不推进读取优化，待统一规则后改消息链路。
+
+- 补充核实正式final缺时回退turn.completedAt、目标接口不传本地submissionId、缓存剔除未确认/实时片段、后台补充消息排序和员工缺时补现在、群聊sequence独立协议。明确实际事件时间与浏览器显示时间目前混用；本轮仍只梳理，无业务改动/部署。
+
+### 2026-11-03 无流式统一显示时间方案专项梳理
+
+- 按用户新假设覆盖乐观消息校时、多过程/跨轮交错、队列创建派发、目标、附件、插入/停止/中断/失败/无final、历史乱序恢复及同秒缺时等场景。
+- 再核对当前item-completed/turn终态事件：commentary完整事件无createdAt，final缺对应完整正文事件；仅屏蔽delta会继续等待历史。列出直接关闭流式不足之处、可删逻辑、不能删除的恢复及身份保护。
+- 本轮仅记录审计及待验收规则，不修改业务、不测试付费供应商、不发布/重启；对中断未完成正文等体验细节保持建议而非已确认要求。
+
+
+### 2026-11-03 显示时间统一排序与取消逐字：代码完成、前端发布、后端待重启
+
+- 本次有效决定见item.md最后一节。删除liveTranscript切段/冻结内存、前端100ms逐字缓冲、流式尾部排序和轮次优先。等候普通气泡时间处显示“等候中”，时间线后按现有队列顺序；正式派发沿既有身份映射更新。完整commentary/final统一事件，服务端持久确认时间和短暂完整正文，历史按同item身份接替；目标提交增加submissionId与可恢复同一气泡。目标结果按轮身份而非连续相邻气泡归属。
+- 本次69项相关单元/交接/路由测试通过，证据 /tmp/negus-complete-message-tests.txt；tsc --noEmit通过，git diff --check通过。额外conversation-send-state中的模型选择断言出现既有范围外失败（wrong与group::saved），未修改模型设置逻辑，不将其冒充本次通过。
+- 前端受控rebuild workerPid=91022，结果2026-11-03T07:01:14.212Z published，buildId=feishu-mw0ca3t6，公网/api/version已核对。后端候选1793689301270-9effc2e8已prepare，回退1793686133641-c91c8911；需受控restart后完整事件生效。
+- DeepSeek两次collaboration入口均VIP 503无渠道。查设置中官方DeepSeek配置后创建独立验证会话01a1a035-e551-7e91-b0c7-efdcb1c4820e，路由ccswitch_9020dc9b-e2ff-43e7-92a8-007b424d6508 / deepseek-flash。尚未以模型响应证明执行成功。独立启动器PID91144仅等待本次后端成功结果后提交测试任务，指令/tmp/negus-deepseek-public-task.txt，提交结果/tmp/negus-deepseek-launch-result.json，测试要求结果/tmp/negus-deepseek-public-verification.json。公网实测未完成，不宣称验收通过。
+
+
+### 2026-11-03 配置争用误报发送失败修复发布
+
+截图文案来自旧后端强度接口82d2347；前端发送前模型/强度设置请求与助手开始运行竞争，错误被写入消息deliveryError。sendDirectMessage改读store最新active，且仅对明确“当前任务运行中”模型/强度争用继续原发送接口；其他错误不吞。tsc、diff --check通过。前端rebuild worker92184，2026-11-03T07:09:18.848Z published，buildId feishu-mw0ckhrh，公网/api/version匹配；后端未重启。
+
+前次受控后端restart 1793689383726-91149已核对started，07:03:56.066Z，release1793689301270-9effc2e8。重启前空DeepSeek会话发送报thread not loaded，未启动执行；重启后新建独立会话01a1a03c-0099-7221-91be-4e43d1d602c6，指定官方DeepSeek配置ccswitch_9020dc9b-e2ff-43e7-92a8-007b424d6508/deepseek-flash，提交202/turn01a1a03c-012f-75d3-bbf0-020c2bc64dfe，已读到其实际过程回复并在准备公网验证。已追加本次强度409故障注入回归要求，202 steered；继续等待该执行者证据，不重复派发。
+
+### 2026-11-03 原生网页搜索
+
+共用 app-server-client.mjs 启用 live 与渠道原生搜索开关，复用原生工具及已有搜索活动状态。当前 VIP / gpt-6.1-sol 独立临时对话已完成真实搜索，证据 work/native-web-search-verification.json；生产后端尚待受控重启加载。
+
+15项相关测试通过，1项Windows测试跳过；语法、diff检查、构建及隔离预检通过。候选1793690679899-be40931b，回退1793689301270-9effc2e8。受控后端重启已安排：jobId=1793690696837-95358，workerPid=95359；scheduled仅代表已安排，恢复后须核对本次status/result。
+
+### 2026-11-03 压缩状态收尾
+
+context-management-service.mjs增加8行，补原生轮次完成/中断终态收尾；7项测试、语法和diff检查通过。指定对话context接口确有compacting残留；尚不以独立运行时notLoaded推断线上压缩结果。准备受控发布，恢复后核对状态。
+
+### 2026-11-03 具体对话通知保持具体范围
+
+- 本步2个业务文件新增6行、删除7行，净删1行（相对本轮开工工作区，非全部累计差异）。合并通知保留threadId数组，仅对应对话失效；目录每批一次，真正全局通知及恢复机制保留。
+- 类型检查、事件Hook模拟验证多对话合并/去重/全局通知/后续批次隔离通过；git diff --check通过。
+- 前端发布workerPid=98012；本次结果published，2026-11-03T09:03:33.070Z，版本feishu-mw0gnem0。公网/api/version已核对同版本；未重启后端。未提交/推送，保留原工作区改动。
+
+### 2026-11-03 列表刷新分段变样修复生效
+
+- 业务3文件新增7行、删除3行（本轮差异）：自身缓存补齐来源/路径/摘要；删除跨对话项目路径头像回退；新提交摘要不再被旧详情摘要覆盖。
+- 类型检查、延迟返回浏览器夹具验证通过：缓存及当前对话提前发布阶段其他行保持完整；批次完成后标题/来源/摘要正确，仍使用聚合详情请求，无六路旧请求。证据/tmp/negus-list-atomic.mjs、/tmp/negus-list-atomic.png。
+- 本次前端workerPid=99144，结果published，at=2026-11-03T09:46:48.568Z，buildId=feishu-mw0i71ab；公网版本核对一致，后端未重启。未提交/推送；已有工作区修改保留。
+
+### 2026-11-03 Ctrl+R混合缓存恢复修复
+
+- 业务1文件+3/-1；较新详情缺少字段时保留完整摘要的cwd/createdBy/latestMessage。类型检查、差异检查、阻断API的三次重载浏览器验证通过，证据/tmp/negus-cache-newer-reload.mjs。
+- 前端workerPid=223，本次published at=2026-11-03T10:09:57.201Z，buildId=feishu-mw0j0sme，公网/api/version核对一致。后端未重启，未提交/推送，其他改动保留。未取得用户现有浏览器存储，不能以夹具证明其全部现场原因。
+
+### 2026-11-03 列表摘要覆盖目录对话，前端已生效
+
+- 本次业务2文件新增9行、删除2行（不含同文件既有改动）：持久化复用实际列表合并摘要；删除摘要50条截断，正文仍仅最近10个。
+- TypeScript、差异检查通过；浏览器12及62个对话夹具均通过：仅3个普通sessions、其余来自目录，正文缓存只保留10个；加载完整后阻断API并整页重载，第12/62行来源及预览与重载前完全一致。证据/tmp/negus-directory-cache-fixed.mjs、/tmp/negus-directory-cache-62.mjs。
+- 受控前端发布workerPid=2732；published at=2026-11-03T11:49:53.860Z，buildId=feishu-mw0mlbo6，公网/api/version返回200且版本一致；后端未重启。未改同步失败与滚动逻辑，未提交/推送，保留工作区已有修改。
+
+### 2026-11-03 多对话同步失败修复，准备受控后端交接
+
+- 本次业务4文件新增26/删除13行（remote-room-demo.mjs仅本轮新增fallbackSessionRoots一行，不包含其既有修改）；复用JSONL解析、已有项目限制和批次发布，不改滚动。
+- TypeScript、git diff --check通过；31项定向测试30通过，剩余为此前已记录current::gpt-bad/gpt-bad断言失败。本次新增三个场景通过：排队不侵占请求超时、旧根/登记路径读取且拒绝错误身份和项目、provider只传只读路径不resume。真实三个404历史只读读取成功。
+- 已重新prepare新候选1793707138071-6130315e（构建及隔离健康检查通过），不使用先前撤销补丁的候选；fallback=1793693232806-62ff0367。
+- 前端workerPid=3137，published at=2026-11-03T11:59:40.512Z，buildId=feishu-mw0mxwc4；后端交接将发布候选自身前端feishu-mw0mx3kf（相同源码）。当前后端历史修复尚待受控重启生效，不能将离线读取成功称为公网已修复。

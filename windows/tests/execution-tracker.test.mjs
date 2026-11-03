@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { createExecutionTracker } from "../server/execution-tracker.mjs";
 
-test("streams final answers but keeps commentary updates complete", () => {
+test("publishes only complete bubbles, without final answer deltas", () => {
   const events = [];
   const tracker = createExecutionTracker({ broadcast: (event) => events.push(event) });
 
@@ -32,9 +32,12 @@ test("streams final answers but keeps commentary updates complete", () => {
   });
 
   assert.equal(events.some((event) => event.type === "assistant_delta" && event.itemId === "commentary-1"), false);
-  assert.equal(events.some((event) => event.type === "assistant_commentary" && event.text === "已经完成分析"), true);
-  assert.equal(events.some((event) => event.type === "assistant_delta" && event.itemId === "answer-1"), true);
-  assert.equal(tracker.getStatus("thread-1").streamingText, "最终回复");
+  assert.equal(events.some((event) => event.type === "assistant_message_completed" && event.message.text === "已经完成分析"), true);
+  assert.equal(events.some((event) => event.type === "assistant_delta"), false);
+  tracker.handleProtocolMessage({ method: "item/completed", params: { threadId: "thread-1", item: {
+    id: "answer-1", type: "agentMessage", phase: "final_answer", text: "最终回复" } } });
+  assert.equal(events.filter(event => event.type === "assistant_message_completed").length, 2);
+  assert.equal(tracker.getStatus("thread-1").streamingText, "");
   assert.equal(tracker.getStatus("thread-1").commentary, "已经完成分析");
   assert.equal(tracker.getStatus("thread-1").activities.length, 0);
 });
@@ -141,7 +144,8 @@ test("ignores delayed protocol events from a retired turn", () => {
   assert.equal(status.phase, "responding");
   assert.equal(status.active, true);
   assert.equal(status.commentary, "");
-  assert.equal(status.streamingText, "new answer");
+  assert.equal(status.streamingText, "");
+  assert.equal(events.some(event => event.type === "assistant_message_completed" && event.message.text === "late old commentary"), true);
   assert.equal(events.some((event) => event.type === "assistant_commentary" && event.text === "late old commentary"), false);
   assert.equal(events.some((event) => event.type === "assistant_delta" && event.delta === "late old answer"), false);
 });
@@ -168,6 +172,28 @@ test("does not let an unscoped idle event reset a newer active turn", () => {
   assert.equal(status.turnId, "turn-2");
   assert.equal(status.active, true);
   assert.equal(status.phase, "working");
+});
+
+test("does not revive a completed turn from an unscoped active event", () => {
+  const tracker = createExecutionTracker({ broadcast: () => {} });
+  tracker.markSubmitted("thread-1");
+  tracker.handleProtocolMessage({
+    method: "turn/started",
+    params: { threadId: "thread-1", turn: { id: "turn-1" } },
+  });
+  tracker.handleProtocolMessage({
+    method: "turn/completed",
+    params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } },
+  });
+  tracker.handleProtocolMessage({
+    method: "thread/status/changed",
+    params: { threadId: "thread-1", status: { type: "active" } },
+  });
+
+  const status = tracker.getStatus("thread-1");
+  assert.equal(status.turnId, "turn-1");
+  assert.equal(status.phase, "completed");
+  assert.equal(status.active, false);
 });
 
 test("does not let an unscoped turn completion reset a newer active turn", () => {
