@@ -1,3 +1,4 @@
+import { openRollout } from './rollout-file.mjs';
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -11,7 +12,7 @@ const walkJsonl = async (directory) => {
   const groups = await Promise.all(entries.map(async (entry) => {
     const fullPath = path.join(directory, entry.name);
     if (entry.isDirectory()) return walkJsonl(fullPath);
-    return entry.isFile() && entry.name.endsWith(".jsonl") ? [fullPath] : [];
+    return entry.isFile() && /\.jsonl(?:\.zst)?$/.test(entry.name) ? [fullPath] : [];
   }));
   return groups.flat();
 };
@@ -47,7 +48,7 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
     if (!refresh && headerCache.has(file)) return headerCache.get(file);
     let handle;
     try {
-      handle = await fsp.open(file, "r");
+      handle = await openRollout(file);
       const decoder = new StringDecoder("utf8");
       const buffer = Buffer.alloc(32768);
       let offset = 0;
@@ -84,7 +85,7 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
   };
 
   const addFile = async (file) => {
-    if (!file.endsWith(".jsonl")) return false;
+    if (!/\.jsonl(?:\.zst)?$/.test(file)) return false;
     const header = await readHeader(file, true);
     if (!header || !sameProject(header.cwd)) return false;
     projectHeaders.set(file, header);
@@ -127,7 +128,7 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
   let watcher;
   try {
     watcher = fs.watch(sessionRoot, { recursive: true }, (event, filename) => {
-      if (!filename || !String(filename).endsWith(".jsonl")) return;
+      if (!filename || !/\.jsonl(?:\.zst)?$/.test(String(filename))) return;
       if (event === "rename") { scheduleReconcile(); return; }
       const file = path.resolve(sessionRoot, String(filename));
       const header = projectHeaders.get(file);
@@ -236,7 +237,7 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
 
   const readAppend = async (file, start, length) => {
     if (length <= 0) return Buffer.alloc(0);
-    const handle = await fsp.open(file, "r");
+    const handle = await openRollout(file);
     try {
       const buffer = Buffer.alloc(length);
       let total = 0;
@@ -251,9 +252,11 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
 
   const readSession = async (header) => {
     const stat = await fsp.stat(header.file);
+    let size = stat.size;
+    if (header.file.endsWith(".zst")) { const handle = await openRollout(header.file); size = (await handle.stat()).size; await handle.close(); }
     let state = sessionCache.get(header.file);
-    if (!state || stat.size < state.offset) state = createSessionState(header);
-    const appended = await readAppend(header.file, state.offset, stat.size - state.offset);
+    if (!state || size < state.offset) state = createSessionState(header);
+    const appended = await readAppend(header.file, state.offset, size - state.offset);
     state.offset += appended.length;
     if (appended.length) {
       const lines = (state.carry + state.decoder.write(appended)).split(/\r?\n/u);

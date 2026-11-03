@@ -748,3 +748,39 @@ context-management-service.mjs增加8行，补原生轮次完成/中断终态收
 - TypeScript、git diff --check通过；31项定向测试30通过，剩余为此前已记录current::gpt-bad/gpt-bad断言失败。本次新增三个场景通过：排队不侵占请求超时、旧根/登记路径读取且拒绝错误身份和项目、provider只传只读路径不resume。真实三个404历史只读读取成功。
 - 已重新prepare新候选1793707138071-6130315e（构建及隔离健康检查通过），不使用先前撤销补丁的候选；fallback=1793693232806-62ff0367。
 - 前端workerPid=3137，published at=2026-11-03T11:59:40.512Z，buildId=feishu-mw0mxwc4；后端交接将发布候选自身前端feishu-mw0mx3kf（相同源码）。当前后端历史修复尚待受控重启生效，不能将离线读取成功称为公网已修复。
+
+### 2026-11-03 正文按对话持久缓存，取消最近10个容量限制
+
+- 业务3文件新增91/删除104行，净减13行；测试更新为新的保留规则，删除旧的10个/60条/1M裁剪预期。复用快照净化和旧缓存读取，IndexedDB按变更对话写入，与列表元信息同事务提交；启动本地恢复后挂载原界面。删除正文复用对整份摘要字符串相等的依赖，沿用服务器sourceRevision精确核对。
+- TypeScript、差异检查通过，摘要/缓存及批次21项测试通过。真实Chrome验证62个对话/3720条正文刷新恢复、hasMore不导致缓存残缺、未变化0次正文写入/单对话变化1次写入、注入写入失败原磁盘记录保留。证据/tmp/negus-idb-cache-failure-verify.mjs。
+- 实际界面夹具62个对话验证：旧localStorage缓存可恢复，全部正文进入IndexedDB；阻断API后整页刷新，列表来源/预览保持，第62条点击即显示正文；正常重载62个请求均携带旧版本供服务器复用。证据/tmp/negus-idb-ui-62.mjs、/tmp/negus-idb-revision-62.mjs。
+- 前端workerPid=4827，本次published at=2026-11-03T12:45:59.996Z，buildId=feishu-mw0olgyy；公网/api/version返回200且一致。后端未重启，排序及滚动未修改，未提交/推送本轮代码。
+- 公网已发布页面同样通过62对话浏览器夹具：接口阻断后刷新，来源/预览保留且第62个对话点击直接显示正文。证据/tmp/negus-idb-public-ui-62.mjs；使用模拟数据验证线上前端，不冒称读取了用户浏览器现有缓存。
+
+- 2026-11-03：用户要求“帮我清理掉对话不存在的对话。然后看看按照现在的negus的读取机制，为什么线程未加载和超时会报错”。复核404后通过现有归档接口清理列表，不删除历史文件；14条结果/tmp/negus-missing-cleanup-result.json，补充请求日志第15条结果/tmp/negus-missing-cleanup-extra-result.json。读取诊断：01a19a93正文35条成功、context/goal失败；登记historyFile仅传findSession，设置读取回退未带该跨供应商路径。3条超时对话本机完整读取76/8/357ms，公网16572/14268/5677ms，前端每次读取10秒取消并最多3次尝试。证据/tmp/negus-read-diagnose.json、/tmp/negus-read-public-diagnose.json。本次业务代码0增0删，无重启。
+
+- 2026-11-03：慢读取最小修改：conversationBatch业务+2/-1（净增1行），测试+7行。分离10秒发布等待和60秒最终读取超时，沿用重试和取消。9项批次测试及tsc通过；/tmp/negus-slow-read-tests.log。前端rebuild workerPid11403已发布feishu-mw0t2b2j，2026-11-03T14:51:03.969Z，后端未重启。
+
+- 2026-11-03：用户刷新截图仍22条同步失败。全量核对活动102条发现另一批14条404，原15条归档未返回目录；按既有清理授权复核并归档这14条，接口全部202，活动列表已移除，累计29条。此前90秒采样非全量，本次改为全量读取核对。证据/tmp/negus-cleanup-complete-result.json及/tmp/negus-current-errors.json；业务代码0增0删。
+
+### 2026-11-03 等候消息跳动最小修复
+
+基线develop/a8357ac，保留已有工作区改动。业务仅useFollowUpQueue.ts新增12行/删除5行：入队前本地待确认队列代替普通乐观正文，复用现有队列气泡及submissionId；服务器队列/正式正文已包含时去重，请求结束清理本地待确认项。3项针对性回归通过（立即进入队列且在已有项后、事件先于响应不重复/切换隔离、失败移除本地项并保留错误，含原派发交接）；tsc --noEmit及git diff --check通过。前端rebuild worker11904，2026-11-03T14:55:15.070Z published，buildId=feishu-mw0t7oug；后端未重启。未改受保护滚动。
+
+- 2026-11-03：按日期批量归档交付。业务新增51行（列表入口5行、ArchiveRangeDialog46行），样式0行；复用ConversationActions.module.css和archiveSession。tsc通过，已发布前端feishu-mw0tfdq9并公网核对200；后端未重启。浏览器拦截归档请求验证空范围禁用、日期同日包含、确认8条、取消零请求、8条失败及8条成功分别计数正确（/tmp/negus-archive-range-ui.mjs、/tmp/negus-archive-range-success.mjs），测试未归档真实对话。
+
+- 2026-11-03：批量归档效率修复：串行改最多4条并行，按钮显示已处理数量，archive请求增加60秒等待上限。相对上一版业务+11/-4（净增7行），无新样式。tsc通过；浏览器拦截9条归档请求验证峰值4、9条成功、取消零请求及进度显示，/tmp/negus-archive-parallel.mjs。前端feishu-mw0tk9lr已发布并公网200核对，后端未重启。
+
+- 2026-11-03：旧对话排序修复，共5行替换（+5/-5净增0）：usePageSnapshot保留摘要时间；conversationDirectory优先已加载用户/助手消息时间，移除详情维护时间优先排序。第一次仅改快照浏览器复测仍23:03，定位目录再次覆盖后补齐；最终/tmp/negus-list-time-check.mjs实测截图会话显示10/3。tsc通过，前端feishu-mw0ty5ke已发布，后端未重启。分享检查/tmp/negus-share-check.mjs：二维码图像240px生成、复制内容等于链接、全新浏览器通过链接鉴权并打开同线程、地址token自动移除均通过；现有分享携带全站访问token，已告知用户，未改分享权限。
+
+- 2026-11-03：分享闪烁修复FeishuApp +3/-2，净增1行，稳定closeSharing回调。tsc通过，前端feishu-mw0uy3l0发布成功。公网浏览器打开分享并等待、两次改变搜索触发父渲染，share-link请求保持1次，链接稳定，二维码生成、复制及新浏览器打开原对话通过；证据/tmp/negus-share-stable.mjs。后端未重启。
+
+- 2026-11-03：摘要覆盖最小修复conversationDirectory替换1行（+1/-1净增0），回归测试新增11行；针对较新详情旧摘要覆盖最新列表摘要的测试及tsc通过。前端feishu-mw0v8xxw发布并公网核对200。公网新浏览器截图线程加载后/刷新摘要核对脚本/tmp/negus-preview-live.mjs。其他同步错误和SW错误未纳入本小步。
+
+- 同轮复验修正：仅调换摘要优先级未通过首次加载验收。实际接口将较早goal用户记录追加于消息数组尾部，at(-1)取到旧指令；改共用latestMessagePreview按createdAt取最新可见消息，快照与目录均复用，消除重复生成。业务相对本轮开始净增5行，回归覆盖旧goal尾插；tsc和针对测试通过。最终发布feishu-mw0vei7u，前述feishu-mw0v8xxw验证结论由本记录替代。
+
+- 2026-11-04：业务净增28行，SW复制时机修复；共用读取器支持zstd并保留原文件；配置/goal复用登记历史路径；5条失效线程对应6条已完成任务标记归档，备份/tmp/negus-task-directory-before.json；清理移出列表的错误计数。压缩读取、原文件不变回归与缓存响应消费测试通过，tsc通过，真实01a19a93配置/goal离线读取通过。provider failed sends及controls unloaded settings两个既存current::模型名前缀断言失败已记录。前端feishu-mw0w2x9x已发布；后端候选1793722554660-707e8051已安排重启jobId1793722606986-19856、workerPid19858，恢复后核对本次结果及真实接口。
+
+### 2026-11-04 全部工作区改动推送前简审
+
+用户要求：“简单审核一下所有代码修改，没大问题的话帮我推送一份到github吧。所有改动包括别人的。”覆盖缓存、候补消息、批量归档、分享、列表摘要、历史读取与打包复用。审核修正目录新消息被旧正文缓存覆盖的回归，沿用实际消息时间比较，业务文件净增0行；摘要14项复验通过。批次、候补发送、压缩历史相关测试合计35项中34项通过；配置保留测试在HEAD基线同样失败（wrong / group::saved），记录为既存问题，不宣称全套通过。Mac/Windows图片元数据2项通过；提交包含其他助手现有改动，不改main，不触发服务重启。

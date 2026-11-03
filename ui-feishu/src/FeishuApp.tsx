@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useProjectConversations } from '../shared/features/conversations/hooks/useProjectConversations';
 import { useProjectDirectory } from '../shared/features/project-directory/hooks/useProjectDirectory';
 import { UserInputDialog } from '../shared/features/conversations/components/UserInputDialog';
@@ -62,6 +62,7 @@ export function FeishuApp() {
   const [details, setDetails] = useState(false);
   const [settings, setSettings] = useState(initialView === 'settings');
   const [sharing, setSharing] = useState(false);
+  const closeSharing = useCallback(() => setSharing(false), []);
   const [tab, setTab] = useState<ChatTab>('messages');
   const [mobileChat, setMobileChat] = useState(initialRoute.hasChat);
   const [railOpen, setRailOpen] = useState(false);
@@ -192,7 +193,7 @@ export function FeishuApp() {
       onBack={() => setMobileChat(false)} onShare={() => setSharing(true)} /></div>
     {roomId && <GroupWorkspace key={roomId} room={groups.rooms.find(room => room.id === roomId) || { id: roomId, name: '群聊', projectId: '' }} projectName={directory.projects.find(project => project.projectId === groups.rooms.find(room => room.id === roomId)?.projectId)?.name || ''} onBack={() => setMobileChat(false)} />}
     {creatingGroup && <CreateGroupDialog directory={directory} onClose={() => setCreatingGroup(false)} onCreated={room => { setCreatingGroup(false); void groups.refresh(); setSection('messages'); setFilter('all'); void open({ id: `group:${room.id}`, name: room.name, subtitle: '群聊', kind: 'group', roomId: room.id }); }} />}
-    <ShareConversationDialog open={sharing} title={c.session?.title || selectedName} onClose={() => setSharing(false)} />
+    <ShareConversationDialog open={sharing} title={c.session?.title || selectedName} onClose={closeSharing} />
     <UserInputDialog request={viewC.userInputRequest} busy={c.userInputBusy} error={c.userInputError} onSubmit={c.answerUserInput} />
     {settings && <div className="settings-overlay"><SettingsPage onClose={closeSettings} connected={c.connected} device={device} projectId={directory.projects.find(project => project.kind === 'personal')?.projectId || ''} projectRoot={c.project?.root || ''} /></div>}
   </div>;

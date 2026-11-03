@@ -18,3 +18,8 @@ export function isVisibleTaskMessage(message: { role: string; text: string }): b
 export function visibleTaskPreview(text?: string): string {
   return text && !isInternalTaskResult(text, true) ? text : '';
 }
+
+export function latestMessagePreview(messages: { role: string; text: string; authorName?: string; createdAt?: string }[] = []): string | undefined {
+  const last = messages.filter(isVisibleTaskMessage).reduce<typeof messages[number] | undefined>((latest, message) => !latest || (Date.parse(message.createdAt || '') || 0) >= (Date.parse(latest.createdAt || '') || 0) ? message : latest, undefined);
+  return last ? `${last.authorName || (last.role === 'user' ? '用户' : '助手')}：${last.text || '[附件]'}`.replace(/\s+/g, ' ').slice(0, 260) : undefined;
+}

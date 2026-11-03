@@ -4,7 +4,7 @@ import type { MediaFile } from "../../../shared/model/media";
 import type { ProjectEvent } from "../../execution/model/types";
 import { followUpQueueApi } from "../data/followUpQueueApi";
 import type { FollowUpQueueItem } from "../model/followUpQueue";
-import { createOptimisticMessage, createSubmissionId } from "../state/optimisticMessage";
+import { createSubmissionId } from "../state/optimisticMessage";
 
 import type { ConversationStore } from "../state/conversationStore";
 
@@ -12,6 +12,7 @@ export function useFollowUpQueue(threadId: string, store: ConversationStore) {
   const conversationId = currentConversationId();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [pendingItems, setPendingItems] = useState<FollowUpQueueItem[]>([]);
   const [withdrawing, setWithdrawing] = useState<{ threadId: string; itemId: string } | null>(null);
   const threadIdRef = useRef(threadId);
   const requestRef = useRef(new Map<string, number>());
@@ -47,14 +48,16 @@ export function useFollowUpQueue(threadId: string, store: ConversationStore) {
 
   const enqueue = useCallback(async (text: string, attachments: MediaFile[] = [], targetThreadId = threadId, modelSettings?: { model: string; reasoningEffort: string }) => {
     const submissionId = `queue-${createSubmissionId()}`;
-    const message = { ...createOptimisticMessage(text.trim(), attachments, submissionId), deliveryState: 'pending' as const };
-    store.addMessage(targetThreadId, message);
+    const createdAt = new Date().toISOString();
+    setPendingItems(items => [...items, { id: submissionId, threadId: targetThreadId, submissionId,
+      text: text.trim(), attachments, attachmentIds: attachments.map(item => item.id),
+      state: 'pending', error: '', createdAt, updatedAt: createdAt, position: items.length }]);
     try {
       return await run(targetThreadId, () => followUpQueueApi.enqueue(
         targetThreadId, text.trim(), attachments.map(attachment => attachment.id), submissionId, modelSettings, conversationId,
       ), true);
     } finally {
-      store.changeMessages(targetThreadId, messages => messages.filter(item => item.id !== message.id));
+      setPendingItems(items => items.filter(item => item.submissionId !== submissionId));
     }
   }, [run, store, threadId, conversationId]);
 
@@ -99,6 +102,10 @@ export function useFollowUpQueue(threadId: string, store: ConversationStore) {
     setError("");
   }, [store]);
 
-  return { items: store.get(threadId).queueItems.filter(item => withdrawing?.threadId !== threadId || withdrawing.itemId !== item.id),
+  const view = store.get(threadId);
+  const items = [...view.queueItems, ...pendingItems.filter(item => item.threadId === threadId
+    && !view.queueItems.some(queued => queued.submissionId === item.submissionId)
+    && !view.session?.messages.some(message => message.submissionId === item.submissionId))];
+  return { items: items.filter(item => withdrawing?.threadId !== threadId || withdrawing.itemId !== item.id),
     loading: store.dirty.has(threadId), busy, error, enqueue, remove, move, retry, sendNow, handleEvent };
 }

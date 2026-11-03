@@ -47,7 +47,7 @@ export const conversationApi = {
     forkedFromTurnId: string;
   }>("/api/session/fork", withConversation({ threadId, lastTurnId }), signal),
   revert: (threadId: string, beforeTurnId: string) => postJson<{ threadId: string }>("/api/session/revert", withConversation({ threadId, beforeTurnId })),
-  archive: (threadId: string, signal?: AbortSignal) => postJson<{ threadId: string; archived: boolean }>("/api/session/archive", withConversation({ threadId }), signal),
+  archive: (threadId: string, signal: AbortSignal = AbortSignal.timeout(60000)) => postJson<{ threadId: string; archived: boolean }>("/api/session/archive", withConversation({ threadId }), signal),
   unarchive: (threadId: string, signal?: AbortSignal) => postJson<SessionSummary>("/api/session/unarchive", withConversation({ threadId }), signal),
   session: async (threadId: string, { before, cursor }: {
     before?: number;

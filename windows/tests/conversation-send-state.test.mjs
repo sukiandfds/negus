@@ -76,6 +76,40 @@ test('queue acceptance recovers a dispatching item when its submitted event was 
   assert.deepEqual(render('useFollowUpQueue', 't').items,[]);
 });
 
+test('enqueue immediately uses the queue and stays after existing items across confirmation', async () => {
+  const gate = deferred();
+  const render = await harness('features/conversations/hooks/useFollowUpQueue.ts', {
+    currentConversationId: () => '', createSubmissionId: () => 'new',
+    followUpQueueApi: { enqueue: () => gate.promise },
+  });
+  const old = { id: 'old', threadId: 't', submissionId: 'old', state: 'pending', text: 'old', attachments: [] };
+  render.store.update('t', { queueItems: [old] });
+  const sending = render('useFollowUpQueue', 't').enqueue('new');
+  let queue = render('useFollowUpQueue', 't');
+  assert.deepEqual(queue.items.map(item => item.text), ['old', 'new']);
+  assert.equal(render.store.get('t').session?.messages.length || 0, 0, 'waiting messages never enter the timed transcript');
+  const local = queue.items[1];
+  const confirmed = { ...local, id: 'server-id', createdAt: '2026-11-03T00:00:00Z' };
+  queue.handleEvent({ type: 'queue_changed', threadId: 't', items: [old, confirmed] });
+  assert.deepEqual(render('useFollowUpQueue', 't').items.map(item => item.text), ['old', 'new']);
+  assert.equal(render('useFollowUpQueue', 'other').items.length, 0);
+  gate.resolve({ items: [old, confirmed] });
+  assert.equal(await sending, true);
+  queue = render('useFollowUpQueue', 't');
+  assert.deepEqual(queue.items.map(item => item.id), ['old', 'server-id']);
+});
+
+test('failed enqueue removes only its local waiting bubble and reports the error', async () => {
+  const render = await harness('features/conversations/hooks/useFollowUpQueue.ts', {
+    currentConversationId: () => '', createSubmissionId: () => 'new',
+    followUpQueueApi: { enqueue: async () => { throw new Error('offline'); } },
+  });
+  assert.equal(await render('useFollowUpQueue', 't').enqueue('new'), false);
+  const queue = render('useFollowUpQueue', 't');
+  assert.deepEqual(queue.items, []);
+  assert.equal(queue.error, 'offline');
+});
+
 test('switching conversations keeps both sends alive and independent', async () => {
   const calls = [];
   const render = await harness('features/execution/hooks/useCodexExecution.ts', {

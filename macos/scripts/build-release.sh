@@ -17,6 +17,9 @@ if [ "${1:-}" != "--skip-tests" ]; then "$ROOT/tests/run-tests.sh"; fi
   --exclude 'release/' \
   "$ROOT/" "$TMP/codex-dream-skin-studio/"
 
+if [ -f "$ROOT/../windows/scripts/image-metadata.mjs" ]; then
+  /bin/cp "$ROOT/../windows/scripts/image-metadata.mjs" "$TMP/codex-dream-skin-studio/scripts/image-metadata.mjs"
+fi
 # The macOS tree is also published as a standalone ZIP. Bundle prompt guides
 # and their referenced images, then translate repository paths for this root.
 "$ROOT/scripts/prepare-standalone-docs.sh" "$TMP/codex-dream-skin-studio"

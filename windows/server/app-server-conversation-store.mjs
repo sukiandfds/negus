@@ -1,3 +1,4 @@
+import { openRollout } from './rollout-file.mjs';
 import { communicationInstructions } from "./base-prompt.mjs";
 import { neutralThreadInstructions } from './model-catalog.mjs';
 import fs from "node:fs/promises";
@@ -59,10 +60,10 @@ export const latestAssistantReplyAtFromRollout = async (file, readSettings = fal
   if (!file || typeof file !== "string") return "";
   let handle;
   try {
-    const stat = await fs.stat(file);
+    handle = await openRollout(file);
+    const stat = await handle.stat();
     const chunkSize = 256 * 1024;
     const maxBytes = readSettings ? stat.size : 4 * 1024 * 1024;
-    handle = await fs.open(file, "r");
     let end = stat.size;
     let scanned = 0;
     let carry = "";
@@ -777,19 +778,19 @@ export const createAppServerConversationStore = ({
 
   const interrupt = async (threadId, turnId) => client.request("turn/interrupt", { threadId, turnId });
 
-  const readSettingsThread = async (threadId) => {
+  const readSettingsThread = async (threadId, options = {}) => {
     try { return (await ensureProjectThread(threadId)).thread; }
     catch (error) {
       if (!threadNotLoaded(error)) throw error;
-      const thread = await historyFallback?.(threadId, "all", { metadataOnly: true });
+      const thread = await historyFallback?.(threadId, "all", { ...options, metadataOnly: true });
       if (!thread) throw error;
       return thread;
     }
   };
 
-  const getRuntimeContext = async (threadId) => {
+  const getRuntimeContext = async (threadId, options) => {
     // FEAT-001: reading settings must never acquire a writer.
-    const thread = await readSettingsThread(threadId);
+    const thread = await readSettingsThread(threadId, options);
     const result = freshThreadRuntime.get(threadId) || {
       ...thread, ...await latestAssistantReplyAtFromRollout(thread.path, "latest"),
     };
@@ -827,9 +828,11 @@ export const createAppServerConversationStore = ({
   };
 
   const getGoal = async (threadId, options) => {
-    await readSettingsThread(threadId);
-    const result = await readThreadGoal(client, threadId, goalAttachmentRoot, options);
-    return { ...result, goal: await expandGoalObjective(result.goal, goalAttachmentRoot) };
+    const thread = await readSettingsThread(threadId, options);
+    const historyHome = thread.path?.split(/[/\\](?:sessions|archived_sessions)[/\\]/)[0];
+    const root = historyHome ? path.join(historyHome, 'attachments') : goalAttachmentRoot;
+    const result = await readThreadGoal(client, threadId, root, options);
+    return { ...result, goal: await expandGoalObjective(result.goal, root) };
   };
 
   const setGoal = async (threadId, patch = {}, options) => {
@@ -902,10 +905,10 @@ export const createAppServerConversationStore = ({
     return thread;
   };
 
-  const getSessionResumeInfo = async (threadId, { readOnly = false } = {}) => {
+  const getSessionResumeInfo = async (threadId, { readOnly = false, ...options } = {}) => {
     let thread;
     try {
-      thread = readOnly ? await readSettingsThread(threadId) : await loadThreadForResume(threadId);
+      thread = readOnly ? await readSettingsThread(threadId, options) : await loadThreadForResume(threadId);
     } catch (error) {
       if (error?.statusCode) throw error;
       if (missingPersistedThread(error)) throw persistedThreadError();

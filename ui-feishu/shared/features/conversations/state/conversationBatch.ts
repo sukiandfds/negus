@@ -6,6 +6,7 @@ export async function readConversationBatches<T>(
   signal: AbortSignal,
   timeoutMs = 10000,
   firstBatchSize = 10,
+  readTimeoutMs = timeoutMs * 6,
 ) {
   const batches = [entries.slice(0, firstBatchSize), entries.slice(firstBatchSize)];
   const attempts = new Map<T, number>();
@@ -35,7 +36,7 @@ export async function readConversationBatches<T>(
           await Promise.race([read(entry, readSignal), new Promise<never>((_, reject) => {
             cancel = () => reject(readSignal.reason);
             readSignal.addEventListener('abort', cancel, { once: true });
-            timer = setTimeout(() => attempt.abort(new Error('同步超时，正在保留当前内容')), timeoutMs);
+            timer = setTimeout(() => attempt.abort(new Error('同步超时，正在保留当前内容')), readTimeoutMs);
           })]);
           results[index] = { entry, error: '' };
         } catch (reason) {

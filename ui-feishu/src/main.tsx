@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import { FeishuApp } from './FeishuApp';
+import { restoreConversationCache } from '../shared/features/conversations/data/conversationSnapshot';
 import '../shared/styles/tokens.css';
 import '../shared/styles/global.css';
 import './style.css';
@@ -16,4 +17,4 @@ resize();
 window.addEventListener('resize', resize);
 window.visualViewport?.addEventListener('resize', resize);
 window.visualViewport?.addEventListener('scroll', resize);
-createRoot(document.getElementById('root')!).render(<FeishuApp />);
+void restoreConversationCache().then(() => createRoot(document.getElementById('root')!).render(<FeishuApp />));

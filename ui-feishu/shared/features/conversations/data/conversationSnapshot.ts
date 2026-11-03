@@ -1,20 +1,8 @@
-import type { ConversationPresentation, SessionDetail, SessionMessage, SessionSummary } from "../model/types";
+import type { ConversationPresentation, SessionDetail, SessionSummary } from "../model/types";
 import { readStorage, writeStorage } from "../../../shared/state/storage";
 
 const storageKey = "negus-conversation-snapshot-v1";
 const legacyStorageKey = "codex-collab-conversation-snapshot-v1";
-const maxSnapshotCharacters = 1024 * 1024;
-const maxCachedConversations = 10;
-const maxCachedMessages = 60;
-
-const isProtectedMessage = (message: SessionMessage) => message.id.startsWith("optimistic-")
-  && (message.deliveryState === "failed" || message.deliveryState === "occupied");
-
-const trimMessages = (messages: SessionMessage[], limit: number) => {
-  let remaining = Math.max(0, limit - messages.filter(isProtectedMessage).length);
-  return [...messages].reverse().filter(message => isProtectedMessage(message) || remaining-- > 0).reverse();
-};
-
 export interface CachedConversation {
   savedAt: string;
   isPartial?: boolean;
@@ -49,7 +37,7 @@ const validSnapshot = (value: ConversationSnapshot | null): ConversationSnapshot
       && typeof entry.savedAt === "string"
       && isSessionDetail(entry.session)
       && entry.session.threadId !== value.selectedId,
-    )).slice(0, maxCachedConversations - 1)
+    ))
     : [];
   // Refetch only snapshots affected by the old attachment-as-prose parser.
   // Keep selection/list state and unrelated cached conversations intact.
@@ -97,10 +85,53 @@ const readLocalSnapshot = (key: string) => {
   return validSnapshot(readStorage<ConversationSnapshot>(key));
 };
 
-export const readConversationSnapshot = (): ConversationSnapshot | null => selectNewestSnapshot(
+const readLegacySnapshot = (): ConversationSnapshot | null => selectNewestSnapshot(
   readLocalSnapshot(storageKey),
   readLocalSnapshot(legacyStorageKey),
 );
+
+// FEAT-001: metadata and each conversation commit together; rewrite only changed records.
+let restored: ConversationSnapshot | null = null;
+let database: Promise<IDBDatabase> | undefined;
+let writes = Promise.resolve(true);
+const persisted = new Map<string, string>();
+const openDatabase = () => database ||= new Promise<IDBDatabase>((resolve, reject) => {
+  const request = indexedDB.open('negus-conversations', 1);
+  request.onupgradeneeded = () => {
+    request.result.createObjectStore('threads', { keyPath: 'threadId' });
+    request.result.createObjectStore('metadata');
+  };
+  request.onsuccess = () => {
+    request.result.onversionchange = () => { request.result.close(); database = undefined; };
+    resolve(request.result);
+  };
+  request.onerror = () => { database = undefined; reject(request.error); };
+  request.onblocked = () => { database = undefined; reject(new Error('Conversation cache upgrade blocked')); };
+});
+export const readConversationSnapshot = () => restored || readLegacySnapshot();
+export const restoreConversationCache = async () => {
+  if (typeof indexedDB === 'undefined') return;
+  try {
+    const db = await openDatabase();
+    const saved = await new Promise<ConversationSnapshot | null>((resolve, reject) => {
+      const tx = db.transaction(['threads', 'metadata'], 'readonly');
+      const metadata = tx.objectStore('metadata').get('snapshot');
+      const threads = tx.objectStore('threads').getAll();
+      tx.oncomplete = () => {
+        const value = metadata.result as ConversationSnapshot | undefined;
+        if (!value) return resolve(null);
+        const records = threads.result as { threadId: string; entry: CachedConversation; view?: ConversationPresentation }[];
+        for (const record of records) persisted.set(record.threadId, JSON.stringify(record));
+        const selected = records.find(record => record.threadId === value.selectedId);
+        resolve(validSnapshot({ ...value, session: selected?.entry.session || null,
+          isPartial: selected?.entry.isPartial, recentSessions: records.filter(record => record !== selected).map(record => record.entry),
+          presentation: Object.fromEntries(records.filter(record => record.view).map(record => [record.threadId, record.view!])) }));
+      };
+      tx.onerror = tx.onabort = () => reject(tx.error);
+    });
+    restored = selectNewestSnapshot(saved, readLegacySnapshot());
+  } catch (error) { console.error('[negus:conversation-cache] Cache restore failed; legacy cache retained', error); }
+};
 
 export const writeConversationSnapshot = ({ selectedId, sessions, session, cachedSessions, presentation }: {
   selectedId: string;
@@ -109,86 +140,43 @@ export const writeConversationSnapshot = ({ selectedId, sessions, session, cache
   cachedSessions?: ReadonlyMap<string, SessionDetail>;
   presentation?: Record<string, ConversationPresentation>;
 }) => {
-  try {
-    const previous = readConversationSnapshot();
-    const savedAt = new Date().toISOString();
-    const cachedMessageCount = session?.threadId === selectedId ? session.messages.length : 0;
-    const cachedSession = session && session.threadId === selectedId
-      ? { ...session, messages: trimMessages(session.messages, maxCachedMessages) }
-      : null;
-    const previousEntries: CachedConversation[] = [
-      ...[...(cachedSessions?.values() || [])].sort((a, b) => Date.parse(b.updatedAt || "") - Date.parse(a.updatedAt || "")).map(session => ({ savedAt, isPartial: Boolean(session.hasMore), session })),
-      ...(previous?.session ? [{
-        savedAt: previous.savedAt,
-        isPartial: previous.isPartial,
-        session: previous.session,
-      }] : []),
-      ...(previous?.recentSessions || []),
-    ];
-    const selectedPrevious = previousEntries.find((entry) => entry.session.threadId === selectedId);
-    const seen = new Set<string>();
-    const recentSessions = previousEntries.filter((entry) => {
-      const threadId = entry.session.threadId;
-      if (threadId === selectedId || seen.has(threadId)) return false;
-      seen.add(threadId);
-      return true;
-    }).slice(0, maxCachedConversations - 1).map(entry => {
-      const latest = cachedSessions?.get(entry.session.threadId);
-      if (!latest) return entry;
-      const messages = trimMessages(latest.messages, maxCachedMessages);
-      return { savedAt, isPartial: Boolean(entry.isPartial || latest.hasMore || latest.messages.length > messages.length),
-        session: { ...latest, messages } };
-    });
-    const snapshot: ConversationSnapshot = validSnapshot({
-      version: 1,
-      savedAt,
-      isPartial: Boolean(selectedPrevious?.isPartial || (cachedSession && cachedMessageCount > cachedSession.messages.length)),
-      selectedId,
-      sessions,
-      session: cachedSession,
-      recentSessions,
-      presentation: Object.fromEntries([selectedId, ...recentSessions.map(entry => entry.session.threadId)].flatMap(id => {
-        const value = presentation?.[id];
-        return value ? [[id, value]] : [];
-      })),
-    })!;
-    let serialized = JSON.stringify(snapshot);
-    while (serialized.length > maxSnapshotCharacters) {
-      let progress = false;
-      for (let i = (snapshot.recentSessions?.length || 0) - 1; i >= 0; i--) {
-        const entry = snapshot.recentSessions![i];
-        const current = entry.session.messages;
-        if (current.length <= 1 && !current.some(isProtectedMessage)) {
-          snapshot.recentSessions!.splice(i, 1);
-          if (snapshot.presentation) delete snapshot.presentation[entry.session.threadId];
-        } else {
-          const messages = trimMessages(current, Math.floor(current.length / 2));
-          if (messages.length === current.length) continue;
-          entry.isPartial = true;
-          entry.session = { ...entry.session, messages };
-        }
-        progress = true;
-        break;
-      }
-      if (!progress && snapshot.session && snapshot.session.messages.length > 1) {
-        const current = snapshot.session.messages;
-        const messages = trimMessages(current, Math.max(1, Math.floor(current.length * 3 / 4)));
-        if (messages.length < current.length) {
-          snapshot.isPartial = true;
-          snapshot.session.messages = messages;
-          progress = true;
-        }
-      }
-      if (!progress) {
-        console.error("[negus:conversation-cache] Snapshot exceeds storage limit; previous snapshot retained");
-        return false;
-      }
-      serialized = JSON.stringify(snapshot);
-    }
-    if (writeStorage(storageKey, snapshot)) return true;
-    console.error("[negus:conversation-cache] Snapshot storage failed; previous snapshot retained");
-  } catch {
-    console.error("[negus:conversation-cache] Snapshot preparation failed; previous snapshot retained");
+  const previous = readConversationSnapshot();
+  const savedAt = new Date().toISOString();
+  const entries = new Map((previous?.recentSessions || []).map(entry => [entry.session.threadId, entry]));
+  if (previous?.session) entries.set(previous.session.threadId, { savedAt: previous.savedAt, session: previous.session, isPartial: previous.isPartial });
+  for (const detail of cachedSessions?.values() || []) entries.set(detail.threadId, { savedAt, session: detail });
+  if (session) entries.set(session.threadId, { savedAt, session });
+  const selected = entries.get(selectedId);
+  const snapshot = validSnapshot({ version: 1, savedAt, selectedId, sessions,
+    session: selected?.session || null, isPartial: selected?.isPartial,
+    recentSessions: [...entries.values()].filter(entry => entry.session.threadId !== selectedId),
+    presentation: { ...previous?.presentation, ...presentation } })!;
+  if (typeof indexedDB === 'undefined') {
+    const saved = writeStorage(storageKey, snapshot);
+    if (!saved) console.error('[negus:conversation-cache] Snapshot storage failed; previous snapshot retained');
+    return saved;
   }
-  return false;
+  restored = snapshot;
+  writes = writes.catch(() => false).then(async () => {
+    try {
+      const db = await openDatabase();
+      const all = [...(snapshot.session ? [{ savedAt, session: snapshot.session, isPartial: snapshot.isPartial }] : []), ...(snapshot.recentSessions || [])];
+      const changes = all.map(entry => ({ threadId: entry.session.threadId,
+        entry: { ...entry, savedAt: '' }, view: snapshot.presentation?.[entry.session.threadId] }))
+        .map(record => ({ record, serialized: JSON.stringify(record) }))
+        .filter(({ record, serialized }) => persisted.get(record.threadId) !== serialized);
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(['threads', 'metadata'], 'readwrite');
+        tx.oncomplete = () => resolve();
+        tx.onerror = tx.onabort = () => reject(tx.error);
+        try {
+          for (const { record } of changes) tx.objectStore('threads').put(record);
+          tx.objectStore('metadata').put({ version: 1, savedAt, selectedId, sessions }, 'snapshot');
+        } catch (error) { tx.abort(); reject(error); }
+      });
+      for (const { record, serialized } of changes) persisted.set(record.threadId, serialized);
+      return true;
+    } catch (error) { console.error('[negus:conversation-cache] Cache write failed; previous persisted content retained', error); return false; }
+  });
+  return writes;
 };

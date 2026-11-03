@@ -41,7 +41,7 @@ self.addEventListener("fetch", (event) => {
     const refresh = fetch(request).then((response) => {
       if (!response.ok) throw new Error(`navigation HTTP ${response.status}`);
       return caches.open(CACHE_NAME).then((cache) => {
-        void cache.put(canonicalPath, response.clone());
+        event.waitUntil(cache.put(canonicalPath, response.clone()).catch(error => console.warn("[negus:cache]", error)));
         return response;
       });
     });
@@ -51,7 +51,10 @@ self.addEventListener("fetch", (event) => {
 
   event.respondWith(
     caches.match(request).then((cached) => cached || fetch(request).then((response) => {
-      if (response.ok) void caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone()));
+      if (response.ok) {
+        const copy = response.clone();
+        event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.put(request, copy)).catch(error => console.warn("[negus:cache]", error)));
+      }
       return response;
     })),
   );

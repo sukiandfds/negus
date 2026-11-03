@@ -6,7 +6,7 @@ import { readConversationBatches } from '../shared/features/conversations/state/
 import { type ThreadSnapshot } from '../shared/features/conversations/state/conversationStore';
 import { readModelDefaults, resolveVisibleModel, resolveVisibleEffort } from '../shared/features/models/model/modelDefaults';
 import { buildConversationDirectory } from './conversationDirectory';
-import { isVisibleTaskMessage } from './taskNotice';
+import { latestMessagePreview } from './taskNotice';
 
 // Empty employee/project entries have no thread to read. Existing threads keep their batch snapshot.
 const mergeProjects = (previous: DirectoryState['projects'], next: DirectoryState['projects'], good: Set<string>) => next.map(project => {
@@ -74,10 +74,10 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
     const entries = rows.map(row => {
       const id = row.threadId!, revision = store.revisions.get(id) || 0;
       return { id, revision, conversationId: row.conversationId || undefined,
-        sourceRevision: row.session?.sourceRevision || '', sourceSignature: row.session?.sourceRevision ? JSON.stringify(row.session) : '',
         signature: JSON.stringify([row.name, row.time, row.preview, row.session, revision]) };
     }).filter(entry => observed.current.get(entry.id) !== entry.signature)
       .map((entry, index) => ({ ...entry, priority: index < 10 }));
+    for (const id of store.errors.keys()) if (!rows.some(row => row.threadId === id)) store.errors.delete(id);
     for (const [id, read] of independentReads.current) {
       if (!rows.some(row => row.threadId === id)) {
         read.abort.abort(); independentReads.current.delete(id);
@@ -115,10 +115,9 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
           const sessions = new Map(previous.sessions.filter(session => current.sessions.some(item => item.threadId === session.threadId)).map(session => [session.threadId, session]));
           for (const summary of current.sessions) if (good.has(summary.threadId)) {
             const detail = store.committed.get(summary.threadId)?.session;
-            const last = detail?.messages.filter(isVisibleTaskMessage).at(-1);
-            const latestMessage = last ? `${last.authorName || (last.role === 'user' ? '用户' : '助手')}：${last.text || '[附件]'}`.replace(/\s+/g, ' ').slice(0, 260) : '';
+            const latestMessage = latestMessagePreview(detail?.messages) || '';
             const { messages: _messages, sourceSignature: _signature, ...fields } = detail || { ...summary, messages: [], sourceSignature: undefined };
-            sessions.set(summary.threadId, { ...summary, ...fields, latestMessage });
+            sessions.set(summary.threadId, { ...summary, ...fields, updatedAt: summary.updatedAt, latestMessage });
           }
           return { sessions: [...sessions.values()], committed: true, project: current.project,
             projects: mergeProjects(previous.projects, live.current.directory.projects, good) };
@@ -128,11 +127,10 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
       const ordered = initial ? [...batch].sort((a, b) => Number(b.id === c.selectedId) - Number(a.id === c.selectedId)) : batch;
       return readConversationBatches(ordered, async (entry, signal) => {
         const cached = store.committed.get(entry.id)?.session;
-        const reuse = Boolean(!store.freshBodies.has(entry.id) && entry.sourceSignature && cached?.sourceSignature === entry.sourceSignature);
-        const view = await store.read(entry.id, reuse ? entry.sourceRevision : '', signal, entry.conversationId);
+        const reuse = Boolean(!store.freshBodies.has(entry.id) && cached?.sourceRevision);
+        const view = await store.read(entry.id, reuse ? cached!.sourceRevision! : '', signal, entry.conversationId);
         if (signal.aborted) return;
-        candidate.set(entry.id, { ...view,
-          session: view.session ? { ...view.session, sourceSignature: view.session.sourceRevision === entry.sourceRevision ? entry.sourceSignature : '' } : null });
+        candidate.set(entry.id, view);
         // FEAT-001: only the open conversation bypasses the initial batch barrier.
         if (initial && entry.id === live.current.conversations.selectedId) {
           publish([{ entry, error: '' }]);
@@ -185,12 +183,12 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
       return c.refresh();
     } };
   useEffect(() => {
-    if (!shown.committed || !c.selectedId || !session || isPendingThread(c.selectedId)) return;
+    if (!shown.committed || isPendingThread(c.selectedId)) return;
     // FEAT-001: persist the same directory-backed summaries that the list displays.
     const sessions = buildConversationDirectory({ ...directory, projects: shown.projects }, shown.sessions,
       c.archivedView, shown.project?.root, c.cachedSessions, c.archivedByThread).all.flatMap(row => {
       if (!row.session || row.pending || isPendingThread(row.session.threadId)) return [];
-      const { messages: _messages, sourceSignature: _signature, ...summary } = row.session as typeof session;
+      const { messages: _messages, sourceSignature: _signature, ...summary } = row.session as NonNullable<typeof session>;
       return [{ ...summary, latestMessage: row.preview }];
     });
     writeConversationSnapshot({ selectedId: c.selectedId, sessions, session, cachedSessions: c.cachedSessions,

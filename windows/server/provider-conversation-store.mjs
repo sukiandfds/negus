@@ -44,18 +44,18 @@ export const createProviderConversationStore = ({ current, providers, createStor
   };
   service.getSessionResumeInfo = async (id, options = { readOnly: true }) => {
     await ready;
-    return (await storeFor(owner(id))).getSessionResumeInfo(id, options);
+    return (await storeFor(owner(id))).getSessionResumeInfo(id, { ...options, historyFile: routes[id]?.resumeInfo?.path });
   };
   service.findSessionForProvider = async (providerId, ...args) => (await storeFor(providerId)).findSession(...args);
   service.getSourceRevisionForProvider = async (providerId, id) => {
-    const info = await (await storeFor(providerId)).getSessionResumeInfo(id, { readOnly: true });
+    const info = await (await storeFor(providerId)).getSessionResumeInfo(id, { readOnly: true, historyFile: routes[id]?.resumeInfo?.path });
     return info?.path ? fs.stat(info.path).then(conversationSourceRevision).catch(() => null) : null;
   };
   service.getSourceRevision = async id => { await ready; return service.getSourceRevisionForProvider(owner(id), id); };
   service.listSessionsForProvider = async (providerId, ...args) => (await storeFor(providerId || "current")).listSessions(...args);
   const rememberPreviousSettings = async (id, source, readOnly = false) => {
     if (Object.hasOwn(routes[id] || {}, "lastSuccessfulSettings")) return;
-    const info = source.isFreshSession?.(id) ? null : await source.getSessionResumeInfo(id, { readOnly });
+    const info = source.isFreshSession?.(id) ? null : await source.getSessionResumeInfo(id, { readOnly, historyFile: routes[id]?.resumeInfo?.path });
     const previous = info?.path ? await latestAssistantReplyAtFromRollout(info.path, true) : null;
     routes[id] = { ...routes[id], providerId: owner(id), lastSuccessfulSettings: previous ? {
       ...previous, model: owner(id).startsWith("ccswitch_") ? owner(id) + "::" + previous.model : previous.model,
@@ -159,7 +159,10 @@ export const createProviderConversationStore = ({ current, providers, createStor
         return { model: routes[id].model, modelProvider: routes[id].pendingProviderId, reasoningEffort: args[0] };
       }
       const source = await storeFor(owner(id));
-      if (method === 'findSession' && routes[id]?.resumeInfo?.path) args[1] = { ...args[1], historyFile: routes[id].resumeInfo.path };
+      if (['findSession', 'getRuntimeContext', 'getGoal'].includes(method) && routes[id]?.resumeInfo?.path) {
+        const index = method === 'findSession' ? 1 : 0;
+        args[index] = { ...args[index], historyFile: routes[id].resumeInfo.path };
+      }
       if (method === "updateReasoningEffort" || method === "getRuntimeContext") {
         await rememberPreviousSettings(id, source, method === "getRuntimeContext");
       }

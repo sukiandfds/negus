@@ -375,7 +375,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     ownsThread: threadId => Boolean(belongs({ id: threadId })) || original.ownsThread(threadId)
       || bindings.findByRuntimeSession?.('codex', threadId)?.conversationKind === 'task',
     list: employeeId => [...original.list(employeeId), ...publicTasks().filter(task => !employeeId || task.agentId === employeeId)],
-    directoryEntries: employeeId => [...original.directoryEntries(employeeId), ...conversationTasks().filter(task => (!employeeId || task.agentId === employeeId) && task.threadId).map(task => ({
+    directoryEntries: employeeId => [...original.directoryEntries(employeeId), ...conversationTasks().filter(task => (!employeeId || task.agentId === employeeId) && task.threadId && !task.archived).map(task => ({
       id: task.threadId, threadId: task.threadId, conversationId: task.conversationId, title: task.title, lastActivityAt: task.updatedAt,
       targetProjectId: task.source?.projectId || null,
       status: execution.getStatus(task.threadId).active ? execution.getStatus(task.threadId)

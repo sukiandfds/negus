@@ -65,3 +65,10 @@ test('deadline publishes successes without starving reads started near the deadl
  assert.equal(calls.length,8);assert.equal(publications.flat().length,8);
  assert.ok(publications.flat().every(r=>!r.error));
 });
+
+ test('slow successful read stays pending past publication deadline without failure or retry', async () => {
+  const publications=[];let calls=0;
+  const pending=readConversationBatches([1],async()=>{calls++;await new Promise(resolve=>setTimeout(resolve,60));},r=>publications.push(r),new AbortController().signal,20);
+  await new Promise(resolve=>setTimeout(resolve,35));assert.deepEqual(publications,[]);
+  await pending;assert.equal(calls,1);assert.deepEqual(publications,[[{entry:1,error:''}]]);
+ });
