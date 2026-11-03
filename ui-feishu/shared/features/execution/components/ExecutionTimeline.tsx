@@ -22,11 +22,9 @@ const elapsedText = (durationMs: number) => {
 export function ExecutionTimeline({
   status,
   contextStatus,
-  timestamp = "",
 }: {
   status: ExecutionStatus;
   contextStatus: ContextStatus;
-  timestamp?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -58,7 +56,6 @@ export function ExecutionTimeline({
   return (
     <section className={styles.timeline} aria-label="Codex 工作过程">
       <button className={styles.header} type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
-        {timestamp ? <time>{timestamp}</time> : null}
         {status.active
           ? <LoaderCircle className={styles.spinner} aria-hidden="true" />
           : terminalIssue

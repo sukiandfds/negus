@@ -67,6 +67,8 @@ export const latestAssistantReplyAtFromRollout = async (file, readSettings = fal
     let scanned = 0;
     let carry = "";
     let foundReply = false;
+    let usage;
+    let latestSettings;
     while (end > 0 && scanned < maxBytes) {
       const length = Math.min(chunkSize, end);
       const start = end - length;
@@ -83,9 +85,21 @@ export const latestAssistantReplyAtFromRollout = async (file, readSettings = fal
         let item;
         try { item = JSON.parse(line); } catch { continue; }
         if (readSettings) {
+          const info = item.type === "event_msg" && item.payload?.type === "token_count" ? item.payload.info : null;
+          if (readSettings === "latest" && !usage && Number.isFinite(info?.last_token_usage?.total_tokens)
+            && info.last_token_usage.total_tokens >= 0 && Number.isFinite(info.model_context_window) && info.model_context_window > 0) {
+            usage = { usedTokens: info.last_token_usage.total_tokens, contextWindow: info.model_context_window };
+            if (latestSettings) return { ...latestSettings, usage };
+          }
           if (isAssistantReplyRecord(item)) foundReply = true;
+          if (readSettings === "latest" && item.type === "turn_context" && item.payload?.model && !usage) {
+            if (latestSettings && latestSettings.model !== item.payload.model) return latestSettings;
+            latestSettings ||= { model: item.payload.model, reasoningEffort: item.payload.effort || item.payload.reasoning_effort || "" };
+            continue;
+          }
           if ((foundReply || readSettings === "latest") && item.type === "turn_context" && item.payload?.model) return {
             model: item.payload.model, reasoningEffort: item.payload.effort || item.payload.reasoning_effort || "",
+            ...(usage ? { usage } : {}),
           };
           continue;
         }
@@ -99,7 +113,7 @@ export const latestAssistantReplyAtFromRollout = async (file, readSettings = fal
       }
       if (latest) return latest;
     }
-    return "";
+    return latestSettings || "";
   } catch {
     return "";
   } finally {
@@ -709,13 +723,16 @@ export const createAppServerConversationStore = ({
   const sendMessage = async (threadId, text, attachments = [], submissionId = "", settings = {}) => {
     onSubmitted?.(threadId);
     try {
-      await resumeThread(threadId);
+      const runtime = await resumeThread(threadId);
       const { runtimeOptions } = await ensureProjectThread(threadId);
       const developerInstructions = await getUserProfilePrompt();
       const result = await client.request("turn/start", {
         threadId,
         input: await inputFromAttachments(promptFromSlashCommand(text, attachments), attachments, attachmentContent),
-        additionalContext: { "negus.communication": { kind: "application", value: communicationInstructions } },
+        additionalContext: {
+          "negus.communication": { kind: "application", value: communicationInstructions },
+          "negus.model": { kind: "application", value: `本轮调用模型：${settings.model || runtime?.model || "未取得"}。这是当前请求的模型标识，回答模型身份时以此为准；不得用 ~/.codex/config.toml 的全局默认值、Codex 工具名称或历史回复推断当前模型。未取得时如实说明。此标识不证明供应商内部的实际模型。` },
+        },
         ...(developerInstructions ? { developerInstructions } : {}),
         ...(submissionId ? { clientUserMessageId: submissionId } : {}),
         ...(runtimeOptions?.turn || {}),
@@ -770,6 +787,7 @@ export const createAppServerConversationStore = ({
       model: result.model || "",
       modelProvider: result.modelProvider || "",
       reasoningEffort: result.reasoningEffort || "",
+      ...(result.usage ? { usage: result.usage } : {}),
     };
   };
 

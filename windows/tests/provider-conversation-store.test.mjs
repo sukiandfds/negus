@@ -57,6 +57,32 @@ test('current parent permits a single native child owner, but rejects mismatches
     'an explicitly different parent provider is not a current-home exception');
 });
 
+test('unregistered current parent is verified from the current store for its native child', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-native-unregistered-parent-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const child = { threadId: 'child', parentThreadId: 'parent', nativeSubagent: true, cwd: root, title: 'native',
+    updatedAt: new Date().toISOString() };
+  const reads = [];
+  const current = {
+    listSessions: async () => [],
+    getSessionResumeInfo: async (id, options) => {
+      reads.push([id, options]);
+      return id === 'parent' ? { path: path.join(root, 'parent.jsonl'), cwd: root } : null;
+    },
+  };
+  const service = createProviderConversationStore({ current,
+    providers: { getClient: async ({ modelProviderId }) => modelProviderId },
+    createStore: provider => ({ listSessions: async () => [],
+      listNativeSubagents: async () => provider === 'vip' ? [child] : [],
+      findSession: async threadId => ({ ...child, threadId, messages: [] }) }),
+    stateFile: path.join(root, 'routes.json') });
+  await service.registerSession({ threadId: 'known', cwd: root }, 'vip', 'model');
+  const found = (await service.listSessions('all', false)).find(item => item.threadId === 'child');
+  assert.equal(found?.nativeSubagent, true);
+  assert.equal(found?.parentThreadId, 'parent');
+  assert.deepEqual(reads, [['parent', { readOnly: true }]]);
+});
+
 test('native header restores a child omitted by thread/list in its actual provider', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-native-header-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

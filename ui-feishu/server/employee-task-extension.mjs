@@ -1,4 +1,4 @@
-import { backgroundTaskRoute } from '../../windows/server/background-tasks/model-policy.mjs';
+import { backgroundTaskRoute, requestedBackgroundRoute } from '../../windows/server/background-tasks/model-policy.mjs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { createTaskKernel, terminalStates } from '../kernel/task-kernel.mjs';
@@ -115,7 +115,8 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     if (!background) hierarchy.assertCanDelegate(source.agentId, agentId);
     if (agentId) registry.require(agentId);
     else if (source.source?.kind !== 'conversation' || !background) throw Object.assign(Error('执行员工不存在'), { statusCode: 400 });
-    const selection = input.modelProviderId || input.model ? modelProviders.resolveRoute({ modelProviderId: input.modelProviderId, model: input.model }) : null;
+    const selection = input.modelProviderId || input.model
+      ? await requestedBackgroundRoute(modelProviders, { modelProviderId: input.modelProviderId, model: input.model }, kernel.list()) : null;
     const conversationId = `handoff-${createHash('sha256').update(`${source.id}:${input.requestId}`).digest('hex').slice(0,32)}`;
     const handoff = { requestId: input.requestId, agentId, background, title: input.title, instructions: input.instructions,
       ...(selection ? { modelProviderId: selection.modelProviderId, model: selection.model } : {}),

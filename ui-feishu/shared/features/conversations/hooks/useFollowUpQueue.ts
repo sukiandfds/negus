@@ -4,7 +4,7 @@ import type { MediaFile } from "../../../shared/model/media";
 import type { ProjectEvent } from "../../execution/model/types";
 import { followUpQueueApi } from "../data/followUpQueueApi";
 import type { FollowUpQueueItem } from "../model/followUpQueue";
-import { createSubmissionId } from "../state/optimisticMessage";
+import { createOptimisticMessage, createSubmissionId } from "../state/optimisticMessage";
 
 import type { ConversationStore } from "../state/conversationStore";
 
@@ -12,11 +12,12 @@ export function useFollowUpQueue(threadId: string, store: ConversationStore) {
   const conversationId = currentConversationId();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [withdrawing, setWithdrawing] = useState<{ threadId: string; itemId: string } | null>(null);
   const threadIdRef = useRef(threadId);
   const requestRef = useRef(new Map<string, number>());
   threadIdRef.current = threadId;
 
-  const run = useCallback(async (targetThreadId: string, request: () => Promise<{ items: FollowUpQueueItem[] }>) => {
+  const run = useCallback(async (targetThreadId: string, request: () => Promise<{ items: FollowUpQueueItem[] }>, confirmLocal = false) => {
     if (!targetThreadId) return false;
     const requestId = (requestRef.current.get(targetThreadId) || 0) + 1;
     requestRef.current.set(targetThreadId, requestId);
@@ -25,8 +26,9 @@ export function useFollowUpQueue(threadId: string, store: ConversationStore) {
     if (threadIdRef.current === targetThreadId) setPending(true);
     try {
       const response = await request();
-      if (isCurrent()) {
-        store.update(targetThreadId, { queueItems: response.items || [] });
+      if (isCurrent() || confirmLocal) {
+        const items = isCurrent() ? response.items : store.live.get(targetThreadId)?.queueItems ?? response.items;
+        store.update(targetThreadId, { queueItems: items || [] });
         if (threadIdRef.current === targetThreadId) setError("");
       }
       return true;
@@ -44,19 +46,28 @@ export function useFollowUpQueue(threadId: string, store: ConversationStore) {
   }, [threadId]);
 
   const enqueue = useCallback(async (text: string, attachments: MediaFile[] = [], targetThreadId = threadId, modelSettings?: { model: string; reasoningEffort: string }) => {
-    return run(targetThreadId, () => followUpQueueApi.enqueue(
-      targetThreadId,
-      text.trim(),
-      attachments.map((attachment) => attachment.id),
-      `queue-${createSubmissionId()}`,
-      modelSettings,
-      conversationId,
-    ));
-  }, [run, threadId, conversationId]);
+    const submissionId = `queue-${createSubmissionId()}`;
+    const message = { ...createOptimisticMessage(text.trim(), attachments, submissionId), deliveryState: 'pending' as const };
+    store.addMessage(targetThreadId, message);
+    try {
+      return await run(targetThreadId, () => followUpQueueApi.enqueue(
+        targetThreadId, text.trim(), attachments.map(attachment => attachment.id), submissionId, modelSettings, conversationId,
+      ), true);
+    } finally {
+      store.changeMessages(targetThreadId, messages => messages.filter(item => item.id !== message.id));
+    }
+  }, [run, store, threadId, conversationId]);
 
-  const remove = useCallback((itemId: string) => {
-    if (!threadId) return Promise.resolve(false);
-    return run(threadId, () => followUpQueueApi.action(threadId, "remove", itemId));
+  const remove = useCallback(async (itemId: string) => {
+    if (!threadId) return false;
+    setWithdrawing({ threadId, itemId });
+    try {
+      const removed = await run(threadId, () => followUpQueueApi.action(threadId, "remove", itemId), true);
+      if (!removed && threadIdRef.current === threadId) setError(reason => `撤回未确认，消息按服务器当前状态显示，请勿当作已取消。${reason}`);
+      return removed;
+    } finally {
+      setWithdrawing(current => current?.threadId === threadId && current.itemId === itemId ? null : current);
+    }
   }, [run, threadId]);
 
   const move = useCallback((itemId: string, direction: "up" | "down") => {
@@ -74,7 +85,7 @@ export function useFollowUpQueue(threadId: string, store: ConversationStore) {
     const key = JSON.stringify([threadId, itemId]);
     store.sendingQueue.set(key, new Date().toISOString());
     store.notify();
-    try { return await run(threadId, () => followUpQueueApi.action(threadId, "sendNow", itemId)); }
+    try { return await run(threadId, () => followUpQueueApi.action(threadId, "sendNow", itemId), true); }
     finally { store.sendingQueue.delete(key); store.notify(); }
   }, [run, store, threadId]);
 
@@ -88,5 +99,6 @@ export function useFollowUpQueue(threadId: string, store: ConversationStore) {
     setError("");
   }, [store]);
 
-  return { items: store.get(threadId).queueItems, loading: store.dirty.has(threadId), busy, error, enqueue, remove, move, retry, sendNow, handleEvent };
+  return { items: store.get(threadId).queueItems.filter(item => withdrawing?.threadId !== threadId || withdrawing.itemId !== item.id),
+    loading: store.dirty.has(threadId), busy, error, enqueue, remove, move, retry, sendNow, handleEvent };
 }

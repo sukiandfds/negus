@@ -132,11 +132,11 @@ export const createProviderConversationStore = ({ current, providers, createStor
           model: route.model || runtime.model,
           reasoningEffort: route.reasoningEffort ?? runtime.reasoningEffort ?? "",
         };
-        const resolved = providers.resolveRoute({ model: route.attemptSettings.model });
+        const resolved = providers.resolveRoute({ model: route.attemptSettings.model,
+          modelProviderId: route.pendingProviderId || owner(id) });
         const effectiveModel = resolved.model || route.attemptSettings.model;
         args[3] = { ...route.attemptSettings, model: effectiveModel };
         if (effectiveModel !== route.attemptSettings.model && resolved.modelProviderId === owner(id)) {
-          route.model = effectiveModel;
           route.runtimeModel = effectiveModel;
           route.activeModel = effectiveModel;
         }
@@ -183,6 +183,10 @@ export const createProviderConversationStore = ({ current, providers, createStor
         routes[id] = { ...routes[id], providerId: owner(id), model: result.model };
         await save();
       }
+      if (method === "getRuntimeContext" && result?.model && !result.model.includes('::')) {
+        result.model = `${owner(id)}::${result.model}`;
+        result.modelProvider = owner(id);
+      }
       return result?.threadId ? decorate(result) : result;
     };
   }
@@ -213,6 +217,18 @@ export const createProviderConversationStore = ({ current, providers, createStor
     childOwners.clear();
     const ids = [...new Set(["current", ...Object.values(routes).map((route) => route.providerId)])];
     const childConflicts = new Set();
+    const parentOwners = new Map();
+    const parentOwnerFor = async id => {
+      if (!id) return null;
+      if (parentOwners.has(id)) return parentOwners.get(id);
+      let providerId = routes[id]?.providerId || await providerForThread(id);
+      if (!providerId) {
+        const info = await current.getSessionResumeInfo?.(id, { readOnly: true }).catch(() => null);
+        if (info?.path && info?.cwd) providerId = 'current';
+      }
+      parentOwners.set(id, providerId || null);
+      return providerId || null;
+    };
     const lists = [];
     for (const providerId of ids) {
       const store = await storeFor(providerId);
@@ -221,7 +237,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
       const knownIds = new Set(listed.map(session => session.threadId));
       const sessions = [...listed, ...native.filter(session => !knownIds.has(session.threadId))];
       for (const session of sessions) if (session.nativeSubagent && !routes[session.threadId]) {
-        const parentOwner = session.parentThreadId && (routes[session.parentThreadId]?.providerId || providerForThread(session.parentThreadId));
+        const parentOwner = await parentOwnerFor(session.parentThreadId);
         const matchesParent = parentOwner === providerId || (parentOwner === 'current' && providerId !== 'current')
           || (!parentOwner && providerId === 'current');
         if (!matchesParent) continue;

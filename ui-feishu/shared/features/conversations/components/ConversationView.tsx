@@ -84,7 +84,7 @@ export function Message({
   return (
     <article className={`${styles.message} ${message.role === "user" && !message.displaySourceAgentId ? styles.user : styles.assistant}`}>
       {message.authorName ? <span className={styles.authorName}>{message.authorName}</span> : null}
-      {!executionPlaceholder && (formattedTime || reserveTimestamp) ? (
+      {formattedTime || reserveTimestamp ? (
         <time className={styles.timestamp} dateTime={message.createdAt} aria-hidden={!formattedTime}>
           {formattedTime || "\u00a0"}
         </time>
@@ -185,24 +185,31 @@ const sameRenderedMessage = (left: SessionMessage, right: SessionMessage) => (
 );
 
 const staysAtEnd = (item: ConversationItem) => (
-  item.streaming || item.executionPlaceholder
+  item.streaming
 );
 
-const orderVisibleItems = (items: ConversationItem[]) => {
+const orderVisibleItems = (items: ConversationItem[], executionAnchor?: SessionMessage) => {
+  const placeholder = items.find(item => item.executionPlaceholder);
   const ordered = items.filter((item, index) => !(
-    item.local
+    item.executionPlaceholder || (item.local
     && visibleText(item.message)
     && items.slice(0, index).some((current) => (
       sameRenderedMessage(current.message, item.message)
       && visibleText(current.message) === visibleText(item.message)
-    ))
+    )))
   ));
   const byMessage = new Map(ordered.map((item) => [item.message, item]));
-  return [
+  const result = [
     ...orderMessageList(ordered.filter((item) => !staysAtEnd(item)).map((item) => item.message))
       .map((message) => byMessage.get(message)!),
     ...ordered.filter(staysAtEnd),
   ];
+  if (placeholder) {
+    const anchorIndex = executionAnchor ? result.findIndex(item => messageListKey(item.message) === messageListKey(executionAnchor)) : -1;
+    const nextIndex = result.findIndex(item => Date.parse(item.message.createdAt || "") > Date.parse(placeholder.message.createdAt || ""));
+    result.splice(anchorIndex >= 0 ? anchorIndex + 1 : nextIndex >= 0 ? nextIndex : result.length, 0, placeholder);
+  }
+  return result;
 };
 
 export function ConversationView({
@@ -265,6 +272,10 @@ export function ConversationView({
     now: new Date().toISOString(),
   });
   const executionOn = (message: SessionMessage) => showExecution && message.id === transcript.executionMessageId;
+  const executionAnchor = executionMatchesSession && executionStatus.turnId ? messages.filter(message => (
+    message.role === "assistant" && message.phase === "commentary"
+    && (message.protocolTurnId || message.turnId) === executionStatus.turnId
+  )).at(-1) : undefined;
   const visibleItems = orderVisibleItems([
     ...transcript.persisted.map((message) => ({
       id: `message:${messageListKey(message)}`,
@@ -294,13 +305,14 @@ export function ConversationView({
     }] : []),
     ...(transcript.placeholder ? [{
       id: "message:execution-placeholder",
-      message: { ...transcript.placeholder, authorName: assistantName },
+      message: { ...transcript.placeholder, authorName: assistantName,
+        createdAt: executionAnchor?.createdAt || (executionMatchesSession ? executionStatus.startedAt || undefined : undefined) },
       streaming: false,
       execution: true,
       executionPlaceholder: true,
       local: true,
     }] : []),
-  ]);
+  ], executionAnchor);
   const goalMessageId = completedGoalMessageId(visibleItems.map(item => {
     const message = item.message;
     return message.turnId === executionStatus.turnId && executionStatus.phase === "completed"

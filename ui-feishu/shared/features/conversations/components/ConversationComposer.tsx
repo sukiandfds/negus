@@ -142,12 +142,17 @@ export function ConversationComposer({
       }
       submittingRef.current = true;
       setWithdrawing(true);
+      setText(item.text);
+      setQuote(null);
+      draft.restoreFiles(item.attachments);
+      setSlash(null);
       try {
-        if (!await remove(item.id)) return false;
-        setText(item.text);
-        setQuote(null);
-        draft.restoreFiles(item.attachments);
-        setSlash(null);
+        if (!await remove(item.id)) {
+          setText("");
+          draft.clear();
+          draft.setError("撤回未确认，已退出编辑，请查看原消息状态后重试。");
+          return false;
+        }
         requestAnimationFrame(() => textareaRef.current?.focus());
         return true;
       } finally {

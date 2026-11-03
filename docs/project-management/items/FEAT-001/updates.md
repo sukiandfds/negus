@@ -510,3 +510,103 @@
 - 未发现重复执行器、第二条正文缓存或第二套任务状态机。当前主要结构风险是 `ConversationStore` 的四种在途状态以及 `employee-task-extension.mjs` 的职责集中，尚无证据表明可直接删除；后续只允许在这两个边界内按现有测试收敛，不能继续新增并行的状态。
 - 已知缺口：任务摘要不可读取时缺少安全的排序时间回退；旧历史无可信 submission/actor 时不能补署名；维护 job 与原任务仍无精确关联。以上均不由本轮猜测补齐。
 - 本轮仅修改文档；`git diff --check`通过，未发布、未重启、未提交或推送。
+
+### 2026-11-02 Codex 子代理后台不可见修复
+
+实查两个 Codex 子代理 JSONL 均存在且 `session_meta.source.subagent.thread_spawn.parent_thread_id` 指向主对话，但目录、sessions 与 tasks API 均未返回；两个 Negus 后台任务则各自有一条目录和结果，因此截图只看到两条后台任务不是少创建。
+
+根因是主对话未登记 Provider route 时，子代理父 owner 无法解析；现有逻辑只允许“未知 owner 且子代理就在 current”，不会放行具体 Provider 下的子代理。修复在 `provider-conversation-store.mjs` 复用 current store 的只读父线程核实：显式 route/source 优先，失败后仅当 current 能返回真实 path/cwd 时视为 current；其他未知情况继续拒绝。
+
+新增回归 `unregistered current parent is verified from the current store for its native child`，与原 current parent 用例 2/2 通过。完整 provider store 文件 15/16，通过项覆盖 child owner、冲突拒绝、header 投影、任务登记和别名切换；唯一失败由工作区另一批未提交的 `getRuntimeContext` 前缀改动产生，与本次修改无关。
+
+业务改动：`windows/server/provider-conversation-store.mjs`；测试：`windows/tests/provider-conversation-store.test.mjs`。当前工作区另有20余个未提交业务文件，我没有将它们打包发布或重启；本次源码已改、线上未生效。另确认 Terra 子代理调用失败是因为当前子代理上游只接受 `deepseek-flash`/`deepseek-v4-pro`，属于模型路由配置不一致。
+
+### 2026-11-02 标题同步与过程时间最小修改
+
+- conversationStore.ts：同步比较排除 working 状态执行 detail 与 reasoning-current.detail 的纯分析文字增量；保留实际状态变化同步。
+- ExecutionTimeline.tsx：复用 status.startedAt 和已有时间格式，补充过程栏开始时间，耗时继续显示。
+- 共2个业务文件、2个需求记录文件。按本轮用户约定未运行测试、类型检查或构建，未发布、重启、提交或推送。仅源码已修改；生效需在安装目录执行 node scripts/negus.mjs rebuild。
+
+### 2026-11-02 模型身份与重连提示源码修改
+
+业务2文件：app-server-conversation-store.mjs 注入本轮模型上下文；execution-tracker.mjs 在成功完成及恢复旧成功状态时清理临时重试提示，保留失败信息。文档2文件。按用户要求未运行测试、未发布、未重启；运行服务尚未加载此改动。
+
+### 2026-11-02 首次批次、日常独立同步与安静提示
+
+- 按用户最新澄清替代持续批次规则：usePageSnapshot.ts 共用原聚合读取/提交，首次最近10个变化优先，首次结束后按线程独立同步、取消和提交，最多4条并行。
+- ChatWorkspace.tsx 移除标题常规同步转圈及无用导入；保留超时/失败错误提示。没有修改滚动、定位、测量或后台服务。
+- 本轮2个代码文件与2个记录文件；按约定未运行测试、构建或发布，未重启。生效方式为安装目录 node scripts/negus.mjs rebuild 后刷新页面。
+
+### 2026-11-02 本轮前端发布生效
+
+- 用户授权：“你帮我执行生效。”已执行 node scripts/negus.mjs rebuild，独立 workerPid=60450。
+- 本次结果 runtime/negus-frontend-result.json：published，2026-11-02T09:01:52.910Z；版本 feishu-mvz15esz，builtAt=2026-11-02T09:01:52.190Z。运行服务 /version.json 返回同一 buildId。
+- 本轮前端修改已发布，backendRestarted=false、browserReloaded=false；用户刷新页面加载新版。未运行额外测试，工作区已有后端修改未通过本次前端发布加载。
+
+### 2026-11-02 过程时间解释纠正及发送回归登记
+
+- 核对并保留直接发送立即显示、接受后清时钟、同消息ID交接和三阶段位置稳定的原要求；记录用户再次反馈，不能引用旧完成状态判为已解决。
+- 时间修正源码：remote-room-demo.mjs 默认历史目录跟随 CODEX_HOME；conversation-routes.mjs 与 initialConversation.ts 的历史格式版本改为2；ExecutionTimeline.tsx 撤销误加的整轮开始时间，恢复已共享的消息时间展示设计。共4个代码文件，本次未测试、未发布、未重启。
+- 下一步仍需定位插入发送确认延迟、队列409与位置跳动；本轮需求核对不代表这些问题已修复。
+
+### 2026-11-02 过程气泡时间修复发布与重启结果
+
+- 用户授权“快速重启给我看效果”。前端 rebuild workerPid=61716，先发布 feishu-mvz1qqit；随后 supervisor restart jobId=1793611136657-61758、workerPid=61777。
+- 恢复后 status 确认本次任务 completed/started，2026-11-02T09:19:18.946Z，active release=1793611131072-b9208b47，PID=61783，首次启动成功。当前运行 version.json 返回配套快照版本 feishu-mvz1rbz7（builtAt=2026-11-02T09:18:55.062Z）。
+- 前后端修复已加载，浏览器需刷新触发旧缓存补读；本次仅核对发布及运行版本，不记为用户验收通过，不代表插入发送延迟、队列报错及跳动问题已解决。
+
+### 2026-11-02 即时排队反馈、发送确认交接与运行时钟
+
+- useFollowUpQueue.ts 复用普通本地气泡立即显示 enqueue；本地 enqueue/sendNow 接口成功后，以最新已接收队列提交操作确认，避免队列事件抢先使响应丢弃、清理本地发送标记后恢复旧等待项。
+- ExecutionTimeline.tsx 复用原每秒计时器和 timestamp 入口显示运行中的当前时间，终态使用 updatedAt；不改消息时间或滚动。
+- 2个代码文件已修改，未测试、未发布、未重启；待前端 rebuild 生效。用户尚未验收。
+
+### 2026-11-02 即时排队反馈与运行时钟发布
+
+- 用户授权“快让他生效”；执行 node scripts/negus.mjs rebuild，workerPid=62967。
+- 本次结果 published，2026-11-02T09:29:55.797Z，buildId=feishu-mvz25h2w；运行 /version.json 与本次版本一致。backendRestarted=false，浏览器未自动刷新。
+- 前端已发布，用户刷新后可体验；未运行额外测试，不记为用户验收通过。
+
+### 2026-11-02 上下文用量链路补齐（源码）
+
+修改 app-server-conversation-store.mjs、context-management-service.mjs、useContextManagement.ts：历史用量恢复、读取期间实时优先、实时用量直接显示并复用原缓存保存。需求记录2文件。本轮按用户要求不运行测试、不构建、不发布、不重启；源码尚待发布生效。保留其他并行修改。
+
+### 2026-11-02 运行时间显示纠正
+
+- 按用户最新原话取消当前时间每秒更新；运行占位气泡读取最后一条过程消息 createdAt，并复用助手名称旁时间样式。底部移除日期时间，保留状态及耗时。
+- 2个代码文件、2个记录文件；未测试、未发布、未重启。生效需前端 node scripts/negus.mjs rebuild。
+
+### 2026-11-02 最后过程消息时间发布生效
+
+- 用户授权前端 rebuild。首次 worker=63778 因当前 TypeScript lib 不支持 findLast 失败，旧线上保留；改用已有 filter/at(-1) 写法，不提高编译目标。
+- 再次 worker=63788 发布成功，2026-11-02T09:41:18.872Z，buildId=feishu-mvz2k4c7；运行 /version.json 与本次结果一致。后端未重启，未运行额外测试，用户验收待确认。
+
+### 2026-11-02 本轮运行提示锚定及消息排序
+
+- 已按当前对话确认方案修改2个前端文件：本轮开始/最后过程时间、提示锚定最后过程回复、跨轮次本地消息按实际时间补位。不改滚动、定位或后端。
+- 中途运行相关回归共23项，22项通过；模型设置场景断言 wrong/group::saved 失败，用户随后要求“不用验证”，已停止追加测试，未改相关设置功能。
+- 本次受控前端发布成功：workerPid=65282，buildId=feishu-mvz39j32，at=2026-11-02T10:01:04.415Z；结果 runtime/negus-frontend-result.json。后端未重启，浏览器未强制刷新。
+
+### 2026-11-02 渠道身份保留源码修复
+
+provider-conversation-store.mjs：发送不再删除渠道前缀，解析绑定 owner，读取配置补明确渠道。业务1文件及记录2文件，未测试/发布；需后端受控重启生效。已有错误 current 登记未离线改写。上一轮上下文发布任务 1793613744576-65455 已核对 started，运行 release 1793613738961-5697bd63。
+
+### 2026-11-02 前端选择与发送同源修复（源码）
+
+useContextManagement.ts、context-management/model/types.ts、conversationStore.ts：页面/发送读取已提交配置，用户选择随已有缓存保存，历史与实时数据不覆盖选择。未测试、未发布；等待前端 rebuild。上次后端重启任务 1793614886431-66201 已确认 started，运行 release 1793614880720-eb10c0bb；该重启未解决前端双来源问题，本次修复针对其原因。
+
+前端生效记录：用户授权“快点让它生效”。rebuild workerPid 66916；本次结果 published，buildId feishu-mvz4a0td，2026-11-02T10:29:27.067Z，backendRestarted=false。线上本机 version.json 返回相同版本。未执行实际供应商发送测试。
+
+### 2026-11-02 等候消息编辑及删除即时反馈
+
+- 4个前端文件：点击后本地临时隐藏原队列项，显示等待服务器确认；编辑即回填但撤回前禁止重发；失败恢复当前真实队列、保留错误原因并退出编辑。成功确认复用已有最新队列交接，不恢复旧快照。
+- 按用户要求未运行测试；本次受控前端发布成功，workerPid=67364，buildId=feishu-mvz4nvtw，at=2026-11-02T10:40:13.797Z。结果 runtime/negus-frontend-result.json；后端未重启、浏览器未强制刷新。
+
+### 2026-11-02 归档旧路径源码修复
+
+业务1文件 jsonl-conversation-store.mjs、需求记录2文件。已查看目标文件位于 archived_sessions；源码修复监听及读取时索引更新。未运行测试、未发布、未重启；需后端受控重启生效。保留其他未提交改动。
+
+### 2026-11-02 后台模型与配置自动匹配
+
+- 3个后端/MCP文件：具体模型匹配已配置目录，优先已有成功完成任务的配置；配置名称选默认模型；显式配置保持；多候选不静默猜测，不换模型。复用已有任务账本成功记录，无新增持久化。
+- 3个文件 node --check 通过，未追加测试、未调用付费供应商。受控重启前状态正常，已有可恢复 active/previous 快照；安排重启加载本次源码，完成结果由 supervisor 核对。

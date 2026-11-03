@@ -19,7 +19,7 @@ export function createHandoffMcpServer({ endpoint = process.env.NEGUS_HANDOFF_EN
     inputSchema: z.object({ requestId: z.string().min(1), agentId: z.string().min(1), title: z.string().min(1), instructions: z.string().min(1) }),
   }, args => call('delegate', args));
   if (background) server.registerTool('create_background_task', {
-    description: '将用户已授权的执行工作放到独立后台对话。保存后立即返回；确认接单后结束本轮回复，不等待或查询，结果会自动回到本对话。重试沿用 requestId。',
+    description: '将用户已授权的执行工作放到独立后台对话。只指定模型时自动匹配配置，优先上次成功配置；model 也可填配置名称以使用该配置默认模型。仅用户明确指定配置时传 modelProviderId，勿自行填 current。保存后立即返回；确认接单后结束本轮回复，不等待或查询，结果会自动回到本对话。重试沿用 requestId。',
     inputSchema: z.object({ requestId: z.string().min(1), title: z.string().min(1), instructions: z.string().min(1),
       modelProviderId: z.string().min(1).optional(), model: z.string().min(1).optional(), reasoningEffort: z.string().min(1).optional() }),
   }, args => call('background', args));

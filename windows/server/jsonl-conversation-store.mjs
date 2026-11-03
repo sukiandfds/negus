@@ -109,6 +109,16 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
     return initializePromise;
   };
 
+  const withCurrentIndex = async (read) => {
+    await initialize();
+    try { return await read(); }
+    catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      await reconcile();
+      return read();
+    }
+  };
+
   const scheduleReconcile = () => {
     clearTimeout(reconcileTimer);
     reconcileTimer = setTimeout(() => void reconcile().then(() => onChange({ type: "sessions_changed" })), 500);
@@ -116,8 +126,9 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
 
   let watcher;
   try {
-    watcher = fs.watch(sessionRoot, { recursive: true }, (_event, filename) => {
+    watcher = fs.watch(sessionRoot, { recursive: true }, (event, filename) => {
       if (!filename || !String(filename).endsWith(".jsonl")) return;
+      if (event === "rename") { scheduleReconcile(); return; }
       const file = path.resolve(sessionRoot, String(filename));
       const header = projectHeaders.get(file);
       if (header) {
@@ -272,31 +283,31 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
     };
   };
 
-  const listSessions = async (source = "all", archived = false) => {
-    await initialize();
+  const listSessions = async (source = "all", archived = false) => withCurrentIndex(async () => {
     const sessions = await Promise.all([...projectHeaders.values()].map(readSession));
     return sessions
       .filter((session) => session.messages.length
         && Boolean(session.archived) === Boolean(archived)
         && (source === "all" || session.source === source))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-  };
+  });
 
-  const listNativeSubagents = async (archived = false) => {
-    await initialize();
+  const listNativeSubagents = async (archived = false) => withCurrentIndex(async () => {
     return Promise.all([...projectHeaders.values()].filter(header => header.nativeSubagent && header.parentThreadId
       && header.archived === archived).map(async header => ({
       threadId: header.threadId, source: 'codex', title: header.title || `新对话 · ${header.threadId.slice(-6)}`,
       cwd: header.cwd, archived, nativeSubagent: true, parentThreadId: header.parentThreadId,
       updatedAt: (await fsp.stat(header.file)).mtime.toISOString(), messageCount: null,
     })));
-  };
+  });
 
-  const findSession = async (threadId, source = "all", { before, limit, metadataOnly = false, includeEventTimes = false } = {}) => {
-    await initialize();
+  const findSession = async (threadId, source = "all", { before, limit, metadataOnly = false, includeEventTimes = false } = {}) => withCurrentIndex(async () => {
     const header = [...projectHeaders.values()].find((item) => item.threadId === threadId);
     if (!header) return null;
-    if (metadataOnly) return { id: header.threadId, path: header.file, cwd: header.cwd, name: header.title };
+    if (metadataOnly) {
+      await fsp.access(header.file);
+      return { id: header.threadId, path: header.file, cwd: header.cwd, name: header.title };
+    }
     let session = await readSession(header);
     if (source !== "all" && session.source !== source) return null;
     if (includeEventTimes) session = { ...session, userMessageEvents: sessionCache.get(header.file).userMessageEvents };
@@ -304,7 +315,7 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, project
     const end = Math.min(Number.isSafeInteger(before) ? before : session.messages.length, session.messages.length);
     const start = Math.max(0, end - limit);
     return { ...session, messages: session.messages.slice(start, end), hasMore: start > 0, nextBefore: start || null };
-  };
+  });
 
   const close = () => {
     clearTimeout(reconcileTimer);

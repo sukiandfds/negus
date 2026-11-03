@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, RefreshCw, Files, PanelRight, Pencil, Share2, X } from 'lucide-react';
+import { Check, Files, PanelRight, Pencil, Share2, X } from 'lucide-react';
 import { FollowUpQueue } from '../../shared/features/conversations/components/FollowUpQueue';
 import { ConversationView, type ConversationViewHandle } from '../../shared/features/conversations/components/ConversationView';
 import { ConversationComposer, type ConversationComposerHandle } from '../../shared/features/conversations/components/ConversationComposer';
@@ -15,7 +15,6 @@ import type { ChatTab, Conversation, ConversationState, UsageState } from '../ty
 import { conversationApi } from '../../shared/features/conversations/data/conversationApi';
 import { mergeMessageList } from '../../shared/features/conversations/state/conversationMerge';
 import { createOptimisticMessage } from '../../shared/features/conversations/state/optimisticMessage';
-import syncStyles from '../../shared/features/conversations/components/MessageActions.module.css';
 import dialogStyles from '../../shared/features/conversations/components/ConversationActions.module.css';
 
 type Props = {
@@ -121,7 +120,6 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
         subtitle={selected?.label || conversationStatus(c.executionStatus, c.contextStatus.threadId === c.selectedId ? c.contextStatus.phase : undefined, projectRoot || '未关联')}
         onBack={onBack} tab={tab} onTabChange={setTab} fileCount={files.length}
         actions={<>
-          {c.syncing && <RefreshCw size={16} className={syncStyles.spinning} role="status" aria-label="正在同步对话" />}
           <button className="icon-button" title="分享当前对话" aria-label="分享当前对话" disabled={!c.session} onClick={onShare}><Share2 size={17} /></button>
           <button className="icon-button" title="重命名对话" aria-label="重命名对话" disabled={!c.session} onClick={() => { setRenameDraft(c.session?.title || ''); setRenaming(true); }}><Pencil size={16} /></button>
           <button className={`icon-button ${details ? 'pressed' : ''}`} title="对话详情" aria-label="对话详情" aria-expanded={details} onClick={() => setDetails(!details)}><PanelRight size={17} /></button>
@@ -130,7 +128,7 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
       <div className="chat-content-row">
         <div className="chat-primary">
           <div className="chat-messages" style={{ display: tab === 'messages' ? undefined : 'none' }}>
-            <ConversationView ref={viewRef} selectedMessages={selectedIds} onSelectMessage={toggleSelection} queue={c.queueItems.length || c.queueError ? <FollowUpQueue items={c.queueItems} isHidden={item => item.state === 'dispatching' || isInternalTaskResult(item.text)} busy={c.queueBusy} error={c.queueError}
+            <ConversationView ref={viewRef} selectedMessages={selectedIds} onSelectMessage={toggleSelection} queue={c.queueItems.length || c.queueError || c.queueBusy ? <FollowUpQueue items={c.queueItems} isHidden={item => item.state === 'dispatching' || isInternalTaskResult(item.text)} busy={c.queueBusy} error={c.queueError}
               onEdit={item => activeComposer()?.editQueuedMessage(item, c.removeQueueItem) ?? Promise.resolve(false)} onRemove={c.removeQueueItem} onMove={c.moveQueueItem} onRetry={c.retryQueueItem} onSendNow={c.sendQueueItem} /> : null} session={displaySession} key={c.composerKey || 'conversation'} active={visible && tab === 'messages'}
               assistantName={selectedName} completedGoal={c.goal?.status === 'complete' ? c.goal : null}
               loading={c.loadingSession} contentSyncState={c.contentSyncState} loadingOlder={c.loadingOlder}

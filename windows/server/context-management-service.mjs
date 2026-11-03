@@ -124,6 +124,7 @@ export const createContextManagementService = async ({
   };
 
   const load = async (threadId) => {
+    const before = statusFor(threadId);
     const runtime = await getRuntimeContext(threadId);
     const model = runtime.model || statusFor(threadId).model;
     const modelChanged = Boolean(model && statusFor(threadId).model && model !== statusFor(threadId).model);
@@ -132,6 +133,10 @@ export const createContextManagementService = async ({
       reasoningEffort: runtime.reasoningEffort || statusFor(threadId).reasoningEffort,
       ...(runtime.lastSuccessfulSettings !== undefined ? { lastSuccessfulSettings: runtime.lastSuccessfulSettings } : {}),
       ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null } : {}),
+      ...(runtime.usage && statusFor(threadId) === before ? {
+        ...runtime.usage,
+        percentage: Math.min(100, Math.round(runtime.usage.usedTokens / runtime.usage.contextWindow * 100)),
+      } : {}),
     });
     return publicStatus(statusFor(threadId));
   };

@@ -22,7 +22,7 @@ export function useContextManagement(threadId: string, store: ConversationStore)
   const activeThread = useRef(threadId);
   activeThread.current = threadId;
   const submittedChoices = useRef(new Map<string, { model: string; reasoningEffort: string }>());
-  const status = store.get(threadId).contextStatus;
+  const status = store.get(threadId, false).contextStatus;
   const setStatus = useCallback((value: ContextStatus | ((current: ContextStatus) => ContextStatus)) => {
     const next = typeof value === 'function' ? value(store.get(threadId).contextStatus) : value;
     store.update(threadId, { contextStatus: next });
@@ -32,10 +32,10 @@ export function useContextManagement(threadId: string, store: ConversationStore)
     return store.get(threadId).contextStatus;
   }, [store, threadId]);
   const handleEvent = useCallback((event: ContextStatus) => {
-    const current = store.get(event.threadId).contextStatus;
+    const current = store.get(event.threadId, false).contextStatus;
     if (current.updatedAt && event.updatedAt && Date.parse(event.updatedAt) < Date.parse(current.updatedAt)) return;
-    store.update(event.threadId, { contextStatus: store.synced.has(event.threadId) || store.modelChoices.has(event.threadId)
-      ? { ...event, model: current.model, reasoningEffort: current.reasoningEffort } : event }, true);
+    store.update(event.threadId, { contextStatus: current.selectedSettings || store.synced.has(event.threadId) || store.modelChoices.has(event.threadId)
+      ? { ...event, model: current.model, reasoningEffort: current.reasoningEffort, selectedSettings: current.selectedSettings } : event });
   }, [store]);
 
   const applyModelSettings = useCallback((changedThreadId: string, settings: { model: string; reasoningEffort: string; committed?: boolean }) => {
@@ -45,6 +45,7 @@ export function useContextManagement(threadId: string, store: ConversationStore)
     else store.modelChoices.set(changedThreadId, visible);
     const modelChanged = Boolean(visible.model && current.model && visible.model !== current.model);
     store.update(changedThreadId, { contextStatus: { ...current, ...visible,
+      selectedSettings: { model: visible.model, reasoningEffort: visible.reasoningEffort },
       ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null } : {}), updatedAt: new Date().toISOString() } });
   }, [store]);
 

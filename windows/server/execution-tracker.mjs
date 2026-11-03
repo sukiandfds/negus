@@ -20,6 +20,8 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
   const maxItemTurns = 500;
   let persistTimer;
   let persistChain = Promise.resolve();
+  const completedNotices = (status) => (status.notices || []).filter(notice =>
+    !(status.retryNotices || []).includes(notice) && !/^Reconnecting\b/iu.test(notice));
 
   if (stateFile) {
     try {
@@ -39,7 +41,7 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
           streamingText: "",
           eventEpoch,
           eventSeq: 0,
-        } : { ...status, eventEpoch, eventSeq: 0 });
+        } : { ...status, ...(status.phase === "completed" ? { notices: completedNotices(status), retryNotices: [] } : {}), eventEpoch, eventSeq: 0 });
       }
     } catch {}
   }
@@ -134,6 +136,7 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
       detail: next.detail || "",
       interruptionReason: beginsTurn ? undefined : previous?.interruptionReason,
       notices: next.notices ?? (beginsTurn ? [] : previous?.notices || []),
+      retryNotices: next.retryNotices ?? (beginsTurn ? [] : previous?.retryNotices || []),
       commentary: beginsTurn ? "" : previous?.commentary || "",
       hasFinalAnswer: beginsTurn ? undefined : next.hasFinalAnswer ?? previous?.hasFinalAnswer,
       streamingItemId: beginsTurn || !active ? "" : previous?.streamingItemId || "",
@@ -147,6 +150,10 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
       lastProbeAt: next.lastProbeAt ?? previous?.lastProbeAt ?? null,
       ...nextEventMetadata(threadId),
     };
+    if (status.phase === "completed") {
+      status.notices = completedNotices(status);
+      status.retryNotices = [];
+    }
     statuses.set(threadId, status);
     schedulePersist();
     broadcast(status);
@@ -273,6 +280,7 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
     const eventTurnId = turnIdFor(threadId, params, params.itemId || params.item?.id || "");
     if (isRetiredTurn(threadId, eventTurnId)) return;
     if (method === "error" || method === "warning") {
+      if (eventTurnId && completedTurns.get(threadId)?.has(eventTurnId) && params.willRetry) return;
       const current = getStatus(threadId);
       const detail = method === "error" ? params.error?.message : params.message;
       if (!detail) return;
@@ -284,6 +292,8 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
         turnId: params.turnId || current.turnId,
         detail: failed ? detail : current.detail,
         notices: [...new Set([...(current.notices || []), detail])],
+        retryNotices: method === "error" && params.willRetry
+          ? [...new Set([...(current.retryNotices || []), detail])] : current.retryNotices,
       });
       return;
     }

@@ -5,6 +5,7 @@ export interface ContextStatus {
   threadId: string;
   model: string;
   reasoningEffort: string;
+  selectedSettings?: { model: string; reasoningEffort: string };
   lastSuccessfulSettings?: { model: string; reasoningEffort: string } | null;
   usedTokens: number | null;
   contextWindow: number | null;

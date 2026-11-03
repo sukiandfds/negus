@@ -59,7 +59,7 @@ const webRoot = path.resolve(getArg("--web-root", path.join(process.cwd(), "ui-f
 const token = getArg("--token", randomBytes(12).toString("hex"));
 const deviceName = String(getArg("--device-name", os.hostname())).trim() || os.hostname();
 const device = { name: deviceName, startedAt: new Date().toISOString() };
-const sessionRoot = process.env.CODEX_SESSION_DIR || path.join(os.homedir(), ".codex", "sessions");
+const sessionRoot = process.env.CODEX_SESSION_DIR || path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "sessions");
 const businessProjects = await loadBusinessProjects(path.join(projectRoot, "runtime", "business-projects.json"));
 const projectRoots = [projectRoot, ...businessProjects.map((entry) => entry.root)];
 const attachmentContent = createAttachmentContentService();

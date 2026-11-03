@@ -19,12 +19,16 @@ export const orderMessageList = (messages: SessionMessage[]) => {
   for (const message of messages) {
     const timestamp = timestampOf(message);
     const insertAt = ordered.findIndex((current) => {
+      const local = (item: SessionMessage) => item.id.startsWith("stream-") || isOptimisticMessage(item);
       if (message.turnId && message.turnId === current.turnId) {
         if (message.turnItemIndex !== undefined && current.turnItemIndex !== undefined) {
           return current.turnItemIndex > message.turnItemIndex;
         }
-        const local = (item: SessionMessage) => item.id.startsWith("stream-") || isOptimisticMessage(item);
         if (!local(message) && !local(current)) return false;
+        const currentTimestamp = timestampOf(current);
+        return timestamp !== null && currentTimestamp !== null && currentTimestamp > timestamp;
+      }
+      if (local(message) || local(current)) {
         const currentTimestamp = timestampOf(current);
         return timestamp !== null && currentTimestamp !== null && currentTimestamp > timestamp;
       }

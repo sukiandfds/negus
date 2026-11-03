@@ -16,8 +16,11 @@ type Patch = Partial<ThreadSnapshot>;
 const persistedPending = (messages: SessionMessage[]) => JSON.stringify(messages.filter(message => message.id.startsWith('optimistic-')
   && (message.deliveryState === 'failed' || message.deliveryState === 'occupied')));
 const signature = (value: unknown, omitStream = false) => JSON.stringify(value,
-  (key, field) => ['updatedAt', 'lastProbeAt', 'lastEventAt', 'eventEpoch', 'eventSeq', 'durationMs'].includes(key)
-    || (omitStream && ['streamingItemId', 'streamingText', 'commentary'].includes(key)) ? undefined : field);
+  function (this: { phase?: string; type?: string; id?: string }, key, field) {
+    return ['updatedAt', 'lastProbeAt', 'lastEventAt', 'eventEpoch', 'eventSeq', 'durationMs'].includes(key)
+      || (omitStream && (['streamingItemId', 'streamingText', 'commentary'].includes(key)
+        || (key === 'detail' && this.phase === 'working' && (this.type === 'execution_status' || this.id === 'reasoning-current')))) ? undefined : field;
+  });
 export const withStreamingStatus = (status: ThreadSnapshot['executionStatus'], live?: ThreadSnapshot['executionStatus']) =>
   status.active && status.turnId && live?.turnId === status.turnId ? { ...status,
     streamingItemId: live.streamingItemId ?? status.streamingItemId, streamingText: live.streamingText ?? status.streamingText,
@@ -174,10 +177,11 @@ export class ConversationStore {
       const session = incoming && current ? current.contentVersion && incoming.contentVersion && current.contentVersion > incoming.contentVersion
         ? current : refreshSession(current, incoming) : incoming || current || null;
       if (!session) throw new Error('对话同步失败，保留已有内容');
-      const saved = result.context.lastSuccessfulSettings;
+      const selectedSettings = this.committed.get(id)?.contextStatus.selectedSettings;
+      const saved = selectedSettings || result.context.lastSuccessfulSettings;
       const models = readModelCatalog(), defaults = readModelDefaults();
       const model = saved ? resolveVisibleModel(models, defaults, saved.model, '') : result.context.model;
-      const contextStatus = saved ? { ...result.context, model,
+      const contextStatus = saved ? { ...result.context, model, selectedSettings,
         reasoningEffort: resolveVisibleEffort(models, defaults, model, saved.reasoningEffort) } : result.context;
       return { session: { ...session, ...(incoming && result.historyFormatVersion ? { historyFormatVersion: result.historyFormatVersion } : {}), sourceRevision: result.sourceRevision || session.sourceRevision }, contextStatus,
         executionStatus: result.status, goal: result.goal, queueItems: result.queue, userInputRequest: result.input };

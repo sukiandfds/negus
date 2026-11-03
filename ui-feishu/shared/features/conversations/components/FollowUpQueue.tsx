@@ -19,10 +19,11 @@ interface FollowUpQueueProps {
 }
 
 export function FollowUpQueue({ items, isHidden, busy, error, onEdit, onRemove, onMove, onRetry, onSendNow }: FollowUpQueueProps) {
-  if (!items.some(item => !isHidden?.(item)) && !error) return null;
+  if (!items.some(item => !isHidden?.(item)) && !error && !busy) return null;
 
   return (
     <section aria-label="指令等候中">
+      {busy && <p role="status">正在处理等候消息，请等待服务器确认…</p>}
       {error && <p className={styles.error}>{error}</p>}
       {items.map((item, index) => {
         if (isHidden?.(item)) return null;
