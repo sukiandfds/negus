@@ -51,7 +51,7 @@ await page.route('**/api/**',async route=>{
    if(process.env.NEGUS_TEST_REMAINDER_FAILURE==='1'&&id==='t10')return route.fulfill({status:503,json:{error:'fixture older conversation failure'}});
    data={session:u.searchParams.get('sourceRevision')===summaries[n]?.sourceRevision?null:data,
      context:{type:'context_status',threadId:id,model:id==='t0'?'model-a':'model-b',reasoningEffort:id==='t0'?'high':'low',phase:'idle',usedTokens:10,contextWindow:100,percentage:10,autoCompactThreshold:80,updatedAt:stamp,message:''},
-     status:id==='t0'&&activeStatus?activeStatus:{type:'execution_status',threadId:id,phase:'idle',active:false,activities:[],turnId:'',startedAt:null,updatedAt:stamp,label:'',detail:'',commentary:''},goal:null,queue:[],input:null,sourceRevision:summaries[n]?.sourceRevision,historyFormatVersion:1};
+     status:id==='t0'&&activeStatus?activeStatus:{type:'execution_status',threadId:id,phase:'idle',active:false,activities:[],turnId:'',startedAt:null,updatedAt:stamp,label:'',detail:'',commentary:''},goal:null,queue:[],input:null,sourceRevision:summaries[n]?.sourceRevision,historyFormatVersion:3};
  }
  await route.fulfill({json:data});
 });
@@ -60,26 +60,26 @@ try{
  await page.getByText('缓存正文t0',{exact:true}).waitFor();
  await page.waitForTimeout(700);
  assert.equal(await page.getByRole('button',{name:'刷新会话',exact:true}).getAttribute('aria-busy'),'true');
- assert.equal(await page.getByRole('status',{name:'正在同步对话'}).count(),1);
+ await page.getByText('最新正文t0',{exact:true}).waitFor();
  assert.ok(calls.some(([p,id])=>p==='/api/session'&&id==='t9'));
  assert.equal(calls.some(([p,id])=>p==='/api/session'&&id==='t10'),false,'second batch must wait');
- assert.equal(await page.getByText('最新正文t0',{exact:true}).count(),0,'body cannot publish early');
+ assert.equal(await page.getByText('最新正文t0',{exact:true}).count(),1,'current body publishes early');
  assert.equal(await page.getByText('最新标题1',{exact:true}).count(),0,'title cannot publish early');
  await page.evaluate(()=>window.emitFixture({type:'execution_status',threadId:'t0',phase:'working',active:true,turnId:'r1',startedAt:'2026-10-30T00:00:00Z',updatedAt:'2026-10-30T00:00:01Z',label:'运行',activities:[]}));
  await page.waitForTimeout(100);
- assert.equal(await page.getByText('助手正在运行...',{exact:true}).count(),0,'status cannot cross batch');
+ assert.equal(await page.getByRole('button',{name:'打开最新标题0',exact:true}).getByText('助手正在运行...').count(),1,'selected synced status updates immediately');
  await page.getByRole('button',{name:'打开缓存标题5',exact:true}).click();
  await page.getByText('缓存正文t5',{exact:true}).waitFor();
  assert.equal(await page.getByRole('button',{name:/测试模型/}).count(),0,'uncached model must not borrow previous thread');
  assert.equal(await page.getByText('最新正文t5',{exact:true}).count(),0,'selection cannot bypass batch');
- await page.getByRole('button',{name:'打开缓存标题0',exact:true}).click();
- await page.getByText('缓存正文t0',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'打开最新标题0',exact:true}).click();
+ await page.getByText('最新正文t0',{exact:true}).waitFor();
  releaseFirst();
  await page.getByText('最新正文t0',{exact:true}).waitFor();
  if(failNinth){await page.getByText('缓存标题9',{exact:true}).waitFor();assert.equal(await page.getByText('最新标题9',{exact:true}).count(),0);await page.getByText(/1 个对话同步失败/).first().waitFor();assert.ok(syncErrors.length);}
  else await page.getByText('最新标题9',{exact:true}).waitFor();
  assert.equal(await page.getByText('最新标题10',{exact:true}).count(),0,'second batch remains frozen');
- assert.ok((await page.getByRole('button',{name:'打开最新标题0',exact:true}).innerText()).includes('助手：最新正文t0'),'list preview comes from committed body');
+ assert.ok((await page.getByRole('button',{name:'打开最新标题1',exact:true}).innerText()).includes('助手：最新正文t1'),'list preview comes from committed body');
  assert.equal(await page.getByRole('button',{name:'刷新会话',exact:true}).getAttribute('aria-busy'),failNinth?'true':'false','first ten determine loading indicator');
  if(process.env.NEGUS_TEST_LIVE_DURING_REMAINDER==='1'){
    currentReply='-实时回复';

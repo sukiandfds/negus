@@ -15,7 +15,7 @@ const detail = id => ({ ...summaries.find(s => s.threadId === id), messages: mes
 const photo = { id: 'photo', name: 'photo.png', mimeType: 'image/png', url: '/api/media/photo', size: 68 };
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 let sendMode = 'accepted', holdSend = false, releaseSend, releaseCreate, holdCreate = false, pageRequest;
-let holdRead = false, releaseRead, heldId = '', readGate;
+let holdRead = false, releaseRead, heldId = '', readGate, failRead = false, failedReads = 0;
 const receipt = new Map();
 page.on('pageerror', error => errors.push(error.message));
 await page.addInitScript(({ summaries, details, stamp }) => {
@@ -81,6 +81,7 @@ await page.route('**/api/**', async route => {
     summaries.push(data); messages.set('created', []);
   } else if (path === '/api/session') {
     if (holdRead && id === heldId) await readGate;
+    if (failRead && id === heldId) { failedReads++; return route.fulfill({ status: 503, json: { error: 'fixture read failure' } }); }
     if (url.searchParams.has('cursor')) {
       pageRequest = id;
       data = { ...detail(id), hasMore: false, messages: [{ id: 'older-page', role: 'assistant', text: '翻页读取的更早历史', createdAt: '2026-10-01T00:00:00Z' }] };
@@ -98,9 +99,49 @@ const open = id => page.getByRole('button', { name: `打开对话${id}`, exact: 
 const bubble = text => page.locator('.chat-messages').getByText(text, { exact: true });
 const wait = async predicate => { const deadline = Date.now() + 6500; while (!predicate()) { if (Date.now() > deadline) throw Error('fixture condition timed out'); await page.waitForTimeout(25); } };
 try {
+  if (process.env.NEGUS_TEST_INITIAL_STATUS === '1') {
+    heldId = 'a'; holdRead = true; readGate = new Promise(resolve => releaseRead = resolve);
+  }
   await page.goto('http://127.0.0.1:5201/?thread=a');
   await bubble('历史a').waitFor();
+  if (process.env.NEGUS_TEST_INITIAL_STATUS === '1') {
+    await wait(() => calls.some(call => call.path === '/api/session' && call.id === 'a'));
+    await page.evaluate(event => window.emit(event), { ...idle('a'), phase: 'working', active: true, turnId: 'initial-turn', label: '运行' });
+    await page.waitForTimeout(200);
+    assert.equal(await page.getByRole('button', { name: '打开对话a' }).getByText('助手正在运行...').count(), 0, 'uncommitted initial status must not cross batch');
+    holdRead = false; releaseRead();
+    await page.waitForFunction(() => document.querySelector('button[aria-label="刷新会话"]')?.getAttribute('aria-busy') === 'false');
+    assert.deepEqual(errors, []);
+    console.log('PASS initial uncommitted status remains behind batch');
+    await browser.close(); process.exit(0);
+  }
   await page.waitForFunction(() => document.querySelector('button[aria-label="刷新会话"]')?.getAttribute('aria-busy') === 'false');
+  if (process.env.NEGUS_TEST_LIST_TERMINAL === '1') {
+    const running = { ...idle('a'), phase: 'working', active: true, turnId: 'compact-turn', startedAt: stamp, label: '运行' };
+    statuses.set('a', running);
+    settings.set('a', { phase: 'compacting', message: '正在压缩上下文' });
+    await page.evaluate(event => window.emit(event), { ...context('a'), updatedAt: new Date().toISOString() });
+    await page.evaluate(event => window.emit(event), running);
+    await page.getByRole('button', { name: '打开对话a' }).getByText('正在压缩对话...').waitFor();
+    await wait(() => calls.filter(call => call.path === '/api/session' && call.id === 'a').length >= 2);
+    await page.waitForTimeout(300);
+    heldId = 'a'; holdRead = true; readGate = new Promise(resolve => releaseRead = resolve);
+    const completed = { ...running, phase: 'completed', active: false, durationMs: 1000, label: '已完成' };
+    statuses.set('a', completed);
+    await page.evaluate(event => window.emit(event), completed);
+    settings.set('a', { phase: 'completed', message: '上下文压缩完成' });
+    await page.evaluate(event => window.emit(event), { ...context('a'), updatedAt: new Date().toISOString() });
+    await page.getByText('已完成', { exact: true }).waitFor();
+    await page.waitForFunction(() => !/助手正在运行|正在压缩对话/.test(document.querySelector('button[aria-label="打开对话a"]')?.textContent || ''));
+    assert.equal(await page.getByRole('button', { name: '打开对话b' }).getByText('助手正在运行...').count(), 0);
+    failRead = true; releaseRead();
+    await wait(() => failedReads > 0);
+    assert.equal(await page.getByRole('button', { name: '打开对话a' }).getByText('助手正在运行...').count(), 0, 'failed snapshot must not restore stale running state');
+    assert.equal(await page.getByRole('button', { name: '打开对话a' }).getByText('正在压缩对话...').count(), 0, 'failed snapshot must not restore stale compaction state');
+    assert.deepEqual(errors, []);
+    console.log('PASS selected terminal status remains consistent during slow and failed snapshot');
+    await browser.close(); process.exit(0);
+  }
   assert.equal(await page.evaluate(() => window.sources.length), 1, 'directory must not open a second event entrance');
   assert.ok(calls.some(call => call.path === '/api/session' && call.id === 'b' && call.view === '1' && !call.sourceRevision), 'a partial cache must load its body even with a matching source signature');
   const beforeClick = calls.length;

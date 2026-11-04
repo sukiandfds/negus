@@ -71,7 +71,8 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
     if (c.selectedId && !isPendingThread(c.selectedId) && !rows.some(row => row.threadId === c.selectedId)) {
       rows.push({ id: c.selectedId, threadId: c.selectedId, name: '', subtitle: '' });
     }
-    const entries = rows.map(row => {
+    // FEAT-001 2026-11-04: temporary mobile relief; fetch only the open thread.
+    const entries = rows.filter(row => row.threadId === c.selectedId).map(row => {
       const id = row.threadId!, revision = store.revisions.get(id) || 0;
       return { id, revision, conversationId: row.conversationId || undefined,
         signature: JSON.stringify([row.name, row.time, row.preview, row.session, revision]) };
@@ -174,7 +175,8 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
   const display = { ...c, ...selected, session, executionStatus, goal: selected.goal || (c.goal?.status === 'complete' ? c.goal : null), visibleModel: model, visibleEffort: effort, usageModel: selected.executionStatus.active ? c.usageModel : model,
     streamingText: executionStatus.streamingText || '', commentaryText: executionStatus.commentary || '',
     syncing,
-    project: shown.project, sessions: shown.sessions,
+    project: shown.project, sessions: c.sessions.map(summary => summary.threadId === c.selectedId
+      ? shown.sessions.find(item => item.threadId === summary.threadId) || summary : summary),
     sessionError: store.errors.get(c.selectedId) || c.sessionError,
     listError: c.listError || (store.errors.size ? `${store.errors.size} 个对话同步失败，保留已有内容；可刷新重试。` : ''),
     loadingSession: c.loadingSession,
@@ -195,7 +197,8 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
       presentation: Object.fromEntries(states.map(([id, { session: _session, ...view }]) => [id, { ...view, visibleModel: '', visibleEffort: '', usageModel: '', streamingText: '', commentaryText: '' }])) });
   }, [shown, c.selectedId, store.getPersistSnapshot()]);
   return { committed: shown.committed, conversations: display, directory: { ...directory, projects: shown.projects,
-    statusByThread: Object.fromEntries(states.map(([id, view]) => [id, view.executionStatus])),
+    statusByThread: Object.fromEntries(states.map(([id, view]) => [id,
+      id === c.selectedId && store.synced.has(id) ? executionStatus : view.executionStatus])),
     contextByThread: Object.fromEntries(states.map(([id, view]) => [id, view.contextStatus.phase])),
     goalByThread: Object.fromEntries(states.map(([id, view]) => [id, view.goal])) } };
 }
