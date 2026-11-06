@@ -14,8 +14,8 @@ test('one slow read cannot hold nine successes or restart deadline; late complet
  const publications=[],signals=[];let release;const held=new Promise(resolve=>release=resolve);
  await readConversationBatches(Array.from({length:10},(_,i)=>i),(i,signal)=>{if(i===9){signals.push(signal);return held;}return Promise.resolve();},r=>publications.push(r),new AbortController().signal,20);
  assert.equal(publications[0].filter(r=>!r.error).length,9);
- const failures=publications.flat().filter(r=>r.error);assert.equal(failures.length,3);assert.ok(failures.every(r=>/同步超时/.test(r.error)));
- assert.equal(failures.at(-1).retry,false);assert.ok(signals.every(signal=>signal.aborted));
+ const failures=publications.flat().filter(r=>r.error);assert.equal(failures.length,1);assert.ok(failures.every(r=>/同步超时/.test(r.error)));
+ assert.equal(signals.length,1);assert.ok(signals.every(signal=>signal.aborted));
  const count=publications.length;release();await new Promise(r=>setTimeout(r,5));assert.equal(publications.length,count);
 });
 test('cancelled view cannot publish old batch',async()=>{
@@ -32,17 +32,17 @@ test('large batches bound concurrent conversation reads while publishing togethe
 test('queued conversations are read later, never reported as failed before starting', async () => {
  const publications=[],calls=[];
  await readConversationBatches(Array.from({length:94},(_,i)=>i),i=>{calls.push(i);return new Promise(()=>{});},r=>{assert.ok(r.every(result=>calls.includes(result.entry)),'only attempted reads may fail');publications.push(r);},new AbortController().signal,30);
- assert.equal(calls.length,94*3);
- assert.equal(publications.flat().length,94*3);
+ assert.equal(calls.length,94);
+ assert.equal(publications.flat().length,94);
  assert.ok(publications.flat().every(r=>r.error.includes('同步超时')));
 });
 
-test('transient failures retry after remaining conversations and eventually clear', async () => {
- const calls=[], publications=[], counts=new Map();
- await readConversationBatches([0,1,2],async i=>{calls.push(i);const count=(counts.get(i)||0)+1;counts.set(i,count);if(i===0&&count<3)throw Error('unavailable');},
+test('failed reads are recorded once without retrying or blocking remaining conversations', async () => {
+ const calls=[], publications=[];
+ await readConversationBatches([0,1,2],async i=>{calls.push(i);if(i===0)throw Error('unavailable');},
    results=>publications.push(results),new AbortController().signal,100,2);
- assert.deepEqual(calls,[0,1,2,0,0]);
- assert.deepEqual(publications.flat().filter(r=>r.entry===0).map(r=>[r.error,r.retry]),[['unavailable',true],['unavailable',true],['',undefined]]);
+ assert.deepEqual(calls,[0,1,2]);
+ assert.deepEqual(publications.flat(),[{entry:0,error:'unavailable'},{entry:1,error:''},{entry:2,error:''}]);
 });
 
 test('cancelling a batch aborts a stalled read and publishes nothing', async () => {

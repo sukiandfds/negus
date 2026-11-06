@@ -6,7 +6,6 @@ import { usePageSnapshot } from "../../../src/usePageSnapshot";
 import { useProjectDirectory } from "../project-directory/hooks/useProjectDirectory";
 import { ProjectProgressApp } from "../project-progress/ProjectProgressApp";
 import { ProjectManagementApp } from "../project-management/ProjectManagementApp";
-import { AppUpdateNotice } from "../app-update/components/AppUpdateNotice";
 import { DeviceStatus } from "../device/components/DeviceStatus";
 import { ProjectStatusControl } from "../project-status/ProjectStatusControl";
 import type { DeviceInfo } from "../device/model/types";
@@ -67,7 +66,6 @@ function SystemPanel({ onClose, connected, device, projectId, projectRoot }: { o
       <h2>项目状态</h2>
       <ProjectStatusControl projectId={projectId} projectRoot={projectRoot} />
     </section>
-    <AppUpdateNotice surface="conversation" />
   </div>;
 }
 

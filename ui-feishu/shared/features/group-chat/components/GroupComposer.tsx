@@ -26,7 +26,7 @@ export interface GroupComposerCopy {
 }
 
 export const defaultGroupComposerCopy: GroupComposerCopy = {
-  placeholder: "发给项目群。可用 @ 点名，也可以说‘各位/所有人’一起讨论",
+  placeholder: "发送消息给运营管理；也可以 @ 指定员工",
   discussionHint: "被点到的员工按顺序回复，没被点名的不会插话",
   contextHint: "群里的完整记录一直保留。每次点名是单独一件事，先发的先做，后一条等下一轮。点名后的补充跟着这一条；短的续话接着上一条理解。已经点到的同事会自己回复。",
   busyReplyHint: (names) => `${names.join("、")}会在当前任务结束后按顺序回复`,

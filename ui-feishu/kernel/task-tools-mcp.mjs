@@ -15,8 +15,8 @@ export function createHandoffMcpServer({ endpoint = process.env.NEGUS_HANDOFF_EN
     } catch (error) { return { isError: true, content: [{ type: 'text', text: error.message }] }; }
   };
   server.registerTool('delegate_task', {
-    description: '将用户已授权的工作异步交给现有员工。工具保存任务后立即返回；你可以继续回复用户，结果完成后自动回到本对话。重试同一次交接必须沿用 requestId；新的工作使用新的 requestId。普通提到同事名字不会派发任务。',
-    inputSchema: z.object({ requestId: z.string().min(1), agentId: z.string().min(1), title: z.string().min(1), instructions: z.string().min(1) }),
+    description: '将用户已授权的工作异步交给现有员工。工具保存任务后立即返回；群内请求意见、验收或等待结果继续处理时保持 notifySource 为 true（默认），纯告知且无需后续处理时可设为 false。重试同一次交接必须沿用 requestId；新的工作使用新的 requestId。普通提到同事名字不会派发任务。',
+    inputSchema: z.object({ requestId: z.string().min(1), agentId: z.string().min(1), title: z.string().min(1), instructions: z.string().min(1), notifySource: z.boolean().optional() }),
   }, args => call('delegate', args));
   if (background) server.registerTool('create_background_task', {
     description: '将用户已授权的执行工作放到独立后台对话。只指定模型时自动匹配配置，优先上次成功配置；model 也可填配置名称以使用该配置默认模型。仅用户明确指定配置时传 modelProviderId，勿自行填 current。保存后立即返回；确认接单后结束本轮回复，不等待或查询，结果会自动回到本对话。重试沿用 requestId。',

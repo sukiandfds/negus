@@ -6,34 +6,14 @@ import type { FollowUpQueueItem } from "../model/followUpQueue";
 import { currentConversationId, resolveConversationId, conversationQuery, withConversation } from "../../../shared/api/conversationScope";
 import { fetchJson, postJson } from "../../../shared/api/http";
 
-const PAGE_SIZE = 60;
-const READ_TIMEOUT_MS = 10000;
-
-const fetchConversationJson = async <T,>(pathname: string, signal?: AbortSignal): Promise<T> => {
-  const controller = new AbortController();
-  let timedOut = false;
-  const abort = () => controller.abort();
-  if (signal?.aborted) controller.abort();
-  signal?.addEventListener("abort", abort, { once: true });
-  const timer = window.setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, READ_TIMEOUT_MS);
-  try {
-    return await fetchJson<T>(pathname, controller.signal);
-  } catch (error) {
-    if (timedOut) throw new Error("同步超时，正在保留当前内容");
-    throw error;
-  } finally {
-    window.clearTimeout(timer);
-    signal?.removeEventListener("abort", abort);
-  }
-};
+const PAGE_SIZE = 30;
+const fetchConversationJson = <T,>(pathname: string, signal?: AbortSignal): Promise<T> =>
+  fetchJson<T>(pathname, AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(60000)]));
 
 export const conversationApi = {
   snapshot: async (threadId: string, sourceRevision: string, signal?: AbortSignal, conversationId = currentConversationId(threadId)) => {
     conversationId ||= await resolveConversationId(threadId);
-    return fetchConversationJson<{ session: SessionDetail | null; context: ContextStatus; status: ExecutionStatus;
+    return fetchJson<{ session: SessionDetail | null; context: ContextStatus; status: ExecutionStatus;
       goal: ThreadGoal | null; queue: FollowUpQueueItem[]; input: UserInputRequest | null; sourceRevision: string | null; historyFormatVersion?: number }>(
       `/api/session?threadId=${encodeURIComponent(threadId)}&limit=${PAGE_SIZE}&view=1${sourceRevision ? `&sourceRevision=${encodeURIComponent(sourceRevision)}` : ''}${conversationQuery(conversationId)}`, signal);
   },

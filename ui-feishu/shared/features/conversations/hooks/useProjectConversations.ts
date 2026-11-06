@@ -596,7 +596,9 @@ export function useProjectConversations() {
   }, [execution.refreshStatus, execution.status.active, selection.selectedIdRef, selection.session?.archived]);
 
   const onSessionsChanged = useCallback((threadId?: string | string[]) => {
-    for (const id of typeof threadId === 'string' ? [threadId] : threadId || selection.store.committed.keys()) selection.store.invalidate(id, false);
+    for (const id of typeof threadId === 'string' ? [threadId] : threadId || []) {
+      if (selection.store.get(id).executionStatus.active) selection.store.invalidate(id, false);
+    }
     selection.store.notify();
     window.dispatchEvent(new Event('negus:directory-changed'));
     return catalog.refreshSessions(false, typeof threadId === 'string' ? threadId : undefined, false);
@@ -605,7 +607,9 @@ export function useProjectConversations() {
   const handleEvent = useCallback((event: ProjectEvent) => {
     if (!selection.store.acceptEvent(event)) return;
     if (event.type === 'sessions_changed') {
-      for (const id of event.threadId ? [event.threadId] : selection.store.committed.keys()) selection.store.freshBodies.add(id);
+      for (const id of event.threadId ? [event.threadId] : []) {
+        if (selection.store.get(id).executionStatus.active) selection.store.freshBodies.add(id);
+      }
     }
     if (event.type === "assistant_message_completed") selection.store.completeMessage(event.threadId, event.message);
     execution.handleEvent(event);

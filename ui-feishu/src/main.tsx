@@ -17,4 +17,4 @@ resize();
 window.addEventListener('resize', resize);
 window.visualViewport?.addEventListener('resize', resize);
 window.visualViewport?.addEventListener('scroll', resize);
-void restoreConversationCache().then(() => createRoot(document.getElementById('root')!).render(<FeishuApp />));
+void restoreConversationCache(true).then(() => createRoot(document.getElementById('root')!).render(<FeishuApp />));

@@ -9,10 +9,10 @@ import { buildConversationDirectory } from './conversationDirectory';
 import { latestMessagePreview } from './taskNotice';
 
 // Empty employee/project entries have no thread to read. Existing threads keep their batch snapshot.
-const mergeProjects = (previous: DirectoryState['projects'], next: DirectoryState['projects'], good: Set<string>) => next.map(project => {
+const mergeProjects = (previous: DirectoryState['projects'], next: DirectoryState['projects'], good: Set<string>, eligible: Set<string>) => next.map(project => {
   const old = previous.find(item => item.id === project.id);
   const children = new Map((old?.conversations || []).filter(item => project.conversations?.some(next => next.id === item.id && Boolean(next.archived) === Boolean(item.archived))).map(item => [item.threadId || item.id, item]));
-  for (const item of project.conversations || []) if (!item.threadId || good.has(item.threadId)) children.set(item.threadId || item.id, item);
+  for (const item of project.conversations || []) if (!item.threadId || good.has(item.threadId) || !eligible.has(item.threadId)) children.set(item.threadId || item.id, item);
   return { ...(old && project.mainThreadId && !good.has(project.mainThreadId) ? old : project),
     status: good.has(project.mainThreadId || '') ? project.status : old?.status,
     conversations: [...children.values()] };
@@ -44,6 +44,10 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
   const source = useMemo(() => JSON.stringify([c.sessions, directory.projects, revisionKey],
     (key, value) => ['updatedAt', 'lastProbeAt', 'lastEventAt', 'eventEpoch', 'eventSeq', 'durationMs'].includes(key) ? undefined : value),
   [c.sessions, directory.projects, revisionKey]);
+  const selectedThread = useRef(c.selectedId);
+  if (selectedThread.current !== c.selectedId) {
+    selectedThread.current = c.selectedId; observed.current.delete(c.selectedId);
+  }
   const archiveView = useRef(c.archivedView);
   if (archiveView.current !== c.archivedView) {
     archiveView.current = c.archivedView; observed.current.clear(); cancelIndependent();
@@ -71,23 +75,27 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
     if (c.selectedId && !isPendingThread(c.selectedId) && !rows.some(row => row.threadId === c.selectedId)) {
       rows.push({ id: c.selectedId, threadId: c.selectedId, name: '', subtitle: '' });
     }
-    // FEAT-001 2026-11-04: temporary mobile relief; fetch only the open thread.
-    const entries = rows.filter(row => row.threadId === c.selectedId).map(row => {
+    // FEAT-001: synchronize the latest 20 conversations and the open conversation.
+    const eligible = new Set(rows.slice(0, 20).map(row => row.threadId!));
+    if (c.selectedId) eligible.add(c.selectedId);
+    for (const id of store.live.keys()) if (store.get(id).executionStatus.active) eligible.add(id);
+    const entries = rows.filter(row => eligible.has(row.threadId!) && (!observed.current.has(row.threadId!)
+      || store.dirty.has(row.threadId!) || store.get(row.threadId!).executionStatus.active)).map(row => {
       const id = row.threadId!, revision = store.revisions.get(id) || 0;
       return { id, revision, conversationId: row.conversationId || undefined,
         signature: JSON.stringify([row.name, row.time, row.preview, row.session, revision]) };
     }).filter(entry => observed.current.get(entry.id) !== entry.signature)
-      .map((entry, index) => ({ ...entry, priority: index < 10 }));
+      .map(entry => ({ ...entry, priority: true }));
     for (const id of store.errors.keys()) if (!rows.some(row => row.threadId === id)) store.errors.delete(id);
     for (const [id, read] of independentReads.current) {
-      if (!rows.some(row => row.threadId === id)) {
+      if (!eligible.has(id) || !rows.some(row => row.threadId === id)) {
         read.abort.abort(); independentReads.current.delete(id);
       }
     }
     if (!entries.length) {
       initialLoading.current = false;
       setSyncing(false);
-      const projects = mergeProjects(shown.projects, directory.projects, new Set());
+      const projects = mergeProjects(shown.projects, directory.projects, new Set(), eligible);
       if (!shown.committed || JSON.stringify(projects) !== JSON.stringify(shown.projects)
         || shown.sessions.some(item => !c.sessions.some(next => next.threadId === item.threadId))) {
         setShown(previous => ({ ...previous, committed: true, project: c.project, projects,
@@ -99,13 +107,13 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
       const pendingPriority = new Set(batch.filter(entry => entry.priority).map(entry => entry.id));
       const candidate = new Map<string, ThreadSnapshot>();
       const earlyPublished = new Set<string>();
-      const publish = (results: { entry: typeof entries[number]; error: string; retry?: boolean }[]) => {
+      const publish = (results: { entry: typeof entries[number]; error: string }[]) => {
         if (!mounted.current || abort.signal.aborted || !isCurrent()) return;
         const good = new Set(results.filter(result => !result.error).map(result => result.entry.id));
-        for (const { entry, error, retry } of results) if (!error || !retry) pendingPriority.delete(entry.id);
+        for (const { entry } of results) pendingPriority.delete(entry.id);
         if (initial) setSyncing(pendingPriority.size > 0);
-        for (const { entry, error, retry } of results) {
-          if (retry) observed.current.delete(entry.id); else observed.current.set(entry.id, entry.signature);
+        for (const { entry, error } of results) {
+          observed.current.set(entry.id, entry.signature);
           if (error) {
             store.finish(entry.id, error);
             console.error('[negus:conversation-sync]', { threadId: entry.id, reason: error, at: new Date().toISOString() });
@@ -121,7 +129,7 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
             sessions.set(summary.threadId, { ...summary, ...fields, updatedAt: summary.updatedAt, latestMessage });
           }
           return { sessions: [...sessions.values()], committed: true, project: current.project,
-            projects: mergeProjects(previous.projects, live.current.directory.projects, good) };
+            projects: mergeProjects(previous.projects, live.current.directory.projects, good, eligible) };
         });
         store.notify();
       };
@@ -185,17 +193,17 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
       return c.refresh();
     } };
   useEffect(() => {
-    if (!shown.committed || isPendingThread(c.selectedId)) return;
+    if (isPendingThread(c.selectedId)) return;
     // FEAT-001: persist the same directory-backed summaries that the list displays.
-    const sessions = buildConversationDirectory({ ...directory, projects: shown.projects }, shown.sessions,
+    const sessions = buildConversationDirectory({ ...directory, projects: shown.projects }, display.sessions,
       c.archivedView, shown.project?.root, c.cachedSessions, c.archivedByThread).all.flatMap(row => {
       if (!row.session || row.pending || isPendingThread(row.session.threadId)) return [];
       const { messages: _messages, sourceSignature: _signature, ...summary } = row.session as NonNullable<typeof session>;
       return [{ ...summary, latestMessage: row.preview }];
     });
-    writeConversationSnapshot({ selectedId: c.selectedId, sessions, session, cachedSessions: c.cachedSessions,
+    writeConversationSnapshot({ selectedId: c.selectedId, sessions, session: c.cachedSessions.get(c.selectedId) || null, cachedSessions: c.cachedSessions,
       presentation: Object.fromEntries(states.map(([id, { session: _session, ...view }]) => [id, { ...view, visibleModel: '', visibleEffort: '', usageModel: '', streamingText: '', commentaryText: '' }])) });
-  }, [shown, c.selectedId, store.getPersistSnapshot()]);
+  }, [shown, c.sessions, c.selectedId, store.getPersistSnapshot()]);
   return { committed: shown.committed, conversations: display, directory: { ...directory, projects: shown.projects,
     statusByThread: Object.fromEntries(states.map(([id, view]) => [id,
       id === c.selectedId && store.synced.has(id) ? executionStatus : view.executionStatus])),

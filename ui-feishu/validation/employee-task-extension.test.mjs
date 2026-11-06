@@ -69,14 +69,17 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
     { id: 'child-b', kind: 'delegation', parentTaskId: 'parent-b', source: { roomId: 'room' },
       inputs: [{ submissionId: 'child-b', actor: { id: 'b', name: '研究员' } }], runtime: { threadId: 'group-child', turnId: 'group-turn' } },
     { id: 'child-unknown', kind: 'delegation', source: {}, runtime: { threadId: 'unknown-child', turnId: 'group-turn' } },
+    { id: 'group-bg', agentId: 'b', background: true, reasoningEffort: 'low', source: { roomId: 'room' }, runtime: { threadId: 'group-background', reasoningEffort: 'low' } },
   ] });
+  assert.equal(extension.runtimeOptions({ id: 'group-background' }).turn.effort, 'low');
+  assert.equal(extension.runtimeOptions({ id: 'group-background' }).resume.config['mcp_servers.negus_handoffs'].enabled, false);
   const groupMessage = { ...initial, turnId: 'group-turn', submissionId: 'child-b' };
   assert.equal(extension.decorateTaskSession('group-child', { messages: [groupMessage] }).messages[0].authorName, '研究员');
   assert.deepEqual(extension.decorateTaskSession('unknown-child', { messages: [groupMessage] }).messages, [groupMessage]);
   employees.find(employee => employee.id === agentId).modelProviderId = 'current';
   assert.equal(extension.providerForThread(starts[0].threadId), 'vip', 'task keeps its own provider when the employee switches');
   if (background) {
-    assert.deepEqual(created[0].config, {});
+    assert.equal(created[0].config['mcp_servers.negus_handoffs'].enabled, false);
     assert.match(created[0].developerInstructions, /直接执行本任务/);
     assert.match(extension.leaderInstructions('a'), /结束本轮回复/);
     mainActive = false;

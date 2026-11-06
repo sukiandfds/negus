@@ -233,3 +233,18 @@ test('committed latest reply wins over stale preview in newer detail cache', () 
   cached.messages.push({ id: 'old-goal', role: 'user', text: '/goal 旧指令', createdAt: time('08') });
   assert.equal(buildConversationDirectory(state, [latest], false, '', new Map([['A', cached]])).all.find(row => row.threadId === 'A').preview, '助手：新的回复');
 });
+
+test('incomplete directory summaries keep cached identity at equal or newer timestamps', () => {
+  const cached = { ...session('A', '已显示正文', '09'), cwd: '/fixture/negus', createdBy: 'user', latestMessage: '助手：已显示正文' };
+  for (const projects of [[], directory().projects]) {
+    for (const hour of ['09', '10']) {
+      const listed = { threadId: 'A', title: '新标题', source: 'codex', updatedAt: time(hour) };
+      const rows = buildConversationDirectory({ ...directory(), projects }, [listed], false, '', new Map([['A', cached]]));
+      const row = rows.all.find(row => row.threadId === 'A');
+      assert.equal(row.session.cwd, cached.cwd);
+      assert.equal(row.session.createdBy, 'user');
+      assert.equal(row.name, projects.length ? 'A' : '新标题');
+      assert.match(row.preview, /已显示正文/);
+    }
+  }
+});

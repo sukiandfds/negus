@@ -1,5 +1,6 @@
-import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
-import type { InitialConversationState } from '../state/initialConversation';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { readInitialConversationState, type InitialConversationState } from '../state/initialConversation';
+import { restoreConversationCache } from '../data/conversationSnapshot';
 import { conversationApi } from '../data/conversationApi';
 import { mergeOlderMessages } from '../state/conversationMerge';
 import { isPendingThread } from '../model/pendingThread';
@@ -15,6 +16,20 @@ export type ConversationSession = ReturnType<typeof useConversationSession>;
 
 export function useConversationSession(initial: InitialConversationState) {
   const [store] = useState(() => new ConversationStore(initial));
+  useEffect(() => {
+    let active = true;
+    void restoreConversationCache().then(() => {
+      if (!active) return;
+      const cached = new ConversationStore(readInitialConversationState());
+      for (const [id, value] of cached.committed) {
+        const current = store.committed.get(id);
+        if (current?.session) continue;
+        store.update(id, { ...value, ...current, session: value.session });
+        if (cached.freshBodies.has(id)) store.freshBodies.add(id);
+      }
+    });
+    return () => { active = false; };
+  }, [store]);
   useSyncExternalStore(store.subscribe, store.getSnapshot);
   const [selectedId, setSelectedId] = useState(initial.selectedId);
   const selectedIdRef = useRef(initial.selectedId);
@@ -83,7 +98,7 @@ export function useConversationSession(initial: InitialConversationState) {
   const updateOptimisticMessage = useCallback((id: string, messageId: string, patch: Partial<SessionMessage>) => store.changeMessages(id, messages => messages.map(message => message.id === messageId ? { ...message, ...patch } : message)), [store]);
   const session = store.get(selectedId, false).session;
   return { store, selectedId, selectedIdRef, composerKey, session,
-    cachedSessions: new Map([...store.committed.keys()].flatMap(id => { const detail = store.get(id, false).session; return detail ? [[id, detail] as const] : []; })),
+    cachedSessions: new Map([...store.committed.entries()].flatMap(([id, value]) => { const detail = store.get(id, false).session; return detail && (value.session || detail.messages.length) ? [[id, detail] as const] : []; })),
     sessionErrors: store.errors, sessionError: sessionError || store.errors.get(selectedId) || '', setSessionError,
     loadingSession: Boolean(selectedId && !store.committed.get(selectedId)?.session), loadingOlder,
     syncing: store.dirty.has(selectedId), contentSyncState: store.errors.has(selectedId) ? 'degraded' as const : !store.synced.has(selectedId) && initial.partialSessionIds.includes(selectedId) ? 'recovering' as const : store.dirty.has(selectedId) ? 'syncing' as const : 'stable' as const,

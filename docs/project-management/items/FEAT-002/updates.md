@@ -142,3 +142,47 @@
 - 用户可见变化：连接失败时先看到“项目群暂时未连接”和“刷新网页”，不会被成员名称弹窗遮挡。
 - 验证：`pnpm build:ui` 通过；`git diff --check` 通过。未启动服务，未做真实浏览器断线验收。
 - 基线：`0353352ba24e6e18a040437e5ba4bb28a1cef805`；本次仅修改前端条件渲染与对应记录。
+
+### 2026-11-04 群聊成品开发中
+
+- 状态：开发未完成，不是验收候选。基线 `2d32c4a54ba93052a29a6e67d5884a6192620a2d`；保留既有用户 goal 和验收记录。
+- 已改本地身份、群时间格式、运营默认接待、群内平级工具交接与署名；正式后台/续派、状态恢复、视觉对照等尚未完成。未修改受保护滚动及测量逻辑，未发布。
+- 验证：TypeScript、隔离 Vite 构建及两个群服务 Node 测试通过；未做真实浏览器测试。详情与未完成项见 `/tmp/negus-group-implementation.md`。
+
+### 2026-11-04 群聊续作
+
+- 群来源后台任务与续派、来源回报、状态投影、消息样式复用及免误广播已接线；隔离 mock 与浏览器验证证据见 `/tmp/negus-group-implementation.md`。
+- 受影响 Node 测试31项、TypeScript、隔离构建及双端浏览器测试通过。真实供应商工具权限、续派重启恢复及真实附件仍缺关键证据，当前不是完整验收候选；未发布。
+
+### 2026-11-04 候选阻断续查
+
+- 群后台显式禁用继承的派工 MCP；隔离原生 app-server 的工具列表对照与恢复测试通过。已发送续派启动恢复、held/steer 及停止未确认场景新增测试，避免持续读取历史。
+- 隔离完整后端桌面及手机打开群，真实上传附件并显示成功；真实供应商助手来源闭环仍受本会话无正规后台工具入口阻断。详细命令、证据及缓存差异见 `/tmp/negus-group-implementation.md`；未发布。
+
+### 2026-11-04 前台接手与定向复验
+
+- 按用户原话由前台亲自收尾开发；原 Terra 已收到停止开发与交接要求，DeepSeek 沿用原任务独立验收。
+- 前台补充复杂事项按需确认的既有提示词（替换1行），并在恢复测试中加入失败队列清理断言。群服务、员工与任务内核34/34通过：`/tmp/negus-group-root-final-core.log`；失败队列探针与回归分别见`/tmp/negus-group-root-recovery-check.log`和`/tmp/negus-group-root-failed-queue-test.log`。
+- 当前完整工作区含普通20对话修改，业务+347/-301（净增46），测试+719/-18；含未跟踪共享helper和测试。统计为此刻候选，最终冻结时再核对。手机样式独立复验已通过；完整页面对照及真实后台执行链继续验收，尚未发布。
+
+### 2026-11-04 完整页面对照差异修复
+
+- DeepSeek 完整页面发现昵称时间竖排、附件卡和运行态不一致。前台改用同行元信息，附件直接调用普通对话 ContentRenderer，运行态直接调用 ExecutionTimeline；删除群专用流式光标样式。未改滚动处理。
+- TypeScript通过，新构建`/tmp/negus-group-root-final-ui`，构建日志`/tmp/negus-group-root-final-ui-build.log`；已交原DeepSeek任务复核同一8张完整页面。旧准备快照1793802029744-0d8f66df已过时，正式发布前必须重新prepare。
+
+### 2026-11-04 已确认缓存与即时补充候选
+
+- 群员工运行中复用turn/steer，沿用任务与thread；输入先登记并以submissionId核对重试，附件缺失明确失败。群服务8项通过：`/tmp/negus-group-immediate-steer.log`。
+- 缓存去掉80条裁剪和384K写入限制，保留已加载消息与状态；默认读取60条。缓存业务5增22删，页大小2行替换。加载回归14/14，含120条保留和状态恢复：`/tmp/negus-group-cache-retention.log`。仍使用localStorage，配额失败保留旧缓存并记录错误，浏览器和独立验收继续。
+
+- 即时补充重试补充：原turn历史确认未包含该submission且已结束时，允许同员工后续任务接收；requestKey维持幂等。定向测试1/1：`/tmp/negus-group-steer-finished.log`，群服务原8项复验通过：`/tmp/negus-group-steer-recheck.log`。已交DeepSeek定向审核。
+
+### 2026-11-04 即时补充与缓存独立验收结果
+
+- DeepSeek任务结果`3a7c965e-783d-4293-9ee0-1d1870266e5b`定向通过：同Thread/turn立即补充、重复请求幂等、附件恢复重试、终态核对后续作；缓存120条且超过384KiB完整保留，后续60条不裁旧历史，消息与活动状态恢复及跨群隔离通过。
+- 报告`/tmp/negus-group-final-review.md`已核对SHA-256为`257d6daa77e7f05575493a4ddead4977d4bee96d36c802545a05b7289f886806`。配额失败保留旧快照、控制台记录；页面提示和存储介质差异继续按用户要求最终核对。
+- 最新源码TypeScript与Vite构建通过，产物`/tmp/negus-group-review-latest-ui`，日志`/tmp/negus-group-review-latest-build.log`。已沿用原DeepSeek任务补派完整桌面/手机缓存及真实浏览器配额验收，submissionId为`handoff:0361b91ec77eb769fb7426877cfaf916`。未重复已通过的定向测试，未发布。
+
+### 2026-11-06 群列表刷新缓存
+- 按本次“这些问题都修复好、保留既有缓存/加载/展示链路”的授权，useGroupChats复用现有createCachedResource恢复群列表，删除空列表初始化及挂载方取消共享请求的控制器。群正文useGroupRoom和按房间快照机制保持。
+- 原生子agent真实Chrome覆盖首次成功缓存、断网刷新群列表/群正文与已加载历史；全局外壳入口及更新确认一并通过。本轮仅工作区修改，未发布。完整证据与代码量统一见FEAT-001本日条目及work/cache-startup-2026-11-06/代码逻辑与验收.md。

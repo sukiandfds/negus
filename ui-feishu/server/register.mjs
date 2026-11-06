@@ -68,7 +68,8 @@ await extendGroupRooms({ stateRoot: path.resolve(process.env.NEGUS_UI_STATE_ROOT
     broadcast: event => realtime.broadcast({ ...event, roomId: room.snapshot().room.id }), webOutputs, attachmentContent,
     resolveAttachments: media.resolveMany, resolveArtifacts: resolveArtifactInputs,
     onContextDelivered: ({ agentId, threadId, messages }) => recordEmployeeGroupContext({ identity, room, agentId, threadId, messages }),
-    appServerClient, modelProviders, bindings: employeeConversationStore, agentTasks,
+    appServerClient, modelProviders, bindings: employeeConversationStore, agentTasks, queue: followUpQueue, execution,
+    registerSession: appServerConversations.registerSession, providerForThread: threadId => appServerConversations.getRecordedProviderForThread(threadId),
   }),
 });
 ${marker}`);

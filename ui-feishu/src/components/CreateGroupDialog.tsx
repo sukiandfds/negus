@@ -10,7 +10,7 @@ export function CreateGroupDialog({ directory, onClose, onCreated }: { directory
   const [name, setName] = useState('');
   const projects = directory.projects.filter(project => project.kind !== 'employee');
   const [projectId, setProjectId] = useState(projects[0]?.projectId || projects[0]?.id || '');
-  const [agents, setAgents] = useState<string[]>([]);
+  const [agents, setAgents] = useState<string[]>(['manager']);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const request = useRef({ signature: '', id: '' });
@@ -30,7 +30,7 @@ export function CreateGroupDialog({ directory, onClose, onCreated }: { directory
     <form onSubmit={event => { event.preventDefault(); void create(); }}>
       <label>群聊名称<input autoFocus aria-label="群聊名称" value={name} disabled={busy} onChange={event => setName(event.target.value)} /></label>
       <label>所属项目<select aria-label="所属项目" value={projectId} disabled={busy} onChange={event => setProjectId(event.target.value)}>{projects.map(project => <option key={project.id} value={project.projectId || project.id}>{project.name}</option>)}</select></label>
-      <fieldset disabled={busy}><legend>添加员工</legend>{directory.projects.filter(project => project.employeeId).map(employee => <label key={employee.employeeId} className="group-member-choice"><input type="checkbox" checked={agents.includes(employee.employeeId!)} onChange={event => setAgents(previous => event.target.checked ? [...previous, employee.employeeId!] : previous.filter(id => id !== employee.employeeId))} />{employee.name}</label>)}</fieldset>
+      <fieldset disabled={busy}><legend>添加员工</legend>{directory.projects.filter(project => project.employeeId).map(employee => <label key={employee.employeeId} className="group-member-choice"><input type="checkbox" disabled={employee.employeeId === 'manager'} checked={agents.includes(employee.employeeId!)} onChange={event => setAgents(previous => event.target.checked ? [...previous, employee.employeeId!] : previous.filter(id => id !== employee.employeeId))} />{employee.name}</label>)}</fieldset>
       {error && <p className={styles.error} role="alert">{error}</p>}
       <footer><button type="button" disabled={busy} onClick={onClose}>取消</button><button type="submit" disabled={busy || !name.trim() || !projectId}>{busy ? '正在创建…' : '创建群聊'}</button></footer>
     </form>

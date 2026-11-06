@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClientId } from "../../../shared/id/clientId";
 import type { MediaFile } from "../../../shared/model/media";
-import { createMemberId, readStoredMember, writeStoredMember } from "../data/groupMemberStorage";
+import { getOrCreateMember } from "../data/groupMemberStorage";
 import { groupApi } from "../data/groupApi";
 import { upsertGroupMessage } from "../data/groupMessageState";
 import { readGroupSnapshot, reconcileGroupSnapshot, writeGroupSnapshot } from "../data/groupSnapshot";
@@ -49,12 +49,12 @@ const describeSendResult = (result: {
   };
 };
 
-export function useGroupRoom() {
-  const [initialSnapshot] = useState(() => readGroupSnapshot("current-project"));
+export function useGroupRoom(initialRoomId = "current-project") {
+  const [initialSnapshot] = useState(() => readGroupSnapshot(initialRoomId));
   const [snapshot, setSnapshot] = useState<GroupSnapshot | null>(initialSnapshot);
   const [rooms, setRooms] = useState<GroupRoom[]>([]);
-  const [roomId, setRoomId] = useState(initialSnapshot?.room.id || "current-project");
-  const [member, setMember] = useState<StoredMember | null>(readStoredMember);
+  const [roomId, setRoomId] = useState(initialSnapshot?.room.id || initialRoomId);
+  const [member] = useState<StoredMember>(getOrCreateMember);
   const [loading, setLoading] = useState(!initialSnapshot);
   const [initialSyncReady, setInitialSyncReady] = useState(false);
   const [sending, setSending] = useState(false);
@@ -272,13 +272,6 @@ export function useGroupRoom() {
     };
   }, [member, roomId]);
 
-  const join = useCallback(async (name: string) => {
-    const joined = await groupApi.join({ id: member?.id || createMemberId(), name: name.trim() }, roomId);
-    setMember(joined);
-    writeStoredMember(joined);
-    return joined;
-  }, [member?.id, roomId]);
-
   const resolveReply = (replyTo: GroupMessage["replyTo"]) => {
     if (!replyTo?.id) return null;
     if (!replyTo.id.startsWith("optimistic-")) return replyTo;
@@ -438,9 +431,10 @@ export function useGroupRoom() {
   const interrupt = useCallback(async () => {
     setError("");
     try {
-      await groupApi.interrupt(roomId);
+      const result = await groupApi.interrupt(roomId);
       queuedAgentIdsRef.current = [];
       setNotice("");
+      if (result.unresolvedCount) { setError(`已请求停止其他任务，${result.unresolvedCount} 条续派正在核对是否已发送`); return false; }
       return true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -449,7 +443,7 @@ export function useGroupRoom() {
   }, [roomId]);
 
   return {
-    snapshot, rooms, roomId, selectRoom, member, loading, initialSyncReady, sending, error, notice, join, send, interrupt, refresh,
+    snapshot, rooms, roomId, selectRoom, member, loading, initialSyncReady, sending, error, notice, send, interrupt, refresh,
     retrySend,
     historyLoading, historyNotice, historyNavigation, focusRequest, loadOlder, loadNewer, jumpToDate, returnToLatest, revealMessage,
     connected: realtime.connected,

@@ -21,17 +21,22 @@ test('group creation keeps the requested members, retries once, and restores his
     const [first, repeated] = await Promise.all([directory.create(input), directory.create(input)]);
     assert.equal(first.id, repeated.id);
     assert.equal(directory.list().length, 1);
-    assert.deepEqual(directory.require(first.id).snapshot().agents.map(agent => agent.id), ['researcher']);
+    assert.deepEqual(directory.require(first.id).snapshot().agents.map(agent => agent.id), ['researcher', 'manager']);
     await directory.require(first.id).addMessage({ type: 'human', authorId: 'u', authorName: '用户', text: '仅记录，无模型执行' });
     await services.get(first.id).close();
     services.clear();
+    const recordsFile = path.join(stateRoot, 'rooms.json');
+    const records = JSON.parse(await fs.readFile(recordsFile, 'utf8'));
+    records[0].agentIds = ['researcher'];
+    await fs.writeFile(recordsFile, JSON.stringify(records));
     const restored = await extendGroupRooms({ ...context, roomDirectory: createGroupRoomDirectory() });
     directory = restored;
     assert.equal(restored.list()[0].name, '调研群');
     assert.equal(restored.require(first.id).snapshot().messages.at(-1).text, '仅记录，无模型执行');
     assert.equal((await restored.create(input)).id, first.id);
-    assert.equal(restored.listForAgent('manager').length, 0);
+    assert.equal(restored.listForAgent('manager').length, 1);
     assert.equal(restored.listForAgent('researcher').length, 1);
+    assert.deepEqual(JSON.parse(await fs.readFile(recordsFile, 'utf8'))[0].agentIds, ['researcher', 'manager']);
   } finally {
     await Promise.allSettled([...services.values()].map(service => service.close()));
     await Promise.allSettled((directory?.list() || []).map(room => directory.require(room.id).close()));

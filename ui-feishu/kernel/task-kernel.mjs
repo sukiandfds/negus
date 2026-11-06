@@ -61,7 +61,8 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
     const task = await mutate(data => {
       const current = requireTask(data, id);
       if (terminalStates.has(current.state)) return current;
-      Object.assign(current, { state: result.status, result: String(result.text || ''), error: String(result.error || ''), updatedAt: now() });
+      const stopped = current.cancelRequested && result.status === 'completed';
+      Object.assign(current, { state: stopped ? 'interrupted' : result.status, result: stopped ? '' : String(result.text || ''), error: stopped ? '' : String(result.error || ''), updatedAt: now() });
       data.deliveries.push({ id: `result:${id}`, taskId: id, state: 'pending', attempts: 0 });
       return current;
     });
@@ -90,6 +91,18 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
     const input = requireTask(data, id).inputs?.find(item => item.requestId === requestId);
     if (!input) throw fail('交接输入不存在', 404);
     input.accepted = true;
+    return input;
+  });
+  const cancelInput = (id, requestId) => mutate(data => {
+    const input = requireTask(data, id).inputs?.find(item => item.requestId === requestId);
+    if (!input) throw fail('交接输入不存在', 404);
+    input.cancelled = true;
+    return input;
+  });
+  const linkInput = (id, requestId, turnId) => mutate(data => {
+    const input = requireTask(data, id).inputs?.find(item => item.requestId === requestId);
+    if (!input) throw fail('交接输入不存在', 404);
+    input.turnId = turnId;
     return input;
   });
   const attributeFollowup = (id, parentTaskId, submissionId, sourceTaskId) => mutate(data => {
@@ -165,7 +178,7 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
           const key = `continuation:${task.id}`;
           if (!data.tasks.some(candidate => candidate.requestKey === key)) {
             data.tasks.push(newTask({ ...task.replyTo, parentTaskId: task.parentTaskId, resultOf: task.id,
-              title: task.title, instructions: `直属下属任务结果（这是已有任务的反馈，请先核验再向用户汇报）：\n${task.title}\n状态：${task.state}\n${task.error || task.result}`,
+              title: task.title, instructions: `交接任务结果（这是已有任务的反馈，请先核验再决定后续处理）：\n${task.title}\n状态：${task.state}\n${task.error || task.result}`,
               attachments: [], kind: 'continuation' }, key));
           }
         }
@@ -274,7 +287,7 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
   recoveryTimer.unref?.();
   schedule();
   return {
-    enqueue, delegate, recordInput, acceptInput, attributeFollowup, cancel,
+    enqueue, delegate, recordInput, acceptInput, cancelInput, linkInput, attributeFollowup, cancel,
     list: () => copy(state.tasks), deliveries: () => copy(state.deliveries), get: id => copy(find(id)),
     hasPendingWork: () => state.tasks.some(task => !terminalStates.has(task.state)),
     retryDelivery: async id => { await mutate(data => {

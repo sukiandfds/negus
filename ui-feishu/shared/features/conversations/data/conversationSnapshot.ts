@@ -109,27 +109,40 @@ const openDatabase = () => database ||= new Promise<IDBDatabase>((resolve, rejec
   request.onblocked = () => { database = undefined; reject(new Error('Conversation cache upgrade blocked')); };
 });
 export const readConversationSnapshot = () => restored || readLegacySnapshot();
-export const restoreConversationCache = async () => {
+export const restoreConversationCache = async (currentOnly = false) => {
   if (typeof indexedDB === 'undefined') return;
   try {
     const db = await openDatabase();
     const saved = await new Promise<ConversationSnapshot | null>((resolve, reject) => {
       const tx = db.transaction(['threads', 'metadata'], 'readonly');
       const metadata = tx.objectStore('metadata').get('snapshot');
-      const threads = tx.objectStore('threads').getAll();
+      let selectedId = '';
+      let threads: IDBRequest;
+      metadata.onsuccess = () => {
+        selectedId = new URLSearchParams(window.location.search).get('thread') || metadata.result?.selectedId || '';
+        threads = currentOnly ? tx.objectStore('threads').get(selectedId) : tx.objectStore('threads').getAll();
+      };
       tx.oncomplete = () => {
         const value = metadata.result as ConversationSnapshot | undefined;
         if (!value) return resolve(null);
-        const records = threads.result as { threadId: string; entry: CachedConversation; view?: ConversationPresentation }[];
-        for (const record of records) persisted.set(record.threadId, JSON.stringify(record));
-        const selected = records.find(record => record.threadId === value.selectedId);
-        resolve(validSnapshot({ ...value, session: selected?.entry.session || null,
+        const records = (currentOnly ? [threads.result].filter(Boolean) : threads.result) as { threadId: string; entry: CachedConversation; view?: ConversationPresentation }[];
+        if (!currentOnly) for (const record of records) persisted.set(record.threadId, JSON.stringify(record));
+        const selected = records.find(record => record.threadId === selectedId);
+        resolve(validSnapshot({ ...value, selectedId, session: selected?.entry.session || null,
           isPartial: selected?.entry.isPartial, recentSessions: records.filter(record => record !== selected).map(record => record.entry),
           presentation: Object.fromEntries(records.filter(record => record.view).map(record => [record.threadId, record.view!])) }));
       };
       tx.onerror = tx.onabort = () => reject(tx.error);
     });
-    restored = selectNewestSnapshot(saved, readLegacySnapshot());
+    const newest = selectNewestSnapshot(saved, restored, readLegacySnapshot());
+    if (saved && newest && newest !== saved) {
+      const entries = new Map([...(saved.recentSessions || []), ...(saved.session ? [{ savedAt: saved.savedAt, session: saved.session, isPartial: saved.isPartial }] : []),
+        ...(newest.recentSessions || []), ...(newest.session ? [{ savedAt: newest.savedAt, session: newest.session, isPartial: newest.isPartial }] : [])].map(entry => [entry.session.threadId, entry]));
+      const selected = entries.get(newest.selectedId);
+      restored = { ...newest, session: selected?.session || null, isPartial: selected?.isPartial,
+        recentSessions: [...entries.values()].filter(entry => entry.session.threadId !== newest.selectedId),
+        presentation: { ...saved.presentation, ...newest.presentation } };
+    } else restored = newest;
   } catch (error) { console.error('[negus:conversation-cache] Cache restore failed; legacy cache retained', error); }
 };
 

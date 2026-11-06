@@ -5,8 +5,9 @@ import { createTaskKernel, terminalStates } from '../kernel/task-kernel.mjs';
 import { createNativeTaskRuntime } from '../kernel/native-task-runtime.mjs';
 import { createTaskTools } from '../kernel/task-tools.mjs';
 import { employeeTurnInstructions } from '../../windows/server/employee-definitions.mjs';
-import { executionPolicy, turnExecutionPolicy } from './execution-policy.mjs';
+import { backgroundToolConfig, executionPolicy, turnExecutionPolicy } from './execution-policy.mjs';
 import { createEmployeeHierarchy } from '../kernel/employee-hierarchy.mjs';
+import { followupTask } from './task-followup.mjs';
 
 // Adapts the same kernel to employee conversations and existing task conversations.
 export async function extendEmployeeTasks(original, { stateRoot, registry, modelProviders, appServerClient,
@@ -34,32 +35,8 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     const sameSource = target?.source?.threadId === source.runtime.threadId;
     if (!target || !sameSource || !target.runtime.threadId || !input.requestId || !input.instructions?.trim())
       throw Object.assign(Error('不能继续此后台任务'), { statusCode: 403 });
-    const submissionId = `handoff:${createHash('sha256').update(`${target.id}:${input.requestId}`).digest('hex').slice(0, 32)}`;
-    const prior = target.inputs?.find(item => item.requestId === input.requestId);
-    if (prior) {
-      if (prior.text !== input.instructions) throw Object.assign(Error('交接标识已用于其他内容'), { statusCode: 409 });
-      const pending = queue.list(target.runtime.threadId).find(item => item.submissionId === submissionId);
-      if (prior.accepted && !pending) {
-        const client = await clientFor({ modelProviderId: target.runtime.modelProviderId || await providerForThread(target.runtime.threadId), model: '' });
-        const history = await client.request('thread/read', { threadId: target.runtime.threadId, includeTurns: true });
-        const confirmed = history.thread?.turns?.some(turn => turn.items?.some(item => item.type === 'userMessage'
-          && (item.clientId === submissionId || item.clientUserMessageId === submissionId)));
-        return { taskId: target.id, threadId: target.runtime.threadId, submissionId,
-          status: confirmed ? 'confirmed' : 'needs-reconciliation' };
-      }
-      if (pending && !pending.held) return { taskId: target.id, threadId: target.runtime.threadId, submissionId, status: pending.state };
-    }
-    const records = kernel;
-    if (!prior) await records.recordInput(target.id, { requestId: input.requestId, submissionId, text: input.instructions,
-      sourceTaskId: source.id,
+    return followupTask({ kernel, source, target, input, queue, execution, clientFor, providerForThread,
       actor: source.source?.actor || (source.agentId ? { id: source.agentId, name: registry.require(source.agentId).name } : null) });
-    const held = await queue.enqueue({ threadId: target.runtime.threadId, submissionId, stableDispatchId: submissionId,
-      text: input.instructions, held: true });
-    await records.acceptInput(target.id, input.requestId);
-    let receipt = await queue.release(target.runtime.threadId, held.id);
-    const targetStatus = execution.getStatus(target.runtime.threadId);
-    if (targetStatus.active && targetStatus.turnId && queue.sendNow) receipt = await queue.sendNow(target.runtime.threadId, receipt.id);
-    return { taskId: target.id, threadId: target.runtime.threadId, submissionId, status: receipt.state };
   };
   const tools = await createTaskTools({ background: true, invoke: async (scope, input) => {
     const employeeScope = scope.startsWith('employee:');
@@ -168,7 +145,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     const taskInstructions = agentless
       ? backgroundInstructions
       : instructions(employee, task.background);
-    const options = { ...executionPolicy, developerInstructions: taskInstructions, config: task.background ? {} : tools.config(task.id),
+    const options = { ...executionPolicy, developerInstructions: taskInstructions, config: task.background ? backgroundToolConfig : tools.config(task.id),
       ...(employee.model ? { model: employee.model } : {}) };
     if (recovering) {
       if (threadId) { await register(); await client.request('thread/resume', { ...options, threadId, persistExtendedHistory: true }); }
@@ -315,6 +292,10 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     },
     onProtocolMessage: async event => {
       await original.onProtocolMessage?.(event);
+      for (const provider of taskProviders.values()) {
+        try { await provider.onProtocolMessage?.(event); }
+        catch (error) { log({ event: 'task_provider_event_failed', error: error.message }); }
+      }
       if (!['turn/started', 'turn/completed', 'item/started', 'item/completed'].includes(event.method)) return;
       const threadId = event.params?.threadId;
       const turnId = event.params?.turn?.id || event.params?.turnId;
@@ -357,7 +338,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
         return { resume: { ...executionPolicy, config: tools.config(pending) },
           bindThread: id => tools.bind(pending, ordinaryScope(id)) };
       }
-      const task = belongs(thread);
+      const task = belongs(thread) || [...taskProviders.values()].flatMap(provider => provider.tasks()).find(candidate => candidate.background && candidate.runtime?.threadId === thread.id);
       const binding = bindings.findByRuntimeSession?.('codex', thread.id);
       if (!task && binding?.conversationKind !== 'task') {
         const existing = original.runtimeOptions(thread);
@@ -366,10 +347,11 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
           turn: { ...turnExecutionPolicy } };
       }
       if (!task && original.ownsThread(thread.id)) return original.runtimeOptions(thread);
-      if (task?.source?.kind === 'conversation' && !task.agentId) return { resume: { ...executionPolicy, developerInstructions: backgroundInstructions, config: task.background ? {} : tools.config(`conversation:${thread.id}`) },
+      if (task?.source?.kind === 'conversation' && !task.agentId) return { resume: { ...executionPolicy, developerInstructions: backgroundInstructions, config: task.background ? backgroundToolConfig : tools.config(`conversation:${thread.id}`) },
         turn: { ...turnExecutionPolicy, developerInstructions: backgroundInstructions } };
-      const employee = registry.require(task?.agentId || binding.agentId);
-      return { resume: { ...executionPolicy, developerInstructions: instructions(employee, task?.background), config: task?.background ? {} : tools.config(`conversation:${thread.id}`) },
+      let employee = registry.require(task?.agentId || binding.agentId);
+      if (task?.background) employee = { ...employee, reasoningEffort: task.reasoningEffort || task.runtime?.reasoningEffort || employee.reasoningEffort };
+      return { resume: { ...executionPolicy, developerInstructions: instructions(employee, task?.background), config: task?.background ? backgroundToolConfig : tools.config(`conversation:${thread.id}`) },
         turn: { cwd: employee.projectRoot, ...turnExecutionPolicy, developerInstructions: instructions(employee, task?.background), ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}) } };
     },
     ownsThread: threadId => Boolean(belongs({ id: threadId })) || original.ownsThread(threadId)

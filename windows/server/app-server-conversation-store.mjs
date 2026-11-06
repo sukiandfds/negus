@@ -599,7 +599,7 @@ export const createAppServerConversationStore = ({
           preferMessageUpdatedAt: before === undefined && cursor === undefined,
         });
       } catch (error) {
-        if (cursor !== undefined) throw error;
+        if (cursor !== undefined || Number.isSafeInteger(limit) && limit > 0) throw error;
         console.warn(`[conversation-store] native paginated history unavailable, using thread/read: ${error.message}`);
       }
     }
@@ -623,6 +623,10 @@ export const createAppServerConversationStore = ({
     // Newly created threads have no persisted turns to read yet.
     if (freshThreadRuntime.has(threadId) && threadCache.has(threadId)) {
       return detailFromMessages(threadCache.get(threadId), [], { messageCount: 0 });
+    }
+    // Paged history is already read-only; never expand it into a complete rollout.
+    if (options.cursor !== undefined || options.before === undefined && Number.isSafeInteger(options.limit) && options.limit > 0) {
+      return readNativeSession(threadId, source, options);
     }
     let nativeReadCompleted = false;
     try {

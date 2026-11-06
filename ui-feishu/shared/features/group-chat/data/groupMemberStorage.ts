@@ -27,3 +27,11 @@ export const writeStoredMember = (member: StoredMember) => {
   // Storage may be unavailable in private or restricted mobile browsers.
   writeStorage(memberKey, member);
 };
+
+export const getOrCreateMember = (): StoredMember => {
+  const existing = readStoredMember();
+  if (existing) return existing;
+  const member = { id: createMemberId(), name: "我" };
+  writeStoredMember(member);
+  return member;
+};

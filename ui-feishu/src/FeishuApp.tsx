@@ -20,6 +20,7 @@ import { CreateGroupDialog } from './components/CreateGroupDialog';
 import { GroupWorkspace } from './components/GroupWorkspace';
 import type { ChatTab, Conversation, ConversationFilter, Section } from './types';
 import { readValidStorage, writeStorage } from '../shared/shared/state/storage';
+import { AppUpdateNotice } from '../shared/features/app-update/components/AppUpdateNotice';
 
 const defaultOrigins = ['user', 'assistant', 'employee'];
 const originsStorageKey = 'negus:conversation-origins';
@@ -180,6 +181,7 @@ export function FeishuApp() {
   };
   return <div className={`feishu-app ${mobileChat ? 'show-chat' : ''} ${railOpen ? 'rail-open' : ''}`} style={{ '--agent-initial': JSON.stringify(selectedName.slice(0, 1)), '--agent-color': avatarColor(employee?.employeeId || agentId) } as CSSProperties}>
     <ChatSkin />
+    <AppUpdateNotice surface="conversation" />
     <AppRail section={section} connected={c.connected} open={railOpen && !mobileChat} onClose={() => setRailOpen(false)}
       onSearch={() => { setSection('messages'); setMobileChat(false); document.getElementById('conversation-search')?.focus(); }}
       onSectionChange={next => { setSection(next); setMobileChat(false); setFilter(next === 'employees' ? 'employees' : 'all'); setOpenError(''); }} onSettings={() => setSettings(true)} />

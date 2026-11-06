@@ -115,6 +115,16 @@ test('stopping one queued or starting task preserves unrelated work and waits fo
   assert.equal(turns.size, 0);
 });
 
+test('late completed output cannot replace a requested stop', async t => {
+  const { kernel, turns } = await setup(t);
+  const task = await kernel.enqueue(input('late'));
+  await until(() => turns.has(task.id));
+  await kernel.cancel(task.id);
+  turns.get(task.id).resolve({ status: 'completed', text: 'late output' });
+  await until(() => kernel.get(task.id).state === 'interrupted');
+  assert.equal(kernel.get(task.id).result, '');
+});
+
 test('restart observes active native work without repeating it, and recovers pending delivery', async t => {
   const { kernel, args, turns } = await setup(t);
   const task = await kernel.enqueue(input('restart'));

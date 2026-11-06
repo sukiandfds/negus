@@ -73,6 +73,12 @@ await page.route('**/api/**', async route => {
   } else if (path === '/api/session/queue' && method === 'POST') {
     const items = queues.get(id) || [];
     if (body.action === 'remove') queues.set(id, items.filter(item => item.id !== body.itemId));
+    else if (body.action === 'sendNow') {
+      const item = items.find(entry => entry.id === body.itemId);
+      record({ ...item, threadId: id });
+      queues.set(id, items.filter(entry => entry.id !== body.itemId));
+      await page.evaluate(event => window.emit(event), { type: 'user_message_accepted', threadId: id, submissionId: item.submissionId, turnId: `turn-${item.submissionId}` });
+    }
     else { items.push({ id: body.submissionId, ...body, attachments: [], state: 'pending', createdAt: new Date().toISOString() }); queues.set(id, items); }
     data = { items: queues.get(id) };
   } else if (path === '/api/session' && method === 'POST') {
@@ -98,6 +104,16 @@ const send = async text => { await composer().fill(text); await composer().press
 const open = id => page.getByRole('button', { name: `打开对话${id}`, exact: true }).click();
 const bubble = text => page.locator('.chat-messages').getByText(text, { exact: true });
 const wait = async predicate => { const deadline = Date.now() + 6500; while (!predicate()) { if (Date.now() > deadline) throw Error('fixture condition timed out'); await page.waitForTimeout(25); } };
+const readCache = () => page.evaluate(() => new Promise((resolve, reject) => {
+  const request = indexedDB.open('negus-conversations', 1);
+  request.onerror = () => reject(request.error);
+  request.onsuccess = () => {
+    const db = request.result, tx = db.transaction(['threads', 'metadata'], 'readonly');
+    const threads = tx.objectStore('threads').getAll(), metadata = tx.objectStore('metadata').get('snapshot');
+    tx.oncomplete = () => { db.close(); resolve({ threads: threads.result, metadata: metadata.result }); };
+    tx.onerror = tx.onabort = () => reject(tx.error);
+  };
+}));
 try {
   if (process.env.NEGUS_TEST_INITIAL_STATUS === '1') {
     heldId = 'a'; holdRead = true; readGate = new Promise(resolve => releaseRead = resolve);
@@ -180,8 +196,8 @@ try {
     await page.getByText(shownReason, { exact: true }).waitFor();
     await open('b'); await page.reload(); await bubble('历史b').waitFor(); await open('a');
     await bubble(`图片失败-${mode}`).waitFor(); await page.getByText(shownReason, { exact: true }).waitFor();
-    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('negus-conversation-snapshot-v1')));
-    const restored = [saved.session, ...saved.recentSessions.map(entry => entry.session)].find(session => session.threadId === 'a');
+    const saved = await readCache();
+    const restored = saved.threads.find(record => record.threadId === 'a').entry.session;
     const message = restored.messages.find(message => message.text === `图片失败-${mode}`);
     assert.equal(message.deliveryState, mode);
     assert.equal(message.blocks.find(block => block.type === 'image').file.id, 'photo');
@@ -204,7 +220,7 @@ try {
   await wait(() => sends.some(body => body.threadId === 'created'));
   await page.waitForTimeout(250);
   assert.equal(await bubble('创建中发送的消息').count(), 1);
-  const cached = await page.evaluate(() => JSON.parse(localStorage.getItem('negus-conversation-snapshot-v1')));
+  const cached = await readCache();
   assert.equal(JSON.stringify(cached).includes('pending:'), false, 'created conversation must leave no temporary cache ID');
   console.log('PASS pending ID migrates messages, list and URL while preserving the composer draft');
 
@@ -216,10 +232,16 @@ try {
   await send('运行时排队的消息');
   await page.getByRole('region', { name: '指令等候中' }).getByText('运行时排队的消息', { exact: true }).waitFor();
   assert.equal(queues.get('created').length, 1);
+  await page.getByRole('button', { name: '直接发送', exact: true }).click();
+  await wait(() => messages.get('created').some(message => message.text === '运行时排队的消息'));
+  await open('a'); await open('b');
+  await page.getByRole('button', { name: '打开新建的对话', exact: true }).click();
+  await bubble('运行时排队的消息').waitFor();
+  assert.equal(await bubble('运行时排队的消息').count(), 1);
   await page.getByRole('button', { name: '停止当前任务', exact: true }).filter({ visible: true }).click();
   await wait(() => calls.some(call => call.path === '/api/session/interrupt' && call.id === 'created'));
   assert.equal(calls.some(call => call.method === 'GET' && ['/api/session/context', '/api/execution-status', '/api/session/queue', '/api/session/goal', '/api/session/user-input'].includes(call.path)), false);
-  console.log('PASS queue and stop use unified state without independent detail reads');
+  console.log('PASS running append survives direct send and rapid switching; queue and stop use unified state');
 
   await open('a'); await bubble('历史a').waitFor();
   await page.locator('.chat-messages').hover();

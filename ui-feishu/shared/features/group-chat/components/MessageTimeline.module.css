@@ -18,20 +18,21 @@
 .emptyRoom { display: grid; min-height: 100%; place-content: center; justify-items: center; gap: 8px; color: #747474; text-align: center; }
 .emptyRoom svg { width: 25px; height: 25px; }
 .emptyRoom strong { color: #aaa; font-size: 13px; }
-.message { display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: start; gap: 11px; margin: 0 0 24px; }
-.messageAvatar { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid #3b3b3b; border-radius: 7px; padding: 0; background: #2d2d2d; color: #dedede; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; }
-.messageAvatar:hover { border-color: #777; }
-.agentMessageAvatar { border-color: #55704d; background: #233020; color: #bde39b; }
-.systemMessage .messageAvatar { border-color: #6d5145; background: #30221d; color: #e0a886; }
-.messageContent { width: min(720px, 82%); min-width: 0; padding-top: 1px; }
-.messageMeta { display: flex; min-width: 0; align-items: center; gap: 8px; margin-bottom: 5px; }
-.messageMeta strong { overflow: hidden; color: #dfdfdf; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.messageMeta span { color: #686868; font-size: 10px; }
+.message { padding-bottom: 34px; }
+.messageContent { width: 100%; min-width: 0; }
+.messageMeta { display: flex; min-width: 0; flex-direction: row; align-items: baseline; }
+.ownMessage .messageMeta { justify-content: flex-end; }
+.messageAuthor { composes: authorName from "../../conversations/components/ConversationView.module.css"; max-width: 100%; overflow: hidden; border: 0; padding: 0; background: transparent; font-family: inherit; text-overflow: ellipsis; white-space: nowrap; }
+button.messageAuthor { cursor: pointer; }
+.messageTime { composes: timestamp from "../../conversations/components/ConversationView.module.css"; }
 .messageMeta em { padding: 1px 5px; border: 1px solid #465d3f; border-radius: 4px; color: #9ac684; font-size: 9px; font-style: normal; }
-.messageBubble { width: fit-content; min-width: 0; max-width: 100%; border: 1px solid var(--color-border); border-radius: 14px; padding: 10px 13px 11px; background: var(--color-surface-soft); }
-.ownMessageBubble { border-color: rgba(255, 255, 255, .09); background: #343434; }
-.messageBubble > p { margin: 0; color: #d0d0d0; font-size: 13px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
-.markdown { color: #d4d4d4; font-size: 13px; line-height: 1.68; overflow-wrap: anywhere; }
+.messageBubble { min-width: 0; }
+.ownMessageBubble { composes: userBubble from "../../conversations/components/ConversationView.module.css"; }
+.agentMessageBubble { composes: assistantBody from "../../conversations/components/ConversationView.module.css"; }
+.messageActions { display: flex; width: 100%; min-height: 24px; margin-top: 5px; }
+.ownMessage .messageActions { justify-content: flex-end; }
+.messageBubble > p { margin: 0; color: var(--color-text); font-size: 15px; line-height: 1.68; white-space: pre-wrap; overflow-wrap: anywhere; }
+.markdown { color: var(--color-text); font-size: 15px; line-height: 1.68; overflow-wrap: anywhere; }
 .markdown > :first-child { margin-top: 0; }
 .markdown > :last-child { margin-bottom: 0; }
 .markdown p, .markdown ul, .markdown ol, .markdown pre, .markdown blockquote { margin: 7px 0; }
@@ -41,30 +42,20 @@
 .markdown a { color: #a8d47d; }
 .markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
 .markdown th, .markdown td { padding: 6px 8px; border: 1px solid #353535; text-align: left; }
-.streamingText { margin: 0; color: #d4d4d4; font-size: 13px; line-height: 1.68; white-space: pre-wrap; overflow-wrap: anywhere; }
-.cursor { display: inline-block; width: 5px; height: 14px; margin-left: 3px; vertical-align: -2px; background: #b9e769; animation: blink 1s steps(2) infinite; }
-@keyframes blink { 50% { opacity: 0; } }
 
 @media (max-width: 680px) {
   .timeline { padding: 22px 15px 24px; }
-  .message { grid-template-columns: 28px minmax(0, 1fr); gap: 9px; margin-bottom: 20px; }
-  .messageAvatar { width: 28px; height: 28px; }
-  .messageContent { max-width: 88%; }
+  .message { padding-bottom: 28px; }
 }
 
 @media (any-pointer: coarse) {
   .timeline { -webkit-overflow-scrolling: touch; }
 }
 
-.copyButton { display: inline-grid; width: 18px; height: 18px; margin-left: auto; place-items: center; border: 0; border-radius: 4px; padding: 0; background: transparent; color: #8d8d8d; cursor: pointer; }
-.copyButton:hover, .copyButton:focus-visible { background: #2c2c2c; color: #eee; }
-.copyButton svg { width: 12px; height: 12px; }
 .emptyRoom p { max-width: 280px; margin: 0; color: #8a8a8a; font-size: 12px; line-height: 1.55; }
 
 .askedLine { margin: 0 0 6px; color: #8fb56f; font-size: 11px; line-height: 1.4; }
 
-.quoteButton { border: 0; background: transparent; color: #8d8d8d; cursor: pointer; font: inherit; font-size: 10px; }
-.quoteButton:hover, .quoteButton:focus-visible { color: #eee; }
 .replyLine { display: block; width: 100%; margin: 0 0 6px; border: 0; border-left: 2px solid #3a3a3a; padding: 0 0 0 8px; background: transparent; color: #9a9a9a; cursor: pointer; font: inherit; font-size: 11px; line-height: 1.4; text-align: left; }
 .replyLine:hover, .replyLine:focus-visible { color: #d5d5d5; }
 .messageFocused .messageBubble { border-color: #8fb56f; }

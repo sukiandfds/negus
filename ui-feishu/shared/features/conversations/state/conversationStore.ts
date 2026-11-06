@@ -149,8 +149,7 @@ export class ConversationStore {
       const keys = Object.keys(next) as (keyof Patch)[];
       if (keys.every(key => signature(current[key]) === signature(next[key]))) return;
       this.live.set(id, { ...this.live.get(id), ...next });
-      if (keys.some(key => signature(current[key], key === 'executionStatus') !== signature(next[key], key === 'executionStatus'))) this.invalidate(id);
-      else this.notify();
+      this.notify();
     } else {
       this.revisions.set(id, (this.revisions.get(id) || 0) + 1);
       this.fieldRevisions.set(id, { ...this.fieldRevisions.get(id),

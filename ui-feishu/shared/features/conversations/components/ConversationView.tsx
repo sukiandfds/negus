@@ -93,7 +93,7 @@ export function Message({
           <span>由已安排任务发送</span>
         </div>
       ) : null}
-      {!executionPlaceholder ? <div className={styles.body}>
+      {!executionPlaceholder ? <div className={`${styles.body} ${message.role === "user" && !message.displaySourceAgentId ? styles.userBubble : styles.assistantBody}`}>
         {!queued && message.deliveryState === "pending" ? <Clock3 className={styles.waiting} role="status" aria-label="正在确认指令是否已送达" /> : null}
         {message.deliveryState === "sending" ? <LoaderCircle className={styles.sending} role="status" aria-label="发送中" /> : null}
         {message.role === "assistant" && message.turnStatus === "interrupted" ? <small>已中断</small> : null}
@@ -356,7 +356,6 @@ export function ConversationView({
         setReturnButtonThread(root.scrollHeight - root.scrollTop - root.clientHeight > 120 ? session?.threadId || "" : "");
       }}>
         <section className={styles.conversation} aria-label="真实项目对话" aria-live="off">
-        {error ? <div className={styles.state} role="alert">{error}</div> : null}
         {!loading && !error && !session && listAvailable ? <div className={styles.state}>当前项目暂无可显示对话</div> : null}
         {session ? (
           <>

@@ -34,6 +34,12 @@ export async function extendGroupRooms({ stateRoot, roomDirectory, services, pro
     writes = writes.catch(() => {}).then(async () => { await fs.mkdir(stateRoot, { recursive: true }); await fs.writeFile(`${file}.tmp`, text); await fs.rename(`${file}.tmp`, file); });
     return writes;
   };
+  if (!employees().some(employee => employee.id === 'manager')) throw new Error('运营管理员工不存在');
+  let migrated = false;
+  for (const record of records) {
+    if (!record.agentIds.includes('manager')) { record.agentIds.push('manager'); migrated = true; }
+  }
+  if (migrated) await save();
   const register = async record => {
     const identity = projects().find(project => project.projectId === record.projectId && project.kind !== 'employee');
     if (!identity) throw Object.assign(new Error('群聊关联项目不存在'), { statusCode: 400 });
@@ -59,7 +65,7 @@ export async function extendGroupRooms({ stateRoot, roomDirectory, services, pro
     if (pending.has(requestId)) return pending.get(requestId);
     const name = typeof input.name === 'string' ? input.name.trim() : '';
     if (!name) throw Object.assign(new Error('请填写群聊名称'), { statusCode: 400 });
-    const agentIds = [...new Set(Array.isArray(input.agentIds) ? input.agentIds : [])];
+    const agentIds = [...new Set(['manager', ...(Array.isArray(input.agentIds) ? input.agentIds : [])])];
     const record = { id: `chat-${randomUUID()}`, name, projectId: String(input.projectId || ''), agentIds, requestId, createdAt: new Date().toISOString() };
     const work = (async () => {
       const room = await register(record);

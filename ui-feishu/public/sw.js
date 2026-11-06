@@ -38,14 +38,16 @@ self.addEventListener("fetch", (event) => {
     // Only application pages may fall back to the cached application shell.
     if (!["/", "/index.html"].includes(url.pathname)) return;
     const canonicalPath = "/index.html";
-    const refresh = fetch(request).then((response) => {
-      if (!response.ok) throw new Error(`navigation HTTP ${response.status}`);
-      return caches.open(CACHE_NAME).then((cache) => {
+    event.respondWith(caches.open(CACHE_NAME).then(async (cache) => {
+      const cached = await cache.match(canonicalPath);
+      const refresh = fetch(request).then((response) => {
+        if (!response.ok) throw new Error(`navigation HTTP ${response.status}`);
         event.waitUntil(cache.put(canonicalPath, response.clone()).catch(error => console.warn("[negus:cache]", error)));
         return response;
       });
-    });
-    event.respondWith(refresh.catch(() => caches.match(canonicalPath)));
+      event.waitUntil(refresh.catch(() => {}));
+      return cached || refresh;
+    }));
     return;
   }
 

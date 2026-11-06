@@ -2,19 +2,18 @@
 export async function readConversationBatches<T>(
   entries: readonly T[],
   read: (entry: T, signal: AbortSignal) => Promise<void>,
-  publish: (results: { entry: T; error: string; retry?: boolean }[]) => void,
+  publish: (results: { entry: T; error: string }[]) => void,
   signal: AbortSignal,
   timeoutMs = 10000,
   firstBatchSize = 10,
   readTimeoutMs = timeoutMs * 6,
 ) {
   const batches = [entries.slice(0, firstBatchSize), entries.slice(firstBatchSize)];
-  const attempts = new Map<T, number>();
   for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
     const batch = batches[batchIndex];
     if (signal.aborted) return;
     if (!batch.length) continue;
-    const results: { entry: T; error: string; retry?: boolean }[] = new Array(batch.length);
+    const results: { entry: T; error: string }[] = new Array(batch.length);
     let next = 0;
     const deadline = Date.now() + timeoutMs;
     const published = new Set<number>();
@@ -40,16 +39,12 @@ export async function readConversationBatches<T>(
           })]);
           results[index] = { entry, error: '' };
         } catch (reason) {
-          const count = (attempts.get(entry) || 0) + 1;
-          attempts.set(entry, count);
-          results[index] = { entry, error: reason instanceof Error ? reason.message : String(reason), retry: count < 3 };
+          results[index] = { entry, error: reason instanceof Error ? reason.message : String(reason) };
         } finally { clearTimeout(timer); if (cancel) readSignal.removeEventListener('abort', cancel); }
       }
     }));
     clearTimeout(publicationTimer);
     flush();
     if (next < batch.length) batches.splice(batchIndex + 1, 0, batch.slice(next));
-    const retry = results.filter(result => result?.retry).map(result => result.entry);
-    if (retry.length) batches.push(retry);
   }
 }

@@ -1,63 +1,30 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Bot, Check, Copy } from "lucide-react";
+import { Bot } from "lucide-react";
 import { JumpToLatest } from "../../../components/JumpToLatest/JumpToLatest";
 import { useReturnToBottom } from "../../../components/JumpToLatest/useReturnToBottom";
-import { AttachmentDisplay } from "../../attachments/components/AttachmentDisplay";
 import { ArtifactCollection } from "../../artifacts/components/ArtifactCollection";
 import type { Artifact, ArtifactReviewDecision } from "../../artifacts/model/types";
-import { MarkdownContent } from "../../conversations/rendering/ContentRenderer";
+import { ContentRenderer, MarkdownContent } from "../../conversations/rendering/ContentRenderer";
+import { ExecutionTimeline } from "../../execution/components/ExecutionTimeline";
+import { emptyStatus } from "../../context-management/hooks/useContextManagement";
+import { MessageActions } from "../../conversations/components/MessageActions";
 import { splitMentions } from "../model/agentMentions";
 import type { GroupAgent, GroupMember, GroupMessage, GroupMessageHistory, GroupProfile, GroupStreamingMessage } from "../model/types";
-import { formatClockTime, formatDayLabel, localDateKey } from "../../../shared/format/dateTime";
+import { formatConversationTimestamp, formatDayLabel, localDateKey } from "../../../shared/format/dateTime";
 import styles from "./MessageTimeline.module.css";
 
 
-function CopyMessageButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<number | null>(null);
-  useEffect(() => () => {
-    if (timer.current !== null) window.clearTimeout(timer.current);
-  }, []);
-  if (!text.trim()) return null;
-  return (
-    <button
-      className={styles.copyButton}
-      type="button"
-      aria-label={copied ? "已复制" : "复制内容"}
-      title={copied ? "已复制" : "复制内容"}
-      onClick={() => {
-        const finish = (ok: boolean) => {
-          setCopied(ok);
-          if (timer.current !== null) window.clearTimeout(timer.current);
-          timer.current = window.setTimeout(() => setCopied(false), 1600);
-        };
-        const write = navigator.clipboard?.writeText(text);
-        if (write) {
-          void write.then(() => finish(true)).catch(() => finish(false));
-          return;
-        }
-        finish(false);
-      }}
-    >
-      {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
-    </button>
-  );
+function GroupExecution({ id, label, text, startedAt }: { id: string; label: string; text: string; startedAt: string | null }) {
+  return <ExecutionTimeline contextStatus={emptyStatus(id)} status={{ type: "execution_status", threadId: id, turnId: id, phase: "working", label, detail: "", commentary: text, active: true, startedAt, updatedAt: null,
+    activities: text ? [{ id, phase: "working", label: "正在回复", detail: text, completed: false, updatedAt: startedAt || "" }] : [] }} />;
 }
+
 function agentPresence(agent: GroupAgent) {
   if (agent.active && agent.phase === "queued") return { tone: "queued", label: agent.label || "等候" };
   if (agent.active) return { tone: "working", label: agent.label || "工作中" };
   return { tone: "idle", label: "空闲" };
 }
 
-function QuoteMessageButton({ message, onQuote }: { message: GroupMessage; onQuote?: (message: GroupMessage) => void }) {
-  const quotable = Boolean(message.text.trim() || (message.attachments || []).some((file) => file.name));
-  if (!onQuote || message.pending || message.id.startsWith("optimistic-") || !quotable) return null;
-  return (
-    <button className={styles.quoteButton} type="button" aria-label="引用这条消息" title="引用" onClick={() => onQuote(message)}>
-      引用
-    </button>
-  );
-}
 export function MessageTimeline({
   active,
   roomId,
@@ -245,7 +212,7 @@ export function MessageTimeline({
       <div className={styles.timeline} ref={scrollRef} onScroll={(event) => onTimelineScroll(event.currentTarget)}>
         {history?.hasOlder ? <div className={styles.historyMarker}>继续向上加载更早消息</div> : null}
         {!messages.length && !streams.length ? (
-          <div className={styles.emptyRoom}><Bot /><strong>这个群还没有消息</strong><p>可以直接发言，也可以用 @ 点名；说“各位”或“所有人”会让员工一起讨论。</p></div>
+          <div className={styles.emptyRoom}><Bot /><strong>这个群还没有消息</strong><p>可以直接发言，也可以用 @ 点名员工。</p></div>
         ) : null}
         {messages.map((message, index) => {
           const agent = message.type === "agent"
@@ -263,46 +230,32 @@ export function MessageTimeline({
           const authorName = agent?.name || message.authorName;
           const ownMessage = message.type === "human" && Boolean(currentMemberId) && message.authorId === currentMemberId;
           const askedNames = (message.targetAgentIds || []).map((id) => agents.find((item) => item.id === id)?.name || "").filter(Boolean);
-          const broadcastMessage = message.type === "human"
-            && /(?:^|[\s,@，。！？：；、])(?:@?(?:所有人|全员|各位|每个人|全部员工|所有员工)|大家)(?=$|[\s,@，。！？：；、]|看|都|一起|讨论|检查|先|请|帮|来)/u.test(message.text || "");
           const statusText = message.type === "human" && message.pending
             ? "发送中"
             : message.type === "human" && message.failure
               ? "发送失败"
-            : pendingAgent
-              ? (agent?.active && agent.label ? agent.label : "正在回复")
-              : formatClockTime(message.createdAt);
+            : formatConversationTimestamp(message.createdAt);
           return (
           <Fragment key={message.id}>
             {index === 0 || localDateKey(messages[index - 1].createdAt) !== localDateKey(message.createdAt)
               ? <div className={styles.dateDivider}><span>{formatDayLabel(message.createdAt)}</span></div>
               : null}
             <article
-              className={`${styles.message} ${message.type === "system" ? styles.systemMessage : ""} ${highlightedId === message.id ? styles.messageFocused : ""}`}
+              className={`${styles.message} ${ownMessage ? styles.ownMessage : ""} ${message.type === "system" ? styles.systemMessage : ""} ${highlightedId === message.id ? styles.messageFocused : ""}`}
               data-message-id={message.id}
             >
-              {profile ? (
-                <button
-                  className={`${styles.messageAvatar} ${message.type === "agent" ? styles.agentMessageAvatar : ""}`}
-                  type="button"
-                  aria-label={`查看${profile.profile.name}的个人信息`}
-                  onClick={() => onOpenProfile(profile)}
-                >
-                  {message.type === "agent" ? "AI" : authorName.slice(0, 1)}
-                </button>
-              ) : <span className={`${styles.messageAvatar} ${message.type === "agent" ? styles.agentMessageAvatar : ""}`}>{message.type === "agent" ? "AI" : message.type === "system" ? "!" : authorName.slice(0, 1)}</span>}
               <div className={styles.messageContent}>
-                <div className={styles.messageMeta}><strong>{authorName}</strong><span>{statusText}</span><CopyMessageButton text={message.text} /><QuoteMessageButton message={message} onQuote={onQuote} /></div>
-                <div className={`${styles.messageBubble} ${ownMessage ? styles.ownMessageBubble : ""}`}>
+                <div className={styles.messageMeta}>{profile ? <button type="button" className={styles.messageAuthor} aria-label={`查看${profile.profile.name}的个人信息`} onClick={() => onOpenProfile(profile)}>{authorName}</button> : <span className={styles.messageAuthor}>{authorName}</span>}<span className={styles.messageTime}>{statusText}</span></div>
+                <div className={`${styles.messageBubble} ${ownMessage ? styles.ownMessageBubble : message.type === "agent" ? styles.agentMessageBubble : ""}`}>
                   {message.replyTo ? (
                     <button className={styles.replyLine} type="button" onClick={() => message.replyTo && onRevealReply?.(message.replyTo)}>
                       {message.type === "system" && message.failure ? "未完成的任务" : "回复"} {message.replyTo.authorName}：{message.replyTo.text}
                     </button>
                   ) : null}
-                  {message.type === "human" && askedNames.length ? <p className={styles.askedLine}>{broadcastMessage ? `已派给 ${askedNames.length} 位员工分别处理` : askedNames.length > 1 ? `按顺序点名了 ${askedNames.join("、")}` : `点名了 ${askedNames[0]}`}</p> : null}
+                  {message.type === "human" && askedNames.length ? <p className={styles.askedLine}>{askedNames.length > 1 ? `点名了 ${askedNames.join("、")}` : `点名了 ${askedNames[0]}`}</p> : null}
                   {message.type === "agent"
                     ? pendingAgent
-                      ? <p className={styles.streamingText}>{liveStream?.text || message.text}<i className={styles.cursor} /></p>
+                      ? <GroupExecution id={message.workId || message.id} label={agent?.label || "正在回复"} text={liveStream?.text || message.text} startedAt={message.createdAt} />
                       : <MarkdownContent text={message.text} className={styles.markdown} />
                     : message.text ? <p>{splitMentions(message.text, agents).map((part, partIndex) => part.mention ? <mark key={partIndex} className={styles.mention}>{part.text}</mark> : <Fragment key={partIndex}>{part.text}</Fragment>)}</p> : null}
                   {message.type === "system" && message.failure && message.agentId && onRetryAgent ? (
@@ -310,7 +263,7 @@ export function MessageTimeline({
                       再让{agents.find((item) => item.id === message.agentId)?.name || "该员工"}试一次
                     </button>
                   ) : null}
-                  <AttachmentDisplay files={message.attachments || []} />
+                  {message.attachments?.length ? <ContentRenderer message={{ id: message.id, role: message.type === "human" ? "user" : "assistant", text: "", blocks: message.attachments.map(file => ({ id: file.id, type: file.mimeType.startsWith("image/") ? "image" : file.mimeType.startsWith("audio/") ? "audio" : file.mimeType.startsWith("video/") ? "video" : "file", source: file.url, name: file.name, file })) }} /> : null}
                   {message.type === "human" && message.failure && onRetrySend ? (
                     <button className={styles.retryButton} type="button" disabled={retryDisabled} onClick={() => onRetrySend(message)}>
                       重新发送
@@ -326,6 +279,7 @@ export function MessageTimeline({
                     onReview={onReviewArtifact}
                   />
                 </div>
+                <div className={styles.messageActions}><MessageActions text={message.text} forkable={false} forking={false} onFork={async () => false} editable={false} editing={false} onEdit={() => {}} onQuote={onQuote && !message.pending && !message.id.startsWith("optimistic-") && (message.text.trim() || message.attachments?.some(file => file.name)) ? () => onQuote(message) : undefined} /></div>
               </div>
             </article>
           </Fragment>
@@ -335,13 +289,10 @@ export function MessageTimeline({
           const agent = agents.find((item) => item.id === value.agentId);
           return (
             <article className={styles.message} key={workId}>
-              {agent ? (
-                <button className={`${styles.messageAvatar} ${styles.agentMessageAvatar}`} type="button" aria-label={`查看${agent.name}的个人信息`} onClick={() => onOpenProfile({ kind: "agent", profile: agent })}>AI</button>
-              ) : <span className={`${styles.messageAvatar} ${styles.agentMessageAvatar}`}>AI</span>}
               <div className={styles.messageContent}>
-                <div className={styles.messageMeta}><strong>{agent?.name || "Codex Agent"}</strong><span>...</span></div>
-                <div className={styles.messageBubble}>
-                  <p className={styles.streamingText}>{value.text}<i className={styles.cursor} /></p>
+                <div className={styles.messageMeta}>{agent ? <button type="button" className={styles.messageAuthor} aria-label={`查看${agent.name}的个人信息`} onClick={() => onOpenProfile({ kind: "agent", profile: agent })}>{agent.name}</button> : <span className={styles.messageAuthor}>Codex Agent</span>}<span className={styles.messageTime}>...</span></div>
+                <div className={`${styles.messageBubble} ${styles.agentMessageBubble}`}>
+                  <GroupExecution id={workId} label={agent?.label || "正在回复"} text={value.text} startedAt={null} />
                 </div>
               </div>
             </article>

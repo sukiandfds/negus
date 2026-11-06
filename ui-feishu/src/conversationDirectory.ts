@@ -10,6 +10,11 @@ export const uniqueConversations = (items: Conversation[]) => [...new Map(items.
 
 // Every view points to the same conversation identity and existing navigation route.
 export function buildConversationDirectory(directory: DirectoryState, sessions: ConversationState['sessions'], archived: boolean, projectRoot = '', cachedSessions?: ConversationState['cachedSessions'], archivedByThread: Record<string, boolean> = {}) {
+  sessions = sessions.map(summary => {
+    const cached = cachedSessions?.get(summary.threadId);
+    return cached ? { ...summary, cwd: summary.cwd ?? cached.cwd, createdBy: summary.createdBy ?? cached.createdBy,
+      latestMessage: summary.latestMessage || latestMessagePreview(cached.messages) || cached.latestMessage } : summary;
+  });
   const summaries = new Map(sessions.map(s => [s.threadId, s]));
   const previewFromCache = (id = '') => latestMessagePreview(cachedSessions?.get(id)?.messages);
   const toConversation = (project: DirectoryProject, entry: Entry): Conversation => {
@@ -34,7 +39,7 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
       projectId: entry.targetProjectId || project.projectId || project.id,
       time: directoryIsNewer ? directoryTime : sessionTime || entry.lastActivityAt || entry.updatedAt,
       active: Boolean(status?.active), label: conversationStatus(status, directory.contextByThread[entry.threadId || '']),
-      preview: (directoryIsNewer ? visibleTaskPreview(entry.latestMessage) : '') || previewFromCache(entry.threadId || '') || session?.latestMessage, session,
+      preview: (directoryIsNewer ? visibleTaskPreview(entry.latestMessage) : '') || session?.latestMessage || previewFromCache(entry.threadId || ''), session,
     };
   };
   const all: Conversation[] = [];
@@ -71,7 +76,7 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
       threadId: session.threadId, time: cachedSessions?.get(session.threadId)?.messages.filter(message => message.role === 'user' || message.role === 'assistant').map(message => message.createdAt).filter(Boolean).sort((a, b) => Date.parse(b!) - Date.parse(a!))[0] || session.updatedAt, session,
       origin: session.nativeSubagent ? 'assistant' : session.createdBy || 'user', nativeSubagent: session.nativeSubagent,
       active: Boolean(directory.statusByThread[session.threadId]?.active),
-      label: conversationStatus(directory.statusByThread[session.threadId], directory.contextByThread[session.threadId]), preview: previewFromCache(session.threadId) ?? session.latestMessage });
+      label: conversationStatus(directory.statusByThread[session.threadId], directory.contextByThread[session.threadId]), preview: session.latestMessage || previewFromCache(session.threadId) });
   }
   // Only explicit project bindings establish membership; employee membership alone is insufficient.
   for (const project of projects) {

@@ -14,7 +14,7 @@ const replyExcerpt = (message) => {
   return cleanText(names.join("、"), 160);
 };
 const safeSequence = (value) => Number.isSafeInteger(value) && value >= 0 ? value : 0;
-const pageSize = (value) => Math.max(1, Math.min(100, Number.parseInt(value, 10) || 50));
+const pageSize = (value) => Math.max(1, Math.min(100, Number.parseInt(value, 10) || 60));
 // Keep each Agent turn bounded even when a room has a long-lived public history.
 // The full history remains available through getMessagePage()/the history API.
 const agentContextMessageLimit = 80;
@@ -144,7 +144,7 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
     activeWorks: [...activeWorks.values()],
   });
 
-  const getMessagePage = ({ beforeSequence = 0, afterSequence = 0, aroundSequence = 0, date = "", limit = 50 } = {}) => {
+  const getMessagePage = ({ beforeSequence = 0, afterSequence = 0, aroundSequence = 0, date = "", limit = 60 } = {}) => {
     const size = pageSize(limit);
     const cleanDate = validDate(date) ? String(date) : "";
     const before = safeSequence(beforeSequence);

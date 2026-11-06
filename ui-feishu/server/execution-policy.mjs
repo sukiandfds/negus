@@ -19,3 +19,7 @@ export function adaptExecutionClientSource(source) {
   return `import { executionParams } from ${JSON.stringify(import.meta.url)};\n` + source.replace(marker, `
     return requestRaw(method, executionParams(method, params), options.timeoutMs);`);
 }
+export const backgroundToolConfig = {
+  'mcp_servers.negus_handoffs': { enabled: false, command: process.execPath },
+  'mcp_servers.negus_tasks': { enabled: false, command: process.execPath },
+};

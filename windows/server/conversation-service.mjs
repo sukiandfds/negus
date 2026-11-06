@@ -101,6 +101,9 @@ export const createConversationService = ({ primary, fallback, contentVersionSto
     try {
       return await primary[operation](...args);
     } catch (error) {
+      const options = args[2] || {};
+      if (operation === "findSession" && (options.cursor !== undefined
+        || options.before === undefined && Number.isSafeInteger(options.limit) && options.limit > 0)) throw error;
       console.warn(`[conversation-service] app-server request failed, using JSONL fallback: ${error.message}`);
       return fallback[operation](...args);
     }

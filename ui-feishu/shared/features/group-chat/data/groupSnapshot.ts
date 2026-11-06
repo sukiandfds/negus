@@ -7,8 +7,6 @@ const storageKeyFor = (roomId: string) => roomId
   && roomId !== "current-project"
   ? `${storageKey}:${encodeURIComponent(roomId)}`
   : storageKey;
-const messageLimit = 80;
-const maxBytes = 384 * 1024;
 
 const validSnapshot = (value: unknown): value is GroupSnapshot => {
   const snapshot = value as GroupSnapshot | null;
@@ -59,27 +57,12 @@ export const reconcileGroupSnapshot = (
 
 export const readGroupSnapshot = (roomId = ""): GroupSnapshot | null => {
   const snapshot = readValidStorage(storageKeyFor(roomId), validSnapshot);
-  if (!snapshot) return null;
-  return {
-    ...snapshot,
-    messages: removePendingAgentMessages(snapshot.messages),
-    agents: snapshot.agents.map((agent) => ({ ...agent, active: false })),
-    members: [],
-    activeWorks: [],
-  };
+  return snapshot ? restoreActiveGroupWorks(snapshot) : null;
 };
 
 export const writeGroupSnapshot = (snapshot: GroupSnapshot) => {
-  try {
-    if (snapshot.history?.date || snapshot.history?.hasNewer) return;
-    const cached: GroupSnapshot = {
-      ...snapshot,
-      messages: removePendingAgentMessages(snapshot.messages).slice(-messageLimit),
-      activeWorks: [],
-    };
-    const serialized = JSON.stringify(cached);
-    if (serialized.length <= maxBytes) writeStorage(storageKeyFor(snapshot.room.id), cached);
-  } catch {
-    // Storage may be unavailable in private or restricted mobile browsers.
-  }
+  const previous = readGroupSnapshot(snapshot.room.id);
+  const messages = keepUnacknowledgedMessages(snapshot.messages, removePendingAgentMessages(previous?.messages || []));
+  if (!writeStorage(storageKeyFor(snapshot.room.id), { ...snapshot, messages }))
+    console.error('[negus:group-cache] Cache write failed; previous snapshot retained');
 };

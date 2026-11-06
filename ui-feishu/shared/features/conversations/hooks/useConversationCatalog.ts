@@ -77,13 +77,11 @@ export function useConversationCatalog(
   const archiveSwitchTimerRef = useRef(0);
   const creatingRef = useRef(new Set<string>());
   const archiveBusyIdsRef = useRef(new Set<string>());
-  const listRetryTimerRef = useRef(0);
   const listRequestRef = useRef(0);
   const listAbortControllerRef = useRef<AbortController | null>(null);
   const transientSessionsRef = useRef(new Map<string, SessionSummary>());
-  const refreshSessionsRef = useRef<(initialLoad?: boolean, changedThreadId?: string, reloadSelected?: boolean, retry?: boolean) => Promise<void>>(async () => {});
 
-  const refreshSessionsOnce = useCallback(async (initialLoad = false, changedThreadId?: string, reloadSelected = true, retry = true) => {
+  const refreshSessions = useCallback(async (initialLoad = false, changedThreadId?: string, reloadSelected = true) => {
     const requestId = ++listRequestRef.current;
     const requestedArchivedView = archivedViewRef.current;
     listAbortControllerRef.current?.abort();
@@ -143,12 +141,7 @@ export function useConversationCatalog(
       if (controller.signal.aborted) return;
       if (requestId !== listRequestRef.current || requestedArchivedView !== archivedViewRef.current) return;
       setListError(reason instanceof Error ? reason.message : String(reason));
-      if (retry) {
-        window.clearTimeout(listRetryTimerRef.current);
-        listRetryTimerRef.current = window.setTimeout(() => {
-          void refreshSessionsRef.current(false, changedThreadId, reloadSelected, false);
-        }, 10000);
-      }
+
     } finally {
       if (listAbortControllerRef.current === controller) listAbortControllerRef.current = null;
       if (!controller.signal.aborted && requestId === listRequestRef.current && requestedArchivedView === archivedViewRef.current) {
@@ -156,14 +149,6 @@ export function useConversationCatalog(
       }
     }
   }, [selection.adoptSelection, selection.clearSelection, selection.loadSession, selection.selectedIdRef]);
-
-  const refreshSessions = useCallback(
-    (initialLoad = false, changedThreadId?: string, reloadSelected = true, retry = true) => (
-      refreshSessionsOnce(initialLoad, changedThreadId, reloadSelected, retry)
-    ),
-    [refreshSessionsOnce],
-  );
-  refreshSessionsRef.current = refreshSessions;
 
   const updateArchiveQuery = useCallback((archived: boolean) => {
     const params = new URLSearchParams(window.location.search);
@@ -177,7 +162,6 @@ export function useConversationCatalog(
   const setArchiveViewMode = useCallback(async (archived: boolean) => {
     if (archived === archivedViewRef.current) return;
     window.clearTimeout(archiveSwitchTimerRef.current);
-    window.clearTimeout(listRetryTimerRef.current);
     listAbortControllerRef.current?.abort();
     ++listRequestRef.current;
     viewCacheRef.current.set(archivedViewRef.current, sessionsRef.current);
@@ -393,7 +377,6 @@ export function useConversationCatalog(
 
   useEffect(() => () => {
     window.clearTimeout(archiveSwitchTimerRef.current);
-    window.clearTimeout(listRetryTimerRef.current);
     listAbortControllerRef.current?.abort();
   }, []);
 

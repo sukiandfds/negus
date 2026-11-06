@@ -107,7 +107,7 @@ async function groupHarness() {
   globalThis[key] = { hooks, api };
   const rewritten = groupSource.replace(/import .* from "react";/, `const {useState,useRef,useCallback,useEffect}=globalThis.${key}.hooks;`)
     .replace(/import .* from ".*clientId";/, 'const createClientId=()=>"test";')
-    .replace(/import .* from ".*groupMemberStorage";/, 'const readStoredMember=()=>null,writeStoredMember=()=>{},createMemberId=()=>"test";')
+    .replace(/import .* from ".*groupMemberStorage";/, 'const readStoredMember=()=>null,writeStoredMember=()=>{},createMemberId=()=>"test",getOrCreateMember=()=>({id:"test",name:"我"});')
     .replace(/import .* from ".*groupApi";/, `const groupApi=globalThis.${key}.api;`)
     .replace('"../model/agentMentions"', JSON.stringify(mentionsUrl))
     .replace('"../data/groupMessageState"', JSON.stringify(groupMessageUrl))
@@ -258,4 +258,22 @@ test('inserted message keeps its position when acceptance adds the active turn i
   assert.deepEqual(ids(mergeMessageList([{ ...local, turnId: 't' }], history)), ['start', 'progress', local.id]);
   const native = { ...local, id: 'native', turnId: 't', turnItemIndex: 2, turnStartedAtMs: 1700000000000 };
   assert.deepEqual(ids(mergeMessageList([{ ...local, turnId: 't' }], [...history, native])), ['start', 'progress', 'native']);
+});
+
+test('group cache retains loaded history and restores state together', async () => {
+  const storage = new Map();
+  const previousWindow = globalThis.window;
+  globalThis.window = { localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) } };
+  try {
+    const { writeGroupSnapshot, readGroupSnapshot } = await import(groupSnapshotUrl);
+    const snapshot = { ...groupSnapshot('cache-check'), messages: Array.from({ length: 120 }, (_, i) => ({ id: `m${i}`, sequence: i + 1, text: `${i}`, type: 'human' })),
+      agents: [{ id: 'manager', active: true }], activeWorks: [{ workId: 'work', agentId: 'manager', startedAt: '2026-11-04T12:00:00Z' }] };
+    writeGroupSnapshot(snapshot);
+    writeGroupSnapshot({ ...snapshot, messages: snapshot.messages.slice(-60) });
+    const saved = readGroupSnapshot('cache-check');
+    assert.equal(saved.messages.filter(message => message.type === 'human').length, 120);
+    assert.equal(saved.agents[0].active, true);
+    assert.equal(saved.activeWorks.length, 1);
+    assert.equal(readGroupSnapshot('other'), null);
+  } finally { globalThis.window = previousWindow; }
 });

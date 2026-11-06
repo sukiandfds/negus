@@ -121,6 +121,7 @@ export interface GroupSendResponse {
 
 export interface GroupInterruptResponse {
   status: "interrupting" | "interrupted";
+  unresolvedCount?: number;
   interruptedAgentIds: string[];
   cancelledDiscussionCount: number;
 }

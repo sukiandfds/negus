@@ -35,6 +35,7 @@ export const buildDiscussionPrompt = ({
   targetProjectRoot = "",
   assignment = null,
   quotedMessage = null,
+  mentionHandoff = true,
 }) => {
   const agentName = String(agent?.name || "当前员工").trim();
   const otherAgents = agents.filter((item) => item.id !== agent?.id);
@@ -88,7 +89,7 @@ export const buildDiscussionPrompt = ({
     targetProjectRoot ? "目标项目：" + targetProjectRoot : "",
     "你是" + agentName + "，只能以自己的身份回复。不得代替其他员工发言，也不得用“[员工名]”等格式模拟他们的回复。",
     "消息标记：成员是真人，员工是其他同事，我是你已经发到群里的话，系统是状态说明。",
-    handoffAgentNames ? "只有你做不到、必须请其他员工接着做时，才在最终回复里准确写：" + handoffAgentNames + "。系统会在你回复后调用被提及的员工。不要声称未被调用的员工已经回复或完成工作。" : "",
+    handoffAgentNames && mentionHandoff ? "只有你做不到、必须请其他员工接着做时，才在最终回复里准确写：" + handoffAgentNames + "。系统会在你回复后调用被提及的员工。不要声称未被调用的员工已经回复或完成工作。" : "",
     alreadyNamed.length ? "这条消息已经点了" + alreadyNamed.join("、") + "，他们会按原来的顺序回复。不要为了交接再点一次。" : "",
     contextIntro,
     earlierOmitted > 0
