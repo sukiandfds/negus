@@ -7,6 +7,29 @@ import { createProviderConversationStore } from "../server/provider-conversation
 import { createJsonlConversationStore } from "../server/jsonl-conversation-store.mjs";
 import { createBackgroundTaskService } from '../server/background-tasks/service.mjs';
 
+test('source revision follows the compacted continuation rollout', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-provider-revision-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const id = '00000000-0000-4000-8000-000000000003';
+  const directory = path.join(root, 'sessions', '2026', '11', '08');
+  await fs.mkdir(directory, { recursive: true });
+  const original = path.join(directory, `rollout-2026-11-08T10-00-00-${id}.jsonl`);
+  await fs.writeFile(original, JSON.stringify({ type: 'session_meta', payload: { id, cwd: root } }) + '\n');
+  const current = {
+    getSessionResumeInfo: async () => ({ path: original, cwd: root }),
+  };
+  const service = createProviderConversationStore({ current, providers: { getClient: async () => ({}) },
+    createStore: () => current, stateFile: path.join(root, 'routes.json') });
+  const before = await service.getSourceRevision(id);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const continuation = path.join(directory, `rollout-2026-11-08T11-00-00-${id}_continuation.jsonl`);
+  await fs.writeFile(continuation, JSON.stringify({ type: 'response_item',
+    payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '压缩后继续' }] } }) + '\n');
+  const after = await service.getSourceRevision(id);
+  assert.ok(before);
+  assert.notEqual(after, before);
+});
+
 test('native child follows the registered parent provider without acquiring a route', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-native-child-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -527,4 +550,215 @@ test('history reads carry the saved server path without resuming or changing pro
   await service.findSession('retained', 'all', { limit: 30 });
   assert.deepEqual(calls, [['retained', 'all', { limit: 30, historyFile: '/saved/history.jsonl' }]]);
   assert.equal((await service.findSession('retained')).modelProviderId, 'current');
+});
+
+test('copies a removed provider conversation into a new target-provider thread', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-removed-provider-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const threadId = '00000000-0000-4000-8000-000000000004';
+  const runtimeRoot = path.join(root, 'runtime');
+  const sourceHome = path.join(runtimeRoot, 'model-providers', 'old-provider', 'codex-home');
+  const sourceFile = path.join(sourceHome, 'sessions', '2026', '11', '08', `rollout-2026-11-08T10-00-00-${threadId}.jsonl`);
+  const sourceContent = `${JSON.stringify({ type: 'session_meta', payload: { id: threadId, session_id: threadId, cwd: root, model_provider: 'old-provider' } })}\n`;
+  await fs.mkdir(path.dirname(sourceFile), { recursive: true });
+  await fs.writeFile(sourceFile, sourceContent);
+  await new Promise(resolve => setTimeout(resolve, 15));
+  const continuationFile = path.join(path.dirname(sourceFile), `rollout-2026-11-08T11-00-00-${threadId}_${threadId}.jsonl`);
+  const continuationContent = `${JSON.stringify({ type: 'session_meta', payload: { id: threadId, session_id: threadId, cwd: root, model_provider: 'old-provider' } })}\n${JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '压缩后的完整历史' }] } })}\n`;
+  await fs.writeFile(continuationFile, continuationContent);
+  await fs.utimes(continuationFile, new Date(Date.now() + 1000), new Date(Date.now() + 1000));
+  const stateFile = path.join(runtimeRoot, 'conversation-provider-routes.json');
+  await fs.writeFile(stateFile, JSON.stringify({ [threadId]: {
+    providerId: 'old-provider', model: 'old-provider::old-model', activeModel: 'old-model',
+    resumeInfo: { path: sourceFile, cwd: root },
+    summary: { threadId, cwd: root, source: 'codex', title: '保留历史', archived: false, model: 'old-model' },
+  } }));
+  const targetRoot = path.join(runtimeRoot, 'model-providers', 'target-provider', 'codex-home');
+  let resumed;
+  const settings = [];
+  const target = {
+    resumeProviderSession: async (id, options) => { resumed = [id, options]; return { thread: { id, cwd: root } }; },
+    updateModel: async (_id, model) => { settings.push(['model', model]); },
+    updateReasoningEffort: async (_id, effort) => { settings.push(['effort', effort]); },
+  };
+  const service = createProviderConversationStore({
+    current: {},
+    stateFile,
+    providers: {
+      getClient: async ({ modelProviderId }) => ({ modelProviderId }),
+      resolveRoute: () => ({ modelProviderId: 'target-provider', model: 'new-model' }),
+      isProviderConfigured: async id => id === 'target-provider',
+      prepareResumeFile: async (_providerId, info, _ancestors, { threadId: copyId } = {}) => {
+        const name = copyId ? path.basename(info.path).replace(threadId, copyId) : path.basename(info.path);
+        const destination = path.join(targetRoot, 'sessions', '2026', '11', '08', name);
+        await fs.mkdir(path.dirname(destination), { recursive: true });
+        await fs.copyFile(info.path, destination);
+        return { ...info, path: destination };
+      },
+    },
+    createStore: (_client, providerId) => providerId === 'target-provider' ? target : null,
+  });
+  const result = await service.createFromProvider(threadId, 'target-provider::new-model');
+  assert.notEqual(result.session.threadId, threadId);
+  assert.equal(result.session.title, '保留历史 · target-provider');
+  assert.equal(result.session.forkedFromId, threadId);
+  assert.equal(resumed[0], result.session.threadId);
+  assert.equal(resumed[1].cwd, root);
+  const transferred = JSON.parse((await fs.readFile(resumed[1].path, 'utf8')).split('\n')[0]);
+  assert.equal(transferred.payload.model_provider, 'target-provider');
+  assert.equal(transferred.payload.id, result.session.threadId);
+  const transferredText = await fs.readFile(resumed[1].path, 'utf8');
+  assert.match(transferredText, /压缩后的完整历史/);
+  assert.deepEqual(settings, [['model', 'new-model']]);
+  assert.equal(await fs.readFile(sourceFile, 'utf8'), sourceContent);
+  assert.equal(await fs.readFile(continuationFile, 'utf8'), continuationContent);
+  const saved = JSON.parse(await fs.readFile(stateFile, 'utf8'))[result.session.threadId];
+  assert.equal(saved.providerId, 'target-provider');
+  assert.equal(saved.summary.forkedFromId, threadId);
+  assert.equal(saved.activeModel, 'new-model');
+  assert.equal(saved.resumeInfo.model, 'new-model');
+});
+
+test('copies into current without modifying the removed provider source file', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-removed-provider-pending-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const threadId = '00000000-0000-4000-8000-000000000005';
+  const runtimeRoot = path.join(root, 'runtime');
+  const sourceHome = path.join(runtimeRoot, 'model-providers', 'old-provider', 'codex-home');
+  const sourceFile = path.join(sourceHome, 'sessions', '2026', '11', '08', `rollout-2026-11-08T10-00-00-${threadId}.jsonl`);
+  await fs.mkdir(path.dirname(sourceFile), { recursive: true });
+  const sourceContent = `${JSON.stringify({ type: 'session_meta', payload: { id: threadId, session_id: threadId, cwd: root, model_provider: 'old-provider' } })}\n`;
+  await fs.writeFile(sourceFile, sourceContent);
+  const stateFile = path.join(runtimeRoot, 'conversation-provider-routes.json');
+  await fs.writeFile(stateFile, JSON.stringify({ [threadId]: {
+    providerId: 'old-provider', model: 'old-provider::old-model', activeModel: 'old-model',
+    summary: { threadId, cwd: root, source: 'codex', title: '切回当前', archived: false },
+  } }));
+  const currentHome = path.join(root, 'current-home');
+  await fs.mkdir(currentHome, { recursive: true });
+  await fs.writeFile(path.join(currentHome, 'config.toml'), 'model_provider = "openai"\n');
+  let resumed;
+  const settings = [];
+  const current = {
+    resumeProviderSession: async (id, options) => { resumed = [id, options]; return { thread: { id, cwd: root } }; },
+    updateModel: async (_id, model) => { settings.push(['model', model]); },
+    updateReasoningEffort: async (_id, effort) => { settings.push(['effort', effort]); },
+  };
+  const service = createProviderConversationStore({
+    current,
+    stateFile,
+    providers: {
+      getClient: async () => current,
+      resolveRoute: () => ({ modelProviderId: 'current', model: 'new-model' }),
+      isProviderConfigured: async id => id === 'current',
+      prepareResumeFile: async (_providerId, info, _ancestors, { threadId: copyId } = {}) => {
+        const name = copyId ? path.basename(info.path).replace(threadId, copyId) : path.basename(info.path);
+        const destination = path.join(currentHome, 'sessions', '2026', '11', '08', name);
+        await fs.mkdir(path.dirname(destination), { recursive: true });
+        await fs.copyFile(info.path, destination);
+        return { ...info, path: destination };
+      },
+    },
+    createStore: () => current,
+  });
+  const result = await service.createFromProvider(threadId, 'current::new-model');
+  const transferred = JSON.parse((await fs.readFile(resumed[1].path, 'utf8')).split('\n')[0]);
+  assert.equal(transferred.payload.model_provider, 'openai');
+  assert.equal(transferred.payload.id, result.session.threadId);
+  assert.deepEqual(settings, [['model', 'new-model']]);
+  assert.equal(await fs.readFile(sourceFile, 'utf8'), sourceContent);
+});
+
+test('cleans a copied thread when target resume fails', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-provider-copy-cleanup-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const threadId = '00000000-0000-4000-8000-000000000008';
+  const runtimeRoot = path.join(root, 'runtime');
+  const sourceHome = path.join(runtimeRoot, 'model-providers', 'old-provider', 'codex-home');
+  const sourceFile = path.join(sourceHome, 'sessions', '2026', '11', '08', `rollout-2026-11-08T10-00-00-${threadId}.jsonl`);
+  await fs.mkdir(path.dirname(sourceFile), { recursive: true });
+  const sourceContent = `${JSON.stringify({ type: 'session_meta', payload: { id: threadId, cwd: root, model_provider: 'old-provider' } })}\n`;
+  await fs.writeFile(sourceFile, sourceContent);
+  const stateFile = path.join(runtimeRoot, 'conversation-provider-routes.json');
+  await fs.writeFile(stateFile, JSON.stringify({ [threadId]: {
+    providerId: 'old-provider', model: 'old-provider::old-model',
+    summary: { threadId, cwd: root, source: 'codex', title: '失败清理', archived: false },
+  } }));
+  const targetRoot = path.join(runtimeRoot, 'model-providers', 'target-provider', 'codex-home');
+  const target = { resumeProviderSession: async () => { throw new Error('resume failed'); }, releaseSession: async () => {} };
+  const service = createProviderConversationStore({
+    current: {},
+    stateFile,
+    providers: {
+      getClient: async ({ modelProviderId }) => ({ modelProviderId }),
+      resolveRoute: () => ({ modelProviderId: 'target-provider', model: 'new-model' }),
+      isProviderConfigured: async id => id === 'target-provider',
+      prepareResumeFile: async (_providerId, info, _ancestors, { threadId: copyId } = {}) => {
+        const name = copyId ? path.basename(info.path).replace(threadId, copyId) : path.basename(info.path);
+        const destination = path.join(targetRoot, 'sessions', '2026', '11', '08', name);
+        await fs.mkdir(path.dirname(destination), { recursive: true });
+        await fs.copyFile(info.path, destination);
+        return { ...info, path: destination };
+      },
+    },
+    createStore: (_client, providerId) => providerId === 'target-provider' ? target : null,
+  });
+  await assert.rejects(service.createFromProvider(threadId, 'target-provider::new-model'), /resume failed/);
+  const targetFiles = await fs.readdir(path.join(targetRoot, 'sessions', '2026', '11', '08')).catch(() => []);
+  assert.deepEqual(targetFiles, []);
+  assert.equal(await fs.readFile(sourceFile, 'utf8'), sourceContent);
+  const saved = JSON.parse(await fs.readFile(stateFile, 'utf8'));
+  assert.deepEqual(Object.keys(saved), [threadId]);
+});
+
+test('runtime model wins over stale resume metadata when restoring a copied thread', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-runtime-model-restore-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const threadId = '00000000-0000-4000-8000-000000000012';
+  const history = path.join(root, 'sessions', '2026', '11', '08', `rollout-2026-11-08T10-00-00-${threadId}.jsonl`);
+  await fs.mkdir(path.dirname(history), { recursive: true });
+  await fs.writeFile(history, `${JSON.stringify({ type: 'session_meta', payload: { id: threadId, cwd: root } })}\n`);
+  const stateFile = path.join(root, 'routes.json');
+  const normalForkId = '00000000-0000-4000-8000-000000000013';
+  await fs.writeFile(stateFile, JSON.stringify({ [threadId]: {
+    providerId: 'deepseek', model: 'deepseek::deepseek-flash', runtimeModel: 'deepseek-flash', reasoningEffort: 'none',
+    summary: { threadId, cwd: root, title: 'copied', forkedFromId: 'source' },
+    resumeInfo: { path: history, cwd: root, model: 'gpt-6.1-sol', reasoningEffort: 'medium', summary: { threadId: 'source' } },
+    lastSuccessfulSettings: { model: 'deepseek::gpt-6.1-sol', reasoningEffort: 'medium' },
+  }, [normalForkId]: {
+    providerId: 'deepseek', model: 'deepseek::not-in-catalog',
+    summary: { threadId: normalForkId, cwd: root, title: 'normal fork', forkedFromId: 'source-2' },
+    resumeInfo: { path: history, cwd: root, model: 'deepseek-flash', summary: { threadId: normalForkId } },
+    lastSuccessfulSettings: { model: 'deepseek::deepseek-flash', reasoningEffort: 'none' },
+  } }));
+  let resumed;
+  const target = {
+    resumeProviderSession: async (_id, options) => { resumed = options; },
+    renameSession: async () => ({ threadId }),
+  };
+  const service = createProviderConversationStore({
+    current: {}, stateFile, createStore: () => target,
+    providers: {
+      getClient: async () => ({}),
+      resolveRoute: ({ model, modelProviderId }) => {
+        if (model === 'deepseek::not-in-catalog') throw new Error('not in catalog');
+        if (modelProviderId === 'deepseek' && !['deepseek-flash', 'deepseek::deepseek-flash'].includes(model)) {
+          throw new Error('wrong stale model');
+        }
+        return { modelProviderId, model: model.replace(/^deepseek::/, '') };
+      },
+      prepareResumeFile: async (_providerId, info) => info,
+    },
+  });
+  await service.renameSession(threadId, 'renamed');
+  assert.equal(resumed.model, 'deepseek-flash');
+  const saved = JSON.parse(await fs.readFile(stateFile, 'utf8'))[threadId];
+  assert.equal(saved.activeModel, 'deepseek-flash');
+  assert.equal(saved.runtimeModel, 'deepseek-flash');
+  assert.equal(saved.resumeInfo.model, 'deepseek-flash');
+  assert.deepEqual(saved.lastSuccessfulSettings, { model: 'deepseek::deepseek-flash', reasoningEffort: 'none' });
+  const normalFork = JSON.parse(await fs.readFile(stateFile, 'utf8'))[normalForkId];
+  assert.equal(normalFork.activeModel, undefined);
+  assert.equal(normalFork.resumeInfo.model, 'deepseek-flash');
+  assert.deepEqual(normalFork.lastSuccessfulSettings, { model: 'deepseek::deepseek-flash', reasoningEffort: 'none' });
 });

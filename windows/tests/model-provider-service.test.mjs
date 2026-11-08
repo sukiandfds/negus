@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { zstdCompressSync } from "node:zlib";
 import { buildAppServerEnvironment, streamRetryArguments } from "../server/app-server-client.mjs";
 import {
   CURRENT_MODEL_PROVIDER_ID,
@@ -18,6 +19,51 @@ const withTemporaryRoot = async (run) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-model-provider-"));
   try { await run(root); } finally { await fs.rm(root, { recursive: true, force: true }); }
 };
+
+test("resume preparation copies a new compressed thread without reading it as UTF-8", async () => {
+  await withTemporaryRoot(async root => {
+    const threadId = "00000000-0000-4000-8000-000000000006";
+    const copyId = "00000000-0000-4000-8000-000000000007";
+    const source = path.join(root, "source", "sessions", "2026", "11", "08", `rollout-2026-11-08T10-00-00-${threadId}.jsonl.zst`);
+    await fs.mkdir(path.dirname(source), { recursive: true });
+    const content = Buffer.from(`${JSON.stringify({ type: "session_meta", payload: { id: threadId, cwd: root } })}\n`);
+    const compressed = zstdCompressSync(content);
+    await fs.writeFile(source, compressed);
+    const service = createModelProviderService({ projectRoot: root, currentApiConfiguration: async () => null });
+    const copied = await service.prepareResumeFile("target-provider", { path: source, cwd: root }, new Set(), { threadId: copyId });
+    assert.equal(path.basename(copied.path), `rollout-2026-11-08T10-00-00-${copyId}.jsonl.zst`);
+    assert.deepEqual(await fs.readFile(source), compressed);
+    service.close();
+  });
+});
+
+test("resume preparation removes copied parent and temporary files when the final copy fails", async () => {
+  await withTemporaryRoot(async root => {
+    const parentId = "00000000-0000-4000-8000-000000000009";
+    const threadId = "00000000-0000-4000-8000-000000000010";
+    const copyId = "00000000-0000-4000-8000-000000000011";
+    const sourceRoot = path.join(root, "source", "sessions", "2026", "11", "08");
+    const parent = path.join(sourceRoot, `rollout-2026-11-08T09-00-00-${parentId}.jsonl`);
+    const source = path.join(sourceRoot, `rollout-2026-11-08T10-00-00-${threadId}.jsonl`);
+    await fs.mkdir(sourceRoot, { recursive: true });
+    await fs.writeFile(parent, `${JSON.stringify({ type: "session_meta", payload: { id: parentId, cwd: root } })}\n`);
+    await fs.writeFile(source, `${JSON.stringify({ type: "session_meta", payload: {
+      id: threadId, cwd: root, forked_from_id: parentId,
+    } })}\n`);
+    const targetDir = path.join(root, "runtime", "model-providers", "target-provider", "codex-home", "sessions", "2026", "11", "08");
+    const blockedDestination = path.join(targetDir, `rollout-2026-11-08T10-00-00-${copyId}.jsonl`);
+    await fs.mkdir(blockedDestination, { recursive: true });
+    const service = createModelProviderService({ projectRoot: root, currentApiConfiguration: async () => null });
+    try {
+      await assert.rejects(service.prepareResumeFile("target-provider", { path: source, cwd: root }, new Set(), { threadId: copyId }));
+    } finally {
+      service.close();
+    }
+    const files = await fs.readdir(targetDir);
+    assert.ok(!files.includes(`rollout-2026-11-08T09-00-00-${parentId}.jsonl`));
+    assert.ok(!files.some(name => name.includes(".resume-")));
+  });
+});
 
 test("manual provider discovery adds new Grok models, persists routing and retains cache on failure", async () => {
   await withTemporaryRoot(async (root) => {

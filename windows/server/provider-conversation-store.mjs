@@ -1,7 +1,11 @@
 import { backgroundTaskRoute } from './background-tasks/model-policy.mjs';
 import { isReasoningEffort } from './reasoning-efforts.mjs';
 import { latestAssistantReplyAtFromRollout } from "./app-server-conversation-store.mjs";
+import { latestRolloutFile } from "./rollout-file.mjs";
+import { removeTransferredThread, setTransferredProvider } from "./provider-transfer.mjs";
 import fs from "node:fs/promises";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { conversationSourceRevision } from "./conversation-version-store.mjs";
 import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
@@ -9,7 +13,6 @@ import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 export const createProviderConversationStore = ({ current, providers, createStore, stateFile, providerForThread = () => null }) => {
   const stores = new Map([["current", Promise.resolve(current)]]);
   let routes = {};
-  const ready = readJsonFile(stateFile, {}).then((stored) => { routes = stored && typeof stored === "object" ? stored : {}; });
   let writing = Promise.resolve();
   const save = () => {
     writing = writing.catch(() => {}).then(async () => {
@@ -17,6 +20,43 @@ export const createProviderConversationStore = ({ current, providers, createStor
     });
     return writing;
   };
+  const ready = readJsonFile(stateFile, {}).then((stored) => {
+    routes = stored && typeof stored === "object" ? stored : {};
+  }).then(async () => {
+    await providers.refreshShared?.().catch(() => {});
+    let changed = false;
+    for (const [id, route] of Object.entries(routes)) {
+      const copied = route?.crossProviderCopyFrom === route?.summary?.forkedFromId
+        || (route?.summary?.forkedFromId && route?.resumeInfo?.summary?.threadId
+          && route.resumeInfo.summary.threadId !== id);
+      if (!copied || !route.model) continue;
+      const [providerId, targetModel] = route.model.includes('::')
+        ? route.model.split('::') : ['current', route.model];
+      let resolved;
+      try {
+        resolved = providers.resolveRoute({ model: route.model, modelProviderId: providerId });
+      } catch {
+        continue;
+      }
+      if (resolved.modelProviderId !== route.providerId || resolved.model !== targetModel) continue;
+      const reasoningEffort = route.reasoningEffort ?? route.resumeInfo?.reasoningEffort ?? "";
+      const stale = route.runtimeModel !== targetModel || route.activeModel !== targetModel
+        || route.resumeInfo?.model !== targetModel || route.resumeInfo?.reasoningEffort !== reasoningEffort;
+      const lastModel = route.lastSuccessfulSettings?.model;
+      const lastEffort = route.lastSuccessfulSettings?.reasoningEffort ?? "";
+      if (!stale && lastModel === route.model && lastEffort === reasoningEffort) continue;
+      routes[id] = {
+        ...route, runtimeModel: targetModel, activeModel: targetModel, reasoningEffort,
+        lastSuccessfulSettings: { model: route.model, reasoningEffort },
+        resumeInfo: route.resumeInfo ? {
+          ...route.resumeInfo, model: targetModel, reasoningEffort,
+          summary: { ...route.resumeInfo.summary, threadId: id, model: targetModel },
+        } : route.resumeInfo,
+      };
+      changed = true;
+    }
+    if (changed) await save();
+  });
   const storeFor = (providerId) => {
     if (!stores.has(providerId)) {
       const pending = providers.getClient({ modelProviderId: providerId }).then(async (client) =>
@@ -28,12 +68,43 @@ export const createProviderConversationStore = ({ current, providers, createStor
   };
   const childOwners = new Map();
   const owner = (id) => routes[id]?.providerId || providerForThread(id) || childOwners.get(id) || "current";
+  const providerConfigured = async (providerId) => providerId === 'current' || !providers.isProviderConfigured
+    || await providers.isProviderConfigured(providerId).catch(() => false);
   const decorate = (session) => session && ({ ...session,
     createdBy: routes[session.threadId]?.createdBy || session.createdBy,
     ...(routes[session.threadId]?.manualTitle ? { title: routes[session.threadId].manualTitle } : {}),
     model: routes[session.threadId]?.model || session.model || "",
     modelProviderId: routes[session.threadId]?.pendingProviderId || owner(session.threadId),
   });
+  const storedRouteInfo = async (id, providerId) => {
+    const route = routes[id];
+    if (route?.resumeInfo?.path && route.resumeInfo.cwd) {
+      return { ...route.resumeInfo, path: await latestRolloutFile(route.resumeInfo.path) };
+    }
+    const cwd = route?.summary?.cwd;
+    if (!stateFile || !cwd || providerId === 'current' || path.basename(providerId) !== providerId) return null;
+    const root = path.join(path.dirname(stateFile), 'model-providers', providerId, 'codex-home');
+    const candidates = [];
+    for (const name of ['sessions', 'archived_sessions']) {
+      let entries;
+      try {
+        entries = await fs.readdir(path.join(root, name), { recursive: true, withFileTypes: true });
+      } catch {}
+      for (const entry of entries || []) {
+        if (!entry.isFile() || !/\.jsonl(?:\.zst)?$/u.test(entry.name)
+          || !entry.name.includes(id)) continue;
+        const file = path.join(entry.parentPath || entry.path, entry.name);
+        try {
+          const stat = await fs.stat(file);
+          candidates.push({ file, modifiedAt: stat.mtimeMs });
+        } catch {}
+      }
+    }
+    const file = candidates.sort((left, right) => right.modifiedAt - left.modifiedAt)[0]?.file;
+    if (!file) return null;
+    return { path: file, cwd, model: route.activeModel || route.runtimeModel || route.summary.model || route.model || "",
+      reasoningEffort: route.reasoningEffort || "", manualTitle: route.manualTitle || "", summary: route.summary };
+  };
   const service = {};
   service.getRecordedProviderForThread = async id => { await ready; return routes[id]?.providerId || null; };
   service.getVerifiedProviderForThread = async id => {
@@ -49,7 +120,10 @@ export const createProviderConversationStore = ({ current, providers, createStor
   service.findSessionForProvider = async (providerId, ...args) => (await storeFor(providerId)).findSession(...args);
   service.getSourceRevisionForProvider = async (providerId, id) => {
     const info = await (await storeFor(providerId)).getSessionResumeInfo(id, { readOnly: true, historyFile: routes[id]?.resumeInfo?.path });
-    return info?.path ? fs.stat(info.path).then(conversationSourceRevision).catch(() => null) : null;
+    return info?.path ? latestRolloutFile(info.path)
+      .then(source => fs.stat(source))
+      .then(conversationSourceRevision)
+      .catch(() => null) : null;
   };
   service.getSourceRevision = async id => { await ready; return service.getSourceRevisionForProvider(owner(id), id); };
   service.listSessionsForProvider = async (providerId, ...args) => (await storeFor(providerId || "current")).listSessions(...args);
@@ -84,10 +158,11 @@ export const createProviderConversationStore = ({ current, providers, createStor
     const route = routes[id];
     const key = `${owner(id)}:${id}`;
     if (!route?.resumeInfo || restored.has(key)) return;
+    if (route.pendingProviderId && !await providerConfigured(owner(id))) return;
     if (!restoring.has(key)) {
       const task = (async () => {
         const target = await storeFor(owner(id));
-        const activeModel = route.activeModel || route.resumeInfo.model || route.runtimeModel || route.model;
+        const activeModel = route.runtimeModel || route.activeModel || route.model || route.resumeInfo.model;
         const resolved = providers.resolveRoute({ model: activeModel, modelProviderId: owner(id) });
         const info = providers.prepareResumeFile ? await providers.prepareResumeFile(owner(id), route.resumeInfo) : route.resumeInfo;
         await target.resumeProviderSession(id, { ...info, model: resolved.model || activeModel,
@@ -101,15 +176,22 @@ export const createProviderConversationStore = ({ current, providers, createStor
   const activatePending = async (id) => {
     const route = routes[id];
     if (!route?.pendingProviderId) return;
-    const source = await storeFor(owner(id));
+    const sourceProviderId = owner(id);
+    const source = (await providerConfigured(sourceProviderId)) ? await storeFor(sourceProviderId) : null;
     const target = await storeFor(route.pendingProviderId);
-    const info = await source.getSessionResumeInfo(id);
-    if (source !== target) await source.releaseSession(id);
+    const info = source ? await source.getSessionResumeInfo(id) : await storedRouteInfo(id, sourceProviderId);
+    if (!info?.path) throw Object.assign(new Error("原对话配置已移除，且找不到原对话记录"), { statusCode: 409 });
+    if (source && source !== target) await source.releaseSession(id);
     restored.delete(`${owner(id)}:${id}`);
     const destinationInfo = providers.prepareResumeFile ? await providers.prepareResumeFile(route.pendingProviderId, info) : info;
-    if (source !== target) await target.resumeProviderSession(id, { ...destinationInfo, model: route.runtimeModel,
-      modelProvider: route.pendingProviderId === 'current' ? undefined : route.pendingProviderId,
-      reasoningEffort: route.reasoningEffort });
+    if (source !== target) {
+      await setTransferredProvider(destinationInfo.path, info.path, id, route.pendingProviderId, id, {
+        model: route.runtimeModel, reasoningEffort: route.reasoningEffort,
+      });
+      await target.resumeProviderSession(id, { ...destinationInfo, model: route.runtimeModel,
+        modelProvider: route.pendingProviderId === 'current' ? undefined : route.pendingProviderId,
+        reasoningEffort: route.reasoningEffort });
+    }
     routes[id] = { ...route, providerId: route.pendingProviderId, pendingProviderId: undefined, resumeInfo: destinationInfo, activeModel: route.runtimeModel };
     restored.add(`${owner(id)}:${id}`);
     await save();
@@ -124,6 +206,13 @@ export const createProviderConversationStore = ({ current, providers, createStor
       if (switching.has(id)) await switching.get(id);
       if (!["findSession", "getRuntimeContext", "getThreadStatus", "getGoal", "getPendingUserInput"].includes(method)) await ensureRestored(id);
       if (method === 'sendMessage') {
+        if (routes[id]?.pendingProviderId && !await providerConfigured(owner(id))) {
+          if (!activating.has(id)) {
+            const task = activatePending(id).finally(() => activating.delete(id));
+            activating.set(id, task);
+          }
+          await activating.get(id);
+        }
         const source = await storeFor(owner(id));
         await rememberPreviousSettings(id, source);
         const runtime = await source.getRuntimeContext(id);
@@ -320,6 +409,65 @@ export const createProviderConversationStore = ({ current, providers, createStor
     return registerSession({ ...result, forkedFromId: id }, providerId,
       providerId !== 'current' && model && !model.includes('::') ? `${providerId}::${model}` : model);
   };
+  service.createFromProvider = async (id, model, { reasoningEffort = "" } = {}) => {
+    await ready;
+    if (!isReasoningEffort(reasoningEffort)) throw new Error("无效的思考等级");
+    const target = providers.resolveRoute({ model });
+    if (!await providerConfigured(target.modelProviderId)) throw new Error('配置 Key 尚未配置');
+    const sourceProviderId = owner(id);
+    let info = null;
+    if (await providerConfigured(sourceProviderId)) {
+      const source = await storeFor(sourceProviderId);
+      info = await source.getSessionResumeInfo(id, { readOnly: true, historyFile: routes[id]?.resumeInfo?.path }).catch(() => null);
+      if (info?.path) info = { ...info, path: await latestRolloutFile(info.path) };
+    }
+    info ||= await storedRouteInfo(id, sourceProviderId);
+    if (!info?.path) throw Object.assign(new Error("找不到原对话记录，未创建新对话"), { statusCode: 409 });
+    const threadId = randomUUID();
+    const sourceTitle = routes[id]?.manualTitle || info.summary?.title || routes[id]?.summary?.title || "对话";
+    const title = `${sourceTitle} · ${target.provider?.displayName || target.modelProviderId}`;
+    let targetStore = null;
+    let destination = null;
+    try {
+      targetStore = await storeFor(target.modelProviderId);
+      destination = providers.prepareResumeFile
+        ? await providers.prepareResumeFile(target.modelProviderId, info, new Set(), { threadId })
+        : info;
+      const effectiveModel = target.model || model;
+      await setTransferredProvider(destination.path, info.path, id, target.modelProviderId, threadId, {
+        model: effectiveModel, reasoningEffort,
+      });
+      await targetStore.resumeProviderSession(threadId, {
+        ...destination, cwd: info.cwd, model: effectiveModel,
+        modelProvider: target.modelProviderId === 'current' ? undefined : target.modelProviderId,
+        reasoningEffort,
+      });
+      await targetStore.updateModel(threadId, effectiveModel);
+      if (reasoningEffort) await targetStore.updateReasoningEffort(threadId, reasoningEffort);
+      const registeredModel = target.modelProviderId === 'current' ? effectiveModel : `${target.modelProviderId}::${effectiveModel}`;
+      const session = await registerSession({
+        ...info.summary, threadId, title, cwd: info.cwd, source: "codex", archived: false,
+        updatedAt: new Date().toISOString(), model: effectiveModel, forkedFromId: id,
+      }, target.modelProviderId, registeredModel,
+      { createdBy: "user", manualTitle: title, reasoningEffort,
+        lastSuccessfulSettings: { model: registeredModel, reasoningEffort }, activeModel: effectiveModel, runtimeModel: effectiveModel,
+        crossProviderCopyFrom: id,
+        resumeInfo: { ...destination, model: effectiveModel, reasoningEffort } });
+      return { session, sourceThreadId: id, model: session.model || registeredModel, modelProvider: target.modelProviderId, reasoningEffort };
+    } catch (error) {
+      await targetStore?.releaseSession?.(threadId).catch(() => {});
+      if (destination?.path && path.resolve(destination.path) !== path.resolve(info.path)) {
+        await removeTransferredThread(destination.path, threadId).catch(() => {});
+        const generated = destination.generatedPaths?.length ? destination.generatedPaths : [destination.path];
+        await Promise.all(generated.map(file => fs.rm(file, { force: true }).catch(() => {})));
+      }
+      if (routes[threadId]) {
+        delete routes[threadId];
+        await save().catch(() => {});
+      }
+      throw error;
+    }
+  };
   const switching = new Map();
   service.updateModel = async (id, model, { allowProviderSwitch = false, reasoningEffort = "" } = {}) => {
     await ready;
@@ -329,8 +477,12 @@ export const createProviderConversationStore = ({ current, providers, createStor
       const target = providers.resolveRoute({ model });
       if (!isReasoningEffort(reasoningEffort)) throw new Error("无效的思考等级");
       const sourceProviderId = owner(id);
-      const source = await storeFor(sourceProviderId);
-      await rememberPreviousSettings(id, source);
+      const sourceConfigured = await providerConfigured(sourceProviderId);
+      if (!sourceConfigured && target.modelProviderId === sourceProviderId) {
+        throw Object.assign(new Error("当前对话配置已移除，请选择其他配置的模型"), { statusCode: 409 });
+      }
+      const source = sourceConfigured ? await storeFor(sourceProviderId) : null;
+      if (sourceConfigured) await rememberPreviousSettings(id, source);
       if (target.modelProviderId === sourceProviderId) {
         await ensureRestored(id);
         const result = await source.updateModel(id, target.model || model);
@@ -339,6 +491,23 @@ export const createProviderConversationStore = ({ current, providers, createStor
         return { ...result, model };
       }
       if (!await providers.isProviderConfigured(target.modelProviderId)) throw new Error('配置 Key 尚未配置');
+      if (!sourceConfigured) {
+        const info = await storedRouteInfo(id, sourceProviderId);
+        if (!info?.path) throw Object.assign(new Error("原对话配置已移除，且找不到原对话记录"), { statusCode: 409 });
+        const targetStore = await storeFor(target.modelProviderId);
+        const destinationInfo = providers.prepareResumeFile ? await providers.prepareResumeFile(target.modelProviderId, info) : info;
+        await setTransferredProvider(destinationInfo.path, info.path, id, target.modelProviderId);
+        await targetStore.resumeProviderSession(id, { ...destinationInfo, model: target.model || model,
+          modelProvider: target.modelProviderId === 'current' ? undefined : target.modelProviderId,
+          reasoningEffort });
+        routes[id] = { ...routes[id], providerId: target.modelProviderId, pendingProviderId: undefined,
+          model, runtimeModel: target.model || model, activeModel: target.model || model, reasoningEffort,
+          resumeInfo: destinationInfo, summary: { ...routes[id]?.summary, threadId: id, cwd: info.cwd, model: target.model || model } };
+        restored.delete(`${sourceProviderId}:${id}`);
+        restored.add(`${target.modelProviderId}:${id}`);
+        await save();
+        return { threadId: id, model, modelProvider: target.modelProviderId, reasoningEffort };
+      }
       if (source.isFreshSession?.(id)) {
         const targetStore = await storeFor(target.modelProviderId);
         const created = await targetStore.createSession(target.model || model, routes[id]?.summary?.cwd || "");

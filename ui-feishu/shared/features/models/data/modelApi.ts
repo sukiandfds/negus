@@ -1,6 +1,7 @@
 import { fetchJson, postJson } from "../../../shared/api/http";
 import { currentConversationId, withConversation } from "../../../shared/api/conversationScope";
 import type { CodexModel, ModelUpdateResult } from "../model/types";
+import type { SessionSummary } from "../../conversations/model/types";
 
 export const modelApi = {
   list: (signal?: AbortSignal, refreshProvider?: string, conversationId = currentConversationId()) => {
@@ -22,5 +23,12 @@ export const modelApi = {
     "/api/session/reasoning-effort",
     withConversation({ threadId, reasoningEffort }, conversationId),
     signal,
+  ),
+  copyToProvider: (threadId: string, model: string, reasoningEffort: string, conversationId = currentConversationId()) => postJson<{
+    session: SessionSummary;
+    sourceThreadId: string;
+  } & ModelUpdateResult>(
+    "/api/session/provider-copy",
+    withConversation({ threadId, model, reasoningEffort }, conversationId),
   ),
 };

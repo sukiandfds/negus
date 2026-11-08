@@ -60,6 +60,15 @@ export function useProjectConversations() {
   const [retryingMessageId, setRetryingMessageId] = useState("");
   const [localSendVersion, setLocalSendVersion] = useState(0);
   const [historyEdit, setHistoryEdit] = useState<{ threadId: string; revision: number } | null>(null);
+  const [providerSwitch, setProviderSwitch] = useState<{
+    threadId: string;
+    title: string;
+    model: string;
+    reasoningEffort: string;
+    providerName: string;
+  } | null>(null);
+  const [providerSwitchBusy, setProviderSwitchBusy] = useState(false);
+  const [providerSwitchError, setProviderSwitchError] = useState("");
   const userInputRequest = selection.store.get(serverThreadId).userInputRequest;
   const setUserInputRequest = useCallback((value: UserInputRequest | null | ((current: UserInputRequest | null) => UserInputRequest | null)) => {
     const id = selection.selectedIdRef.current;
@@ -604,6 +613,83 @@ export function useProjectConversations() {
     return catalog.refreshSessions(false, typeof threadId === 'string' ? threadId : undefined, false);
   }, [catalog.refreshSessions, selection.store]);
 
+  const providerOf = useCallback((model: string) => {
+    const entry = modelManager.models.find((item) => item.model === model);
+    return {
+      id: entry ? providerIdOf(entry) : model.includes("::") ? model.split("::")[0] : "current",
+      name: entry?.providerDisplayName || entry?.displayName || "",
+    };
+  }, [modelManager.models]);
+
+  const changeModel = useCallback(async (model: string, reasoningEffort?: string) => {
+    const threadId = selection.selectedIdRef.current;
+    if (isPendingThread(threadId)) {
+      draftSettingsRef.current.set(threadId, { model, reasoningEffort: reasoningEffort ?? visibleEffort });
+      selection.updateCurrentSession(threadId, current => ({ ...current, model }));
+      return true;
+    }
+    const source = providerOf(visibleModel);
+    const target = providerOf(model);
+    const employeeScoped = Boolean(new URLSearchParams(window.location.search).get("agent"));
+    if (threadId && !employeeScoped && visibleModel && source.id !== target.id) {
+      if (execution.status.active) {
+        selection.setSessionError("当前任务完成后再切换配置");
+        return false;
+      }
+      setProviderSwitchError("");
+      setProviderSwitch({
+        threadId,
+        title: selection.session?.title || "当前对话",
+        model,
+        reasoningEffort: reasoningEffort ?? visibleEffort,
+        providerName: target.name || target.id,
+      });
+      return true;
+    }
+    return modelManager.change(model, reasoningEffort);
+  }, [execution.status.active, modelManager.change, providerOf, selection.selectedIdRef, selection.session?.title, selection.setSessionError, selection.updateCurrentSession, visibleEffort, visibleModel]);
+
+  const cancelProviderSwitch = useCallback(() => {
+    const request = providerSwitch;
+    if (!request) return false;
+    const previous = contextManagement.status.lastSuccessfulSettings || {
+      model: visibleModel,
+      reasoningEffort: visibleEffort,
+    };
+    modelManager.clearPending(request.threadId);
+    draftSettingsRef.current.delete(request.threadId);
+    contextManagement.applyModelSettings(request.threadId, { ...previous, committed: true });
+    setProviderSwitch(null);
+    setProviderSwitchError("");
+    return true;
+  }, [contextManagement.applyModelSettings, contextManagement.status.lastSuccessfulSettings, modelManager.clearPending, providerSwitch, visibleEffort, visibleModel]);
+
+  const confirmProviderSwitch = useCallback(async () => {
+    const request = providerSwitch;
+    if (!request || providerSwitchBusy) return false;
+    setProviderSwitchBusy(true);
+    setProviderSwitchError("");
+    try {
+      const result = await modelApi.copyToProvider(request.threadId, request.model, request.reasoningEffort, conversationScope);
+      catalog.updateSessionSummary(result.session);
+      contextManagement.applyModelSettings(result.session.threadId, {
+        model: result.model,
+        reasoningEffort: result.reasoningEffort,
+        committed: true,
+      });
+      await selection.loadSession(result.session.threadId);
+      selection.selectSession(result.session.threadId);
+      void catalog.refreshSessions(false, result.session.threadId, false);
+      setProviderSwitch(null);
+      return true;
+    } catch (reason) {
+      setProviderSwitchError(reason instanceof Error ? reason.message : "创建新对话失败");
+      return false;
+    } finally {
+      setProviderSwitchBusy(false);
+    }
+  }, [catalog.refreshSessions, catalog.updateSessionSummary, contextManagement.applyModelSettings, conversationScope, providerSwitch, providerSwitchBusy, selection.loadSession, selection.selectSession]);
+
   const handleEvent = useCallback((event: ProjectEvent) => {
     if (!selection.store.acceptEvent(event)) return;
     if (event.type === 'sessions_changed') {
@@ -695,6 +781,11 @@ export function useProjectConversations() {
     archiveSession: catalog.archiveSession,
     unarchiveSession: catalog.unarchiveSession,
     archiveBusyIds: catalog.archiveBusyIds,
+    providerSwitch,
+    providerSwitchBusy,
+    providerSwitchError,
+    confirmProviderSwitch,
+    cancelProviderSwitch,
     forkFromMessage,
     forkingMessageId,
     editingMessage,
@@ -743,13 +834,7 @@ export function useProjectConversations() {
     review,
     compactContext: contextManagement.compact,
     setAutoCompactThreshold: contextManagement.setThreshold,
-    changeModel: async (model: string, reasoningEffort?: string) => {
-      const id = selection.selectedIdRef.current;
-      if (!isPendingThread(id)) return modelManager.change(model, reasoningEffort);
-      draftSettingsRef.current.set(id, { model, reasoningEffort: reasoningEffort ?? visibleEffort });
-      selection.updateCurrentSession(id, current => ({ ...current, model }));
-      return true;
-    },
+    changeModel,
     changeReasoningEffort: async (reasoningEffort: string) => {
       const id = selection.selectedIdRef.current;
       if (!isPendingThread(id)) return modelManager.changeReasoningEffort(reasoningEffort);

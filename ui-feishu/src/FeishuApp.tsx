@@ -18,6 +18,7 @@ import { useGroupChats } from './useGroupChats';
 import { usePageSnapshot } from './usePageSnapshot';
 import { CreateGroupDialog } from './components/CreateGroupDialog';
 import { GroupWorkspace } from './components/GroupWorkspace';
+import { BorderToolPage } from './components/BorderToolPage';
 import type { ChatTab, Conversation, ConversationFilter, Section } from './types';
 import { readValidStorage, writeStorage } from '../shared/shared/state/storage';
 import { AppUpdateNotice } from '../shared/features/app-update/components/AppUpdateNotice';
@@ -45,7 +46,7 @@ export function FeishuApp() {
   const viewDirectory = page.directory;
   const usage = useUsageMonitor(c.executionStatus);
   const device = useDeviceInfo(c.connected);
-  const [section, setSection] = useState<Section>(initialView === 'employees' ? 'employees' : initialView === 'tasks' ? 'tasks' : 'messages');
+  const [section, setSection] = useState<Section>(initialView === 'employees' ? 'employees' : initialView === 'tasks' ? 'tasks' : initialView === 'border' ? 'border' : 'messages');
   const groups = useGroupChats();
   const pins = usePinnedConversations();
   const [creatingGroup, setCreatingGroup] = useState(false);
@@ -89,6 +90,7 @@ export function FeishuApp() {
       setSettings(next.view === 'settings');
       if (next.view === 'employees') setSection('employees');
       else if (next.view === 'tasks') setSection('tasks');
+      else if (next.view === 'border') setSection('border');
       else if (next.view === 'group' || next.view === 'conversation' || next.agentId) setSection('messages');
       setTab('messages'); setDetails(false); setMobileChat(next.hasChat || next.view === 'group');
     };
@@ -139,7 +141,10 @@ export function FeishuApp() {
     const children = item.children ? filterOrigins(item.children) : undefined;
     return origins.includes(item.origin === 'assistant' ? 'assistant' : item.main && item.agentId ? 'employee' : 'user') || children?.length ? [{ ...item, children }] : [];
   });
-  const visibleRoster = filter === 'background' ? sortPinned(roster.all.filter(item => item.origin === 'assistant'), pins.pinned) : filterOrigins(filter === 'employees' ? roster.employees : filter === 'projects' ? roster.projects : sortPinned(roster.all, pins.pinned));
+  const visibleRoster = filter === 'background' ? sortPinned(roster.all.filter(item => item.origin === 'assistant'), pins.pinned)
+    : filter === 'employees' ? roster.employees
+    : filter === 'projects' ? roster.projects
+    : filterOrigins(sortPinned(roster.all, pins.pinned));
   const selected = roster.all.find(v => v.threadId === viewC.selectedId);
   const forwardTargets = buildConversationDirectory(viewDirectory, viewC.sessions.filter(session => !session.archived), false, viewC.project?.root, viewC.cachedSessions, viewC.archivedByThread).all;
   const open = async (item: Conversation) => {
@@ -152,7 +157,7 @@ export function FeishuApp() {
       window.dispatchEvent(new Event('negus:navigate'));
       setOpenError(''); return true;
     }
-    if (!item.threadId && item.kind) {
+    if (!item.agentId && !item.threadId && item.kind) {
       setOpenError(item.kind === 'project' ? '此项目尚无总群聊，请展开查看已有对话。' : '此定期任务尚无关联对话，请展开查看执行记录。');
       return false;
     }
@@ -180,7 +185,7 @@ export function FeishuApp() {
     url.searchParams.set('view', 'conversation'); history.pushState({}, '', `${url.pathname}${url.search}`);
     c.openNewSession(root, '', '', { deferred: true }); setRoomId(''); setMobileChat(true); setSection('messages'); setTab('messages');
   };
-  return <div className={`feishu-app ${mobileChat ? 'show-chat' : ''} ${railOpen ? 'rail-open' : ''}`} style={{ '--agent-initial': JSON.stringify(selectedName.slice(0, 1)), '--agent-color': avatarColor(employee?.employeeId || agentId) } as CSSProperties}>
+  return <div className={`feishu-app ${mobileChat ? 'show-chat' : ''} ${railOpen ? 'rail-open' : ''} ${section === 'border' ? 'border-tool-open' : ''}`} style={{ '--agent-initial': JSON.stringify(selectedName.slice(0, 1)), '--agent-color': avatarColor(employee?.employeeId || agentId) } as CSSProperties}>
     <ChatSkin />
     <AppUpdateNotice surface="conversation" />
     <AppRail section={section} connected={c.connected} open={railOpen && !mobileChat} onClose={() => setRailOpen(false)}
@@ -195,6 +200,7 @@ export function FeishuApp() {
       targets={forwardTargets} onOpenTarget={open}
       onBack={() => setMobileChat(false)} onShare={() => setSharing(true)} /></div>
     {roomId && <GroupWorkspace key={roomId} room={groupRoom || { id: roomId, name: '群聊', projectId: '' }} projectName={directory.projects.find(project => project.projectId === groupRoom?.projectId)?.name || ''} onBack={() => setMobileChat(false)} onShare={() => setSharing(true)} onRename={name => groups.update(roomId, { name })} />}
+    {section === 'border' && <BorderToolPage onBack={() => setSection('messages')} />}
     {creatingGroup && <CreateGroupDialog directory={directory} onClose={() => setCreatingGroup(false)} onCreated={room => { setCreatingGroup(false); void groups.refresh(); setSection('messages'); setFilter('all'); void open({ id: `group:${room.id}`, name: room.name, subtitle: '群聊', kind: 'group', roomId: room.id }); }} />}
     <ShareConversationDialog open={sharing} title={roomId ? groupRoom?.name || '群聊' : c.session?.title || selectedName} heading={roomId ? '分享当前群聊' : undefined} onClose={closeSharing} />
     <UserInputDialog request={viewC.userInputRequest} busy={c.userInputBusy} error={c.userInputError} onSubmit={c.answerUserInput} />

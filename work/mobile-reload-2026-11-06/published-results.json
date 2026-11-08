@@ -1,0 +1,29 @@
+{
+  "version": "feishu-mw4fqhbj",
+  "tests": [
+    {
+      "name": "普通聊天页直接注册并控制SW",
+      "pass": true
+    },
+    {
+      "name": "真实网络内容被应用写入IndexedDB",
+      "pass": true
+    },
+    {
+      "name": "手机尺寸慢网页面刷新已有内容恢复",
+      "pass": true,
+      "ms": 38,
+      "networkDelay": 1500
+    },
+    {
+      "name": "断网完整刷新恢复已有正文",
+      "pass": true,
+      "ms": 37
+    },
+    {
+      "name": "无未捕获页面错误",
+      "pass": true
+    }
+  ],
+  "errors": []
+}

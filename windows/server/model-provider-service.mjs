@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from 'node:crypto';
 import { createAppServerClient } from "./app-server-client.mjs";
 import { createCcSwitchConfigService } from "./cc-switch-config-service.mjs";
+import { readRolloutHead } from "./rollout-file.mjs";
 
 export const CURRENT_MODEL_PROVIDER_ID = "current";
 export const GROK_MODEL_PROVIDER_ID = "fusheng-grok";
@@ -469,35 +470,54 @@ export const createModelProviderService = ({
     ownedClients.clear();
     clientPromises.clear();
   };
-  const prepareResumeFile = async (providerId, info, ancestors = new Set()) => {
+  const prepareResumeFile = async (providerId, info, ancestors = new Set(), { threadId = "" } = {}) => {
     const home = providerId === CURRENT_MODEL_PROVIDER_ID
       ? process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
       : path.join(path.resolve(runtimeRoot), providerId, 'codex-home');
     const basename = path.basename(info.path);
     const date = /^rollout-(\d{4})-(\d{2})-(\d{2})T/u.exec(basename);
     if (!date || !path.isAbsolute(info.path)) throw new Error('原会话记录位置无效');
-    const destination = path.join(home, 'sessions', date[1], date[2], date[3], basename);
-    if (path.resolve(destination).toLowerCase() !== path.resolve(info.path).toLowerCase()) {
-      if (ancestors.has(info.path)) throw new Error('对话来源记录存在循环，未切换配置');
-      ancestors.add(info.path);
-      const header = JSON.parse((await fs.readFile(info.path, 'utf8')).split('\n', 1)[0]);
-      const parentId = header.type === 'session_meta' ? header.payload?.forked_from_id : null;
-      if (parentId) {
-        if (!/^[a-f0-9-]{36}$/i.test(parentId)) throw new Error('对话来源编号无效，未切换配置');
-        let parent;
-        for await (const file of fs.glob(`**/rollout-*-${parentId}.jsonl`, { cwd: path.resolve(path.dirname(info.path), '../../..') })) {
-          parent = path.resolve(path.dirname(info.path), '../../..', file); break;
+    const targetBasename = threadId
+      ? basename.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/iu, threadId)
+      : basename;
+    const destination = path.join(home, 'sessions', date[1], date[2], date[3], targetBasename);
+    const generated = [];
+    const temporaryFiles = [];
+    try {
+      if (path.resolve(destination).toLowerCase() !== path.resolve(info.path).toLowerCase()) {
+        if (ancestors.has(info.path)) throw new Error('对话来源记录存在循环，未切换配置');
+        ancestors.add(info.path);
+        const header = JSON.parse(await readRolloutHead(info.path));
+        const parentId = header.type === 'session_meta' ? header.payload?.forked_from_id : null;
+        if (parentId) {
+          if (!/^[a-f0-9-]{36}$/i.test(parentId)) throw new Error('对话来源编号无效，未切换配置');
+          let parent;
+          for (const pattern of [`**/rollout-*-${parentId}.jsonl`, `**/rollout-*-${parentId}*.jsonl.zst`]) {
+            if (parent) break;
+            for await (const file of fs.glob(pattern, { cwd: path.resolve(path.dirname(info.path), '../../..') })) {
+              parent = path.resolve(path.dirname(info.path), '../../..', file); break;
+            }
+          }
+          if (!parent) throw new Error('找不到分支来源对话记录，未切换配置');
+          const parentInfo = await prepareResumeFile(providerId, { ...info, path: parent }, ancestors);
+          generated.push(...(parentInfo.generatedPaths || []));
         }
-        if (!parent) throw new Error('找不到分支来源对话记录，未切换配置');
-        await prepareResumeFile(providerId, { ...info, path: parent }, ancestors);
+        const existed = await fs.access(destination).then(() => true).catch(() => false);
+        await fs.mkdir(path.dirname(destination), { recursive: true });
+        // Preserve the complete native rollout and its thread ID, not a text summary/new conversation.
+        const temporary = `${destination}.resume-${process.pid}`;
+        temporaryFiles.push(temporary);
+        await fs.copyFile(info.path, temporary);
+        await fs.rename(temporary, destination);
+        temporaryFiles.pop();
+        if (!existed) generated.push(destination);
       }
-      await fs.mkdir(path.dirname(destination), { recursive: true });
-      // Preserve the complete native rollout and its thread ID, not a text summary/new conversation.
-      const temporary = `${destination}.resume-${process.pid}`;
-      await fs.copyFile(info.path, temporary);
-      await fs.rename(temporary, destination);
+      return { ...info, path: destination, ...(generated.length ? { generatedPaths: [...new Set(generated)] } : {}) };
+    } catch (error) {
+      await Promise.all(temporaryFiles.map(file => fs.rm(file, { force: true }).catch(() => {})));
+      await Promise.all(generated.map(file => fs.rm(file, { force: true }).catch(() => {})));
+      throw error;
     }
-    return { ...info, path: destination };
   };
 
   return {

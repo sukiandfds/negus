@@ -1,0 +1,16 @@
+{
+  "build": {
+    "buildId": "feishu-mw4fqhbj",
+    "builtAt": "2026-11-06T03:49:00.543Z"
+  },
+  "scope": "Isolated mobile Chrome; first session read 503 once, later requests succeed",
+  "beforeRefresh": {
+    "sessionReads": 1,
+    "visibleMessages": 0,
+    "hasSyncFailure": false
+  },
+  "afterRefresh": {
+    "sessionReads": 2,
+    "visibleMessages": 1
+  }
+}

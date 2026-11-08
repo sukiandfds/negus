@@ -897,3 +897,18 @@ context-management-service.mjs增加8行，补原生轮次完成/中断终态收
 - 用户反馈普通对话选择其他 GPT 配置后显示 `Reconnecting... waiting for network`，配置页测试却通过；指定线程 `01a1b9de-8950-77a2-b702-5ab3de6fdb53` 使用 `vip / gpt-6.1-sol`。
 - 已复现：同一 Key 的直接 `/responses` 流式请求成功；Codex 运行进程连续报 `Connection failed: error sending request`。本机系统代理 `127.0.0.1:7890` 对供应商连接失败，加入该供应商 `NO_PROXY` 后 Codex 6 秒完成。
 - `app-server-client.mjs` 从实际 Codex 配置读取模型供应商域名，合并到 `NO_PROXY/no_proxy`；配置页测试路径和 GitHub 专用代理保持原样。
+
+### 2026-11-08 压缩续写文件统一读取
+
+- 用户反馈压缩完成后用量不立即更新、发送后回退，列表摘要停在旧回复。实查线程 `01a1b5f4-6ff1-7ea1-8119-6bbcd8d06f6d`：初始 rollout 末条为旧摘要和 470,103 tokens，同一 Thread ID 的新续写 rollout 已包含后续消息和压缩后用量。
+- `rollout-file.mjs` 新增按 Thread ID 查找最新 rollout；`app-server-conversation-store.mjs` 的摘要读取、运行时上下文和列表 `sourceRevision`，以及 `provider-conversation-store.mjs` 的正文快照 `sourceRevision` 统一使用该文件。标题和来源标签仍读取线程元信息。
+- DeepSeek 首轮审核发现正文快照版本入口仍读取旧文件，已补 `provider-conversation-store.mjs` 并新增 provider 层续写版本回归。
+- 回归 `node --test windows/tests/rollout-file.test.mjs windows/tests/conversation-source-revision.test.mjs` 5/5 通过；provider 层定向回归 1/1 通过；`node --check` 与 `git diff --check` 通过。真实旧线程样本已验证会选中续写文件并读到最新摘要和用量。待 DeepSeek 增量复核及后端受控重启生效。
+
+### 2026-11-08 普通对话跨配置创建新对话
+
+- 用户可见变化：同配置切换保持原对话；跨配置选择先弹窗确认。确认后保留原对话，在目标配置中创建带完整上下文的新对话并自动打开；取消则恢复上次成功发送的模型设置。
+- 实现：前端复用现有模型目录识别供应商差异；服务端新增 `/api/session/provider-copy`，从原对话最新 rollout 复制到目标配置，生成新 Thread ID，并复用员工迁移使用的供应商元数据与本地索引校正。原记录不修改；目标恢复失败时清理未完成副本。
+- 路径：旧配置不可用时直接读取其本地历史，不启动旧供应商；压缩续写文件使用最新 rollout；`.jsonl.zst` 同样支持。
+- 验证：跨配置复制到外部配置、切回当前配置、压缩文件、源文件保护及失败清理回归通过；员工跨配置回归10/10、旧项目路由回归11/11通过；TypeScript 和生产构建通过。DeepSeek 复核确认通过且无必须修复项。完整 provider 测试另有既有 `current::gpt-bad` 断言失败，与本次路径无关。
+- 生效：前端已发布，当前服务返回版本`feishu-mw7lxwgm`；后端受控重启任务`1794128763759-77562`成功加载release`1794128760027-f5dbc26b`，新进程PID`77618`。

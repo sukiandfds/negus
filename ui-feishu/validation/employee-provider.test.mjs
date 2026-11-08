@@ -3,6 +3,7 @@ import test from 'node:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { zstdCompressSync, zstdDecompressSync } from 'node:zlib';
 import '../server/register.mjs';
 import { setTransferredProvider } from '../server/employee-provider-integration.mjs';
 const { createEmployeeProjectRegistry } = await import('../../windows/server/employee-project-registry.mjs');
@@ -175,15 +176,37 @@ test('a completed native task with stale employee status does not block the next
   const original = JSON.stringify({ type: 'session_meta', payload: { id: 'thread', model_provider: 'removed' } }) + body;
   const settings = JSON.stringify({ type: 'event_msg', payload: { type: 'thread_settings_applied', thread_settings: { model_provider_id: 'removed', model: 'old-model' } } }) + '\n';
   await fs.writeFile(source, original + settings); await fs.copyFile(source, target);
-  await setTransferredProvider(target, source, 'thread', 'deepseek');
+  await setTransferredProvider(target, source, 'thread', 'deepseek', 'thread', { model: 'new-model', reasoningEffort: 'low' });
   const migrated = await fs.readFile(target, 'utf8');
   assert.equal(JSON.parse(migrated.split('\n')[0]).payload.model_provider, 'deepseek');
   assert.ok(migrated.slice(migrated.indexOf('\n')).startsWith(body));
   const applied = JSON.parse(migrated.trim().split('\n').at(-1)).payload.thread_settings;
   assert.equal(applied.model_provider_id, 'deepseek');
-  assert.equal(applied.model, 'old-model');
+  assert.equal(applied.model, 'new-model');
+  assert.equal(applied.reasoning_effort, 'low');
   assert.equal(await fs.readFile(source, 'utf8'), original + settings);
   await assert.rejects(setTransferredProvider(target, source, 'wrong-thread', 'other'), /校验失败/);
+});
+
+test('migration creates a new compressed thread without modifying the source', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-compressed-provider-copy-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const source = path.join(root, 'source.jsonl.zst');
+  const target = path.join(root, 'target.jsonl.zst');
+  const original = `${JSON.stringify({ type: 'session_meta', payload: {
+    id: 'thread', session_id: 'thread', model_provider: 'removed',
+  } })}\n${JSON.stringify({ type: 'event_msg', payload: { text: 'complete history' } })}\n`;
+  const compressed = zstdCompressSync(Buffer.from(original));
+  await fs.writeFile(source, compressed);
+  await fs.copyFile(source, target);
+  await setTransferredProvider(target, source, 'thread', 'deepseek', 'new-thread');
+  const migrated = zstdDecompressSync(await fs.readFile(target)).toString('utf8');
+  const header = JSON.parse(migrated.split('\n')[0]);
+  assert.equal(header.payload.id, 'new-thread');
+  assert.equal(header.payload.session_id, 'new-thread');
+  assert.equal(header.payload.model_provider, 'deepseek');
+  assert.match(migrated, /complete history/);
+  assert.deepEqual(await fs.readFile(source), compressed);
 });
 
 test('migration recovers an unloaded source before reading its history', async t => {

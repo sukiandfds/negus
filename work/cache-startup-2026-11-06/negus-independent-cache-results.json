@@ -1,0 +1,66 @@
+[
+  {
+    "name": "当前正文与列表在全部API失败时恢复，首屏只get当前线程",
+    "pass": true
+  },
+  {
+    "name": "URL选中b优先于上次a，全部95条与失败图片缓存直接恢复",
+    "pass": true
+  },
+  {
+    "name": "业务接口慢2.5秒时缓存正文先展示",
+    "pass": true
+  },
+  {
+    "name": "无缓存且接口失败仍能挂载页面",
+    "pass": true
+  },
+  {
+    "name": "旧localStorage快照迁移恢复正文及失败附件",
+    "pass": true
+  },
+  {
+    "name": "其余缓存晚到时切换b：仍恢复历史、失败图及当前选择",
+    "pass": true
+  },
+  {
+    "name": "普通B晚到回填后磁盘仍保存原95条正文",
+    "pass": true
+  },
+  {
+    "name": "普通B回填前再次刷新仍直接恢复磁盘95条正文",
+    "pass": true
+  },
+  {
+    "name": "群聊列表及群正文断网刷新继续显示",
+    "pass": true
+  },
+  {
+    "name": "群聊列表成功读取后自动持久化，下一次断网刷新恢复",
+    "pass": true
+  },
+  {
+    "name": "闲置目标状态事件立即显示恢复/暂停，零额外聚合读取",
+    "pass": true
+  },
+  {
+    "name": "待答问题事件立即弹出，零额外聚合读取",
+    "pass": true
+  },
+  {
+    "name": "队列事件立即显示等候气泡，零额外聚合读取",
+    "pass": true
+  },
+  {
+    "name": "Chrome执行Store：缓存晚到不覆盖已同步新正文",
+    "pass": true
+  },
+  {
+    "name": "Chrome执行Store：缓存晚到保留新Goal并恢复缺失旧正文",
+    "pass": true
+  },
+  {
+    "name": "Chrome执行Store：旧失败图与新pending同时保留",
+    "pass": true
+  }
+]

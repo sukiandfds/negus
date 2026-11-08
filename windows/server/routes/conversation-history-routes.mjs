@@ -96,6 +96,25 @@ export const createConversationHistoryRoutes = ({ conversations, execution, foll
     }, 201);
     return true;
   }
+  if (url.pathname === "/api/session/provider-copy" && request.method === "POST") {
+    const body = await readJson(request);
+    const threadId = String(body.threadId || "").trim();
+    const conversationId = String(body.conversationId || "").trim();
+    const model = String(body.model || "").trim();
+    if (!threadId || !model) {
+      sendJson(response, { error: "threadId and model are required" }, 400);
+      return true;
+    }
+    const binding = await authorizeAgentThread({ threadId, conversationId });
+    if (binding) throw Object.assign(new Error("员工对话请在员工详情中切换模型"), { statusCode: 409 });
+    if (execution.getStatus(threadId).active) throw Object.assign(new Error("当前任务运行中，请完成后再切换配置"), { statusCode: 409 });
+    const result = await conversations.createFromProvider(threadId, model, {
+      reasoningEffort: String(body.reasoningEffort || "").trim(),
+    });
+    publishThreadEvent(result.session.threadId, { type: "sessions_changed", threadId: result.session.threadId });
+    sendJson(response, result, 201);
+    return true;
+  }
   if (url.pathname === "/api/session/archive" && request.method === "POST") {
     const body = await readJson(request);
     const threadId = String(body.threadId || "").trim();

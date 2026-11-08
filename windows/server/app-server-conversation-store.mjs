@@ -1,4 +1,4 @@
-import { openRollout } from './rollout-file.mjs';
+import { latestRolloutFile, openRollout } from './rollout-file.mjs';
 import { communicationInstructions } from "./base-prompt.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -59,6 +59,7 @@ export const latestAssistantReplyAtFromRollout = async (file, readSettings = fal
   if (!file || typeof file !== "string") return "";
   let handle;
   try {
+    file = await latestRolloutFile(file);
     handle = await openRollout(file);
     const stat = await handle.stat();
     const chunkSize = 256 * 1024;
@@ -411,7 +412,10 @@ export const createAppServerConversationStore = ({
       .filter((thread) => source === "all" || sourceFromThread(thread) === source)
       .map(async (thread) => {
         const summary = summaryFromThread(thread, archived);
-        if (thread.path) summary.sourceRevision = await fs.stat(thread.path).then(conversationSourceRevision).catch(() => undefined);
+        if (thread.path) summary.sourceRevision = await latestRolloutFile(thread.path)
+          .then(source => fs.stat(source))
+          .then(conversationSourceRevision)
+          .catch(() => undefined);
         const cached = previewCache.get(thread.id);
         const latest = summary.sourceRevision && cached?.revision === summary.sourceRevision
           ? cached.latest : await latestAssistantReplyAtFromRollout(thread.path, false, true);

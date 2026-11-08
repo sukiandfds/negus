@@ -41,7 +41,10 @@ export function combineConversations(current, previous, previousIds) {
     result[method] = async (id, ...args) => {
       const owner = select(id);
       const value = await owner[method](id, ...args);
-      if (method === 'forkSession' && owner === previous && value?.threadId) previousIds.add(value.threadId);
+      if (owner === previous) {
+        const createdId = method === 'createFromProvider' ? value?.session?.threadId : method === 'forkSession' ? value?.threadId : '';
+        if (createdId) previousIds.add(createdId);
+      }
       return value;
     };
   }
@@ -58,8 +61,6 @@ export async function withExistingConversations(current, options) {
   const clients = createAppServerClient({ codexHome: home, workingDirectory: installationRoot, label: 'existing-projects' });
   const providers = createModelProviderService({ projectRoot: installationRoot, defaultClient: clients,
     currentApiConfiguration: () => readCurrentApiConfiguration(home) });
-  const prepareResumeFile = providers.prepareResumeFile;
-  providers.prepareResumeFile = (id, info) => id === 'current' ? Promise.resolve(info) : prepareResumeFile(id, info);
   const histories = new Map();
   let currentStore;
   const historyFor = id => {

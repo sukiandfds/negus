@@ -49,9 +49,9 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
     const entries = (project.conversations || []) as Entry[];
     const mainEntry = entries.find(entry => entry.main || entry.threadId === project.mainThreadId);
     const mainArchived = Boolean(mainEntry && (archivedByThread[mainEntry.threadId || ''] ?? mainEntry.archived));
-    // Project group execution is outside this UI phase.
-    const available = entries.filter(entry => entry.role !== 'project' && Boolean(archivedByThread[entry.threadId || ''] ?? entry.archived) === archived);
-    const rows = available.map(entry => toConversation(project, entry));
+    const available = entries.filter(entry => Boolean(archivedByThread[entry.threadId || ''] ?? entry.archived) === archived);
+    const rows = available.filter(entry => entry.role !== 'project').map(entry => toConversation(project, entry));
+    const groupRows = available.filter(entry => entry.role === 'project').map(entry => toConversation(project, entry));
     if (project.kind === 'employee') {
       if ((archived && !rows.length) || (!archived && mainArchived)) continue;
       const main = rows.find(row => row.main) || (!archived && !mainArchived ? toConversation(project, {
@@ -60,7 +60,9 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
         pendingOpen: !project.mainThreadId, status: project.status,
       }) : null);
       if (!main) continue;
-      employees.push({ ...main, time: (Date.parse(project.lastActivityAt || '') || 0) > (Date.parse(main.time || '') || 0) ? project.lastActivityAt : main.time, children: uniqueConversations(rows.filter(row => !row.main)) });
+      const employee = { ...main, time: (Date.parse(project.lastActivityAt || '') || 0) > (Date.parse(main.time || '') || 0) ? project.lastActivityAt : main.time, children: uniqueConversations([...rows.filter(row => !row.main), ...groupRows]) };
+      employees.push(employee);
+      projects.push({ ...employee, id: `project:${project.id}`, kind: 'project', subtitle: '员工' });
       all.push(...rows);
       if (!rows.some(row => conversationKey(row) === conversationKey(main)) && main.threadId) all.push(main);
     } else {

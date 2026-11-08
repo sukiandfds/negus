@@ -39,6 +39,7 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
   const [forwardBusy, setForwardBusy] = useState(false);
   const [pendingForward, setPendingForward] = useState<{ threadId: string; text: string } | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const providerDialogRef = useRef<HTMLDialogElement>(null);
   const currentThread = useRef(c.selectedId);
   currentThread.current = c.selectedId;
   const selectedIds = selection?.threadId === c.selectedId ? selection.ids : null;
@@ -48,6 +49,9 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
   useEffect(() => {
     if (forwardDialog) dialogRef.current?.showModal();
   }, [forwardDialog]);
+  useEffect(() => {
+    if (c.providerSwitch) providerDialogRef.current?.showModal();
+  }, [c.providerSwitch]);
   useEffect(() => {
     if (!pendingForward || pendingForward.threadId !== c.selectedId || c.loadingSession) return;
     if (c.sessionError && c.session?.threadId !== c.selectedId) {
@@ -171,6 +175,13 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
         </select></label>
         {forwardError ? <p role="alert" className={dialogStyles.error}>{forwardError}</p> : null}
         <footer><button type="button" disabled={!targetId || forwardBusy} onClick={() => void forward()}>转发</button><button type="button" disabled={forwardBusy} onClick={() => setForwardDialog(false)}>取消</button></footer>
+      </dialog>, document.body)}
+      {c.providerSwitch && createPortal(<dialog ref={providerDialogRef} className={dialogStyles.dialog} aria-label="切换模型配置" onCancel={event => { event.preventDefault(); if (!c.providerSwitchBusy) c.cancelProviderSwitch(); }}>
+        <header><strong>切换模型配置</strong><button type="button" aria-label="关闭" disabled={c.providerSwitchBusy} onClick={() => c.cancelProviderSwitch()}><X /></button></header>
+        <p>切换配置将使用完整上下文创建新对话，是否创建？</p>
+        <p className={dialogStyles.source}>目标配置：{c.providerSwitch.providerName} · {c.providerSwitch.model.split("::").at(-1)}</p>
+        {c.providerSwitchError ? <p role="alert" className={dialogStyles.error}>{c.providerSwitchError}</p> : null}
+        <footer><button type="button" disabled={c.providerSwitchBusy} onClick={() => void c.confirmProviderSwitch()}>{c.providerSwitchBusy ? "正在创建…" : "创建新对话"}</button><button type="button" disabled={c.providerSwitchBusy} onClick={() => c.cancelProviderSwitch()}>取消</button></footer>
       </dialog>, document.body)}
     </section>;
 }
