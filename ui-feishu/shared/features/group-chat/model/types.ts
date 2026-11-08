@@ -1,5 +1,4 @@
 import type { MediaFile } from "../../../shared/model/media";
-import type { ArtifactRealtimeEvent } from "../../artifacts/model/types";
 
 export interface GroupMember {
   id: string;
@@ -63,6 +62,7 @@ export interface GroupRoom {
   id: string;
   name: string;
   projectId: string;
+  archived?: boolean;
 }
 
 export interface GroupSnapshot {
@@ -91,10 +91,6 @@ export type GroupMessageHistory = Omit<GroupMessagePage, "messages">;
 export interface GroupRoomListResponse {
   rooms: GroupRoom[];
 }
-
-export type GroupProfile =
-  | { kind: "agent"; profile: GroupAgent }
-  | { kind: "member"; profile: GroupMember };
 
 export interface StoredMember {
   id: string;
@@ -133,5 +129,4 @@ export type GroupEvent =
   | { type: "group_agent_updated"; roomId?: string; agent: GroupAgent }
   | { type: "group_members_changed"; roomId?: string; members: GroupMember[] }
   | { type: "group_agent_started"; roomId?: string; agentId: string; agentName: string; workId: string; startedAt: string }
-  | { type: "group_agent_delta"; roomId?: string; agentId: string; workId?: string; itemId: string; delta: string }
-  | ArtifactRealtimeEvent;
+  | { type: "group_agent_delta"; roomId?: string; agentId: string; workId?: string; itemId: string; delta: string };

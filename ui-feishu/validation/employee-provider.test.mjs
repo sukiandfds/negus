@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import '../server/register.mjs';
+import { setTransferredProvider } from '../server/employee-provider-integration.mjs';
 const { createEmployeeProjectRegistry } = await import('../../windows/server/employee-project-registry.mjs');
 const { createEmployeeRuntimeService } = await import('../../windows/server/employee-runtime-service.mjs');
 
@@ -60,6 +61,8 @@ async function fixture(t) {
     async prepareResumeFile(id, info) {
       const source = path.basename(path.dirname(info.path));
       histories.set(id, [...histories.get(source)]);
+      await fs.mkdir(path.join(root, id), { recursive: true });
+      await fs.writeFile(path.join(root, id, 'rollout.jsonl'), JSON.stringify({ type: 'session_meta', payload: { id: 'original-thread', model_provider: source } }) + '\n');
       return { ...info, path: path.join(root, id, 'rollout.jsonl') };
     },
   };
@@ -107,6 +110,25 @@ test('failed switch leaves previous provider usable and settings unchanged', asy
   assert.equal(f.histories.get('current').at(-1), 'still works');
 });
 
+test('switching away from an unavailable old provider does not resume it before migrating history', async t => {
+  const f = await fixture(t);
+  const source = f.client('current');
+  const request = source.request.bind(source);
+  source.request = async (method, params) => {
+    if (method === 'thread/resume') throw Error('This chat uses model provider "old", which is no longer configured.');
+    return request(method, params);
+  };
+  await f.service.updateModelSettings('researcher', { model: 'ccswitch_deepseek::deepseek-flash', reasoningEffort: 'high' });
+  await f.service.sendMessage({ employeeId: 'researcher', text: 'continue on DeepSeek' });
+  assert.deepEqual(f.histories.get('ccswitch_deepseek'), ['old question', 'old answer', 'continue on DeepSeek']);
+  const employee = f.registry.get('researcher');
+  assert.equal(employee.modelProviderId, 'ccswitch_deepseek');
+  assert.equal(employee.reasoningEffort, 'high');
+  assert.equal(employee.pendingModelSettings, null);
+  assert.equal(employee.mainThreadId, 'original-thread');
+  assert.equal(employee.conversationId, 'original-conversation');
+});
+
 test('restart restores selected employee provider; old provider events cannot complete its new task', async t => {
   const f = await fixture(t);
   await f.service.updateModelSettings('researcher', { model: 'ccswitch_vip::model-b' });
@@ -143,4 +165,53 @@ test('a completed native task with stale employee status does not block the next
   assert.equal(f.histories.has('ccswitch_vip'), false);
   await f.service.sendMessage({ employeeId: 'researcher', text: 'third' });
   assert.deepEqual(f.histories.get('ccswitch_vip'), ['old question', 'old answer', 'first', 'second', 'third']);
+});
+
+ test('migration updates only destination provider metadata, preserving source and message bytes', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-provider-header-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const source = path.join(root, 'source.jsonl'), target = path.join(root, 'target.jsonl');
+  const body = '\n{"type":"event_msg","payload":{"text":"original message"}}\n';
+  const original = JSON.stringify({ type: 'session_meta', payload: { id: 'thread', model_provider: 'removed' } }) + body;
+  const settings = JSON.stringify({ type: 'event_msg', payload: { type: 'thread_settings_applied', thread_settings: { model_provider_id: 'removed', model: 'old-model' } } }) + '\n';
+  await fs.writeFile(source, original + settings); await fs.copyFile(source, target);
+  await setTransferredProvider(target, source, 'thread', 'deepseek');
+  const migrated = await fs.readFile(target, 'utf8');
+  assert.equal(JSON.parse(migrated.split('\n')[0]).payload.model_provider, 'deepseek');
+  assert.ok(migrated.slice(migrated.indexOf('\n')).startsWith(body));
+  const applied = JSON.parse(migrated.trim().split('\n').at(-1)).payload.thread_settings;
+  assert.equal(applied.model_provider_id, 'deepseek');
+  assert.equal(applied.model, 'old-model');
+  assert.equal(await fs.readFile(source, 'utf8'), original + settings);
+  await assert.rejects(setTransferredProvider(target, source, 'wrong-thread', 'other'), /校验失败/);
+});
+
+test('migration recovers an unloaded source before reading its history', async t => {
+  const f = await fixture(t), source = f.client('current'), request = source.request.bind(source);
+  let loaded = false;
+  source.request = async (method, params) => {
+    if (method === 'thread/read' && !loaded) throw Error('thread not loaded: original-thread');
+    if (method === 'thread/resume') loaded = true;
+    return request(method, params);
+  };
+  await f.service.updateModelSettings('researcher', { model: 'ccswitch_vip::model-b' });
+  await f.service.sendMessage({ employeeId: 'researcher', text: 'after unloaded source' });
+  assert.equal(f.histories.get('ccswitch_vip').at(-1), 'after unloaded source');
+});
+
+test('migration corrects an existing native index only for the destination thread', async t => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-index-migration-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, 'sessions/2026/11/06/rollout.jsonl');
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify({ type: 'session_meta', payload: { id: 'thread', model_provider: 'old' } }) + '\n');
+  const db = new DatabaseSync(path.join(root, 'state_5.sqlite'));
+  t.after(() => db.close());
+  db.exec('CREATE TABLE threads (id TEXT, model_provider TEXT, rollout_path TEXT)');
+  const insert = db.prepare('INSERT INTO threads VALUES (?,?,?)');
+  insert.run('thread', 'old', file); insert.run('other', 'old', 'other-path');
+  await setTransferredProvider(file, path.join(root, 'source.jsonl'), 'thread', 'deepseek');
+  assert.equal(db.prepare('SELECT model_provider FROM threads WHERE id=?').get('thread').model_provider, 'deepseek');
+  assert.equal(db.prepare('SELECT model_provider FROM threads WHERE id=?').get('other').model_provider, 'old');
 });

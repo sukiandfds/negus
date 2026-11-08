@@ -9,10 +9,10 @@ import { pinKey } from '../usePinnedConversations';
 import { visibleTaskPreview } from '../taskNotice';
 import type { Conversation, ConversationState } from '../types';
 
-type Props = { items: Conversation[]; c: Pick<ConversationState, 'project' | 'selectedId' | 'archivedView' | 'archiveBusyIds' | 'archiveSession' | 'unarchiveSession'>; opening: string; query: string; onOpen: (item: Conversation) => void; pinned?: ReadonlySet<string>; onTogglePin?: (item: Conversation) => void; selectedRoomId?: string };
+type Props = { items: Conversation[]; c: Pick<ConversationState, 'project' | 'selectedId' | 'archivedView' | 'archiveBusyIds' | 'archiveSession' | 'unarchiveSession'>; opening: string; query: string; onOpen: (item: Conversation) => void; pinned?: ReadonlySet<string>; onTogglePin?: (item: Conversation) => void; onRenameRoom?: (roomId: string, name: string) => Promise<void>; onArchiveRoom?: (roomId: string, archived: boolean) => Promise<void>; selectedRoomId?: string };
 
 // Shared flat/tree rows for recent chats, employees, projects and task conversations.
-export function ConversationRows({ items, c, opening, query, onOpen, pinned, onTogglePin, selectedRoomId }: Props) {
+export function ConversationRows({ items, c, opening, query, onOpen, pinned, onTogglePin, onRenameRoom, onArchiveRoom, selectedRoomId }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const matches = (item: Conversation): boolean => `${item.name} ${item.subtitle} ${visibleTaskPreview(item.preview)} ${visibleTaskPreview(item.session?.latestAssistant)} ${visibleTaskPreview(item.session?.latestUser)}`.toLowerCase().includes(query.toLowerCase()) || Boolean(item.children?.some(matches));
   const render = (item: Conversation) => {
@@ -20,6 +20,8 @@ export function ConversationRows({ items, c, opening, query, onOpen, pinned, onT
     const key = item.taskId || (item.kind ? item.id : conversationKey(item));
     const isExpanded = expanded.has(key) || Boolean(query && item.children?.some(matches));
     const expandable = item.children !== undefined;
+    const group = item.kind === 'group' && Boolean(item.roomId);
+    const employeeMain = Boolean(item.main && item.agentId);
     return <div className="conversation-branch" key={key}>
       <div className={`contact-row ${expandable ? 'expandable' : ''} ${(item.roomId ? item.roomId === selectedRoomId : !selectedRoomId && item.threadId && item.threadId === c.selectedId) ? 'current' : ''}`}>
         <button className="contact-main" disabled={Boolean(opening)} onClick={() => onOpen(item)} aria-label={`打开${item.name}${item.main ? '单聊' : ''}`} aria-current={item.threadId && item.threadId === c.selectedId ? 'true' : undefined}>
@@ -29,7 +31,7 @@ export function ConversationRows({ items, c, opening, query, onOpen, pinned, onT
           </span>
         </button>
         {expandable && <button className="icon-button contact-expand" aria-label={`${isExpanded ? '折叠' : '展开'}${item.name}`} aria-expanded={isExpanded} onClick={() => setExpanded(previous => { const next = new Set(previous); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>{isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button>}
-        {!expandable && (item.session || onTogglePin) && <ConversationActions conversationId={item.conversationId || undefined} session={item.session ? { ...item.session, title: item.name } : { threadId: item.threadId || '', title: item.name, source: 'codex', updatedAt: item.time || '', messageCount: null, latestUser: '', latestAssistant: '' }} pinOnly={!item.threadId} pinned={pinned?.has(pinKey(item))} onTogglePin={onTogglePin ? () => onTogglePin(item) : undefined} archived={c.archivedView} disabled={c.archiveBusyIds.has(item.threadId || '')} className="contact-more" onArchive={() => void (c.archivedView ? c.unarchiveSession(item.threadId!) : c.archiveSession(item.threadId!))} />}
+        {!expandable && (item.session || group || onTogglePin) && <ConversationActions conversationId={item.conversationId || undefined} copyId={item.roomId} onRename={group && item.roomId && onRenameRoom ? name => onRenameRoom(item.roomId!, name) : undefined} unavailableForward={group} unavailableCopy={group} showArchive={!employeeMain || c.archivedView} session={item.session ? { ...item.session, title: item.name } : { threadId: item.threadId || '', title: item.name, source: 'codex', updatedAt: item.time || '', messageCount: null, latestUser: '', latestAssistant: '' }} pinOnly={!item.threadId && !group} pinned={pinned?.has(pinKey(item))} onTogglePin={onTogglePin ? () => onTogglePin(item) : undefined} archived={c.archivedView} disabled={!group && c.archiveBusyIds.has(item.threadId || '')} className="contact-more" onArchive={() => void (group && item.roomId && onArchiveRoom ? onArchiveRoom(item.roomId, !c.archivedView) : c.archivedView ? c.unarchiveSession(item.threadId!) : c.archiveSession(item.threadId!))} />}
       </div>
       {expandable && isExpanded && <div className="conversation-children" aria-label={`${item.name}的关联对话`}>{item.children!.length ? item.children!.map(render) : <p className="branch-empty">{item.main ? '暂无外派对话' : '暂无关联对话'}</p>}</div>}
     </div>;

@@ -21,6 +21,18 @@ export const streamRetryArguments = (home) => {
   return Object.keys(providers).length ? ['-c', `model_providers=${TOML.stringify.value(providers)}`] : [];
 };
 
+export const modelProviderNoProxyHosts = (home) => {
+  let config;
+  try { config = TOML.parse(fs.readFileSync(path.join(home, "config.toml"), "utf8")); }
+  catch (error) { if (error.code === "ENOENT") return []; throw error; }
+  return [...new Set(Object.values(config.model_providers || {}).flatMap((provider) => {
+    try {
+      const url = new URL(provider.base_url);
+      return url.protocol === "https:" ? [url.hostname] : [];
+    } catch { return []; }
+  }))];
+};
+
 const versionParts = (version) => {
   const match = version.match(/(\d+)\.(\d+)\.(\d+)(?:-([\w.-]+))?/);
   if (!match) return null;
@@ -220,10 +232,14 @@ export const createAppServerClient = ({
     const logPrefix = label ? `[app-server-client:${label}]` : "[app-server-client]";
     console.log(`${logPrefix} using ${selected.entrypoint} (${selected.version})`);
     const effectiveHome = codexHome || environment.CODEX_HOME || process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+    const noProxy = [...new Set([
+      environment.NO_PROXY, environment.no_proxy, process.env.NO_PROXY, process.env.no_proxy,
+      ...modelProviderNoProxyHosts(effectiveHome),
+    ].filter(Boolean).flatMap((value) => String(value).split(",")).map((value) => value.trim()).filter(Boolean))].join(",");
     const spawned = spawn(selected.command, [...selected.prefixArgs, "app-server", "-c", 'web_search="live"', ...streamRetryArguments(effectiveHome), ...sharedModelCatalogArguments(), ...imageMcpArguments(), ...computerMcpArguments(), ...nativeComputerMcpArguments()], {
       cwd: workingDirectory,
       env: buildAppServerEnvironment({
-        environment,
+        environment: noProxy ? { ...environment, NO_PROXY: noProxy, no_proxy: noProxy } : environment,
         codexHome,
         sanitizeEnvironment,
       }),

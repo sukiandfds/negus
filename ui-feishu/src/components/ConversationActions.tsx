@@ -9,8 +9,8 @@ import styles from "../../shared/features/conversations/components/ConversationA
 import { copyWithFallback } from "../../shared/features/conversations/components/MessageActions";
 
 type Target = { threadId: string; title: string; projectName: string; employeeId: string; conversationId: string };
-type Props = { conversationId?: string; session: SessionSummary; archived: boolean; disabled: boolean; onArchive: () => void; className: string; pinned?: boolean; onTogglePin?: () => void; pinOnly?: boolean };
-export function ConversationActions({ conversationId, session, archived, disabled, onArchive, className, pinned, onTogglePin, pinOnly }: Props) {
+type Props = { conversationId?: string; copyId?: string; session: SessionSummary; archived: boolean; disabled: boolean; onArchive: () => void; className: string; pinned?: boolean; onTogglePin?: () => void; pinOnly?: boolean; onRename?: (name: string) => Promise<void>; showForward?: boolean; showCopy?: boolean; showArchive?: boolean; unavailableForward?: boolean; unavailableCopy?: boolean };
+export function ConversationActions({ conversationId, copyId, session, archived, disabled, onArchive, className, pinned, onTogglePin, pinOnly, onRename, showForward = true, showCopy = true, showArchive = true, unavailableForward = false, unavailableCopy = false }: Props) {
   const [idCopied, setIdCopied] = useState(false);
   const [menu, setMenu] = useState(false);
   const [dialog, setDialog] = useState<"forward" | "rename" | "">("");
@@ -51,10 +51,14 @@ export function ConversationActions({ conversationId, session, archived, disable
     if (busy || !normalized || normalized.length > 120) return;
     setBusy(true); setError("");
     try {
-      const renamed = await postJson<SessionSummary>("/api/session/name", {
-        threadId: session.threadId, name: normalized, conversationId: await sourceConversationId(),
-      });
-      window.dispatchEvent(new CustomEvent("negus:session-renamed", { detail: renamed }));
+      if (onRename) {
+        await onRename(normalized);
+      } else {
+        const renamed = await postJson<SessionSummary>("/api/session/name", {
+          threadId: session.threadId, name: normalized, conversationId: await sourceConversationId(),
+        });
+        window.dispatchEvent(new CustomEvent("negus:session-renamed", { detail: renamed }));
+      }
       setDialog("");
       button.current?.focus();
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
@@ -101,17 +105,17 @@ export function ConversationActions({ conversationId, session, archived, disable
       }}><MoreHorizontal aria-hidden="true" /></button>
     {menu && createPortal(<div ref={menuElement} role="menu" className={styles.menu} style={position}>
       {onTogglePin && <button role="menuitem" onClick={() => { setMenu(false); onTogglePin(); }}>{pinned ? <PinOff /> : <Pin />}{pinned ? '取消置顶' : '置顶'}</button>}
-      <button role="menuitem" disabled={!session.threadId && !conversationId} onClick={async () => {
-        try { await copyWithFallback([conversationId && `conversationId: ${conversationId}`, session.threadId && `threadId: ${session.threadId}`].filter(Boolean).join("\n")); setIdCopied(true); setError(""); }
+      <button role="menuitem" disabled={!session.threadId && !conversationId && !copyId} onClick={async () => {
+        try { await copyWithFallback([conversationId && `conversationId: ${conversationId}`, session.threadId && `threadId: ${session.threadId}`, copyId && `roomId: ${copyId}`].filter(Boolean).join("\n")); setIdCopied(true); setError(""); }
         catch { setError("复制失败，请重试"); }
       }}><Copy />{idCopied ? "已复制对话 ID" : "复制对话 ID"}</button>
       {!pinOnly && <>
       <button role="menuitem" disabled={busy || session.readOnly} onClick={() => {
         setMenu(false); setName(session.title); setError(""); setDialog("rename");
       }}><Pencil />重命名</button>
-      <button role="menuitem" disabled={busy} onClick={() => void openForward()}><Forward />转发</button>
-      <button role="menuitem" disabled={busy || archived} onClick={() => void copy()}><Copy />{busy ? "复制中…" : "复制"}</button>
-      <button role="menuitem" disabled={busy} onClick={() => { setMenu(false); onArchive(); }}>{archived ? <ArchiveRestore /> : <Archive />}{archived ? "恢复" : "归档"}</button>
+      {showForward && <button role="menuitem" disabled={busy} onClick={() => unavailableForward ? setError("暂不支持") : void openForward()}><Forward />转发</button>}
+      {showCopy && <button role="menuitem" disabled={busy || (!unavailableCopy && archived)} onClick={() => unavailableCopy ? setError("暂不支持") : void copy()}><Copy />{busy ? "复制中…" : "复制"}</button>}
+      {showArchive && <button role="menuitem" disabled={busy} onClick={() => { setMenu(false); onArchive(); }}>{archived ? <ArchiveRestore /> : <Archive />}{archived ? "恢复" : "归档"}</button>}
       </>}
       {error && !dialog ? <p role="alert" className={styles.error}>{error}</p> : null}
     </div>, document.body)}

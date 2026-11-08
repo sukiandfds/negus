@@ -1,8 +1,50 @@
 import path from 'node:path';
+import fs from 'node:fs/promises';
+
+export async function setTransferredProvider(file, sourceFile, threadId, modelProvider) {
+  if (path.resolve(file) === path.resolve(sourceFile)) return;
+  const content = await fs.readFile(file, 'utf8');
+  const newline = content.indexOf('\n');
+  const header = JSON.parse(newline < 0 ? content : content.slice(0, newline));
+  if (header.type !== 'session_meta' || header.payload?.id !== threadId) throw Error('员工原对话记录校验失败，未切换配置');
+  header.payload.model_provider = modelProvider;
+  const tail = (newline < 0 ? '' : content.slice(newline)).split('\n').map(line => {
+    if (!line) return line;
+    const entry = JSON.parse(line);
+    const settings = entry.type === 'event_msg' && entry.payload?.type === 'thread_settings_applied'
+      ? entry.payload.thread_settings : null;
+    if (!settings || settings.model_provider_id === modelProvider) return line;
+    settings.model_provider_id = modelProvider;
+    return JSON.stringify(entry);
+  }).join('\n');
+  const temporary = `${file}.provider-${process.pid}`;
+  await fs.writeFile(temporary, JSON.stringify(header) + tail, { mode: 0o600 });
+  await fs.rename(temporary, file);
+  // Native resume also trusts its persisted index over the rollout metadata.
+  let directory = path.dirname(file);
+  while (path.dirname(directory) !== directory && !['sessions', 'archived_sessions'].includes(path.basename(directory))) directory = path.dirname(directory);
+  if (!['sessions', 'archived_sessions'].includes(path.basename(directory))) return;
+  const home = path.dirname(directory);
+  const databases = (await fs.readdir(home)).filter(name => /^state_\d+\.sqlite$/.test(name));
+  if (!databases.length) return;
+  const { DatabaseSync } = await import('node:sqlite');
+  for (const name of databases) {
+    const db = new DatabaseSync(path.join(home, name));
+    try {
+      db.exec('PRAGMA busy_timeout=5000');
+      db.prepare('UPDATE threads SET model_provider=? WHERE id=? AND rollout_path=?').run(modelProvider, threadId, file);
+    } finally { db.close(); }
+  }
+}
 
 // Move the native rollout, preserving the thread ID and complete history.
 export async function transferEmployeeThread({ source, target, providers, threadId, route, config, instructions, policy }) {
-  const { thread } = await source.request('thread/read', { threadId, includeTurns: false });
+  let thread;
+  try { ({ thread } = await source.request('thread/read', { threadId, includeTurns: false })); }
+  catch (error) {
+    if (!/thread not loaded/i.test(String(error.message))) throw error;
+    ({ thread } = await source.request('thread/resume', { threadId, persistExtendedHistory: true, ...policy }));
+  }
   if (thread?.status?.type === 'active') throw Object.assign(new Error('员工正在处理消息，不能修改配置'), { statusCode: 409 });
   if (!thread?.path || !path.isAbsolute(thread.path) || !thread.cwd) throw Error('无法找到员工原对话记录，未切换配置');
   const native = (await target.request('config/read', { cwd: thread.cwd })).config;
@@ -13,6 +55,7 @@ export async function transferEmployeeThread({ source, target, providers, thread
     const info = await providers.prepareResumeFile(route.modelProviderId, thread);
     // A prior visit to this provider may still have this thread cached.
     await target.request('thread/unsubscribe', { threadId });
+    await setTransferredProvider(info.path, thread.path, threadId, modelProvider);
     const result = await target.request('thread/resume', {
       threadId, path: info.path, cwd: thread.cwd, model: route.model, modelProvider,
       config, developerInstructions: instructions, persistExtendedHistory: true, ...policy,
@@ -85,7 +128,6 @@ export function adaptEmployeeProviderSource(source) {
     try {
       if (threadId) {
         originalClient = await clientForThread(threadId, employee);
-        await resumeThread(threadId, employee);
         if (switchingProvider) {
           await transferEmployeeThread({ source: originalClient, target: runtimeClient, providers: modelProviders,
             threadId, route: requestedRoute,
@@ -97,6 +139,7 @@ export function adaptEmployeeProviderSource(source) {
           freshThreads.delete(threadId);
           taskConfiguredClients.set(threadId, runtimeClient);
         } else {
+          await resumeThread(threadId, employee);
           if (requestedRoute.model && requestedRoute.model !== currentRoute.model) {
             await runtimeClient.request("thread/settings/update", { threadId, model: requestedRoute.model });
           }

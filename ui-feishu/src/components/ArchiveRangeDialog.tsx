@@ -17,7 +17,7 @@ export function ArchiveRangeDialog({ items, archive, onClose }: { items: Convers
   const [processed, setProcessed] = useState(0);
   const [result, setResult] = useState('');
   useEffect(() => { dialog.current?.showModal(); }, []);
-  const matches = [...new Map(flatten(items).filter(item => item.threadId && !item.roomId && item.kind !== 'project'
+  const matches = [...new Map(flatten(items).filter(item => item.threadId && !item.roomId && item.kind !== 'project' && !(item.main && item.agentId)
     && !item.pending && dateOf(item.time) && dateOf(item.time) >= start && dateOf(item.time) <= end)
     .map(item => [item.threadId!, item])).values()];
   const submit = async () => {

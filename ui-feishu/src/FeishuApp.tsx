@@ -67,6 +67,7 @@ export function FeishuApp() {
   const [tab, setTab] = useState<ChatTab>('messages');
   const [mobileChat, setMobileChat] = useState(initialRoute.hasChat);
   const [railOpen, setRailOpen] = useState(false);
+  const groupRoom = roomId ? groups.rooms.find(room => room.id === roomId) : undefined;
   const employee = viewDirectory.projects.find(p => p.employeeId === agentId || (p.employeeId && (p.mainThreadId === viewC.selectedId || p.conversations?.some(item => item.threadId === viewC.selectedId))));
   const autoOpenedAgent = useRef('');
   const selectedName = employee?.name || 'Negus 助手';
@@ -97,7 +98,8 @@ export function FeishuApp() {
   }, []);
   useEffect(() => {
     if (!legacyGroup || roomId || !groups.rooms.length) return;
-    const fallback = groups.rooms[0];
+    const fallback = groups.rooms.find(room => !room.archived);
+    if (!fallback) return;
     setRoomId(fallback.id);
     const url = new URL(location.href);
     url.searchParams.set('view', 'group');
@@ -127,8 +129,7 @@ export function FeishuApp() {
   }, []);
   const roster = useMemo(() => {
     const base = buildConversationDirectory(viewDirectory, viewC.sessions, viewC.archivedView, viewC.project?.root, viewC.cachedSessions, viewC.archivedByThread);
-    if (viewC.archivedView) return base;
-    const rooms: Conversation[] = groups.rooms.map(room => ({ id: `group:${room.id}`, kind: 'group', roomId: room.id, name: room.name, subtitle: viewDirectory.projects.find(project => project.projectId === room.projectId)?.name || '群聊', projectId: room.projectId, time: room.lastActivityAt }));
+    const rooms: Conversation[] = groups.rooms.filter(room => Boolean(room.archived) === viewC.archivedView).map(room => ({ id: `group:${room.id}`, kind: 'group', roomId: room.id, name: room.name, subtitle: viewDirectory.projects.find(project => project.projectId === room.projectId)?.name || '群聊', projectId: room.projectId, time: room.lastActivityAt }));
     return { ...base, all: [...base.all, ...rooms], projects: base.projects.map(project => {
       const children = [...(project.children || []), ...rooms.filter(room => room.projectId === project.projectId)].sort(byLatest);
       return { ...project, time: children[0]?.time || project.time, children };
@@ -188,14 +189,14 @@ export function FeishuApp() {
     <ConversationList c={viewC} section={section} query={query} filter={filter} origins={origins} onOriginsChange={updateOrigins} onOpenNavigation={() => setRailOpen(open => !open)}
       opening={opening} openError={openError} hasRoster={Boolean(roster.all.length)} initialReady={page.committed} visibleRoster={visibleRoster}
       onQueryChange={setQuery} onFilterChange={next => { setFilter(next); setSection('messages'); setOpenError(''); }} onRefresh={() => { void viewC.refresh(); void directory.refresh(undefined, true); void groups.refresh(); }}
-      onCreate={create} onCreateGroup={() => setCreatingGroup(true)} pinned={pins.pinned} onTogglePin={pins.toggle} selectedRoomId={roomId} onOpen={item => void open(item)} />
+      onCreate={create} onCreateGroup={() => setCreatingGroup(true)} pinned={pins.pinned} onTogglePin={pins.toggle} onRenameRoom={(id, name) => groups.update(id, { name }).then(() => undefined)} onArchiveRoom={async (id, archived) => { await groups.update(id, { archived }); if (archived && roomId === id) { setRoomId(''); setLegacyGroup(false); setMobileChat(false); const url = new URL(location.href); url.searchParams.delete('roomId'); if (url.searchParams.get('view') === 'group') url.searchParams.set('view', 'conversation'); history.replaceState({}, '', `${url.pathname}${url.search}`); } }} selectedRoomId={roomId} onOpen={item => void open(item)} />
     <div className="chat-surface" style={{ display: roomId ? 'none' : undefined }}><ChatWorkspace visible={mobileChat || window.innerWidth > 760} c={singleChat.current} usage={usage} initialReady={page.committed} tab={tab} setTab={setTab}
       details={details} setDetails={setDetails} agentId={employee?.employeeId || agentId} selectedName={selectedName} selected={selected}
       targets={forwardTargets} onOpenTarget={open}
       onBack={() => setMobileChat(false)} onShare={() => setSharing(true)} /></div>
-    {roomId && <GroupWorkspace key={roomId} room={groups.rooms.find(room => room.id === roomId) || { id: roomId, name: '群聊', projectId: '' }} projectName={directory.projects.find(project => project.projectId === groups.rooms.find(room => room.id === roomId)?.projectId)?.name || ''} onBack={() => setMobileChat(false)} />}
+    {roomId && <GroupWorkspace key={roomId} room={groupRoom || { id: roomId, name: '群聊', projectId: '' }} projectName={directory.projects.find(project => project.projectId === groupRoom?.projectId)?.name || ''} onBack={() => setMobileChat(false)} onShare={() => setSharing(true)} onRename={name => groups.update(roomId, { name })} />}
     {creatingGroup && <CreateGroupDialog directory={directory} onClose={() => setCreatingGroup(false)} onCreated={room => { setCreatingGroup(false); void groups.refresh(); setSection('messages'); setFilter('all'); void open({ id: `group:${room.id}`, name: room.name, subtitle: '群聊', kind: 'group', roomId: room.id }); }} />}
-    <ShareConversationDialog open={sharing} title={c.session?.title || selectedName} onClose={closeSharing} />
+    <ShareConversationDialog open={sharing} title={roomId ? groupRoom?.name || '群聊' : c.session?.title || selectedName} heading={roomId ? '分享当前群聊' : undefined} onClose={closeSharing} />
     <UserInputDialog request={viewC.userInputRequest} busy={c.userInputBusy} error={c.userInputError} onSubmit={c.answerUserInput} />
     {settings && <div className="settings-overlay"><SettingsPage onClose={closeSettings} connected={c.connected} device={device} projectId={directory.projects.find(project => project.kind === 'personal')?.projectId || ''} projectRoot={c.project?.root || ''} /></div>}
   </div>;

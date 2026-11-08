@@ -34,12 +34,6 @@ export async function extendGroupRooms({ stateRoot, roomDirectory, services, pro
     writes = writes.catch(() => {}).then(async () => { await fs.mkdir(stateRoot, { recursive: true }); await fs.writeFile(`${file}.tmp`, text); await fs.rename(`${file}.tmp`, file); });
     return writes;
   };
-  if (!employees().some(employee => employee.id === 'manager')) throw new Error('运营管理员工不存在');
-  let migrated = false;
-  for (const record of records) {
-    if (!record.agentIds.includes('manager')) { record.agentIds.push('manager'); migrated = true; }
-  }
-  if (migrated) await save();
   const register = async record => {
     const identity = projects().find(project => project.projectId === record.projectId && project.kind !== 'employee');
     if (!identity) throw Object.assign(new Error('群聊关联项目不存在'), { statusCode: 400 });
@@ -48,7 +42,7 @@ export async function extendGroupRooms({ stateRoot, roomDirectory, services, pro
     const store = await createGroupRoomStore({ stateFile: path.join(stateRoot, `${record.id}.json`), project: identity.name,
       projectId: identity.projectId, roomId: record.id, agentDefinitions: profiles, broadcast, onMessageCreated });
     const snapshot = store.snapshot;
-    store.snapshot = () => { const data = snapshot(); return { ...data, room: { ...data.room, name: record.name, lastActivityAt: data.messages.at(-1)?.createdAt || record.createdAt } }; };
+    store.snapshot = () => { const data = snapshot(); return { ...data, room: { ...data.room, name: record.name, archived: Boolean(record.archived), lastActivityAt: data.messages.at(-1)?.createdAt || record.createdAt } }; };
     const service = await createGroupTaskService({ ...createServiceOptions(identity, store), room: store,
       stateRoot: path.join(stateRoot, 'tasks', record.id) });
     services.set(record.id, service);
@@ -63,9 +57,8 @@ export async function extendGroupRooms({ stateRoot, roomDirectory, services, pro
     const saved = records.find(record => record.requestId === requestId);
     if (saved) return roomDirectory.require(saved.id).snapshot().room;
     if (pending.has(requestId)) return pending.get(requestId);
-    const name = typeof input.name === 'string' ? input.name.trim() : '';
-    if (!name) throw Object.assign(new Error('请填写群聊名称'), { statusCode: 400 });
-    const agentIds = [...new Set(['manager', ...(Array.isArray(input.agentIds) ? input.agentIds : [])])];
+    const name = typeof input.name === 'string' && input.name.trim() ? input.name.trim() : '未命名群聊';
+    const agentIds = [...new Set(Array.isArray(input.agentIds) ? input.agentIds : [])];
     const record = { id: `chat-${randomUUID()}`, name, projectId: String(input.projectId || ''), agentIds, requestId, createdAt: new Date().toISOString() };
     const work = (async () => {
       const room = await register(record);
@@ -77,13 +70,32 @@ export async function extendGroupRooms({ stateRoot, roomDirectory, services, pro
     pending.set(requestId, work);
     return work;
   };
+  roomDirectory.update = async (roomId, patch) => {
+    const record = records.find(item => item.id === roomId);
+    if (!record) throw Object.assign(new Error('群聊不存在'), { statusCode: 404 });
+    if (patch.name !== undefined) {
+      const name = String(patch.name).trim();
+      if (!name || name.length > 120) throw Object.assign(new Error('群聊名称不能为空且不能超过 120 个字符'), { statusCode: 400 });
+      record.name = name;
+    }
+    if (patch.archived !== undefined) record.archived = Boolean(patch.archived);
+    await save();
+    const room = roomDirectory.require(record.id).snapshot().room;
+    broadcast({ type: 'sessions_changed', roomId: room.id });
+    return room;
+  };
   return roomDirectory;
 }
 
 export function createGroupCreationRoute({ roomDirectory }) {
   return async (request, response, url) => {
-    if (url.pathname !== '/api/group/rooms' || request.method !== 'POST') return false;
-    sendJson(response, { room: await roomDirectory.create(await readJson(request)) }, 201);
+    if (url.pathname !== '/api/group/rooms' || !['POST', 'PATCH'].includes(request.method)) return false;
+    const input = await readJson(request);
+    if (request.method === 'PATCH') {
+      sendJson(response, { room: await roomDirectory.update(input.roomId, input) });
+    } else {
+      sendJson(response, { room: await roomDirectory.create(input) }, 201);
+    }
     return true;
   };
 }

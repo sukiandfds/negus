@@ -47,12 +47,14 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
   const projects: Conversation[] = [];
   for (const project of directory.projects) {
     const entries = (project.conversations || []) as Entry[];
+    const mainEntry = entries.find(entry => entry.main || entry.threadId === project.mainThreadId);
+    const mainArchived = Boolean(mainEntry && (archivedByThread[mainEntry.threadId || ''] ?? mainEntry.archived));
     // Project group execution is outside this UI phase.
     const available = entries.filter(entry => entry.role !== 'project' && Boolean(archivedByThread[entry.threadId || ''] ?? entry.archived) === archived);
     const rows = available.map(entry => toConversation(project, entry));
     if (project.kind === 'employee') {
-      if ((archived && !rows.length) || (!archived && archivedByThread[project.mainThreadId || ''])) continue;
-      const main = rows.find(row => row.main) || (!archived ? toConversation(project, {
+      if ((archived && !rows.length) || (!archived && mainArchived)) continue;
+      const main = rows.find(row => row.main) || (!archived && !mainArchived ? toConversation(project, {
         id: `${project.id}:main`, title: project.name, main: true,
         threadId: project.mainThreadId, conversationId: project.mainConversationId,
         pendingOpen: !project.mainThreadId, status: project.status,
@@ -71,6 +73,7 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
     }
   }
   for (const session of sessions) {
+    if (Boolean(archivedByThread[session.threadId] ?? session.archived) !== archived) continue;
     if (session.conversationKind === 'group' || all.some(row => row.threadId === session.threadId)) continue;
     all.push({ id: session.threadId, name: session.title || '未命名对话', subtitle: '项目对话',
       threadId: session.threadId, time: cachedSessions?.get(session.threadId)?.messages.filter(message => message.role === 'user' || message.role === 'assistant').map(message => message.createdAt).filter(Boolean).sort((a, b) => Date.parse(b!) - Date.parse(a!))[0] || session.updatedAt, session,

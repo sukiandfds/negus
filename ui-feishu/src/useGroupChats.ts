@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { observeProjectStream } from './projectEvents';
 import { groupApi } from '../shared/features/group-chat/data/groupApi';
 import type { GroupRoom } from '../shared/features/group-chat/model/types';
@@ -6,8 +6,13 @@ import type { GroupRoom } from '../shared/features/group-chat/model/types';
 export type ChatRoom = GroupRoom & { lastActivityAt?: string };
 export function useGroupChats() {
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
+  const requestVersion = useRef(0);
   const refresh = useCallback(async (signal?: AbortSignal) => {
-    try { const data = await groupApi.rooms(signal); if (!signal?.aborted) setRooms(data.rooms); }
+    const version = ++requestVersion.current;
+    try {
+      const data = await groupApi.rooms(signal);
+      if (!signal?.aborted && version === requestVersion.current) setRooms(data.rooms);
+    }
     catch { /* Original conversation connection handles service recovery. */ }
   }, []);
   useEffect(() => {
@@ -20,5 +25,11 @@ export function useGroupChats() {
     };
     return () => { controller.abort(); source.close(); clearTimeout(timer); };
   }, [refresh]);
-  return { rooms, refresh };
+  const update = useCallback(async (roomId: string, patch: { name?: string; archived?: boolean }) => {
+    const { room } = await groupApi.updateRoom(roomId, patch);
+    ++requestVersion.current;
+    setRooms(current => current.map(item => item.id === room.id ? { ...item, ...room } : item));
+    return room;
+  }, []);
+  return { rooms, refresh, update };
 }

@@ -1,6 +1,5 @@
 import type { ProjectRuntimeStatus } from '../shared/features/project-directory/model/types';
-const palette: Record<string, string> = { researcher: '#5179db', manager: '#19a592', engineer: '#8370d9', risk: '#ca9950' };
-export const avatarColor = (id = '') => palette[id] || '#4b87b4';
+export { avatarColor } from '../shared/shared/presentation/avatarColor';
 export const compactTime = (value?: string | null) => {
   if (!value || !Number.isFinite(Date.parse(value))) return '';
   const date = new Date(value);

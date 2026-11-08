@@ -131,3 +131,13 @@ test("queues auto compaction until the active turn completes", async () => {
   assert.deepEqual(compacted, ["thread-1"]);
   assert.equal(service.getStatus("thread-1").phase, "compacting");
 });
+
+test('DeepSeek replaces legacy fallback capacity while preserving measured token usage', async () => {
+  const { service } = await createService();
+  service.handleProtocolMessage({ method: 'thread/settings/updated', params: { threadId: 'deepseek', threadSettings: { model: 'deepseek-flash' } } });
+  service.handleProtocolMessage({ method: 'thread/tokenUsage/updated', params: { threadId: 'deepseek', tokenUsage: { last: { totalTokens: 20896 }, modelContextWindow: 258400 } } });
+  assert.equal(service.getStatus('deepseek').usedTokens, 20896);
+  assert.equal(service.getStatus('deepseek').contextWindow, 996147);
+  assert.equal(service.getStatus('deepseek').percentage, 2);
+  await service.close();
+});

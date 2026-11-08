@@ -1,4 +1,5 @@
 import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
+import { verifiedContextWindow } from './model-catalog.mjs';
 
 const DEFAULT_THRESHOLD = 80;
 const MIN_THRESHOLD = 50;
@@ -128,6 +129,7 @@ export const createContextManagementService = async ({
     const runtime = await getRuntimeContext(threadId);
     const model = runtime.model || statusFor(threadId).model;
     const modelChanged = Boolean(model && statusFor(threadId).model && model !== statusFor(threadId).model);
+    const verifiedWindow = verifiedContextWindow(model);
     publish(threadId, {
       model,
       reasoningEffort: runtime.reasoningEffort || statusFor(threadId).reasoningEffort,
@@ -137,6 +139,9 @@ export const createContextManagementService = async ({
         ...runtime.usage,
         percentage: Math.min(100, Math.round(runtime.usage.usedTokens / runtime.usage.contextWindow * 100)),
       } : {}),
+      ...(verifiedWindow ? { contextWindow: verifiedWindow,
+        percentage: Number.isFinite(runtime.usage?.usedTokens ?? before.usedTokens)
+          ? Math.min(100, Math.round((runtime.usage?.usedTokens ?? before.usedTokens) / verifiedWindow * 100)) : null } : {}),
     });
     return publicStatus(statusFor(threadId));
   };
@@ -175,7 +180,7 @@ export const createContextManagementService = async ({
 
     if (method === "thread/tokenUsage/updated") {
       const usedTokens = Number(params.tokenUsage?.last?.totalTokens);
-      const contextWindow = Number(params.tokenUsage?.modelContextWindow);
+      const contextWindow = verifiedContextWindow(statusFor(threadId).model) || Number(params.tokenUsage?.modelContextWindow);
       const validUsage = Number.isFinite(usedTokens) && usedTokens >= 0;
       const validWindow = Number.isFinite(contextWindow) && contextWindow > 0;
       publish(threadId, {

@@ -1,45 +1,58 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Bot } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { JumpToLatest } from "../../../components/JumpToLatest/JumpToLatest";
 import { useReturnToBottom } from "../../../components/JumpToLatest/useReturnToBottom";
-import { ArtifactCollection } from "../../artifacts/components/ArtifactCollection";
-import type { Artifact, ArtifactReviewDecision } from "../../artifacts/model/types";
-import { ContentRenderer, MarkdownContent } from "../../conversations/rendering/ContentRenderer";
-import { ExecutionTimeline } from "../../execution/components/ExecutionTimeline";
 import { emptyStatus } from "../../context-management/hooks/useContextManagement";
-import { MessageActions } from "../../conversations/components/MessageActions";
-import { splitMentions } from "../model/agentMentions";
-import type { GroupAgent, GroupMember, GroupMessage, GroupMessageHistory, GroupProfile, GroupStreamingMessage } from "../model/types";
-import { formatConversationTimestamp, formatDayLabel, localDateKey } from "../../../shared/format/dateTime";
+import { Message } from "../../conversations/components/ConversationView";
+import type { ContentBlock, SessionMessage } from "../../conversations/model/types";
+import type { ExecutionStatus } from "../../execution/model/types";
+import type { GroupMessage, GroupMessageHistory, GroupStreamingMessage } from "../model/types";
+import { avatarColor } from "../../../shared/presentation/avatarColor";
 import styles from "./MessageTimeline.module.css";
 
 
-function GroupExecution({ id, label, text, startedAt }: { id: string; label: string; text: string; startedAt: string | null }) {
-  return <ExecutionTimeline contextStatus={emptyStatus(id)} status={{ type: "execution_status", threadId: id, turnId: id, phase: "working", label, detail: "", commentary: text, active: true, startedAt, updatedAt: null,
-    activities: text ? [{ id, phase: "working", label: "正在回复", detail: text, completed: false, updatedAt: startedAt || "" }] : [] }} />;
-}
+const groupExecution = (id: string, label: string, text: string, startedAt: string | null): ExecutionStatus => ({
+  type: "execution_status",
+  threadId: id,
+  turnId: id,
+  phase: "working",
+  label,
+  detail: "",
+  commentary: text,
+  active: true,
+  startedAt,
+  updatedAt: null,
+  activities: text ? [{ id, phase: "working", label: "正在回复", detail: text, completed: false, updatedAt: startedAt || "" }] : [],
+});
 
-function agentPresence(agent: GroupAgent) {
-  if (agent.active && agent.phase === "queued") return { tone: "queued", label: agent.label || "等候" };
-  if (agent.active) return { tone: "working", label: agent.label || "工作中" };
-  return { tone: "idle", label: "空闲" };
-}
+const attachmentBlocks = (message: GroupMessage): ContentBlock[] => (message.attachments || []).map((file) => {
+  const type = file.mimeType.startsWith("image/") ? "image"
+    : file.mimeType.startsWith("audio/") ? "audio"
+      : file.mimeType.startsWith("video/") ? "video"
+        : "file";
+  return type === "file"
+    ? { id: file.id, type, source: file.url, name: file.name, file }
+    : { id: file.id, type, source: file.url, file };
+});
+
+const sessionMessage = (message: GroupMessage, currentMemberId: string): SessionMessage => ({
+  id: message.id,
+  role: message.type === "human" && message.authorId === currentMemberId ? "user" : "assistant",
+  authorId: message.authorId,
+  authorName: message.authorName,
+  text: message.text,
+  blocks: attachmentBlocks(message),
+  createdAt: message.createdAt,
+  sequence: message.sequence,
+  deliveryState: message.type === "human" && message.pending ? "sending" : message.type === "human" && message.failure ? "failed" : undefined,
+  deliveryError: message.failure ? "发送失败" : undefined,
+});
 
 export function MessageTimeline({
   active,
   roomId,
   messages,
-  agents,
-  members,
   currentMemberId,
   streaming,
-  artifacts,
-  artifactLoadErrors,
-  reviewingArtifactIds,
-  reviewerName,
-  onRetryArtifact,
-  onReviewArtifact,
-  onOpenProfile,
   localSendVersion,
   history,
   historyLoading,
@@ -49,27 +62,13 @@ export function MessageTimeline({
   onLoadNewer,
   onReturnToLatest,
   onQuote,
-  onMentionAgent,
-  onRevealReply,
-  onRetryAgent,
-  onRetrySend,
   unseenLiveCount = 0,
-  retryDisabled = false,
 }: {
   active: boolean;
   roomId: string;
   messages: GroupMessage[];
-  agents: GroupAgent[];
-  members: GroupMember[];
   currentMemberId: string;
   streaming: Record<string, GroupStreamingMessage>;
-  artifacts: Record<string, Artifact>;
-  artifactLoadErrors: Record<string, boolean>;
-  reviewingArtifactIds: Set<string>;
-  reviewerName: string;
-  onRetryArtifact: (artifactId: string) => Promise<void>;
-  onReviewArtifact: (artifactId: string, decision: ArtifactReviewDecision, note: string, reviewedBy: string) => Promise<void>;
-  onOpenProfile: (profile: GroupProfile) => void;
   localSendVersion: number;
   history?: GroupMessageHistory;
   historyLoading: boolean;
@@ -79,12 +78,7 @@ export function MessageTimeline({
   onLoadNewer: () => Promise<boolean>;
   onReturnToLatest: () => Promise<boolean>;
   onQuote?: (message: GroupMessage) => void;
-  onMentionAgent?: (agent: GroupAgent) => void;
-  onRevealReply?: (reply: NonNullable<GroupMessage["replyTo"]>) => void;
-  onRetryAgent?: (agentId: string, replyTo?: GroupMessage["replyTo"]) => void;
-  onRetrySend?: (message: GroupMessage) => void;
   unseenLiveCount?: number;
-  retryDisabled?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const streams = Object.entries(streaming).filter(([, value]) => value.text);
@@ -188,122 +182,47 @@ export function MessageTimeline({
 
   return (
     <div className={styles.timelineShell}>
-      {agents.length ? (
-        <div className={styles.roster} aria-label="群里的员工">
-          {agents.map((agent) => {
-            const presence = agentPresence(agent);
-            return (
-              <button
-                key={agent.id}
-                className={styles.rosterItem}
-                type="button"
-                title={agent.responsibility}
-                aria-label={`点名${agent.name}，${agent.responsibility}，当前${presence.label}`}
-                onClick={() => onMentionAgent?.(agent)}
-              >
-                <i className={`${styles.rosterDot} ${presence.tone === "working" ? styles.rosterDotWorking : ""} ${presence.tone === "queued" ? styles.rosterDotQueued : ""}`} />
-                <strong>{agent.name}</strong>
-                <span>{presence.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
       <div className={styles.timeline} ref={scrollRef} onScroll={(event) => onTimelineScroll(event.currentTarget)}>
-        {history?.hasOlder ? <div className={styles.historyMarker}>继续向上加载更早消息</div> : null}
         {!messages.length && !streams.length ? (
-          <div className={styles.emptyRoom}><Bot /><strong>这个群还没有消息</strong><p>可以直接发言，也可以用 @ 点名员工。</p></div>
+          <div className={styles.emptyState}>这个群还没有消息</div>
         ) : null}
-        {messages.map((message, index) => {
-          const agent = message.type === "agent"
-            ? agents.find((item) => item.id === message.agentId || item.id === message.authorId)
-            : null;
-          const member = message.type === "human"
-            ? members.find((item) => item.id === message.authorId)
-              || { id: message.authorId, name: message.authorName, lastSeenAt: message.createdAt }
-            : null;
-          const profile: GroupProfile | null = agent
-            ? { kind: "agent", profile: agent }
-            : member ? { kind: "member", profile: member } : null;
+        {messages.map((message) => {
           const liveStream = message.workId ? streaming[message.workId] : undefined;
           const pendingAgent = message.type === "agent" && message.pending;
-          const authorName = agent?.name || message.authorName;
-          const ownMessage = message.type === "human" && Boolean(currentMemberId) && message.authorId === currentMemberId;
-          const askedNames = (message.targetAgentIds || []).map((id) => agents.find((item) => item.id === id)?.name || "").filter(Boolean);
-          const statusText = message.type === "human" && message.pending
-            ? "发送中"
-            : message.type === "human" && message.failure
-              ? "发送失败"
-            : formatConversationTimestamp(message.createdAt);
+          const executionId = message.workId || message.id;
           return (
-          <Fragment key={message.id}>
-            {index === 0 || localDateKey(messages[index - 1].createdAt) !== localDateKey(message.createdAt)
-              ? <div className={styles.dateDivider}><span>{formatDayLabel(message.createdAt)}</span></div>
-              : null}
-            <article
-              className={`${styles.message} ${ownMessage ? styles.ownMessage : ""} ${message.type === "system" ? styles.systemMessage : ""} ${highlightedId === message.id ? styles.messageFocused : ""}`}
+            <div
+              key={message.id}
               data-message-id={message.id}
+              data-focused={highlightedId === message.id ? "" : undefined}
+              style={{ "--agent-color": avatarColor(message.agentId || message.authorId) } as CSSProperties}
             >
-              <div className={styles.messageContent}>
-                <div className={styles.messageMeta}>{profile ? <button type="button" className={styles.messageAuthor} aria-label={`查看${profile.profile.name}的个人信息`} onClick={() => onOpenProfile(profile)}>{authorName}</button> : <span className={styles.messageAuthor}>{authorName}</span>}<span className={styles.messageTime}>{statusText}</span></div>
-                <div className={`${styles.messageBubble} ${ownMessage ? styles.ownMessageBubble : message.type === "agent" ? styles.agentMessageBubble : ""}`}>
-                  {message.replyTo ? (
-                    <button className={styles.replyLine} type="button" onClick={() => message.replyTo && onRevealReply?.(message.replyTo)}>
-                      {message.type === "system" && message.failure ? "未完成的任务" : "回复"} {message.replyTo.authorName}：{message.replyTo.text}
-                    </button>
-                  ) : null}
-                  {message.type === "human" && askedNames.length ? <p className={styles.askedLine}>{askedNames.length > 1 ? `点名了 ${askedNames.join("、")}` : `点名了 ${askedNames[0]}`}</p> : null}
-                  {message.type === "agent"
-                    ? pendingAgent
-                      ? <GroupExecution id={message.workId || message.id} label={agent?.label || "正在回复"} text={liveStream?.text || message.text} startedAt={message.createdAt} />
-                      : <MarkdownContent text={message.text} className={styles.markdown} />
-                    : message.text ? <p>{splitMentions(message.text, agents).map((part, partIndex) => part.mention ? <mark key={partIndex} className={styles.mention}>{part.text}</mark> : <Fragment key={partIndex}>{part.text}</Fragment>)}</p> : null}
-                  {message.type === "system" && message.failure && message.agentId && onRetryAgent ? (
-                    <button className={styles.retryButton} type="button" disabled={retryDisabled} onClick={() => message.agentId && onRetryAgent(message.agentId, message.replyTo)}>
-                      再让{agents.find((item) => item.id === message.agentId)?.name || "该员工"}试一次
-                    </button>
-                  ) : null}
-                  {message.attachments?.length ? <ContentRenderer message={{ id: message.id, role: message.type === "human" ? "user" : "assistant", text: "", blocks: message.attachments.map(file => ({ id: file.id, type: file.mimeType.startsWith("image/") ? "image" : file.mimeType.startsWith("audio/") ? "audio" : file.mimeType.startsWith("video/") ? "video" : "file", source: file.url, name: file.name, file })) }} /> : null}
-                  {message.type === "human" && message.failure && onRetrySend ? (
-                    <button className={styles.retryButton} type="button" disabled={retryDisabled} onClick={() => onRetrySend(message)}>
-                      重新发送
-                    </button>
-                  ) : null}
-                  <ArtifactCollection
-                    artifactIds={message.artifactIds || []}
-                    artifacts={artifacts}
-                    loadErrors={artifactLoadErrors}
-                    reviewingIds={reviewingArtifactIds}
-                    reviewerName={reviewerName}
-                    onRetry={onRetryArtifact}
-                    onReview={onReviewArtifact}
-                  />
-                </div>
-                <div className={styles.messageActions}><MessageActions text={message.text} forkable={false} forking={false} onFork={async () => false} editable={false} editing={false} onEdit={() => {}} onQuote={onQuote && !message.pending && !message.id.startsWith("optimistic-") && (message.text.trim() || message.attachments?.some(file => file.name)) ? () => onQuote(message) : undefined} /></div>
-              </div>
-            </article>
-          </Fragment>
+              <Message
+                message={sessionMessage(message, currentMemberId)}
+                executionPlaceholder={Boolean(pendingAgent)}
+                executionStatus={pendingAgent ? groupExecution(executionId, "正在回复", liveStream?.text || message.text, message.createdAt) : undefined}
+                contextStatus={pendingAgent ? emptyStatus(executionId) : undefined}
+                onQuote={onQuote && !message.pending && !message.id.startsWith("optimistic-") && (message.text.trim() || message.attachments?.length) ? () => onQuote(message) : undefined}
+                onFork={async () => false}
+                onEdit={() => {}}
+              />
+            </div>
           );
         })}
         {(history?.date || history?.hasNewer) ? null : orphanStreams.map(([workId, value]) => {
-          const agent = agents.find((item) => item.id === value.agentId);
           return (
-            <article className={styles.message} key={workId}>
-              <div className={styles.messageContent}>
-                <div className={styles.messageMeta}>{agent ? <button type="button" className={styles.messageAuthor} aria-label={`查看${agent.name}的个人信息`} onClick={() => onOpenProfile({ kind: "agent", profile: agent })}>{agent.name}</button> : <span className={styles.messageAuthor}>Codex Agent</span>}<span className={styles.messageTime}>...</span></div>
-                <div className={`${styles.messageBubble} ${styles.agentMessageBubble}`}>
-                  <GroupExecution id={workId} label={agent?.label || "正在回复"} text={value.text} startedAt={null} />
-                </div>
-              </div>
-            </article>
+            <div key={workId} style={{ "--agent-color": avatarColor(value.agentId) } as CSSProperties}>
+              <Message
+                message={{ id: workId, role: "assistant", authorName: "Codex Agent", text: "", createdAt: value.startedAt }}
+                executionPlaceholder
+                executionStatus={groupExecution(workId, "正在回复", value.text, null)}
+                contextStatus={emptyStatus(workId)}
+                onFork={async () => false}
+                onEdit={() => {}}
+              />
+            </div>
           );
         })}
-        {!history?.hasNewer && agents.some((agent) => agent.active && agent.phase === "queued") ? (
-          <p className={styles.liveStatus}>
-            {agents.filter((agent) => agent.active && agent.phase === "queued").map((agent) => `${agent.name} ${agent.label || "等候"}`).join("，")}
-          </p>
-        ) : null}
-        {history?.hasNewer ? <div className={styles.historyMarker}>继续向下加载更新消息</div> : null}
       </div>
       <JumpToLatest
         visible={showReturnToBottom || Boolean(history?.date || history?.hasNewer) || unseenLiveCount > 0 || arrivedWhileReading > 0}

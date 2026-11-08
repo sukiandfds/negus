@@ -109,9 +109,11 @@ export const createConversationHistoryRoutes = ({ conversations, execution, foll
       sendJson(response, { error: "当前任务运行中，请完成后再归档" }, 409);
       return true;
     }
-    const result = isEmployeeDirectBinding(binding)
-      ? await employeeRuntime.archiveSession(binding.agentId)
-      : await conversations.archiveSession(threadId);
+    if (isEmployeeDirectBinding(binding)) {
+      sendJson(response, { error: "员工主对话不能归档" }, 409);
+      return true;
+    }
+    const result = await conversations.archiveSession(threadId);
     publishThreadEvent(threadId, { type: "sessions_changed", threadId });
     sendJson(response, result, 202);
     return true;

@@ -873,3 +873,27 @@ context-management-service.mjs增加8行，补原生轮次完成/中断终态收
 ## 2026-11-06 用户要求停止排查并推送当前版本
 
 用户要求：“我建议是别查了。查半天都没有结果。你先推送一个版本到github，写清楚这个版本的体验的问题。快速完成。快快快。github应该要用代理”。本次停止排查，将develop当前源码及相关需求/验证代码作为快照提交，使用现有GitHub代理推送origin/develop；不发布、不重启、不变更实时同步或缓存实现。已知体验、各浏览器观察、409验证边界、401暂缓决定及当前运行版本详见[本次快照说明](records/2026-11-06-checkpoint-experience.md)。本机work调试材料不随本次快照上传。提交SHA与远端核对结果在交付消息中报告。
+
+### 2026-11-06 员工选择DeepSeek后发送被旧配置拦截
+
+基线develop/d10e477。employee-provider-integration.mjs仅将resume旧线程调用移入同配置分支（+1/-1），跨配置复用原有只读历史迁移。新增旧配置resume报错回归，employee-provider.test.mjs六项全部通过，覆盖稳定线程/会话ID、完整历史、强度、待选清理及失败回退；git diff --check通过。未向用户对话发送测试消息。已开始prepare受控快照；后端尚未加载新代码，后续记录独立任务ID与workerPID。
+
+受控准备通过：candidate=1793949536529-6a071e1f，fallback=1793926645821-36ed7013。受控重启已安排：jobId=1793949574847-28505，workerPid=28506，15秒交接；scheduled不代表成功。恢复后以supervisor status及同jobId结果核对加载，未在本轮等待自身重启。
+
+2026-11-06 补充：上一版已生效仍失败。实际风控记录隔离验证发现原生恢复同时读取session_meta和thread_settings_applied旧供应商。迁移目标副本修正这两处元数据后原生恢复成功：原threadId、deepseek-flash及目标DeepSeek供应商一致，源文件不变；无真实发送。新增源文件保护、消息保留、供应商设置校正回归。待重新prepare及受控加载。
+
+补充修复7项回归通过，diff检查通过。prepare通过candidate=1793953025590-a41915bb；受控重启scheduled，jobId=1793953046180-29571，workerPid=29572。尚未以scheduled宣称生效，恢复后需核对本job结果。
+
+2026-11-06 截图复核：1793953046180-29571已生效但17:07发送仍失败。目标state_5.sqlite中该线程model_provider仍为旧供应商；原生索引优先于迁移文件。补充只更新已迁移目标副本对应id及rollout_path匹配的索引行，不修改其他线程。目标unsubscribe后再同步文件及索引。negus-assistant截图thread not loaded为源只读失败，仅该明确错误恢复源线程后继续原迁移。9项定向测试通过；复制真实目标索引及风控历史到隔离home，原生resume成功返回原id、deepseek-flash和目标provider；无turn/start。待受控加载。
+
+受控准备完成candidate=1793956298986-86479c43；重启已安排jobId=1793956331333-30602，workerPid=30603，15秒交接。恢复后核对本job结果，不将scheduled当作已生效。
+
+生效核验：job1793956331333-30602于2026-11-06T09:12:33.837Z started，active1793956298986-86479c43。用户17:36截图风控hi已正常回复；服务状态复核provider为DeepSeek配置9020dc9b、model=deepseek-flash、effort=low、pending=null，原threadId01a1af97保持不变。截图另有模型元数据缺失fallback警告，未将其标为已解决；negus助手本轮真实发送未获验收证据。
+
+2026-11-06 DeepSeek容量及身份修正：官方https://api-docs.deepseek.com/api/list-models/给出1048576；已有目录95%原生预算996147。sharedModelCatalogArguments补用现有negus-models.json，实际原生model/list已返回deepseek-flash。隔离旧线程resume仍回放258400旧tokenUsage，故contextManagement从既有官方元数据纠正已知DeepSeek窗口，保留测得用量；20896/996147=2%，不再8%。员工turn/start明确model/effort及本轮身份。22项目录/上下文/员工适配测试、15项员工基础测试通过，diff检查通过。无模型付费试请求、未向用户线程发消息。待受控后端加载。
+
+### 2026-11-08 模型供应商直连例外
+
+- 用户反馈普通对话选择其他 GPT 配置后显示 `Reconnecting... waiting for network`，配置页测试却通过；指定线程 `01a1b9de-8950-77a2-b702-5ab3de6fdb53` 使用 `vip / gpt-6.1-sol`。
+- 已复现：同一 Key 的直接 `/responses` 流式请求成功；Codex 运行进程连续报 `Connection failed: error sending request`。本机系统代理 `127.0.0.1:7890` 对供应商连接失败，加入该供应商 `NO_PROXY` 后 Codex 6 秒完成。
+- `app-server-client.mjs` 从实际 Codex 配置读取模型供应商域名，合并到 `NO_PROXY/no_proxy`；配置页测试路径和 GitHub 专用代理保持原样。

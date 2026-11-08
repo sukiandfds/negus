@@ -25,12 +25,14 @@ type Props = {
   onCreateGroup: () => void;
   pinned: ReadonlySet<string>;
   onTogglePin: (item: Conversation) => void;
+  onRenameRoom: (roomId: string, name: string) => Promise<void>;
+  onArchiveRoom: (roomId: string, archived: boolean) => Promise<void>;
   selectedRoomId: string;
   onOpen: (item: Conversation) => void;
   onOpenNavigation: () => void;
 };
 
-export function ConversationList({ c, section, query, filter, origins, onOriginsChange, opening, openError, hasRoster, initialReady, visibleRoster, onQueryChange, onFilterChange, onRefresh, onCreate, onCreateGroup, pinned, onTogglePin, selectedRoomId, onOpen, onOpenNavigation }: Props) {
+export function ConversationList({ c, section, query, filter, origins, onOriginsChange, opening, openError, hasRoster, initialReady, visibleRoster, onQueryChange, onFilterChange, onRefresh, onCreate, onCreateGroup, pinned, onTogglePin, onRenameRoom, onArchiveRoom, selectedRoomId, onOpen, onOpenNavigation }: Props) {
   const [archiveRange, setArchiveRange] = useState(false);
   return <aside className="message-list" aria-label="员工、项目和任务对话列表">
       <header className="list-heading"><button className="icon-button mobile-navigation" aria-label="打开功能菜单" onClick={onOpenNavigation}><Menu size={21} /></button><h2>{section === 'employees' ? '工作伙伴' : section === 'tasks' ? '任务' : '消息'}</h2><div>
@@ -44,7 +46,7 @@ export function ConversationList({ c, section, query, filter, origins, onOrigins
       ]} />{([['all', '全部'], ['employees', '员工'], ['projects', '项目'], ['background', '后台']] as const).map(([id, label]) => <button key={id} className={filter === id ? 'active' : ''} aria-pressed={filter === id} onClick={() => onFilterChange(id)}>{label}</button>)}
         <button className={`archive-filter ${c.archivedView ? 'active' : ''}`} title={c.archivedView ? '返回活动对话' : '查看已归档对话'} aria-label={c.archivedView ? '返回活动对话' : '查看已归档对话'} onClick={() => void c.setArchiveViewMode(!c.archivedView)}><Archive size={15} /></button></div>}
       <div className="contacts-scroll">
-        {(initialReady || hasRoster) ? <ConversationRows items={visibleRoster} c={c} opening={opening} query={query} onOpen={onOpen} pinned={filter === 'all' || filter === 'background' ? pinned : undefined} onTogglePin={filter === 'all' || filter === 'background' ? onTogglePin : undefined} selectedRoomId={selectedRoomId} /> : null}
+        {(initialReady || hasRoster) ? <ConversationRows items={visibleRoster} c={c} opening={opening} query={query} onOpen={onOpen} pinned={filter === 'all' || filter === 'background' ? pinned : undefined} onTogglePin={filter === 'all' || filter === 'background' ? onTogglePin : undefined} onRenameRoom={onRenameRoom} onArchiveRoom={onArchiveRoom} selectedRoomId={selectedRoomId} /> : null}
 
       </div>
       <footer className="list-footer"><ListFilter size={14} />{c.archivedView ? '已归档对话' : '聊天'}<span>{visibleRoster.length}</span></footer>

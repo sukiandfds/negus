@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { ArtifactRealtimeEvent } from "../../artifacts/model/types";
 import { groupApi } from "../data/groupApi";
 import { createPendingAgentMessage, removePendingAgentMessages, upsertGroupMessage } from "../data/groupMessageState";
 import { reconcileGroupSnapshot } from "../data/groupSnapshot";
@@ -10,7 +9,6 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
   const [connected, setConnected] = useState(false);
   const [unseenLiveCount, setUnseenLiveCount] = useState(0);
   const [streaming, setStreaming] = useState<Record<string, GroupStreamingMessage>>({});
-  const [artifactEvent, setArtifactEvent] = useState<ArtifactRealtimeEvent | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const streamingBuffer = useRef<Record<string, GroupStreamingMessage>>({});
@@ -28,7 +26,6 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
     setConnected(false);
     streamingBuffer.current = {};
     setStreaming({});
-    setArtifactEvent(null);
     setUnseenLiveCount(0);
 
     const clearReconnectTimer = () => {
@@ -193,8 +190,6 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
               setStreaming(streamingBuffer.current);
             });
           }
-        } else if (event.type === "artifact.ready" || event.type === "artifact.reviewed") {
-          setArtifactEvent(event);
         }
       } catch {
         // Ignore malformed realtime events and wait for the next snapshot/event.
@@ -224,5 +219,5 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
     };
   }, [roomId, setSnapshot]);
 
-  return { connected, streaming, artifactEvent, unseenLiveCount };
+  return { connected, streaming, unseenLiveCount };
 }

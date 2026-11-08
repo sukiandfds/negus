@@ -52,3 +52,11 @@ test('decimal model names and every shared resume/fork path lose only fixed iden
     assert.equal(JSON.parse(await fs.readFile(file,'utf8')).payload.base_instructions.text,original);
   } finally { await fs.rm(path.dirname(file),{recursive:true,force:true}); }
 });
+
+test('DeepSeek effective context follows official capacity and native 95 percent budget', async () => {
+  const { verifiedContextWindow, sharedModelCatalogArguments } = await import('../server/model-catalog.mjs');
+  assert.equal(verifiedContextWindow('ccswitch_deepseek::deepseek-flash'), 996147);
+  assert.equal(verifiedContextWindow('deepseek-v4-pro'), 996147);
+  assert.equal(verifiedContextWindow('unknown'), null);
+  assert.ok(sharedModelCatalogArguments().length > 0);
+});

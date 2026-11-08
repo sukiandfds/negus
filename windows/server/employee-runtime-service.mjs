@@ -365,13 +365,6 @@ export const createEmployeeRuntimeService = ({
     return readSession(employeeId, { limit: 0 });
   };
 
-  const archiveSession = async (employeeId) => {
-    await requestThread(employeeId, "thread/archive");
-    const threadId = registry.require(employeeId).mainThreadId;
-    await registry.setConversationArchived(employeeId, true);
-    return { threadId, archived: true };
-  };
-
   const unarchiveSession = async (employeeId) => {
     await requestThread(employeeId, "thread/unarchive");
     await registry.setConversationArchived(employeeId, false);
@@ -559,7 +552,9 @@ export const createEmployeeRuntimeService = ({
             ...turnPolicyFor(),
           }),
           ...(requestMethod === "turn/start" ? {
-            additionalContext: { 'negus.employee': { kind: 'application', value: '以下是本员工当前生效的职责和工作要求，替代对话中旧的员工身份及派工说明。\n' + [
+            ...(employee.model ? { model: employee.model } : {}),
+            ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}),
+            additionalContext: { 'negus.model': { kind: 'application', value: `本轮调用模型：${employee.model || '未取得'}。回答模型身份时以本轮请求为准，不以历史回复或全局默认配置推断。此标识不证明供应商内部实际模型。` }, 'negus.employee': { kind: 'application', value: '以下是本员工当前生效的职责和工作要求，替代对话中旧的员工身份及派工说明。\n' + [
               communicationInstructions, employee.instructions,
               [runtimeClient.turnDeveloperInstructions === true ? context : "", taskService?.leaderInstructions(employee.id)].filter(Boolean).join("\n"),
             ].filter(Boolean).join('\n') } },
@@ -798,7 +793,6 @@ export const createEmployeeRuntimeService = ({
     renameSession,
     forkSession,
     revertSession: (employeeId, beforeTurnId) => requestThread(employeeId, "thread/revert", { beforeTurnId }),
-    archiveSession,
     unarchiveSession,
     reviewSession,
     sendMessage,

@@ -361,64 +361,6 @@ export function useGroupRoom(initialRoomId = "current-project") {
     return true;
   }, [ensureLiveTail, member, roomId]);
 
-  const retrySend = useCallback(async (message: GroupMessage) => {
-    const clientMessageId = message.clientMessageId || "";
-    const attachmentIds = (message.attachments || []).map((file) => file.id);
-    if (!member || sendingRef.current || !message.failure || !clientMessageId || (!message.text.trim() && !attachmentIds.length)) return false;
-    if (!(await ensureLiveTail()) || sendingRef.current) return false;
-    sendingRef.current = true;
-    setSending(true);
-    setError("");
-    const requestRoomId = roomId;
-    const sendGeneration = ++sendGenerationRef.current;
-    const optimisticMessage: GroupMessage = {
-      ...message,
-      id: message.id.startsWith("optimistic-") ? message.id : `optimistic-${clientMessageId}`,
-      pending: true,
-      failure: false,
-    };
-    pendingMessagesRef.current.set(clientMessageId, optimisticMessage);
-    setSnapshot((current) => current && {
-      ...current,
-      messages: upsertGroupMessage(current.messages, optimisticMessage),
-    });
-    void (async () => {
-      try {
-        const result = await groupApi.send(member, requestRoomId, message.text.trim(), clientMessageId, attachmentIds, message.replyTo || null);
-        if (sendGeneration !== sendGenerationRef.current || activeRoomIdRef.current !== requestRoomId) return;
-        pendingMessagesRef.current.delete(clientMessageId);
-        setSnapshot((current) => current && {
-          ...current,
-          messages: upsertGroupMessage(current.messages, {
-            ...result.message,
-            clientMessageId: result.message.clientMessageId || clientMessageId,
-          }),
-        });
-        const followUp = describeSendResult(result);
-        queuedAgentIdsRef.current = followUp.agentIds;
-        if (followUp.agentIds.length) {
-          knownWorkIdsRef.current = new Set((snapshotRef.current?.activeWorks || []).map((work) => work.workId));
-        }
-        setNotice(followUp.notice);
-      } catch (reason) {
-        if (sendGeneration !== sendGenerationRef.current || activeRoomIdRef.current !== requestRoomId) return;
-        const failedMessage: GroupMessage = { ...optimisticMessage, pending: false, failure: true };
-        pendingMessagesRef.current.set(clientMessageId, failedMessage);
-        setSnapshot((current) => current && {
-          ...current,
-          messages: upsertGroupMessage(current.messages, failedMessage),
-        });
-        setError(reason instanceof Error ? reason.message : String(reason));
-      } finally {
-        if (sendGeneration === sendGenerationRef.current) {
-          sendingRef.current = false;
-          setSending(false);
-        }
-      }
-    })();
-    return true;
-  }, [ensureLiveTail, member, roomId]);
-
   useEffect(() => {
     const waiting = queuedAgentIdsRef.current;
     if (!waiting.length || !snapshot) return;
@@ -444,11 +386,9 @@ export function useGroupRoom(initialRoomId = "current-project") {
 
   return {
     snapshot, rooms, roomId, selectRoom, member, loading, initialSyncReady, sending, error, notice, send, interrupt, refresh,
-    retrySend,
     historyLoading, historyNotice, historyNavigation, focusRequest, loadOlder, loadNewer, jumpToDate, returnToLatest, revealMessage,
     connected: realtime.connected,
     streaming: realtime.streaming,
-    artifactEvent: realtime.artifactEvent,
     unseenLiveCount: realtime.unseenLiveCount,
   };
 }

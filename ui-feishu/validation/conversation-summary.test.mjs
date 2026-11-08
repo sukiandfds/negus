@@ -78,6 +78,20 @@ test('cached conversations do not restore removed or archived directory entries'
   assert.equal(rows.all.some(entry => entry.threadId === 'B' || entry.threadId === 'removed'), false);
 });
 
+test('an archived employee main conversation does not return as a placeholder row', () => {
+  const state = directory();
+  state.projects[0].conversations[0].archived = true;
+  const rows = buildConversationDirectory(state, [], false);
+  assert.equal(rows.employees.some(entry => entry.agentId === 'A'), false);
+  assert.equal(rows.all.some(entry => entry.threadId === 'A'), false);
+});
+
+test('a stale active session response cannot restore a confirmed archived row', () => {
+  const stale = session('C', '归档前的旧摘要', '10');
+  const rows = buildConversationDirectory({ ...directory(), projects: [] }, [stale], false, '', undefined, { C: true });
+  assert.equal(rows.all.some(entry => entry.threadId === 'C'), false);
+});
+
 test('task rows ignore recovery timestamps in cached summaries but retain actual new messages', () => {
   const state = directory();
   const entry = state.projects[1].conversations[0];

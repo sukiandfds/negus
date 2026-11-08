@@ -1,5 +1,5 @@
-import { fetchJson, postJson, withAccessToken } from "../../../shared/api/http";
-import type { GroupAgent, GroupInterruptResponse, GroupMessagePage, GroupRoomListResponse, GroupSendResponse, GroupSnapshot, StoredMember } from "../model/types";
+import { fetchJson, patchJson, postJson, withAccessToken } from "../../../shared/api/http";
+import type { GroupAgent, GroupInterruptResponse, GroupMessagePage, GroupRoom, GroupRoomListResponse, GroupSendResponse, GroupSnapshot, StoredMember } from "../model/types";
 
 const roomQuery = (roomId: string) => roomId ? `?roomId=${encodeURIComponent(roomId)}` : "";
 const messageQuery = (roomId: string, params: Record<string, string | number | undefined>) => {
@@ -12,6 +12,7 @@ const messageQuery = (roomId: string, params: Record<string, string | number | u
 
 export const groupApi = {
   rooms: (signal?: AbortSignal) => fetchJson<GroupRoomListResponse>("/api/group/rooms", signal),
+  updateRoom: (roomId: string, patch: { name?: string; archived?: boolean }) => patchJson<{ room: GroupRoom }>("/api/group/rooms", { roomId, ...patch }),
   snapshot: (roomId = "", signal?: AbortSignal) => fetchJson<GroupSnapshot>(`/api/group/snapshot${roomQuery(roomId)}`, signal),
   messages: (roomId = "", params: Record<string, string | number | undefined> = {}, signal?: AbortSignal) => fetchJson<GroupMessagePage>(
     `/api/group/messages?${messageQuery(roomId, params)}`,

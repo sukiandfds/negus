@@ -317,6 +317,8 @@ export function useConversationCatalog(
 
   const archiveSession = useCallback(async (threadId: string) => {
     if (!beginArchiveOperation(threadId)) return false;
+    listAbortControllerRef.current?.abort();
+    ++listRequestRef.current;
     let removed: RemovedSession | null = null;
     let requestFailed = false;
     let requestError: unknown;
@@ -329,16 +331,21 @@ export function useConversationCatalog(
       await waitForArchiveIconFeedback();
       if (requestFailed) throw requestError;
       removed = removeSessionOptimistically(threadId);
+      setArchivedByThread(previous => ({ ...previous, [threadId]: true }));
       await request;
       if (requestFailed) throw requestError;
+      listAbortControllerRef.current?.abort();
+      ++listRequestRef.current;
       selection.setArchived(threadId, true);
       setArchivedByThread(previous => ({ ...previous, [threadId]: true }));
       window.dispatchEvent(new CustomEvent("negus:conversation-archived", { detail: { threadId } }));
       transientSessionsRef.current.delete(threadId);
+      viewCacheRef.current.delete(true);
       if (selection.selectedIdRef.current === threadId) selection.clearSelection();
       return true;
     } catch (reason) {
       restoreRemovedSession(removed);
+      setArchivedByThread(previous => ({ ...previous, [threadId]: false }));
       setListError(reason instanceof Error ? reason.message : String(reason));
       return false;
     } finally {
@@ -348,6 +355,8 @@ export function useConversationCatalog(
 
   const unarchiveSession = useCallback(async (threadId: string) => {
     if (!beginArchiveOperation(threadId)) return false;
+    listAbortControllerRef.current?.abort();
+    ++listRequestRef.current;
     let removed: RemovedSession | null = null;
     let requestFailed = false;
     let requestError: unknown;
@@ -360,14 +369,19 @@ export function useConversationCatalog(
       await waitForArchiveIconFeedback();
       if (requestFailed) throw requestError;
       removed = removeSessionOptimistically(threadId);
+      setArchivedByThread(previous => ({ ...previous, [threadId]: false }));
       await request;
       if (requestFailed) throw requestError;
+      listAbortControllerRef.current?.abort();
+      ++listRequestRef.current;
       selection.setArchived(threadId, false);
       setArchivedByThread(previous => ({ ...previous, [threadId]: false }));
+      viewCacheRef.current.delete(false);
       if (selection.selectedIdRef.current === threadId) selection.clearSelection();
       return true;
     } catch (reason) {
       restoreRemovedSession(removed);
+      setArchivedByThread(previous => ({ ...previous, [threadId]: true }));
       setListError(reason instanceof Error ? reason.message : String(reason));
       return false;
     } finally {

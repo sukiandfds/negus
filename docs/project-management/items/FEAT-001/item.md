@@ -772,6 +772,16 @@ B2 定向测试修正：总监核对受保护的 `ConversationView.tsx` 本就�
 
 现状：指定 DeepSeek 对话的 turn_context 为 deepseek-flash，助手却读取全局默认配置自称 GPT；重试通知进入 notices 后成功结束仍被保留，导致额外占位块。修改：turn/start 复用 additionalContext 注入本轮请求模型及身份判断边界；执行状态记录可重试通知，成功完成时移除，失败/中断仍保留，恢复旧成功状态时清除已知 Reconnecting 提示。预期身份回答依据当前请求，成功后不再残留临时重连块；不修改滚动、测量或正式正文。源码待后端受控重启生效。
 
+### 2026-11-08 其他 GPT 配置发送停在 Reconnecting
+
+来源：本次维护对话。用户原话：
+
+> 我在普通对话中，给其他配置的 gpt 发消息提示 Reconnecting... waiting for network，但是在输入框，配置编辑页面，点击测试配置，又提示通过。
+
+用户补充出错对话：`01a1b9de-8950-77a2-b702-5ab3de6fdb53`。
+
+现状：该对话使用 `vip / gpt-6.1-sol`。配置页直接请求供应商 `/responses`，因此成功；普通对话由 Codex 运行进程发送，走了本机系统代理 `127.0.0.1:7890`，该代理访问供应商失败。当前逻辑没有给模型供应商保留直连例外。修改：Codex 运行进程从自身 `config.toml` 读取模型供应商域名，并入已有 `NO_PROXY/no_proxy`；GitHub 等工具继续沿用原代理，不修改系统代理或其他项目配置。预期同一条消息正常进入模型并返回，不再持续等待网络。
+
 ### 2026-11-02 首次批次与日常独立同步（替代持续批次规则）
 
 来源：当前维护对话，用户原话：
@@ -1415,3 +1425,17 @@ B2 定向测试修正：总监核对受保护的 `ConversationView.tsx` 本就�
 有效约束：本轮继续排查启动/刷新缓存，不改用户满意的前台实时事件、更新速度、队列或乐观消息行为。安卓其他浏览器同样复现，不能认定Edge专属；旧对话也复现，不能认定运行中专属。
 
 只读及隔离证据：work/mobile-cache-diagnosis-2026-11-06/。实际会话正文数据在隔离手机尺寸Chrome正常写入、刷新可直接恢复；注入IndexedDB写入失败后页面正文仍正常、刷新正文为空，确认失败仅控制台记录且调用方忽略返回值，但没有证明用户手机发生该失败。注入运行中状态仍可正常缓存恢复。全新Chrome配置用带令牌链接访问实际本机服务首次成功、Cookie和正文缓存正常，不能代表安卓公网首次访问。cold-409-results.json：首次完整快照请求仅一次返回409后，4.5秒内无第二次请求、无正文；刷新第二次读取成功。代码usePageSnapshot把失败条目的signature也记为已观察，无主动延时重试；ConversationView不渲染传入error，列表也未显示listError。服务器conversation-history-routes.mjs在读取前后sourceRevision不同会抛409，但用户实际409响应体未取得，不把该分支认定为唯一原因。当前本机同请求连续三次200。未改业务代码、未发布、未重启。
+
+### 2026-11-06 员工跨配置切换被旧配置恢复阻断
+
+用户原话：“给风控员工设定了deepseek，结果发消息弹出来This chat uses model provider … which is no longer configured”；“这对应了刚才列表中哪个环节的问题？请你快速最小改动修复”。来源：当前维护对话。基线develop/d10e477。
+
+现状：用户确认DeepSeek后发送，pendingModelSettings已保存，但员工适配层applyModelSettings在迁移前无条件resume旧线程，旧配置失效时提前失败。纠正此前仅看基础源码得出的“无待选应用／不支持跨配置”判断：employee-provider-integration已注入待选应用与迁移。最小修改该适配文件，将旧resume限定为同配置；跨配置继续共用既有thread/read、prepareResumeFile和目标resume，保留原线程ID、完整历史、身份及失败回退。不改实时同步、队列或滚动。预计业务1文件约+1/-1、回归1文件约20行；验收旧配置resume报错时仍能向新配置发送且历史完整。必要后端受控更新加载。
+
+后续纠正：用户反馈“还是一样的报错”。核对1793949574847-28505已成功生效；隔离复制风控真实rollout及目标配置，原生0.166.0-alpha.6即使指定目标modelProvider仍按session_meta.model_provider与thread_settings_applied.model_provider_id拒绝恢复。仅跳过旧resume不够。最小补充：在既有跨配置迁移的目标副本中校正上述供应商元数据，核对threadId，保留原文件和其他消息/设置，原子写入。不修改源历史。真实副本恢复验证已成功返回相同threadId、deepseek-flash、目标供应商；无turn/start、无模型请求。教训：原生迁移兼容问题必须用真实记录的隔离副本验证，不能仅以模拟resume成功交付。
+
+2026-11-06 截图复核：1793953046180-29571已生效但17:07发送仍失败。目标state_5.sqlite中该线程model_provider仍为旧供应商；原生索引优先于迁移文件。补充只更新已迁移目标副本对应id及rollout_path匹配的索引行，不修改其他线程。目标unsubscribe后再同步文件及索引。negus-assistant截图thread not loaded为源只读失败，仅该明确错误恢复源线程后继续原迁移。9项定向测试通过；复制真实目标索引及风控历史到隔离home，原生resume成功返回原id、deepseek-flash和目标provider；无turn/start。待受控加载。
+
+### 2026-11-06 DeepSeek容量兜底与员工错误身份
+
+用户原话：“上下文容量不能认定准确，那你就快点查清楚弄准确！”截图DeepSeek-Flash/Low显示258k且自称GPT-6。官方/models文档明确deepseek-flash context_window=1048576；本机~/.codex/negus-models.json已有14项完整元数据含DeepSeek，但config.toml未指定model_catalog_json，sharedModelCatalogArguments返回空，原生使用兜底。最小修复复用该既有目录作为未显式指定时的加载路径；员工turn/start明确传当前model、effort及本轮身份上下文。不改用户全局配置、不改实时同步及滚动。预期目录不再缺失，原生有效容量按模型窗口及其95%预算返回，保留真实用量。验证原生模型目录与隔离resume容量；必要受控后端加载。

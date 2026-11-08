@@ -12,7 +12,16 @@ export const sharedModelCatalogArguments = () => {
   let config;
   try { config = TOML.parse(fs.readFileSync(path.join(home, 'config.toml'), 'utf8')); }
   catch (error) { if (error.code === 'ENOENT') return []; throw error; }
-  return config.model_catalog_json ? ['-c', `model_catalog_json=${JSON.stringify(config.model_catalog_json)}`] : [];
+  const catalog = config.model_catalog_json || path.join(home, 'negus-models.json');
+  return fs.existsSync(catalog) ? ['-c', `model_catalog_json=${JSON.stringify(catalog)}`] : [];
+};
+
+export const verifiedContextWindow = model => {
+  const name = String(model || '').split('::').at(-1);
+  if (!['deepseek-flash', 'deepseek-v4-pro'].includes(name)) return null;
+  const { models } = JSON.parse(fs.readFileSync(new URL('./deepseek-models.json', import.meta.url), 'utf8'));
+  const entry = models.find(item => item.slug === name);
+  return entry ? Math.floor(entry.context_window * entry.effective_context_window_percent / 100) : null;
 };
 
 export const neutralThreadInstructions = async file => {
