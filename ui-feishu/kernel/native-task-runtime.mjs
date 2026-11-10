@@ -8,12 +8,8 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
   const active = new Map();
   const trace = event => { try { log(event); } catch {} };
   const run = async (task, controls, recovering) => {
-    // This checkpoint is written before registration and before any turn/start.
-    if (recovering && task.runtime.registrationPending && task.runtime.threadId && !task.runtime.starting && !task.runtime.turnId) recovering = false;
-    if (recovering && !task.runtime.turnId) {
-      if (!task.runtime.starting) return { status: 'interrupted', text: '', error: '服务在任务启动前退出' };
-      if (!Array.isArray(task.runtime.previousTurnIds)) return { status: 'unknown', error: '缺少本次执行前的历史记录，无法确认执行结果' };
-    }
+    if (recovering && (!task.runtime?.threadId || !task.runtime?.turnId))
+      return { status: 'interrupted', text: '', error: '重启恢复缺少可核验的原执行编号' };
     const prepared = await resolve(task, controls, { recovering });
     const { client, threadId, input, turnOptions = {}, previousTurnIds = [] } = prepared;
     if (!threadId) return recovering && !task.runtime.starting
@@ -71,16 +67,27 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
       });
     });
     const check = async () => {
-      const value = await client.request('thread/read', { threadId, includeTurns: true });
+      let value;
+      try {
+        value = await client.request('thread/read', { threadId, includeTurns: true });
+      } catch (error) {
+        if (recovering) return { status: 'interrupted', error: '重启后无法核对原执行状态，任务未自动重复启动' };
+        throw error;
+      }
       const turns = value.thread?.turns || [];
       const candidates = turns.filter(turn => turn.id && (turnId ? turn.id === turnId : !ignored.has(turn.id)));
       if (candidates.length > 1) return { status: 'unknown', error: '发现多次可能的执行，无法确认本次任务结果' };
       const found = candidates[0];
       const idle = value.thread?.status?.type === 'idle' || value.thread?.status === 'idle';
+      if (recovering && value.thread?.status?.type === 'notLoaded') return {
+        status: 'interrupted', error: '重启后原执行会话未加载，任务未自动重复启动',
+      };
       if ((recovering || turnId) && idle && found && !terminal.has(found.status)) return {
         status: 'interrupted', text: resultFrom(found).text, error: '原执行已不在运行，任务未自动重复启动',
       };
-      if (!found) return { status: 'unknown', error: '尚未在原会话中确认这次执行' };
+      if (!found) return recovering
+        ? { status: 'interrupted', error: '重启后未找到原执行，任务未自动重复启动' }
+        : { status: 'unknown', error: '尚未在原会话中确认这次执行' };
       if (!turnId) {
         await controls.checkpoint({ threadId, turnId: found.id });
         turnId = found.id;

@@ -1,4 +1,5 @@
 import { cloneJson, readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
+import path from "node:path";
 
 const clean = (value, maxLength = 400) => String(value ?? "").trim().slice(0, maxLength);
 const now = () => new Date().toISOString();
@@ -258,6 +259,12 @@ export const createProjectIdentityStore = async ({
   };
 
   const findExisting = (incoming) => {
+    if (incoming.kind === "business" && incoming.root) {
+      const resolvedRoot = path.resolve(incoming.root).toLowerCase();
+      const byRoot = [...projects.values()].find((item) => item.kind === "business"
+        && item.root && path.resolve(item.root).toLowerCase() === resolvedRoot);
+      if (byRoot) return byRoot;
+    }
     const byKey = [...projects.values()].find((item) => item.kind === incoming.kind && item.key === incoming.key);
     if (byKey) return byKey;
     const employeeId = clean(incoming.employeeId, 120);
@@ -278,13 +285,18 @@ export const createProjectIdentityStore = async ({
   };
 
   const sync = async () => {
+    const businessEntries = typeof businessProjects === "function" ? await businessProjects() : businessProjects;
     const incoming = [
       personalProject({ project, projectRoot }),
-      ...businessProjects.map(businessProject),
+      ...businessEntries.map(businessProject),
     ];
     for (const employee of registry?.list?.() || []) incoming.push(employeeProject(employee));
     const before = [...projects.values()];
     const synced = incoming.map(upsert);
+    const configuredBusinessKeys = new Set(businessEntries.map((entry) => clean(entry?.key, 160) || slug(entry?.name)));
+    for (const [projectId, value] of projects) {
+      if (value.kind === "business" && !configuredBusinessKeys.has(value.key)) projects.delete(projectId);
+    }
     if (!sameJson(before, [...projects.values()])) await persist();
     return synced.map(cloneJson);
   };

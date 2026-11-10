@@ -35,7 +35,7 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
       return {};
     } };
   const original = { leaderConfig: () => ({}), leaderInstructions: () => '', ownsThread: () => false, list: () => [], directoryEntries: () => [], runtimeOptions: () => null, hasPendingWork: () => false, close: async () => {} };
-  const modelProviders = { providers: () => [{ id: 'vip', displayName: 'VIP', models: [{ model: 'gpt-6.1-terra' }] }],
+  const modelProviders = { providers: () => [{ id: 'deepseek', displayName: 'DeepSeek', models: [{ model: 'deepseek-flash' }] }],
     isProviderConfigured: async () => true, resolveRoute: route => route, getClient: async () => client };
   const extension = await extendEmployeeTasks(original, { stateRoot: root, registry, growthService, appServerClient: client, modelProviders,
     registerSession: async (...args) => registrations.push(args),
@@ -53,8 +53,8 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
   const child = await delegate('tool-1');
   assert.equal((await delegate('tool-1')).id, child.id);
   await until(() => starts.length === 1);
-  assert.equal(created[0].model, 'gpt-6.1-terra');
-  assert.equal(starts[0].effort, 'xhigh');
+  assert.equal(created[0].model, 'deepseek-flash');
+  assert.equal(starts[0].effort, 'high');
   assert.match(starts[0].instructions, /每次标注一手来源/);
   assert.match(extension.runtimeOptions({ id: starts[0].threadId }).turn.developerInstructions, /每次标注一手来源/);
   await growthService.changeRule(background ? 'a' : 'b', rule.id, 'disabled');
@@ -90,7 +90,7 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
   assert.equal(extension.decorateTaskSession('group-child', { messages: [groupMessage] }).messages[0].authorName, '研究员');
   assert.deepEqual(extension.decorateTaskSession('unknown-child', { messages: [groupMessage] }).messages, [groupMessage]);
   employees.find(employee => employee.id === agentId).modelProviderId = 'current';
-  assert.equal(extension.providerForThread(starts[0].threadId), 'vip', 'task keeps its own provider when the employee switches');
+  assert.equal(extension.providerForThread(starts[0].threadId), 'deepseek', 'task keeps its own provider when the employee switches');
   if (background) {
     assert.equal(created[0].config['mcp_servers.negus_handoffs'].enabled, false);
     assert.match(created[0].developerInstructions, /直接执行本任务/);
@@ -294,10 +294,11 @@ for (const scenario of ['completed', 'running', 'cancel', 'missing']) test(`unlo
   const threadId = 'original-thread';
   const task = { id: 'followup', kind: 'followup', requestKey: 'followup:original-thread:target', agentId: 'a',
     conversationId: 'conversation', lane: threadId, title: '任务', instructions: '', runtime: { threadId, turnId: 'target' },
-    suppressContinuation: true, state: 'recovering', cancelRequested: scenario === 'cancel', createdAt: '2026-01-01', updatedAt: '2026-01-01' };
+    suppressContinuation: true, state: 'recovering', cancelRequested: scenario === 'cancel', createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString() };
   const parent = { ...task, id: 'parent', kind: 'delegation', state: 'completed', runtime: { threadId, turnId: 'other', modelProviderId: 'old-provider' } };
   await fs.writeFile(path.join(root, 'tasks.json'), JSON.stringify({ version: 1, tasks: [parent, task], deliveries: [] }));
-  const listeners = new Set(); const calls = []; let loaded = false;
+  const listeners = new Set(); const calls = []; let loaded = scenario !== 'missing';
   const turns = [{ id: 'other', status: 'completed', items: [{ type: 'agentMessage', text: '别的回合' }] }];
   if (scenario !== 'missing') turns.push({ id: 'target', status: scenario === 'completed' ? 'completed' : 'inProgress', items: [{ type: 'agentMessage', text: '本回合' }] });
   const client = { subscribe: callback => { listeners.add(callback); return () => listeners.delete(callback); }, request: async (method, params) => {
@@ -315,18 +316,18 @@ for (const scenario of ['completed', 'running', 'cancel', 'missing']) test(`unlo
     providerForThread: async () => 'actual-provider', bindings: { bindRuntime: async () => {} }, execution: { getStatus: () => ({ active: false }) }, queue: {} });
   t.after(async () => { await extension.close(); await fs.rm(root, { recursive: true, force: true }); });
   await until(() => scenario === 'completed' ? extension.tasks().find(item => item.id === 'followup').state === 'completed'
-    : scenario === 'missing' ? extension.tasks().find(item => item.id === 'followup').state === 'needs-reconciliation'
+    : scenario === 'missing' ? extension.tasks().find(item => item.id === 'followup').state === 'interrupted'
       : calls.some(call => call.method === (scenario === 'cancel' ? 'turn/interrupt' : 'thread/read') && loaded));
   assert.equal(routes[0].modelProviderId, 'actual-provider');
-  assert.equal(calls.filter(call => call.method === 'thread/resume').length, 1);
+  assert.equal(calls.filter(call => call.method === 'thread/resume').length, 0);
   assert.equal(calls.filter(call => call.method === 'turn/start').length, 0);
   assert.equal(extension.tasks().find(item => item.id === 'parent').state, 'completed');
   if (scenario === 'completed') {
     assert.equal(extension.tasks().find(item => item.id === 'followup').result, '本回合');
     await extension.reconcileTask('followup');
-    assert.equal(calls.filter(call => call.method === 'thread/resume').length, 1);
+    assert.equal(calls.filter(call => call.method === 'thread/resume').length, 0);
   } else if (scenario === 'missing') {
-    assert.equal(extension.tasks().find(item => item.id === 'followup').state, 'needs-reconciliation');
+    assert.equal(extension.tasks().find(item => item.id === 'followup').state, 'interrupted');
   } else {
     assert.notEqual(extension.tasks().find(item => item.id === 'followup').state, 'completed');
     if (scenario === 'cancel') assert.deepEqual(calls.filter(call => call.method === 'turn/interrupt').map(call => call.turnId), ['target']);
@@ -342,7 +343,7 @@ for (const scenario of ['completed', 'running', 'cancel', 'missing']) test(`unlo
 for (const state of ['recovering', 'completed']) test(`${state} employee task repairs missing registration without creating another thread`, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-task-registration-'));
   const task = { id: 'repair', kind: 'delegation', agentId: 'a', conversationId: 'task-repair', lane: 'repair',
-    title: '恢复任务', instructions: '', state, createdAt: '2026-10-01T00:00:00Z',
+    title: '恢复任务', instructions: '', state, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     runtime: { threadId: 'existing', turnId: 'turn', modelProviderId: 'saved-provider', model: 'saved-model' } };
   await fs.writeFile(path.join(root, 'tasks.json'), JSON.stringify({version:1,tasks:[task],deliveries:[]}));
   const calls = [], registrations = [], bindings = [];
@@ -376,10 +377,11 @@ for (const state of ['recovering', 'completed']) test(`${state} employee task re
   assert.equal(calls.includes('turn/start'),false);
 });
 
-test('registration-pending task starts its first turn on the checkpointed thread', async t => {
+test('registration-pending task without a verified turn is interrupted instead of started', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-registration-pending-'));
   const task = { id: 'pending-task', kind: 'delegation', agentId: 'a', conversationId: 'pending-conversation', lane: 'pending',
-    title: '继续原任务', instructions: '原始要求', state: 'recovering', createdAt: '2026-11-02T00:00:00Z',
+    title: '继续原任务', instructions: '原始要求', state: 'recovering', createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     runtime: { threadId: 'checkpointed-thread', modelProviderId: 'current', registrationPending: true } };
   await fs.writeFile(path.join(root, 'tasks.json'), JSON.stringify({ version: 1, tasks: [task], deliveries: [] }));
   const methods = [];
@@ -396,7 +398,25 @@ test('registration-pending task starts its first turn on the checkpointed thread
     registerSession: async () => {}, bindings: { bindRuntime: async () => {} },
     execution: { getStatus: () => ({ active: false }) }, queue: {} });
   t.after(async () => { await extension.close(); await fs.rm(root, { recursive: true, force: true }); });
-  await until(() => extension.tasks()[0].state === 'completed');
+  assert.equal(extension.tasks()[0].state, 'interrupted');
   assert.equal(methods.filter(method => method === 'thread/start').length, 0);
-  assert.equal(methods.filter(method => method === 'turn/start').length, 1);
+  assert.equal(methods.filter(method => method === 'turn/start').length, 0);
+});
+
+test('task directory excludes records without a native thread identity', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-task-directory-'));
+  const now = new Date().toISOString();
+  const task = (id, runtime) => ({ id, requestKey: id, kind: 'delegation', agentId: 'a', conversationId: `conversation-${id}`,
+    lane: id, title: id, instructions: '', state: 'running', runtime, createdAt: now, updatedAt: now });
+  await fs.writeFile(path.join(root, 'tasks.json'), JSON.stringify({ version: 1, tasks: [
+    task('empty', {}),
+    task('valid', { threadId: 'native-thread' }),
+  ], deliveries: [] }));
+  const employee = { id: 'a', name: '员工', projectRoot: root };
+  const extension = await extendEmployeeTasks({ directoryEntries: () => [], close: async () => {} }, {
+    stateRoot: root, registry: { list: () => [employee], require: () => employee },
+    bindings: { bindRuntime: async () => {} }, execution: { getStatus: () => ({ active: false }) }, queue: {},
+  });
+  t.after(async () => { await extension.close(); await fs.rm(root, { recursive: true, force: true }); });
+  assert.deepEqual(extension.directoryEntries('a').map(entry => entry.threadId), ['native-thread']);
 });

@@ -13,28 +13,53 @@ const readStored = async (stateFile) => {
   } catch { return []; }
 };
 
-const normalize = (definition, saved = {}, workspaceRoot) => ({
-  ...definition,
-  // User-visible employees operate on the same project workspace as the main
-  // agent. Their private context remains isolated below, but cwd must not hide
-  // the repository behind employees/<id>.
-  projectRoot: clean(workspaceRoot, 400),
-  contextRoot: clean(saved.contextRoot, 400) || path.join(workspaceRoot, "runtime", "employee-contexts", definition.id),
-  modelProviderId: clean(saved.modelProviderId, 80) || clean(definition.modelProviderId, 80) || CURRENT_MODEL_PROVIDER_ID,
-  model: clean(saved.model, 120) || clean(definition.model, 120) || "",
-  reasoningEffort: clean(saved.reasoningEffort, 40) || clean(definition.reasoningEffort, 40) || "",
-  pendingModelSettings: saved.pendingModelSettings || null,
-  mainThreadId: clean(saved.mainThreadId, 120) || null,
-  conversationId: clean(saved.conversationId, 120) || null,
-  conversationTitle: clean(saved.conversationTitle, 240) || null,
-  conversationArchived: saved.conversationArchived === true,
-  // User-visible employees inherit the main Agent's host-level authorization;
-  // the legacy confirmation flag is retained for API compatibility only.
-  modificationConfirmed: true,
-  updatedAt: saved.updatedAt || null,
-});
+const normalize = (definition, saved = {}, workspaceRoot, defaultModelSettings = null) => {
+  const explicitSelection = saved.modelSelectionSource === 'explicit'
+    || saved.pendingModelSettings?.modelSelectionSource === 'explicit';
+  const defaults = defaultModelSettings && !explicitSelection ? defaultModelSettings : null;
+  const savedProviderId = clean(saved.modelProviderId, 80) || clean(definition.modelProviderId, 80) || CURRENT_MODEL_PROVIDER_ID;
+  const savedModel = clean(saved.model, 120) || clean(definition.model, 120) || "";
+  const savedEffort = clean(saved.reasoningEffort, 40) || clean(definition.reasoningEffort, 40) || "";
+  const defaultProviderId = defaults?.providerId || defaults?.modelProviderId || '';
+  const defaultModel = defaults?.model || '';
+  const defaultEffort = defaults?.effort || defaults?.reasoningEffort || '';
+  const needsDefaultSettings = Boolean(saved.mainThreadId && !explicitSelection && defaults
+    && (savedProviderId !== defaultProviderId || savedModel !== defaultModel || savedEffort !== defaultEffort));
+  const modelProviderId = needsDefaultSettings ? savedProviderId : defaultProviderId || savedProviderId;
+  const model = needsDefaultSettings ? savedModel : defaultModel || savedModel;
+  const reasoningEffort = needsDefaultSettings ? savedEffort : defaultEffort || savedEffort;
+  const pendingModelSettings = saved.pendingModelSettings ? {
+    ...saved.pendingModelSettings,
+    modelSelectionSource: explicitSelection ? 'explicit'
+      : saved.pendingModelSettings.modelSelectionSource || 'default',
+  } : needsDefaultSettings ? {
+    modelProviderId: defaultProviderId, model: defaultModel, reasoningEffort: defaultEffort,
+    modelSelectionSource: 'default',
+  } : null;
+  return {
+    ...definition,
+    // User-visible employees operate on the same project workspace as the main
+    // agent. Their private context remains isolated below, but cwd must not hide
+    // the repository behind employees/<id>.
+    projectRoot: clean(workspaceRoot, 400),
+    contextRoot: clean(saved.contextRoot, 400) || path.join(workspaceRoot, "runtime", "employee-contexts", definition.id),
+    modelProviderId,
+    model,
+    reasoningEffort,
+    modelSelectionSource: explicitSelection ? 'explicit' : 'default',
+    pendingModelSettings,
+    mainThreadId: clean(saved.mainThreadId, 120) || null,
+    conversationId: clean(saved.conversationId, 120) || null,
+    conversationTitle: clean(saved.conversationTitle, 240) || null,
+    conversationArchived: saved.conversationArchived === true,
+    // User-visible employees inherit the main Agent's host-level authorization;
+    // the legacy confirmation flag is retained for API compatibility only.
+    modificationConfirmed: true,
+    updatedAt: saved.updatedAt || null,
+  };
+};
 
-export const createEmployeeProjectRegistry = async ({ stateFile, workspaceRoot, definitions = null }) => {
+export const createEmployeeProjectRegistry = async ({ stateFile, workspaceRoot, definitions = null, defaultModelSettings = null }) => {
   const employeeDefinitions = definitions || await loadEmployeeDefinitions(
     builtInEmployeesRoot,
     path.join(workspaceRoot, "employees"),
@@ -42,7 +67,7 @@ export const createEmployeeProjectRegistry = async ({ stateFile, workspaceRoot, 
   const saved = new Map((await readStored(stateFile)).map((entry) => [entry?.id, entry]));
   const employees = new Map(employeeDefinitions.map((definition) => [
     definition.id,
-    normalize(definition, saved.get(definition.id), workspaceRoot),
+    normalize(definition, saved.get(definition.id), workspaceRoot, defaultModelSettings),
   ]));
   let writeQueue = Promise.resolve();
   const persist = () => {
@@ -83,8 +108,9 @@ export const createEmployeeProjectRegistry = async ({ stateFile, workspaceRoot, 
     setConversationTitle: (employeeId, conversationTitle) => update(employeeId, { conversationTitle: clean(conversationTitle, 240) || null }),
     setConversationArchived: (employeeId, conversationArchived) => update(employeeId, { conversationArchived: conversationArchived === true }),
     setPendingModelSettings: (employeeId, settings) => update(employeeId, { pendingModelSettings: settings }),
-    setModelSettings: (employeeId, settings) => update(employeeId, {
+    setModelSettings: (employeeId, settings, { source = 'explicit' } = {}) => update(employeeId, {
       pendingModelSettings: null,
+      modelSelectionSource: source === 'default' ? 'default' : 'explicit',
       modelProviderId: clean(settings?.modelProviderId, 80) || CURRENT_MODEL_PROVIDER_ID,
       model: clean(settings?.model, 120),
       reasoningEffort: clean(settings?.reasoningEffort, 40),

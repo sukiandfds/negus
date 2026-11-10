@@ -1,4 +1,14 @@
-// One preference for all Negus-managed background tasks; foreground models stay unchanged.
+// Shared default for new ordinary conversations, employees and Negus-managed tasks.
+export const DEFAULT_DEEPSEEK_ROUTE = Object.freeze({ model: 'deepseek-flash', reasoningEffort: 'high', label: 'DeepSeek Flash High' });
+
+export const modelDefaultsFromRoute = route => ({
+  providerId: route.modelProviderId,
+  model: route.modelProviderId === 'current' || String(route.model).includes('::')
+    ? route.model : `${route.modelProviderId}::${route.model}`,
+  effort: route.reasoningEffort || '',
+  archivedProviderIds: [],
+});
+
 export const requestedBackgroundRoute = async (providers, request, tasks = []) => {
   const { model = '', modelProviderId = '' } = request;
   if (modelProviderId || model.includes('::')) return providers.resolveRoute(request);
@@ -21,11 +31,30 @@ export const requestedBackgroundRoute = async (providers, request, tasks = []) =
   return route;
 };
 
-export const backgroundTaskRoute = async (providers, fallback) => {
-  if (!providers?.providers) return fallback;
-  await providers.refreshShared?.();
-  const vip = providers.providers().find(provider => provider.displayName.toLowerCase() === 'vip');
-  if (!vip || !await providers.isProviderConfigured(vip.id)) return fallback;
-  if (!vip.models.some(entry => entry.model === 'gpt-6.1-terra')) await providers.refreshProviderModels(vip.id);
-  return { ...providers.resolveRoute({ modelProviderId: vip.id, model: 'gpt-6.1-terra' }), reasoningEffort: 'xhigh' };
+export const backgroundTaskRoute = async (providers) => {
+  const unavailable = detail => new Error(`默认模型 ${DEFAULT_DEEPSEEK_ROUTE.label} 不可用：${detail}`);
+  if (!providers?.providers || !providers?.isProviderConfigured || !providers?.resolveRoute)
+    throw unavailable('模型提供方服务未连接');
+  try {
+    await providers.refreshShared?.();
+  } catch (error) {
+    throw unavailable(`配置刷新失败：${error?.message || String(error)}`);
+  }
+  const candidates = providers.providers().filter(provider =>
+    provider.models?.some(entry => entry.model === DEFAULT_DEEPSEEK_ROUTE.model)
+    && (provider.mode !== 'current' || !provider.activeModel
+      || !provider.activeModels?.length || provider.activeModels.includes(DEFAULT_DEEPSEEK_ROUTE.model)));
+  const configured = await Promise.all(candidates.map(provider => providers.isProviderConfigured(provider.id)));
+  const available = candidates.filter((_, index) => configured[index]);
+  if (!available.length) throw unavailable(`没有已配置的渠道支持 ${DEFAULT_DEEPSEEK_ROUTE.model}`);
+  const provider = available.find(entry => /deepseek/iu.test(entry.displayName || '')) || available[0];
+  let route;
+  try {
+    route = providers.resolveRoute({ modelProviderId: provider.id, model: DEFAULT_DEEPSEEK_ROUTE.model });
+  } catch (error) {
+    throw unavailable(`渠道 ${provider.displayName || provider.id} 路由失败：${error.message}`);
+  }
+  if (route.model !== DEFAULT_DEEPSEEK_ROUTE.model)
+    throw unavailable(`渠道 ${provider.displayName || provider.id} 无法保持指定模型 ${DEFAULT_DEEPSEEK_ROUTE.model}`);
+  return { ...route, reasoningEffort: DEFAULT_DEEPSEEK_ROUTE.reasoningEffort };
 };

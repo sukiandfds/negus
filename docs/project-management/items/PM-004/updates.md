@@ -1,5 +1,21 @@
 # 更新记录
 
+## 2026-11-10 后台任务默认模型
+
+- 新范围原话：“后续没有指定模型的对话和任务用deepseek，以前的对话就是继续沿用之前的模型。员工暂时都用deepseek。”已更新同一条目，不新建重复需求。
+- 新增普通新对话空路由 DeepSeek 兜底；模型默认存储缺失/空白时使用运行时 DeepSeek route，当前 `runtime/model-defaults.json` 为 `ccswitch_9020dc9b-e2ff-43e7-92a8-007b424d6508::deepseek-flash` / `high`。已有普通 thread 测试确认 provider/model 与路由文件不变。
+- 员工注册表和群员工默认由启动时解析的 DeepSeek route 注入；显式员工/群员工选择带 `modelSelectionSource=explicit`，重启后不被默认值覆盖。Grok 员工文件已移除固定 `grok-4.6`。当前 6 个员工和 2 个群聊数据均规范化为 DeepSeek/high。
+- 新增模型默认存储、全部员工默认、Grok、显式员工选择、群员工显式选择、用户新建空路由/显式路由和旧普通 thread 不迁移测试。默认策略 5/5、员工默认 2/2、模型默认存储 1/1、群聊存储 17/17、群任务 10/10、员工任务 13/13、员工 Provider 迁移 10/10、普通后台关联 7/7、员工任务服务关联 1/1，合计 66/66；TypeScript、相关 MJS 语法和 `git diff --check` 通过。
+- 起始普通会话路由为 339 条；核验结束时为 340 条，既有模型/供应商类别的数量未发生迁移，新增项为运行中服务产生的一条 DeepSeek assistant 任务。未改写普通历史路由。
+- 员工数据备份：`/tmp/negus-employee-projects-pre-deepseek-default-20261110.json`；群聊数据备份：`/tmp/negus-group-room-pre-deepseek-default-20261110.json`、`/tmp/negus-group-rooms-pre-deepseek-default-20261110/`。
+- 基线 develop / d2f439a；保存用户关于“都用 DeepSeek Flash High”的原话及当前有效决定，沿用 PM-004，不新建重复条目。
+- 修改全局 `communicationInstructions`，后台实操及审核默认模型改为 `deepseek-flash` / `high`，保留真实来源派工、单层派工、证据与验收规则；删除 Terra 及继承子助手相关指导。
+- `backgroundTaskRoute` 改为严格选择支持 `deepseek-flash` 的已配置渠道并返回 `high`；未配置时返回“DeepSeek Flash High 不可用”的明确错误，不再回退 Terra 或员工模型。员工任务、群任务和普通 Negus 后台任务的默认调用已核对并去掉旧回退值。
+- 风控只读复核发现显式模型被 DeepSeek 默认路由覆盖，以及配置刷新异常被吞掉。已最小修复：仅当去除空白后的模型与渠道都为空时使用默认 DeepSeek 路由，任一显式字段保留原路由；刷新异常改为“DeepSeek Flash High 不可用：配置刷新失败：<原错误>”。
+- 补充显式模型、显式渠道、模型与渠道同时显式、空/纯空白字段、刷新失败和普通 Negus 实际启动模型断言。复核前已有的 26 项定向测试继续通过，新增 2 项测试；本轮关联测试结果为默认策略 5/5、员工任务 13/13、群任务 9/9、普通后台关联 4/4、员工任务服务关联 1/1。全部本轮修改文件 MJS 语法检查及 `git diff --check` 通过。
+- 使用当前本机共享配置执行只读路由核对，实际返回 `ccswitch_9020dc9b-e2ff-43e7-92a8-007b424d6508` / `deepseek-flash` / `high`。本轮未重跑完整 provider 文件，仅运行与后台默认路由相关的 4 项用例；历史已知的 3 项完整文件失败未计入本轮通过结论。
+- 代码尚未提交、推送、发布或重启；当前运行服务仍加载修改前版本。
+
 ## 2026-11-08 敏捷开发约定
 
 - 基线 develop / 4262e231e402ffcca06fce29ca229e2e48e003ba；保护工作区既有修改。保存本次用户原话，更新工作规则中的澄清、直接实施、删减复用、必要验证及按需受控发布流程。

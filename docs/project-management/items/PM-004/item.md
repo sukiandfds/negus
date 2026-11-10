@@ -4,7 +4,7 @@ type: maintenance
 title: 用户原话与澄清的持续维护
 category: maintenance
 status: in_progress
-updated_at: 2026-11-08
+updated_at: 2026-11-10
 ---
 
 # 用户原话与澄清的持续维护
@@ -27,6 +27,54 @@ updated_at: 2026-11-08
 - 复用现有项目管理条目，不增加第二套需求系统。具体工作步骤统一放在根目录 AI_ASSISTANT_WORK_RULES.md，其他入口引用。
 - 只有未被当前用户明确替代的真实冲突才询问；已澄清的要求不反复提问。
 - 助手实现建议不是用户原话或已确认产品决定。发言日期不明时记录收录日期，不倒推日期。
+
+## 2026-11-10 后台任务统一使用 DeepSeek Flash High
+
+来源：当前维护对话，2026-11-10；未取得消息级标识。
+
+> 请你不要让terra开发。都用deepseek吧。开发审核都用deepseek flash high
+
+> 全局规则也改一下。都用deepseek
+
+当前有效决定：
+
+- 所有 Negus 助手进行开发、测试、验证、资料搜集、电脑操作等后台实操及审核时，默认使用 DeepSeek Flash High，即模型 `deepseek-flash`、思考等级 `high`；不再默认使用 VIP `gpt-6.1-terra`。
+- 用户显式指定其他模型时按指定模型执行；显式路由能力继续保留。
+- DeepSeek 配置不可用时必须返回具体错误，不得静默回退 Terra，也不得回退员工原模型。
+- 只有实际路由确认后才能声称使用了 DeepSeek；继承模型的子助手不视为 Terra，也不再作为 Terra 的替代路径。
+
+相关入口：`windows/server/base-prompt.mjs`、`windows/server/background-tasks/model-policy.mjs`、主员工后台任务、群任务和普通 Negus 后台任务的运行时调用链。验收方式：全局提示词包含 DeepSeek Flash High；无显式路由时选择支持 `deepseek-flash` 的已配置渠道并设置 `high`；不可用时明确失败；显式模型或渠道路由不被改写。
+
+### 2026-11-10 风控只读复核补修
+
+风控复核发现两项阻断：普通 Negus 后台创建会把调用方显式传入的 `model` / `modelProviderId` 覆盖为 DeepSeek 默认值；共享配置刷新异常被吞掉，用户只看到“没有渠道支持 DeepSeek”，丢失真实原因。
+
+最小修复后的有效行为：
+
+- `createdBy=assistant` 仅在去除首尾空白后的 `model` 与 `modelProviderId` 都为空时使用 DeepSeek Flash High；任一字段显式存在时保留 `providers.resolveRoute` 的原路由。
+- DeepSeek 默认路由的配置刷新失败必须报告“DeepSeek Flash High 不可用：配置刷新失败：<原错误>”，不得改写为渠道缺失。
+- 无显式路由时实际启动模型必须断言为 `deepseek-flash`，且思考等级为 `high`；显式模型、显式渠道和同时显式三种路径均需验证。
+
+## 2026-11-10 新对话、历史对话与员工模型范围
+
+来源：当前维护对话，2026-11-10；未取得消息级标识。
+
+> 后续没有指定模型的对话和任务用deepseek，以前的对话就是继续沿用之前的模型。员工暂时都用deepseek。
+
+当前有效决定：
+
+- 之后新建且没有指定模型的普通对话默认 DeepSeek Flash High：`deepseek-flash`、思考等级 `high`；用户显式选择其他模型或渠道时保留原选择。
+- 之后新建且没有指定模型的任务继续默认 DeepSeek Flash High；员工后台任务同样适用。
+- 已有普通对话、历史群会话和历史任务不迁移、不改写模型或供应商路由，重启或默认值变化不得将其自动切到 DeepSeek。
+- 员工暂时全部默认 DeepSeek Flash High，包括 Grok 助手；员工主对话、群内员工工作和员工后台任务的新一轮均适用。用户之后显式修改员工模型时保留该选择，并在员工数据中标记为显式选择。
+- 前台模型和后台模型继续隔离；普通新建默认、后台任务默认和员工默认只影响新路由或员工明确切换，不覆盖已有普通 thread 的 saved provider/model。
+
+当前实现边界：
+
+- `/api/model-defaults` 的文件缺失、默认值空白或保存空默认时，通过运行时 DeepSeek 渠道解析结果兜底；当前安装的 `runtime/model-defaults.json` 已保存 DeepSeek，未在代码中重复本机渠道 UUID。
+- 新普通对话空路由由后端统一 DeepSeek 兜底；已有 thread 读取自身路由，不经过新对话默认逻辑。
+- 员工默认使用启动时解析的 DeepSeek route 注入注册表。旧员工 thread 若供应商不同，保留 thread 和 conversation 身份并写入 pending 切换；下次受控重启后的首个员工请求走现有员工 Provider transfer。已有普通对话不参与该迁移。
+- 当前员工与群聊数据已通过产品 API 规范化为 DeepSeek；普通对话路由文件未执行批量迁移。
 
 ## 相关入口与验收
 

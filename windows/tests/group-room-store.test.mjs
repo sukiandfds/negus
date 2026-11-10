@@ -189,6 +189,48 @@ test("exposes active Agent work in snapshots without persisting it across restar
   await restored.close();
 });
 
+test("employee group agents default to the injected DeepSeek route while explicit choices survive reload", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "negus-group-model-defaults-"));
+  const stateFile = path.join(directory, "group-room.json");
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  await fs.writeFile(stateFile, JSON.stringify({ agents: [
+    { id: "grok", modelProviderId: "fusheng-grok", model: "grok-4.6", reasoningEffort: "" },
+    { id: "developer", modelProviderId: "channel-explicit", model: "model-explicit", reasoningEffort: "low",
+      modelSelectionSource: "explicit" },
+    { id: "legacy", modelProviderId: "old-provider", model: "old-model", reasoningEffort: "medium", threadId: "old-thread" },
+  ] }));
+  const definitions = [
+    { id: "grok", name: "Grok 助手", modelProviderId: "fusheng-grok", model: "grok-4.6", reasoningEffort: "" },
+    { id: "developer", name: "技术研发" },
+    { id: "legacy", name: "历史员工" },
+  ];
+  const defaultModelSettings = { modelProviderId: "ccswitch_deepseek", model: "deepseek-flash", reasoningEffort: "high" };
+  const room = await createGroupRoomStore({ stateFile, project: "negus", agentDefinitions: definitions, defaultModelSettings });
+  assert.deepEqual(room.getAgent("grok"), {
+    ...definitions[0],
+    modelProviderId: "ccswitch_deepseek",
+    model: "deepseek-flash",
+    reasoningEffort: "high",
+    modelSelectionSource: "default",
+    pendingModelSettings: null,
+    threadId: null,
+    phase: "idle",
+    label: "尚未启动",
+    detail: "",
+    active: false,
+    updatedAt: null,
+  });
+  assert.equal(room.getAgent("developer").modelProviderId, "channel-explicit");
+  assert.equal(room.getAgent("developer").modelSelectionSource, "explicit");
+  assert.equal(room.getAgent("legacy").modelProviderId, "old-provider");
+  assert.equal(room.getAgent("legacy").model, "old-model");
+  assert.equal(room.getAgent("legacy").threadId, "old-thread");
+  assert.deepEqual(room.getAgent("legacy").pendingModelSettings, {
+    ...defaultModelSettings, modelSelectionSource: "default",
+  });
+  await room.close();
+});
+
 test("adds a configured Grok employee to an existing group without changing saved agents", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "negus-group-grok-"));
   const stateFile = path.join(directory, "group-room.json");

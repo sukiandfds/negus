@@ -164,6 +164,7 @@ test("historical unnamed threads use previews without model calls and preserve m
 
 test("creates a thread in a registered business project and rejects unknown folders", async () => {
   const calls = [];
+  const projectRoots = ["D:\\main", "D:\\finance"];
   const client = {
     subscribe: () => () => {},
     close: () => {},
@@ -174,7 +175,7 @@ test("creates a thread in a registered business project and rejects unknown fold
   };
   const store = createAppServerConversationStore({
     projectRoot: "D:\\main",
-    projectRoots: ["D:\\main", "D:\\finance"],
+    projectRoots,
     registerMedia: () => null,
     client,
   });
@@ -182,6 +183,9 @@ test("creates a thread in a registered business project and rejects unknown fold
   await store.createSession("gpt-5.6-sol", "D:\\finance");
   assert.equal(calls[0].params.cwd, path.resolve("D:\\finance"));
   await assert.rejects(() => store.createSession("", "D:\\unknown"), /not registered/iu);
+  projectRoots.push("D:\\new-project");
+  await store.createSession("gpt-5.6-sol", "D:\\new-project");
+  assert.equal(calls.at(-1).params.cwd, path.resolve("D:\\new-project"));
   store.close();
 });
 

@@ -1523,3 +1523,39 @@ B2 定向测试修正：总监核对受保护的 `ConversationView.tsx` 本就�
 - 状态冲突优先级为 selected 真实 live > 其他 thread 真实 live > 最新目录；无 live 的旧 committed active 不得覆盖目录 completed/failed/systemError。
 - committed active 仅在目录缺失，或目录仍 active 且 turnId 一致时作为补充，避免旧 turn 误报运行。
 - 员工父行只聚合映射后的主对话、群任务和后台子任务有效状态，不再直接信任目录 `project.status.active`。所有子任务终态且主对话非 active 时父行 inactive；任一有效主对话、群对话或子任务 active 时才运行。
+
+### 2026-11-10 刷新缓存恢复交接补修
+
+来源：本次维护对话。用户原话：“继续完成修改和验证。依然是最小代码改动、删除为主来修复”。继续原第2/3项，沿用用户早上回退后的版本及后续有效修改；不恢复被回退方案，不改滚动、切换调度、群缓存或SW。
+
+当前版本隔离手机回归发现后台恢复其他对话时，临时Store将失败消息拆入localPending，交接只复制正文，可能丢失失败图片并再次写盘。复用Store原有addMessage合并失败消息，不建立新缓存层；必须保留已加载历史、正文及来源、项目、模型、上下文。修复前后证据和发布状态见updates.md。
+
+### 2026-11-10 业务项目热刷新与重启任务恢复规则
+
+来源：本次用户指令，2026-11-10；沿用 FEAT-001，不新建重复条目。
+
+用户原话：
+
+> 已完成、已停止、无有效线程任务，重启后永不恢复，只保留历史。
+
+> 有活动任务但找不到真实运行证据，标记 interrupted，不自动重跑。
+
+> 最后活动超过 30 分钟且没有明确运行中的 turn，标记 interrupted。
+
+> 只有最近仍在真实运行且能核对到原 turnId 的任务，重启后只重连观察，绝不发起新一轮执行。
+
+> 恢复任务不要因恢复本身刷新为列表最新；只有真实新进度才更新时间。
+
+当前有效决定：`runtime/business-projects.json` 是业务项目目录来源，后端运行期间按文件修改时间在下一次项目目录或身份同步时惰性刷新，不新增 watcher；配置删除或改名须从项目目录移除旧业务项目，现有普通项目及员工项目不重复。共享项目 root 集合随刷新更新，现有会话 root 校验和群聊创建复用当前项目身份，不预建新业务项目专属群。重启恢复只处理 terminal 以外且同时具备近期 `threadId`、`turnId` 的任务；其余直接收敛为 `interrupted` 并保留原记录/历史，超过 30 分钟不重启执行。近期任务先只读核对，只有原 turn 仍 active 时订阅观察，绝不 `turn/start`；恢复附着不写 `updatedAt`、不发布新活动事件。无 `threadId` 的任务不进入目录。实现和验证状态见 updates.md。
+
+#### 2026-11-10 风控补充：恢复无旁路、项目标识稳定、缺失项目群归档
+
+用户原话：
+
+> 删除该旁路。恢复态只要缺持久化且可核验的 turnId/必要历史边界就 interrupted；绝不 turn/start，不刷新 task.updatedAt。定时恢复扫描先排除缺 thread/turn 的证据不足记录。
+
+> project-identity-store 优先按同 root 匹配现有 business project，key 改名时保留原 projectId；显示 name 改动继续正常。
+
+> 业务项目从配置永久删除后，动态目录不再显示；group-extension 不得 throw 阻断启动。最小复用现有 archived 字段：把关联项目不存在/已删除的群记录标记 archived，不注册 service，保存记录，用户可保留历史而不出现在活动列表。
+
+当前有效决定：`registrationPending` 不再作为恢复旁路；恢复必须同时具备持久化 `threadId`、`turnId`，否则直接 `interrupted`，不调用执行适配器。定时与手动核对同样先检查证据，缺证据直接 `interrupted`，不改 `updatedAt`。业务项目身份在 key 前优先按规范化 root 匹配，因此 key 改名保留原 `projectId`，名称变化仍更新。业务项目永久删除后项目目录不显示；启动恢复群记录时，缺失项目的群复用 `archived`，保留原 `projectId`、员工线程和消息，加载历史但不注册群任务 service；普通群继续注册。该行为不由缺失项目阻断启动。

@@ -57,22 +57,37 @@ const dateKey = (value) => {
 };
 const validDate = (value) => /^\d{4}-\d{2}-\d{2}$/u.test(String(value || ""));
 
-const initialAgent = (definition, saved = {}) => ({
-  ...definition,
-  modelProviderId: cleanText(saved.modelProviderId, 80)
-    || cleanText(definition.modelProviderId, 80)
-    || CURRENT_MODEL_PROVIDER_ID,
-  model: cleanText(saved.model, 120) || cleanText(definition.model, 120) || "",
-  reasoningEffort: cleanText(saved.reasoningEffort, 40) || cleanText(definition.reasoningEffort, 40) || "",
-  threadId: cleanText(saved.threadId, 80) || null,
-  phase: "idle",
-  label: saved.threadId ? "等待新任务" : "尚未启动",
-  detail: "",
-  active: false,
-  updatedAt: saved.updatedAt || null,
-});
+const initialAgent = (definition, saved = {}, defaultModelSettings = null) => {
+  const explicitSelection = saved.modelSelectionSource === 'explicit';
+  const savedProviderId = cleanText(saved.modelProviderId, 80);
+  const crossProviderThread = Boolean(saved.threadId && savedProviderId
+    && defaultModelSettings && savedProviderId !== defaultModelSettings.modelProviderId);
+  const defaults = defaultModelSettings && !explicitSelection && !crossProviderThread ? defaultModelSettings : null;
+  const pendingModelSettings = saved.pendingModelSettings || (crossProviderThread ? {
+    modelProviderId: defaultModelSettings.modelProviderId,
+    model: defaultModelSettings.model,
+    reasoningEffort: defaultModelSettings.reasoningEffort,
+    modelSelectionSource: 'default',
+  } : null);
+  return {
+    ...definition,
+    modelProviderId: defaults?.modelProviderId
+      || cleanText(saved.modelProviderId, 80) || cleanText(definition.modelProviderId, 80) || CURRENT_MODEL_PROVIDER_ID,
+    model: defaults?.model || cleanText(saved.model, 120) || cleanText(definition.model, 120) || "",
+    reasoningEffort: defaults?.reasoningEffort
+      || cleanText(saved.reasoningEffort, 40) || cleanText(definition.reasoningEffort, 40) || "",
+    modelSelectionSource: explicitSelection ? 'explicit' : 'default',
+    pendingModelSettings,
+    threadId: cleanText(saved.threadId, 80) || null,
+    phase: "idle",
+    label: saved.threadId ? "等待新任务" : "尚未启动",
+    detail: "",
+    active: false,
+    updatedAt: saved.updatedAt || null,
+  };
+};
 
-export const createGroupRoomStore = async ({ stateFile, project, projectId = "", roomId = "", agentDefinitions = null, broadcast = () => {}, onMessageCreated = () => {} }) => {
+export const createGroupRoomStore = async ({ stateFile, project, projectId = "", roomId = "", agentDefinitions = null, broadcast = () => {}, onMessageCreated = () => {}, defaultModelSettings = null }) => {
   const definitions = agentDefinitions || await loadEmployeeDefinitions();
   let stored = {};
   try {
@@ -86,7 +101,9 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
   const savedAgents = new Map((Array.isArray(stored.agents) ? stored.agents : []).map((agent) => [agent.id, agent]));
   const storedContextSequences = stored.agentContextSequences && typeof stored.agentContextSequences === "object"
     && !Array.isArray(stored.agentContextSequences) ? stored.agentContextSequences : {};
-  const agents = new Map(definitions.map((definition) => [definition.id, initialAgent(definition, savedAgents.get(definition.id))]));
+  const agents = new Map(definitions.map((definition) => [
+    definition.id, initialAgent(definition, savedAgents.get(definition.id), defaultModelSettings),
+  ]));
   const agentContextSequences = new Map(definitions.map((definition) => [
     definition.id,
     safeSequence(storedContextSequences[definition.id]),

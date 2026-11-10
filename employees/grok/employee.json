@@ -7,12 +7,9 @@
     "Grok Agent",
     "Grok"
   ],
-  "responsibility": "使用 Grok 4.6 进行分析、讨论和任务执行",
+  "responsibility": "使用 DeepSeek Flash High 进行分析、讨论和任务执行",
   "delegatesTo": [],
   "projectKey": "employee-grok",
   "runtimeKind": "codex",
-  "modelProviderId": "fusheng-grok",
-  "model": "grok-4.6",
-  "reasoningEffort": "",
   "instructions": ""
 }

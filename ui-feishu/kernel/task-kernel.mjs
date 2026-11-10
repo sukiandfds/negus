@@ -11,7 +11,7 @@ const fail = (message, statusCode = 409) => Object.assign(new Error(message), { 
  * deliver MUST deduplicate by delivery.id. Startup never replays an ambiguous native start.
  */
 export async function createTaskKernel({ stateFile, runtime, deliver, validate = () => {},
-  broadcast = () => {}, log = () => {}, now = () => new Date().toISOString() }) {
+  broadcast = () => {}, log = () => {}, now = () => new Date().toISOString(), recoveryIntervalMs = 15000 }) {
   let state = { version: 1, tasks: [], deliveries: [] };
   try { state = JSON.parse(await fs.readFile(stateFile, 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -56,6 +56,7 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
     state: ['external', 'followup'].includes(input.kind) ? 'recovering' : 'queued',
     runtime: ['external', 'followup'].includes(input.kind) ? copy(input.runtime || {}) : {},
     cancelRequested: false, createdAt: now(), updatedAt: now() });
+  const hasRecoveryEvidence = task => Boolean(task.runtime?.threadId && task.runtime?.turnId);
   const complete = async (id, result) => {
     if (!terminalStates.has(result?.status)) throw new Error('运行适配器没有提供终态');
     const task = await mutate(data => {
@@ -120,7 +121,7 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
         const task = await mutate(data => {
           const current = requireTask(data, id);
           if (!terminalStates.has(current.state)) current.state = recovering ? 'recovering' : 'starting';
-          current.updatedAt = now();
+          if (!recovering) current.updatedAt = now();
           return current;
         });
         if (terminalStates.has(task.state)) return;
@@ -134,9 +135,9 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
               if (terminalStates.has(current.state)) return;
               Object.assign(current.runtime, copy(patch));
               current.state = current.cancelRequested ? 'stopping' : 'running';
-              current.updatedAt = now();
+              if (!recovering) current.updatedAt = now();
             });
-            emit({ event: 'task_started', taskId: id, conversationId: task.conversationId });
+            if (!recovering) emit({ event: 'task_started', taskId: id, conversationId: task.conversationId });
           },
           delegate: input => delegate(id, input),
         };
@@ -273,17 +274,32 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
     schedule();
     return copy(find(id));
   };
-  // Persist the recovery decision before accepting new messages.
+  // Persist the recovery decision before accepting new messages. Recovery is
+  // observation-only: no execution is retried and no timestamps are refreshed.
   await mutate(data => {
-    for (const task of data.tasks) if (['starting', 'running', 'stopping', 'recovering'].includes(task.state)) task.state = 'recovering';
+    const currentTime = Date.parse(now());
+    for (const task of data.tasks) {
+      if (terminalStates.has(task.state)) continue;
+      const lastActivity = Date.parse(task.updatedAt || task.createdAt);
+      const verifiable = hasRecoveryEvidence(task)
+        && Number.isFinite(lastActivity) && currentTime - lastActivity <= 30 * 60 * 1000;
+      task.state = verifiable ? 'recovering' : 'interrupted';
+      if (!verifiable) task.error = task.runtime?.threadId && task.runtime?.turnId
+        ? '服务重启时任务已超过 30 分钟没有活动'
+        : '服务重启时没有可核对的运行证据';
+    }
     for (const delivery of data.deliveries) if (delivery.state === 'delivering') delivery.state = 'pending';
   });
   const recoveryTimer = setInterval(() => {
     if (closed || !state.tasks.some(task => task.state === 'needs-reconciliation')) return;
     void mutate(data => {
-      for (const task of data.tasks) if (task.state === 'needs-reconciliation') task.state = 'recovering';
+      for (const task of data.tasks) {
+        if (task.state !== 'needs-reconciliation') continue;
+        task.state = hasRecoveryEvidence(task) ? 'recovering' : 'interrupted';
+        if (task.state === 'interrupted') task.error = '恢复核对缺少可验证的原执行编号';
+      }
     }).then(schedule).catch(error => emit({ event: 'task_recovery_failed', code: error.code || 'unknown' }));
-  }, 15000);
+  }, recoveryIntervalMs);
   recoveryTimer.unref?.();
   schedule();
   return {
@@ -297,7 +313,10 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
     }); schedule(); },
     reconcile: async id => { await mutate(data => {
       const task = requireTask(data, id);
-      if (task.state === 'needs-reconciliation') task.state = 'recovering';
+      if (task.state === 'needs-reconciliation') {
+        task.state = hasRecoveryEvidence(task) ? 'recovering' : 'interrupted';
+        if (task.state === 'interrupted') task.error = '恢复核对缺少可验证的原执行编号';
+      }
     }); schedule(); },
     // Detach without cancelling native work: the next instance must observe its authoritative state.
     close: async () => { closed = true; clearInterval(recoveryTimer); runtime.detach?.(); await writes; await Promise.allSettled([...notifications]); await writes; },

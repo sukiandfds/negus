@@ -1,4 +1,5 @@
 import { createModelDefaultsStore } from "../model-defaults-store.mjs";
+import { backgroundTaskRoute, modelDefaultsFromRoute } from "../background-tasks/model-policy.mjs";
 import { createProviderProbe } from "../provider-probe.mjs";
 import path from "node:path";
 import { sendJson } from "../http/request-utils.mjs";
@@ -24,7 +25,9 @@ const createObserverReader = (observerPort) => async (threadId = "") => {
 };
 
 export const createSystemRoutes = ({ token, project, projectRoot, device, observerPort, media, realtime, modelProviders, fushengUsage }) => {
-  const defaults = createModelDefaultsStore(path.join(projectRoot, "runtime/model-defaults.json"));
+  const defaults = createModelDefaultsStore(path.join(projectRoot, "runtime/model-defaults.json"), {
+    fallback: async () => modelDefaultsFromRoute(await backgroundTaskRoute(modelProviders)),
+  });
   const probe = modelProviders?.sharedConfig?.resolveDraft
     ? createProviderProbe({ resolveDraft: modelProviders.sharedConfig.resolveDraft }) : null;
   const readObserverStatus = createObserverReader(observerPort);

@@ -79,7 +79,7 @@ export async function createBackgroundTaskService({ stateFile, registry, modelPr
       await persist();
       const start = (async () => {
         try {
-          const route = await backgroundTaskRoute(modelProviders, employee);
+          const route = await backgroundTaskRoute(modelProviders);
           task.reasoningEffort = route.reasoningEffort || task.reasoningEffort;
           const session = await conversations.createSession(route.model, employee.projectRoot, route.modelProviderId, {
             managed: true, sandbox: 'danger-full-access', approvalPolicy: 'never', developerInstructions: workerInstructions,

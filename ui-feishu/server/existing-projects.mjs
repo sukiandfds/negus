@@ -18,8 +18,8 @@ const readJson = async (file, fallback) => {
 export async function existingProjects(currentRoot) {
   if (path.resolve(currentRoot) === path.resolve(installationRoot)) return [];
   const state = await readJson(path.join(installationRoot, 'runtime/project-identities.json'), { projects: [] });
-  return state.projects.filter(project => ['personal', 'business'].includes(project.kind) && project.root && project.root !== currentRoot)
-    .map(project => ({ key: project.key, name: project.name, root: project.root, provider: project.provider || 'codex' }));
+  return state.projects.filter(project => project.kind === 'personal' && project.root && project.root !== currentRoot)
+    .map(project => ({ key: project.key, name: project.name, root: project.root, provider: project.provider || 'codex', kind: project.kind }));
 }
 
 // Keep original histories and provider routes in their owning stores; never copy or recreate a chat.

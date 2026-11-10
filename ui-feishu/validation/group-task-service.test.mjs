@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createGroupTaskService } from '../server/group-task-service.mjs';
+import { createGroupTaskService, migrateGroupAgentThread } from '../server/group-task-service.mjs';
 import { createGroupRoomStore } from '../../windows/server/group-room-store.mjs';
 import { routeMessage } from '../kernel/message-routing.mjs';
 import { mentionedAgentIds } from '../../windows/server/multi-agent/agent-routing.mjs';
@@ -17,6 +17,122 @@ test('群聊自然语言不广播，明确点名优先', async () => {
     const result = await routeMessage({ text, members, explicitIds: mentionedAgentIds(text, members), receptionId: 'manager', allowBroadcast: false });
     assert.deepEqual(result.agentIds, expected);
   }
+});
+
+test('群内员工默认使用 DeepSeek，显式修改后重启仍保留', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-group-model-default-'));
+  const stateFile = path.join(root, 'room.json');
+  const defaultModelSettings = { modelProviderId: 'ccswitch_deepseek', model: 'deepseek-flash', reasoningEffort: 'high' };
+  const createRoom = () => createGroupRoomStore({ stateFile, roomId: 'room', project: '测试',
+    agentDefinitions: [{ id: 'manager', name: '运营管理' }], defaultModelSettings });
+  let room = await createRoom();
+  const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root,
+    modelProviders: { resolveRoute: settings => settings }, appServerClient: null });
+  t.after(async () => { await service.close(); await room.close(); await fs.rm(root, { recursive: true, force: true }); });
+  assert.equal(room.getAgent('manager').model, 'deepseek-flash');
+  assert.equal(room.getAgent('manager').modelProviderId, 'ccswitch_deepseek');
+  await service.updateAgentSettings('manager', { modelProviderId: 'channel-explicit', model: 'model-explicit', reasoningEffort: 'low' });
+  assert.equal(room.getAgent('manager').modelSelectionSource, 'explicit');
+  await room.close();
+  room = await createRoom();
+  assert.equal(room.getAgent('manager').modelProviderId, 'channel-explicit');
+  assert.equal(room.getAgent('manager').model, 'model-explicit');
+  assert.equal(room.getAgent('manager').modelSelectionSource, 'explicit');
+});
+
+test('群员工 Provider 迁移保持 thread，失败继续旧来源且多个 agent 互不阻塞', async () => {
+  const agents = new Map([
+    ['a', { id: 'a', threadId: 'thread-a', modelProviderId: 'old-a', model: 'old-model-a',
+      pendingModelSettings: { modelProviderId: 'deepseek', model: 'deepseek-flash', reasoningEffort: 'high', modelSelectionSource: 'default' } }],
+    ['b', { id: 'b', threadId: 'thread-b', modelProviderId: 'old-b', model: 'old-model-b',
+      pendingModelSettings: { modelProviderId: 'deepseek', model: 'deepseek-flash', reasoningEffort: 'high', modelSelectionSource: 'default' } }],
+    ['explicit', { id: 'explicit', threadId: 'thread-explicit', modelProviderId: 'vip', model: 'chosen',
+      modelSelectionSource: 'explicit', pendingModelSettings: null }],
+  ]);
+  const updates = [];
+  const room = {
+    getAgent: id => agents.get(id),
+    updateAgent: async (id, patch) => { const next = { ...agents.get(id), ...patch }; agents.set(id, next); updates.push({ id, patch }); return next; },
+  };
+  const providers = { resolveRoute: ({ modelProviderId, model }) => ({ modelProviderId, model }) };
+  const clientFor = async agent => ({ provider: agent.modelProviderId });
+  const migrated = [];
+  const migrate = (agent, fail = false) => migrateGroupAgentThread({
+    agent, room, modelProviders: providers, clientFor,
+    transferThread: async ({ source, target, threadId, route }) => {
+      if (fail) throw Error('source unavailable');
+      migrated.push({ id: agent.id, source: source.provider, target: target.provider, threadId, route });
+    },
+  });
+  const [a, failed, explicit] = await Promise.all([
+    migrate(agents.get('a')),
+    migrate(agents.get('b'), true),
+    migrate(agents.get('explicit')),
+  ]);
+  assert.equal(a.modelProviderId, 'deepseek');
+  assert.equal(a.threadId, 'thread-a');
+  assert.equal(failed.modelProviderId, 'old-b');
+  assert.equal(failed.threadId, 'thread-b');
+  assert.equal(explicit.modelProviderId, 'vip');
+  assert.deepEqual(migrated, [{
+    id: 'a', source: 'old-a', target: 'deepseek', threadId: 'thread-a',
+    route: { modelProviderId: 'deepseek', model: 'deepseek-flash' },
+  }]);
+  assert.equal(updates.length, 1);
+});
+
+test('群内员工在真实下一轮先迁移后启动，同 thread 不重开', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-group-provider-migration-'));
+  const stateFile = path.join(root, 'room.json');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.writeFile(stateFile, JSON.stringify({ agents: [{
+    id: 'manager', modelProviderId: 'old-provider', model: 'old-model', reasoningEffort: 'medium', threadId: 'group-thread',
+  }] }));
+  const defaultModelSettings = { modelProviderId: 'ccswitch_deepseek', model: 'deepseek-flash', reasoningEffort: 'high' };
+  const room = await createGroupRoomStore({ stateFile, roomId: 'room', project: '测试',
+    agentDefinitions: [{ id: 'manager', name: '运营管理' }], defaultModelSettings });
+  const listeners = new Set();
+  const turns = [];
+  const calls = [];
+  const client = {
+    subscribe: callback => { listeners.add(callback); return () => listeners.delete(callback); },
+    request: async (method, params) => {
+      calls.push({ method, params });
+      if (method === 'thread/read') return { thread: { id: params.threadId, turns: [] } };
+      if (method === 'thread/resume') return { thread: { id: params.threadId, turns: [] } };
+      if (method === 'turn/start') {
+        const turn = { id: 'turn', status: 'inProgress', items: [] };
+        turns.push(params);
+        queueMicrotask(() => listeners.forEach(callback => callback({ method: 'turn/started', params: { threadId: params.threadId, turn } })));
+        return { turn };
+      }
+      return {};
+    },
+  };
+  let migrations = 0;
+  const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root,
+    modelProviders: { resolveRoute: settings => settings, getClient: async () => client }, appServerClient: client,
+    transferThread: async ({ threadId, route }) => {
+      migrations += 1;
+      assert.equal(threadId, 'group-thread');
+      assert.deepEqual(route, { modelProviderId: 'ccswitch_deepseek', model: 'deepseek-flash' });
+      assert.equal(calls.some(call => call.method === 'turn/start'), false);
+    } });
+  t.after(async () => { await service.close(); await room.close(); });
+  await service.receive({ requestId: 'migrate-next-turn', agentIds: [],
+    message: { type: 'human', authorId: 'user', authorName: '用户', text: '继续处理', attachments: [] } });
+  await until(() => turns.length === 1);
+  assert.equal(migrations, 1);
+  assert.equal(turns[0].threadId, 'group-thread');
+  assert.equal(calls.find(call => call.method === 'thread/resume')?.params.model, 'deepseek-flash');
+  assert.equal(room.getAgent('manager').threadId, 'group-thread');
+  assert.equal(room.getAgent('manager').modelProviderId, 'ccswitch_deepseek');
+  assert.equal(room.getAgent('manager').modelSelectionSource, 'default');
+  assert.equal(room.getAgent('manager').pendingModelSettings, null);
+  listeners.forEach(callback => callback({ method: 'turn/completed', params: {
+    threadId: 'group-thread', turn: { id: 'turn', status: 'completed', items: [{ type: 'agentMessage', text: '迁移完成' }] },
+  } }));
+  await new Promise(resolve => setImmediate(resolve));
 });
 
 test('用户追加立即 steer 原 turn 且重试不重复派工', async t => {
@@ -64,15 +180,15 @@ test('未送达的补充在原turn结束后重试为同线程后续任务', asyn
   assert.equal(service.tasks().filter(task => task.requestKey === 'message:extra:manager').length, 1);
 });
 
-test('重启时待核对任务投影为活跃而非空闲', async t => {
+test('重启时没有原生线程证据的待核对任务直接收敛且不再占用员工', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-group-state-'));
   const room = await createGroupRoomStore({ stateFile: path.join(root, 'room.json'), roomId: 'room', project: '验证',
     agentDefinitions: [{ id: 'manager', name: '运营管理' }] });
-  await fs.writeFile(path.join(root, 'tasks.json'), JSON.stringify({ version: 1, deliveries: [], tasks: [{ id: 'unknown', requestKey: 'unknown', agentId: 'manager', conversationId: 'room', lane: 'room:manager', state: 'needs-reconciliation', runtime: {}, source: { roomId: 'room' }, createdAt: new Date().toISOString() }] }));
+  await fs.writeFile(path.join(root, 'tasks.json'), JSON.stringify({ version: 1, deliveries: [], tasks: [{ id: 'unknown', requestKey: 'unknown', agentId: 'manager', conversationId: 'room', lane: 'room:manager', state: 'needs-reconciliation', runtime: { threadId: 'stale-thread' }, source: { roomId: 'room' }, createdAt: new Date().toISOString() }] }));
   const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root });
   t.after(async () => { await service.close(); await room.close(); await fs.rm(root, { recursive: true, force: true }); });
-  assert.equal(room.getAgent('manager').active, true);
-  assert.equal(room.getAgent('manager').label, '等待核对状态');
+  assert.equal(service.tasks()[0].state, 'interrupted');
+  assert.equal(room.getAgent('manager').active, false);
 });
 
 test('丢失续派事件后重启从原线程历史恢复一次且不重发', async t => {
@@ -92,7 +208,10 @@ test('丢失续派事件后重启从原线程历史恢复一次且不重发', as
     return {};
   } };
   let failedEntry = { id: 'failed-entry', submissionId: 'submission', state: 'failed' };
-  const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root, appServerClient: client, registerSession: async () => {}, bindings: { bindRuntime: async () => {} },
+  const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root, appServerClient: client,
+    modelProviders: { providers: () => [{ id: 'ccswitch_deepseek', displayName: 'DeepSeek', models: [{ model: 'deepseek-flash' }] }],
+      isProviderConfigured: async () => true, resolveRoute: ({ model, modelProviderId }) => ({ model, modelProviderId }), getClient: async () => client },
+    registerSession: async () => {}, bindings: { bindRuntime: async () => {} },
     queue: { list: () => failedEntry ? [failedEntry] : [], remove: async () => { failedEntry = null; } } });
   t.after(async () => { await service.close(); await room.close(); await fs.rm(root, { recursive: true, force: true }); });
   await until(() => service.tasks().some(task => task.kind === 'followup' && task.state === 'completed'));
@@ -115,6 +234,8 @@ test('held 续派不读历史，同轮 steer 只归属原 turn，无法确认停
   let reads = 0; let pending = { id: 'q', submissionId: 'held-id', held: true, state: 'pending' };
   const client = { subscribe: () => () => {}, request: async method => { if (method === 'thread/read') { reads++; return { thread: { turns: [] } }; } return {}; } };
   const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root, appServerClient: client,
+    modelProviders: { providers: () => [{ id: 'ccswitch_deepseek', displayName: 'DeepSeek', models: [{ model: 'deepseek-flash' }] }],
+      isProviderConfigured: async () => true, resolveRoute: ({ model, modelProviderId }) => ({ model, modelProviderId }), getClient: async () => client },
     queue: { list: () => pending ? [pending] : [], remove: async () => { pending = null; } } });
   t.after(async () => { await service.close(); await room.close(); await fs.rm(root, { recursive: true, force: true }); });
   await new Promise(resolve => setTimeout(resolve, 30));
@@ -122,7 +243,7 @@ test('held 续派不读历史，同轮 steer 只归属原 turn，无法确认停
   pending = { ...pending, held: false, state: 'dispatching' };
   assert.equal((await service.interruptDiscussion()).unresolvedCount, 1);
   assert.notEqual(service.tasks().find(task => task.id === 'target').inputs[0].cancelled, true);
-  assert.equal(service.tasks().find(task => task.id === 'other').cancelRequested, true);
+  assert.equal(service.tasks().find(task => task.id === 'other').state, 'interrupted');
   pending = null;
   await service.onProtocolMessage({ method: 'item/completed', params: { threadId: 'background', turnId: 'initial', item: { type: 'userMessage', clientId: 'held-id' } } });
   assert.equal(service.tasks().find(task => task.id === 'target').inputs[0].turnId, 'initial');
@@ -154,6 +275,8 @@ test('其他群或其他员工不能续派来源员工的后台任务', async t 
       agentDefinitions: [{ id: 'manager', name: '运营管理' }, { id: 'dev', name: '技术研发' }] });
     rooms.push(room);
     services.push(await createGroupTaskService({ stateRoot: path.join(root, id), room, projectRoot: root, appServerClient: client, growthService,
+      modelProviders: { providers: () => [{ id: 'ccswitch_deepseek', displayName: 'DeepSeek', models: [{ model: 'deepseek-flash' }] }],
+        isProviderConfigured: async () => true, resolveRoute: ({ model, modelProviderId }) => ({ model, modelProviderId }), getClient: async () => client },
       queue: { list: () => [], enqueue: async () => ({}), release: async () => ({}) }, execution: { getStatus: () => ({ active: false }) },
       registerSession: async () => {}, bindings: { bindRuntime: async () => {} } }));
   }
@@ -257,6 +380,8 @@ test('group intake keeps sender IDs, routes ordinary messages, @ takes priority,
     release: async (threadId, id) => { const item = queued.find(entry => entry.threadId === threadId && entry.id === id); item.held = false; return item; },
     remove: async (threadId, id) => { const index = queued.findIndex(item => item.threadId === threadId && item.id === id); if (index < 0) throw Error('not found'); queued.splice(index, 1); } };
   const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root, appServerClient: client,
+    modelProviders: { providers: () => [{ id: 'ccswitch_deepseek', displayName: 'DeepSeek', models: [{ model: 'deepseek-flash' }] }],
+      isProviderConfigured: async () => true, resolveRoute: ({ model, modelProviderId }) => ({ model, modelProviderId }), getClient: async () => client },
     queue, execution: { getStatus: () => ({ active: false }) }, registerSession: async (...args) => registered.push(args),
     bindings: { bindRuntime: async () => {} }, resolveAttachments: ids => ids.map(id => ({ id, name: 'fixture.txt', mimeType: 'text/plain', url: '/fixture', path: '/tmp/fixture.txt' })) });
   t.after(async () => { await service.close(); await room.close(); await fs.rm(root, { recursive: true, force: true }); });

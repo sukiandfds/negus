@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { createBusinessProjectLoader } from "../server/business-project-config.mjs";
 import { createProjectIdentityStore } from "../server/project-identity-store.mjs";
 import { createEmployeeProjectDirectory } from "../server/employee-project-directory.mjs";
 
@@ -151,6 +152,57 @@ test("directory groups Codex conversations under an additional business project"
     listing.projects.find((item) => item.kind === "personal").conversations.map((item) => item.threadId),
     ["main-thread"],
   );
+});
+
+test("business project edits and removals apply on the next identity sync without a restart", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-business-project-refresh-"));
+  const financeRoot = path.join(root, "finance");
+  const cameraRoot = path.join(root, "cameras");
+  const configFile = path.join(root, "business-projects.json");
+  await Promise.all([fs.mkdir(financeRoot), fs.mkdir(cameraRoot)]);
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const writeProjects = async (projects, seconds) => {
+    await fs.writeFile(configFile, JSON.stringify({ projects }), "utf8");
+    const stamp = new Date(Date.now() + seconds * 1000);
+    await fs.utimes(configFile, stamp, stamp);
+  };
+  await writeProjects([{ key: "finance", name: "财务", root: financeRoot }], 1);
+  const store = await createProjectIdentityStore({
+    stateFile: path.join(root, "project-identities.json"),
+    project: "negus",
+    projectRoot: root,
+    registry: { list: () => [] },
+    businessProjects: createBusinessProjectLoader(configFile),
+  });
+  t.after(() => store.close());
+  const directory = createEmployeeProjectDirectory({
+    project: "negus", projectRoot: root, registry: { list: () => [] }, projectIdentity: store,
+    conversations: { listSessions: async () => [] },
+  });
+  const first = await directory.list();
+  const finance = first.projects.find((item) => item.kind === "business");
+  assert.equal(finance.name, "财务");
+
+  await writeProjects([{ key: "finance", name: "财务中心", root: financeRoot }], 2);
+  const renamed = (await directory.list()).projects.find((item) => item.kind === "business");
+  assert.equal(renamed.projectId, finance.projectId);
+  assert.equal(renamed.name, "财务中心");
+
+  await writeProjects([
+    { key: "capital", name: "资金", root: financeRoot },
+    { key: "cameras", name: "相机数据", root: cameraRoot },
+  ], 3);
+  const [refreshed] = await Promise.all([directory.list(), store.sync()]);
+  const businesses = refreshed.projects.filter((item) => item.kind === "business");
+  assert.deepEqual(businesses.map((item) => item.name), ["资金", "相机数据"]);
+  assert.equal(businesses.find((item) => item.name === "资金").projectId, finance.projectId);
+  assert.equal(businesses.filter((item) => item.name === "资金").length, 1);
+  assert.equal(businesses.filter((item) => item.projectId.endsWith(":cameras")).length, 1);
+  assert.equal(refreshed.projects.filter((item) => item.kind === "personal").length, 1);
+
+  await writeProjects([], 4);
+  const [removed] = await Promise.all([directory.list(), store.sync()]);
+  assert.deepEqual(removed.projects.filter((item) => item.kind === "business"), []);
 });
 
 test("directory reads existing employee group bindings without creating them", async (t) => {

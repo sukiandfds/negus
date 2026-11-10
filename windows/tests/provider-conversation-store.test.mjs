@@ -477,22 +477,159 @@ test('assistant background creation records the actual provider, model and effor
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-assistant-registration-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const stateFile = path.join(root, 'routes.json');
+  let created;
   const service = createProviderConversationStore({ stateFile, current: {},
-    providers: { resolveRoute: ({ model, modelProviderId }) => ({ model, modelProviderId }), getClient: async () => ({}) },
-    createStore: () => ({ createSession: async (model, cwd) => ({ threadId: 'background', model, cwd, title: 'task' }) }) });
-  await service.createSession('model', root, 'external', { createdBy: 'assistant', reasoningEffort: 'high' });
+    providers: {
+      providers: () => [{ id: 'ccswitch_deepseek', displayName: 'DeepSeek', models: [{ model: 'deepseek-flash' }] }],
+      isProviderConfigured: async () => true,
+      resolveRoute: ({ model, modelProviderId }) => ({ model, modelProviderId }), getClient: async () => ({}),
+    },
+    createStore: () => ({ createSession: async (model, cwd) => {
+      created = { model, cwd, title: 'task' };
+      return { threadId: 'background', model, cwd, title: 'task' };
+    } }) });
+  await service.createSession('  ', root, '  ', { createdBy: 'assistant', reasoningEffort: 'high' });
+  assert.equal(created.model, 'deepseek-flash');
   const route = JSON.parse(await fs.readFile(stateFile, 'utf8')).background;
-  assert.equal(route.providerId, 'external'); assert.equal(route.model, 'external::model');
+  assert.equal(route.providerId, 'ccswitch_deepseek'); assert.equal(route.model, 'ccswitch_deepseek::deepseek-flash');
   assert.equal(route.createdBy, 'assistant'); assert.equal(route.reasoningEffort, 'high');
   assert.equal(route.summary.threadId, 'background');
+});
+
+test('new user conversation with an empty route starts on DeepSeek Flash High', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-user-default-route-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const stateFile = path.join(root, 'routes.json');
+  let created;
+  const service = createProviderConversationStore({ stateFile, current: {},
+    providers: {
+      providers: () => [{ id: 'ccswitch_deepseek', displayName: 'DeepSeek', models: [{ model: 'deepseek-flash' }] }],
+      isProviderConfigured: async () => true,
+      resolveRoute: ({ model, modelProviderId }) => ({ model, modelProviderId }),
+      getClient: async () => ({}),
+    },
+    createStore: () => ({ createSession: async (model, cwd, options) => {
+      created = { model, cwd, options };
+      return { threadId: 'user-default', model, cwd };
+    } }) });
+
+  const session = await service.createSession('', root, '', { createdBy: 'user' });
+  assert.equal(created.model, 'deepseek-flash');
+  assert.equal(created.options.reasoningEffort, 'high');
+  assert.equal(session.modelProviderId, 'ccswitch_deepseek');
+  assert.equal(session.reasoningEffort, 'high');
+  const route = JSON.parse(await fs.readFile(stateFile, 'utf8'))['user-default'];
+  assert.equal(route.providerId, 'ccswitch_deepseek');
+  assert.equal(route.model, 'ccswitch_deepseek::deepseek-flash');
+  assert.equal(route.reasoningEffort, 'high');
+});
+
+test('new user conversation keeps an explicit model and provider', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-user-explicit-route-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const resolved = [];
+  const service = createProviderConversationStore({ stateFile: path.join(root, 'routes.json'), current: {},
+    providers: {
+      providers: () => { throw Error('默认路由不应覆盖用户显式选择'); },
+      resolveRoute: request => {
+        resolved.push(request);
+        return { modelProviderId: request.modelProviderId, model: request.model };
+      },
+      getClient: async () => ({}),
+    },
+    createStore: (_client, providerId) => ({ createSession: async model => ({
+      threadId: `user-explicit-${providerId}`, model,
+    }) }) });
+
+  const session = await service.createSession('model-a', root, 'channel-a', { createdBy: 'user' });
+  assert.deepEqual(resolved, [{ model: 'model-a', modelProviderId: 'channel-a' }]);
+  assert.equal(session.modelProviderId, 'channel-a');
+  assert.equal(session.model, 'channel-a::model-a');
+});
+
+test('assistant background creation preserves an explicit model or provider route', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-assistant-explicit-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const stateFile = path.join(root, 'routes.json');
+  const resolved = [];
+  const created = [];
+  const resolveRoute = ({ model, modelProviderId }) => {
+    resolved.push({ model, modelProviderId });
+    return { modelProviderId: modelProviderId || (model === 'model-b' ? 'channel-b' : 'channel-a'), model: model || 'channel-default' };
+  };
+  const service = createProviderConversationStore({ stateFile, current: {},
+    providers: { providers: () => { throw Error('默认路由不应覆盖显式选择'); }, resolveRoute, getClient: async () => ({}) },
+    createStore: (_client, provider) => ({ createSession: async (model, cwd) => {
+      const threadId = `explicit-${created.length}`;
+      created.push({ provider, model, cwd });
+      return { threadId, model, cwd };
+    } }) });
+
+  await service.createSession('model-a', root, 'channel-a', { createdBy: 'assistant' });
+  await service.createSession('model-b', root, '', { createdBy: 'assistant' });
+  await service.createSession('', root, 'channel-c', { createdBy: 'assistant' });
+
+  assert.deepEqual(resolved, [
+    { model: 'model-a', modelProviderId: 'channel-a' },
+    { model: 'model-b', modelProviderId: '' },
+    { model: '', modelProviderId: 'channel-c' },
+  ]);
+  assert.deepEqual(created.map(({ provider, model }) => ({ provider, model })), [
+    { provider: 'channel-a', model: 'model-a' },
+    { provider: 'channel-b', model: 'model-b' },
+    { provider: 'channel-c', model: 'channel-default' },
+  ]);
+});
+
+test('reading an existing ordinary thread keeps its saved provider and model after the default changes', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-existing-route-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const stateFile = path.join(root, 'routes.json');
+  const saved = {
+    providerId: 'legacy-provider',
+    model: 'legacy-model',
+    reasoningEffort: 'medium',
+    createdBy: 'user',
+    summary: {
+      threadId: 'legacy-thread', source: 'codex', title: '旧对话', updatedAt: '2026-11-01T00:00:00.000Z',
+      messageCount: 1, latestUser: '旧问题', latestAssistant: '旧回答', archived: false, cwd: root,
+    },
+  };
+  const before = JSON.stringify({ 'legacy-thread': saved });
+  await fs.writeFile(stateFile, before);
+  const service = createProviderConversationStore({ stateFile, current: {},
+    providers: {
+      providers: () => { throw Error('读取旧对话不应触达新对话默认路由'); },
+      getClient: async route => ({ providerId: route.modelProviderId }),
+      resolveRoute: ({ model, modelProviderId }) => ({ model, modelProviderId }),
+    },
+    createStore: (_client, providerId) => ({
+      findSession: async id => ({ ...saved.summary, threadId: id, model: 'legacy-model', messages: [] }),
+      getSessionResumeInfo: async id => ({ path: path.join(root, `${id}.jsonl`), cwd: root, model: 'legacy-model',
+        reasoningEffort: 'medium', summary: { ...saved.summary, threadId: id } }),
+      getRuntimeContext: async id => ({ threadId: id, model: 'legacy-model', reasoningEffort: 'medium' }),
+      findSessionForProvider: async () => null,
+      provider: providerId,
+    }) });
+
+  const existing = await service.findSession('legacy-thread');
+  assert.equal(existing.modelProviderId, 'legacy-provider');
+  assert.equal(existing.model, 'legacy-model');
+  assert.equal(await fs.readFile(stateFile, 'utf8'), before);
 });
 
 test('legacy background task requests assistant registration with its chosen effort', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-legacy-background-'));
   const calls = [];
   const employee = { id: 'employee', name: 'employee', projectRoot: root, mainThreadId: 'parent', model: 'model', modelProviderId: 'provider', reasoningEffort: 'high' };
+  const modelProviders = {
+    providers: () => [{ id: 'ccswitch_deepseek', displayName: 'DeepSeek', models: [{ model: 'deepseek-flash' }] }],
+    isProviderConfigured: async () => true,
+    resolveRoute: ({ model, modelProviderId }) => ({ model, modelProviderId }),
+  };
   const service = await createBackgroundTaskService({ stateFile: path.join(root, 'tasks.json'),
     registry: { list: () => [employee], require: () => employee },
+    modelProviders,
     conversations: { createSession: async (...args) => { calls.push(args); return { threadId: 'child' }; },
       renameSession: async () => {}, sendMessage: async () => {} },
     bindings: { bindRuntime: async binding => binding }, queue: { enqueue: async () => ({}) },
@@ -501,7 +638,8 @@ test('legacy background task requests assistant registration with its chosen eff
   await service.create('employee', { title: 'task', instructions: 'work' });
   for (let i = 0; i < 100 && !calls.length; i++) await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(calls.length, 1);
-  assert.equal(calls[0][2], 'provider');
+  assert.equal(calls[0][0], 'deepseek-flash');
+  assert.equal(calls[0][2], 'ccswitch_deepseek');
   assert.equal(calls[0][3].createdBy, 'assistant');
   assert.equal(calls[0][3].reasoningEffort, 'high');
   const task = service.list('employee')[0];

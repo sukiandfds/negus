@@ -12,9 +12,58 @@ import { employeeTurnInstructions } from '../../windows/server/employee-definiti
 import { buildDiscussionPrompt } from '../../windows/server/multi-agent/discussion-prompt.mjs';
 import { backgroundToolConfig, executionPolicy, turnExecutionPolicy } from './execution-policy.mjs';
 import { followupTask } from './task-followup.mjs';
+import { transferEmployeeThread } from './employee-provider-integration.mjs';
+
+export async function migrateGroupAgentThread({
+  agent, room, modelProviders, clientFor, transferThread = transferEmployeeThread,
+}) {
+  const pending = agent?.pendingModelSettings;
+  if (!agent?.threadId || !pending || !modelProviders) return agent;
+  try {
+    const route = modelProviders.resolveRoute({
+      modelProviderId: pending.modelProviderId,
+      model: pending.model,
+    });
+    const targetAgent = { ...agent, ...pending, modelProviderId: route.modelProviderId, model: route.model };
+    const sourceClient = await clientFor(agent);
+    const targetClient = await clientFor(targetAgent);
+    await transferThread({
+      source: sourceClient,
+      target: targetClient,
+      providers: modelProviders,
+      threadId: agent.threadId,
+      route,
+      reasoningEffort: pending.reasoningEffort,
+      config: pending.reasoningEffort ? { model_reasoning_effort: pending.reasoningEffort } : {},
+      instructions: employeeTurnInstructions(agent.instructions),
+      policy: executionPolicy,
+    });
+    await room.updateAgent(agent.id, {
+      modelProviderId: route.modelProviderId,
+      model: route.model,
+      reasoningEffort: pending.reasoningEffort || '',
+      modelSelectionSource: pending.modelSelectionSource === 'explicit' ? 'explicit' : 'default',
+      pendingModelSettings: null,
+    });
+    return room.getAgent(agent.id) || targetAgent;
+  } catch (error) {
+    logMigrationFailure(agent, error);
+    return agent;
+  }
+}
+
+const logMigrationFailure = (agent, error) => {
+  console.warn(JSON.stringify({
+    scope: 'group-provider-migration',
+    agentId: agent?.id || '',
+    threadId: agent?.threadId || '',
+    event: 'failed',
+    error: error instanceof Error ? error.message : String(error),
+  }));
+};
 
 export async function createGroupTaskService({ stateRoot, room, projectRoot, employeeWorkRoots = {}, modelProviders,
-  appServerClient, broadcast = () => {}, attachmentContent, resolveAttachments = () => [], resolveArtifacts = () => [], onContextDelivered = async () => {}, bindings, agentTasks, queue, execution, registerSession, growthService = null, providerForThread = async () => null }) {
+  appServerClient, broadcast = () => {}, attachmentContent, resolveAttachments = () => [], resolveArtifacts = () => [], onContextDelivered = async () => {}, bindings, agentTasks, queue, execution, registerSession, growthService = null, providerForThread = async () => null, transferThread = transferEmployeeThread }) {
   const roomId = room.snapshot().room.id;
   const log = event => console.log(JSON.stringify({ scope: 'negus-tasks', roomId, at: new Date().toISOString(), ...event }));
   let kernel;
@@ -89,7 +138,10 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
     resolve: async (task, controls, { recovering }) => {
       let agent = room.getAgent(task.agentId);
       if (!agent) throw Error('执行员工已不在当前群聊');
-      if (task.conversationId !== roomId) agent = { ...agent, ...(task.modelProviderId ? { modelProviderId: task.modelProviderId, model: task.model } : task.runtime.modelProviderId ? { modelProviderId: task.runtime.modelProviderId, model: task.runtime.model || agent.model } : await backgroundTaskRoute(modelProviders, agent)) };
+      if (task.conversationId === roomId && agent.threadId && agent.pendingModelSettings) {
+        agent = await migrateGroupAgentThread({ agent, room, modelProviders, clientFor, transferThread });
+      }
+      if (task.conversationId !== roomId) agent = { ...agent, ...(task.modelProviderId ? { modelProviderId: task.modelProviderId, model: task.model } : task.runtime.modelProviderId ? { modelProviderId: task.runtime.modelProviderId, model: task.runtime.model || agent.model } : await backgroundTaskRoute(modelProviders)) };
       if (task.background) agent = { ...agent, reasoningEffort: task.reasoningEffort || task.runtime.reasoningEffort || agent.reasoningEffort };
       const modelProviderId = task.runtime.modelProviderId || agent.modelProviderId || 'current';
       const client = await clientFor({ ...agent, modelProviderId });
@@ -106,7 +158,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
           conversationKind: 'task', title: task.title, targetProjectId: room.snapshot().room.projectId, executionRoot: projectRoot });
       };
       if (recovering) {
-        if (threadId) { if (independent) await registerBackground(); await client.request('thread/resume', { threadId, ...options, persistExtendedHistory: true }); }
+        if (threadId && independent) await registerBackground();
         return { client, threadId };
       }
       if (controls.signal.aborted) return { client, threadId: threadId || 'cancelled-before-start', input: [] };
@@ -283,7 +335,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       if (!agent) throw Object.assign(Error('员工不存在'), { statusCode: 404 });
       if (agent.threadId && settings.modelProviderId !== agent.modelProviderId) throw Object.assign(Error('现有员工会话暂不支持跨供应商切换'), { statusCode: 409 });
       modelProviders?.resolveRoute(settings);
-      return room.updateAgent(agentId, settings);
+      return room.updateAgent(agentId, { ...settings, modelSelectionSource: 'explicit' });
     },
     interruptDiscussion: async () => {
       const tasks = kernel.list().filter(task => !terminalStates.has(task.state));

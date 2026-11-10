@@ -49,6 +49,7 @@ export interface SessionSummary {
   sourceRevision?: string;
   model?: string;
   modelProviderId?: string;
+  reasoningEffort?: string;
   threadId: string;
   source: SessionSource;
   title: string;

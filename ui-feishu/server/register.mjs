@@ -33,11 +33,11 @@ registerHooks({ load(url, context, nextLoad) {
     if (!source.includes(marker)) throw new Error('Group extension: route integration point changed');
     source = `import { createGroupCreationRoute } from ${JSON.stringify(extension)};\nimport { createTaskRoutes } from ${JSON.stringify(taskRoutes)};\n` + source.replace(marker, `${marker}\n    ...(roomDirectory?.create ? [createGroupCreationRoute({ roomDirectory }), createTaskRoutes({ roomDirectory, multiAgentDirectory, groupRoom, media, agentTasks, employeeProjectDirectory })] : []),`);
   } else {
-    const projectsMarker = 'const businessProjects = await loadBusinessProjects(path.join(projectRoot, "runtime", "business-projects.json"));';
+    const projectsMarker = 'const businessProjects = await loadBusinessProjectConfig();';
     const conversationsMarker = 'followUpQueue = createFollowUpQueueService({';
     if (!source.includes(projectsMarker) || !source.includes(conversationsMarker)) throw Error('Existing project integration changed');
     source = `import { existingProjects, withExistingConversations } from ${JSON.stringify(existingProjects)};\n` + source
-      .replace(projectsMarker, 'const businessProjects = [...await loadBusinessProjects(path.join(projectRoot, "runtime", "business-projects.json")), ...await existingProjects(projectRoot)];')
+      .replace(projectsMarker, 'const businessProjects = [...await loadBusinessProjectConfig(), ...await existingProjects(projectRoot)];')
       .replace('const conversations = createConversationService({', 'let conversations = createConversationService({')
       .replace(conversationsMarker, `conversations = await withExistingConversations(conversations, conversationStoreOptions);\n${conversationsMarker}`);
     const executionMarker = '    execution.handleProtocolMessage(message);';
@@ -59,6 +59,7 @@ registerHooks({ load(url, context, nextLoad) {
 await extendGroupRooms({ stateRoot: path.resolve(process.env.NEGUS_UI_STATE_ROOT || path.join(projectRoot, 'runtime', 'ui-feishu')), roomDirectory: groupRoomDirectory, services: multiAgentDirectory,
   projects: () => projectIdentity.list(), employees: () => employeeRegistry.listRuntimeProfiles(), broadcast: realtime.broadcast,
   onMessageCreated: broadcastEmployeeGroupMessage,
+  defaultModelSettings: employeeDefaultSettings,
   createServiceOptions: (identity, room) => ({ projectRoot: identity.root || projectRoot,
     // Group work is performed on the selected project, so every employee sees
     // the same repository and can review one another's changes.  The private

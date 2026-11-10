@@ -960,3 +960,28 @@ context-management-service.mjs增加8行，补原生轮次完成/中断终态收
 - 员工父行改为聚合映射后的主对话、群任务和子任务有效状态，移除对目录 `project.status.active` 的直接信任；多任务任一有效 active 才运行。
 - 验证使用真实 `ConversationStore` 和实际目录派生，不手工构造状态覆盖表。目录/缓存 41/41、真实 recovery hook 1/1；TypeScript、Vite 生产构建和 `git diff --check` 通过。
 - 现有标题、正文失败状态更新、断线恢复、新任务先出现、线程去重、归档/移除、短时失效合并均保持通过。未发布、未重启、未提交推送。
+
+### 2026-11-10 刷新缓存恢复交接补修及发布
+
+- 原第2/3项修复已于11月6日发布；本次基于现行develop d2f439a补测，发现后台加载其他会话时失败消息拆入临时Store的localPending却未交接，可能再次写盘丢失。业务1文件+5/-3，复用addMessage交接，保留去重及未完成消息过滤；不改滚动、切换调度、群缓存或SW。
+- 修复前隔离运行在A恢复后B失败图片断言失败（原控制台记录；/tmp/negus-refresh-current-20261110.log仅保留标准输出，未捕获错误堆栈）；源码修复后手机尺寸、业务API全503的A/B/A首帧及刷新、来源/项目/模型/上下文、95条历史与失败图片、完成回复和独立失败消息通过：/tmp/negus-refresh-current-fix-20261110.log。TypeScript与diff检查通过。
+- 受控rebuild workerPid 30213，结果published，2026-11-10T12:00:40.806Z，feishu-mwan26hw，未重启后端。实际HTTP版本及index-Cd11eHX9.js与磁盘一致（SHA-256 055047b4be4ace2a03695ffe5bb92ff8a863ed204d389000188277f9d8e9ed16）。发布入口复验：/tmp/negus-refresh-published-20261110.log；完成回复显示后不等待写盘立即刷新通过：/tmp/negus-refresh-immediate-20261110.log，脚本/tmp/negus-refresh-immediate-20261110.cjs，截图/tmp/negus-refresh-published-20261110.png。
+- 隔离手机Chrome结果不等于真实安卓设备验收；磁盘从未保存或已被覆盖的正文仍须成功同步一次重建。未提交推送。
+
+### 2026-11-10 业务项目热刷新与重启任务恢复最小修复（未发布）
+
+- 基线 `develop / d2f439a`。保留工作区已有的 DeepSeek 全局模型策略、员工详情及用户列出的全部未提交改动；本轮不提交、不推送、不发布、不重启。
+- 修改前，用户把新路径写入 `runtime/business-projects.json` 后必须重启，旧任务还会在重启时统一改成 recovering 并重新观察/执行，导致旧任务重新出现、无效空线程占用目录。修改后，保存配置后下一次项目目录读取即可新增/改名/删除业务项目；新 root 可通过现有会话创建校验，已有普通/员工项目不重复，新项目进入目录后现有群聊创建可选中。重启时 terminal 保持终态；无 `threadId`/`turnId`、无法核对或最后活动超过 30 分钟的任务直接 interrupted；仅近期且原 turnId 可核对的活动 turn 进入只读观察，不创建新 turn，不因恢复附着刷新 `updatedAt` 或发布活动事件；无 `threadId` 任务不进入任务目录。
+- 本轮业务代码最小范围为 10 文件，约 +87/-25 行：`business-project-config.mjs`（mtime 惰性加载）、`project-identity-store.mjs`（动态业务配置及删除同步）、`existing-projects.mjs`（业务项目以配置为唯一来源）、`remote-room-demo.mjs`（共享 root 原位刷新）、`register.mjs`（接入同一加载器）、`app-server-conversation-store.mjs`（root 校验读取当前集合）、`task-kernel.mjs`（启动分类且恢复不写时间/不广播）、`native-task-runtime.mjs`（恢复只读核对及无证据收敛）、`employee-task-extension.mjs`、`group-task-service.mjs`（恢复前不预 resume）。未新增状态存储、watcher、轮询器或第二恢复器。
+- 验证：任务内核/原生运行时 25/25；员工任务/群任务 24/24；项目身份/群创建 9/9；动态 root 定向 1/1；MJS 语法及 loader 转换后的入口检查通过。覆盖新增、重复读取、删除、动态 root、真实 active 只 observe、terminal 不恢复、30 分钟边界、无 turn 不执行、无 thread 不进入目录。证据 `/tmp/negus-roots-task-20261110.log`、`/tmp/negus-roots-employee-group-20261110.log`、`/tmp/negus-roots-project-20261110.log`、`/tmp/negus-roots-static-20261110.log`。受保护的 `ConversationView.tsx`、`useReturnToBottom.ts` 零 diff，`git diff --check` 通过。
+- `conversation-controls.test.mjs` 全量另有 4 项既有失败（3 项 paginated history fallback、1 项 provider 模型前缀）；已用 `d2f439a` 独立快照复现同样的 4 项，本轮未改动这些路径。受控发布/重启未执行，文内“修改后”是源码行为及隔离测试结论，当前运行服务尚未加载，不可作为已生效或真实浏览器验收结论。
+- 新项目由下一次目录读取触发刷新，不主动广播；已打开页面仍依赖现有目录刷新事件或用户操作。该实现可供独立风控复核。
+
+### 2026-11-10 风控阻断补修：恢复旁路与缺失项目群（未发布）
+
+- 风控整组确认两项阻断后，本轮只补这两项并保留并行任务的 group-room-store、员工模型及相关调用改动；未提交、推送、发布或重启。
+- 恢复状态机：删除 `registrationPending + threadId` 将恢复态改回执行态的旁路；`native-task-runtime` 在缺持久化 `threadId`/`turnId` 时不解析客户端、不订阅、不 checkpoint，直接 interrupted。`task-kernel` 启动、定时核对和手动 reconcile 都先检查完整证据，缺证据的记录收敛为 interrupted 且不刷新 `updatedAt`。近期有完整证据的任务仍只 observe；真实 terminal 才收敛终态，普通新任务、停止和续派路径不变。
+- 项目与群历史：业务项目改为先按规范化 root 匹配现有身份，key 改名保留原 `projectId`，name 仍可更新；配置永久删除后身份从项目目录移除。`group-extension` 启动恢复缺失项目的群记录时设为 archived，复用原文件加载原 `projectId`、员工 thread 和消息，不注册群任务 service并保存 rooms.json；普通群照常恢复 service，新 root 仍可建群。
+- 本轮业务源码 4 文件约 +44/−25 行：`native-task-runtime.mjs` +2/−6、`task-kernel.mjs` +12/−4、`project-identity-store.mjs` +7/−0、`group-extension.mjs` +23/−15。测试覆盖恢复 `turn/start=0`、定时无证据收敛、`updatedAt` 不变、stale 群任务不占用员工、key 改名保 ID、并发 mtime 刷新、新 root、删除项目目录消失、缺失项目群归档且启动不阻断、普通群不受影响、员工 thread/消息保留。
+- 定向验证：task-kernel/native-task-runtime 27/27；employee-task-extension 14/14；group-task-service 相关恢复 4/4；project-identity-store/group-extension 9/9；动态 root 会话 1/1；MJS 语法、loader 转换入口及 `git diff --check` 通过。证据 `/tmp/negus-risk-fix-task-20261110.log`、`/tmp/negus-risk-fix-employee-20261110.log`、`/tmp/negus-risk-fix-group-task-20261110.log`、`/tmp/negus-risk-fix-project-group-20261110.log`、`/tmp/negus-risk-fix-root-session-20261110.log`、`/tmp/negus-risk-fix-static-20261110.log`。完整 group-task-service 同时含并行任务新增的员工 Provider 迁移用例，其失败不属于本轮两处改动，未触碰相应文件。
+- 当前只完成源码与隔离验证，运行服务仍加载旧版本；用户可见行为尚未切换，不可宣称已生效。可交增量风控复核。

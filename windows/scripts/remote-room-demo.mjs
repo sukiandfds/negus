@@ -1,4 +1,5 @@
 import { createBackgroundTaskService } from "../server/background-tasks/service.mjs";
+import { backgroundTaskRoute } from "../server/background-tasks/model-policy.mjs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -39,7 +40,7 @@ import { createEmployeeGrowthReviewer } from "../server/employee-growth-reviewer
 import { createEmployeeGrowthService } from "../server/employee-growth-service.mjs";
 import { createAttachmentContentService } from "../server/attachment-content-service.mjs";
 import { loadEmployeeDefinitions } from "../server/employee-definitions.mjs";
-import { loadBusinessProjects } from "../server/business-project-config.mjs";
+import { createBusinessProjectLoader } from "../server/business-project-config.mjs";
 import { createModelProviderService } from "../server/model-provider-service.mjs";
 import { createProjectActivityIndex } from "../server/project-activity-index.mjs";
 import { createProjectStatusService } from "../server/project-status-service.mjs";
@@ -60,8 +61,15 @@ const token = getArg("--token", randomBytes(12).toString("hex"));
 const deviceName = String(getArg("--device-name", os.hostname())).trim() || os.hostname();
 const device = { name: deviceName, startedAt: new Date().toISOString() };
 const sessionRoot = process.env.CODEX_SESSION_DIR || path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "sessions");
-const businessProjects = await loadBusinessProjects(path.join(projectRoot, "runtime", "business-projects.json"));
+const loadBusinessProjectConfig = createBusinessProjectLoader(path.join(projectRoot, "runtime", "business-projects.json"));
+const businessProjects = await loadBusinessProjectConfig();
 const projectRoots = [projectRoot, ...businessProjects.map((entry) => entry.root)];
+const retainedProjects = businessProjects.filter((entry) => entry.kind === "personal");
+const refreshBusinessProjects = async () => {
+  const projects = [...await loadBusinessProjectConfig(), ...retainedProjects];
+  projectRoots.splice(0, projectRoots.length, projectRoot, ...projects.map((entry) => entry.root));
+  return projects;
+};
 const attachmentContent = createAttachmentContentService();
 const media = createMediaService({ uploadRoot: path.join(projectRoot, "runtime", "uploads"), attachmentContent });
 await media.restoreUploads();
@@ -229,18 +237,25 @@ contextManagement = await createContextManagementService({
     ? employeeRuntime.compactContext(threadId)
     : conversations.compactContext(threadId),
 });
+const employeeDefaultRoute = await backgroundTaskRoute(modelProviders);
+const employeeDefaultSettings = {
+  modelProviderId: employeeDefaultRoute.modelProviderId,
+  model: employeeDefaultRoute.model,
+  reasoningEffort: employeeDefaultRoute.reasoningEffort,
+};
 const employeeDefinitions = await loadEmployeeDefinitions(employeesRoot);
 employeeRegistry = await createEmployeeProjectRegistry({
   stateFile: path.join(projectRoot, "runtime", "employee-projects.json"),
   workspaceRoot: projectRoot,
   definitions: employeeDefinitions,
+  defaultModelSettings: employeeDefaultSettings,
 });
 const projectIdentity = await createProjectIdentityStore({
   stateFile: path.join(projectRoot, "runtime", "project-identities.json"),
   project,
   projectRoot,
   registry: employeeRegistry,
-  businessProjects,
+  businessProjects: refreshBusinessProjects,
 });
 const projectIdentities = projectIdentity.list();
 const roomIdForProject = (identity) => identity.kind === "personal"
@@ -329,6 +344,7 @@ const groupRoomEntries = await Promise.all(projectIdentities.filter((identity) =
       model: employee.model,
       reasoningEffort: employee.reasoningEffort,
     })),
+    defaultModelSettings: employeeDefaultSettings,
     broadcast: realtime.broadcast,
     onMessageCreated: broadcastEmployeeGroupMessage,
   });

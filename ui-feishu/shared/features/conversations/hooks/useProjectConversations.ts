@@ -111,6 +111,9 @@ export function useProjectConversations() {
     || catalog.sessions.find((item) => item.threadId === selection.selectedId)?.model
     || "";
   const recordedEffort = contextManagement.status.threadId === selection.selectedId ? contextManagement.status.reasoningEffort : "";
+  const sessionEffort = (selection.session?.threadId === selection.selectedId ? selection.session.reasoningEffort || "" : "")
+    || catalog.sessions.find((item) => item.threadId === selection.selectedId)?.reasoningEffort
+    || "";
   const visibleModel = resolveVisibleModel(modelManager.models, modelDefaults, recordedModel, sessionModel);
   if (execution.status.active && execution.status.threadId === selection.selectedId) {
     const previous = runningModelRef.current.get(selection.selectedId);
@@ -118,7 +121,8 @@ export function useProjectConversations() {
   } else runningModelRef.current.delete(selection.selectedId);
   const usageModel = execution.status.active ? runningModelRef.current.get(selection.selectedId)?.model || '' : visibleModel;
   const draftSettingsRef = useRef(new Map<string, { model: string; reasoningEffort: string }>());
-  const visibleEffort = draftSettingsRef.current.get(selection.selectedId)?.reasoningEffort ?? resolveVisibleEffort(modelManager.models, modelDefaults, visibleModel, recordedEffort);
+  const visibleEffort = draftSettingsRef.current.get(selection.selectedId)?.reasoningEffort
+    ?? resolveVisibleEffort(modelManager.models, modelDefaults, visibleModel, recordedEffort || sessionEffort);
   const modelChoiceRef = useRef({ threadId: "", recordedModel: "", sessionModel: "", recordedEffort: "", contextSettled: false });
   modelChoiceRef.current = {
     threadId: selection.selectedId,
@@ -532,7 +536,8 @@ export function useProjectConversations() {
       const chosenProvider = draft && chosenEntry ? providerIdOf(chosenEntry) : providerId;
       return catalog.createSession(projectRoot, chosenModel, pendingId, chosenProvider, true).then(async (created) => {
         if (created) contextManagement.applyModelSettings(created, {
-          model: chosenModel, reasoningEffort: draft?.reasoningEffort ?? resolveVisibleEffort(models, defaults, chosenModel, ""),
+          model: chosenModel,
+          reasoningEffort: draft?.reasoningEffort || resolveVisibleEffort(models, defaults, chosenModel, ""),
         });
         if (created && draftNames.current.has(pendingId)) {
           const renamed = await conversationApi.rename(created, draftNames.current.get(pendingId)!).catch(() => {

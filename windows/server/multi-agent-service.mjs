@@ -301,6 +301,7 @@ export const createMultiAgentService = ({
       modelProviderId: requestedRoute.modelProviderId,
       model: requestedRoute.model,
       reasoningEffort: String(settings.reasoningEffort || "").trim().slice(0, 40),
+      modelSelectionSource: 'explicit',
     };
     if (!nextSettings.model) {
       throw Object.assign(new Error("模型不能为空"), { statusCode: 400 });

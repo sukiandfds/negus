@@ -670,7 +670,7 @@ export const createEmployeeRuntimeService = ({
       modelProviderId: requestedRoute.modelProviderId,
       model: requestedRoute.model,
       reasoningEffort,
-    });
+    }, { source: 'explicit' });
     return { employee: updated, status: statusFor(employee.id) };
   };
 

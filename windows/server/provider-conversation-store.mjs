@@ -75,6 +75,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
     ...(routes[session.threadId]?.manualTitle ? { title: routes[session.threadId].manualTitle } : {}),
     model: routes[session.threadId]?.model || session.model || "",
     modelProviderId: routes[session.threadId]?.pendingProviderId || owner(session.threadId),
+    reasoningEffort: routes[session.threadId]?.reasoningEffort || session.reasoningEffort || "",
   });
   const storedRouteInfo = async (id, providerId) => {
     const route = routes[id];
@@ -397,15 +398,18 @@ export const createProviderConversationStore = ({ current, providers, createStor
   service.createSession = async (model = "", cwd = "", modelProviderId = "", options = {}) => {
     await ready;
     await providers.refreshShared?.().catch((error) => { if (model.includes('::')) throw error; });
-    const route = options.createdBy === "assistant"
-      ? await backgroundTaskRoute(providers, providers.resolveRoute({ model, modelProviderId }))
+    const hasExplicitRoute = Boolean(String(model ?? '').trim() || String(modelProviderId ?? '').trim());
+    const route = !hasExplicitRoute
+      ? await backgroundTaskRoute(providers)
       : providers.resolveRoute({ model, modelProviderId });
     const effectiveModel = route.model || model;
-    const session = await (await storeFor(route.modelProviderId)).createSession(effectiveModel, cwd, options);
+    const sessionOptions = route.reasoningEffort && !options.reasoningEffort
+      ? { ...options, reasoningEffort: route.reasoningEffort } : options;
+    const session = await (await storeFor(route.modelProviderId)).createSession(effectiveModel, cwd, sessionOptions);
     return registerSession(session, route.modelProviderId,
       route.modelProviderId === 'current' ? effectiveModel : `${route.modelProviderId}::${effectiveModel}`,
       { createdBy: options.createdBy === 'assistant' ? 'assistant' : 'user', lastSuccessfulSettings: null,
-        ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}) });
+        ...(sessionOptions.reasoningEffort ? { reasoningEffort: sessionOptions.reasoningEffort } : {}) });
   };
   service.forkSession = async (id, ...args) => {
     await ready;

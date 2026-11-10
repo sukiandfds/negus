@@ -116,7 +116,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       ? { ...modelProviders.resolveRoute({ modelProviderId: task.modelProviderId, model: task.model }), reasoningEffort: task.reasoningEffort || '' }
       : task.runtime.modelProviderId
         ? { modelProviderId: task.runtime.modelProviderId, model: task.runtime.model || employee.model, reasoningEffort: task.runtime.reasoningEffort ?? employee.reasoningEffort }
-        : await backgroundTaskRoute(modelProviders, employee)),
+        : await backgroundTaskRoute(modelProviders)),
       ...(task.reasoningEffort ? { reasoningEffort: task.reasoningEffort } : {}) };
     const observed = ['external', 'followup'].includes(task.kind);
     const related = observed && kernel?.list().find(candidate => candidate.runtime.threadId === task.runtime.threadId && candidate.runtime.modelProviderId);
@@ -124,12 +124,14 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     const client = await clientFor({ ...employee, modelProviderId, ...(observed ? { model: '' } : {}) });
     let threadId = task.runtime.threadId;
     if (observed) {
-      try {
-        const response = await client.request('thread/read', { threadId, includeTurns: true });
-        if (response.thread?.status?.type === 'notLoaded') throw Error('thread not loaded');
-      } catch (error) {
-        if (!/thread not loaded/i.test(error.message)) throw error;
-        await client.request('thread/resume', { ...executionPolicy, threadId, persistExtendedHistory: true });
+      if (!recovering) {
+        try {
+          const response = await client.request('thread/read', { threadId, includeTurns: true });
+          if (response.thread?.status?.type === 'notLoaded') throw Error('thread not loaded');
+        } catch (error) {
+          if (!/thread not loaded/i.test(error.message)) throw error;
+          await client.request('thread/resume', { ...executionPolicy, threadId, persistExtendedHistory: true });
+        }
       }
       return { client, threadId };
     }
@@ -148,7 +150,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     const options = { ...executionPolicy, developerInstructions: taskInstructions, config: task.background ? backgroundToolConfig : tools.config(task.id),
       ...(employee.model ? { model: employee.model } : {}) };
     if (recovering) {
-      if (threadId) { await register(); await client.request('thread/resume', { ...options, threadId, persistExtendedHistory: true }); }
+      if (threadId) await register();
       return { client, threadId };
     }
     if (controls.signal.aborted) return { client, threadId: threadId || 'cancelled-before-start', input: [] };

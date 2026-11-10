@@ -23,9 +23,11 @@ export function useConversationSession(initial: InitialConversationState) {
       const cached = new ConversationStore(readInitialConversationState());
       for (const [id, value] of cached.committed) {
         const current = store.committed.get(id);
-        if (current?.session) continue;
-        store.update(id, { ...value, ...current, session: value.session });
-        if (cached.freshBodies.has(id)) store.freshBodies.add(id);
+        if (!current?.session) {
+          store.update(id, { ...value, ...current, session: value.session });
+          if (cached.freshBodies.has(id)) store.freshBodies.add(id);
+        }
+        for (const message of cached.localPending.get(id) || []) store.addMessage(id, message);
       }
     });
     return () => { active = false; };

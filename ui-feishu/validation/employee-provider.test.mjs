@@ -9,11 +9,16 @@ import { setTransferredProvider } from '../server/employee-provider-integration.
 const { createEmployeeProjectRegistry } = await import('../../windows/server/employee-project-registry.mjs');
 const { createEmployeeRuntimeService } = await import('../../windows/server/employee-runtime-service.mjs');
 
-async function fixture(t) {
+async function fixture(t, { defaultModelSettings = null, initialEmployee = null } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-provider-switch-'));
   const stateFile = path.join(root, 'employees.json');
   const definition = { id: 'researcher', name: '产品分析', model: 'model-a', reasoningEffort: 'medium', instructions: 'research', workRoot: root };
-  const registry = await createEmployeeProjectRegistry({ stateFile, workspaceRoot: root, definitions: [definition] });
+  if (initialEmployee) {
+    await fs.writeFile(stateFile, JSON.stringify({ version: 1, employees: [{ ...definition, ...initialEmployee }] }));
+  }
+  const registry = await createEmployeeProjectRegistry({
+    stateFile, workspaceRoot: root, definitions: [definition], defaultModelSettings,
+  });
   await registry.bindMainThread('researcher', 'original-thread');
   await registry.bindConversation('researcher', 'original-conversation');
   const histories = new Map([['current', ['old question', 'old answer']]]);
@@ -45,7 +50,9 @@ async function fixture(t) {
         if (method === 'turn/start') {
           active = true;
           assert.equal(params.threadId, 'original-thread');
-          histories.get(id).push(params.input[0].text);
+          const history = histories.get(id);
+          if (!history) throw Error(`missing history for ${id}: ${[...histories.keys()].join(',')}`);
+          history.push(params.input[0].text);
           return { turn: { id: `turn-${calls.length}`, status: 'inProgress' } };
         }
         return {};
@@ -74,15 +81,27 @@ async function fixture(t) {
   };
   let service = createEmployeeRuntimeService(options);
   t.after(async () => { service.close(); await registry.close(); await fs.rm(root, { recursive: true, force: true }); });
-  return { get service() { return service; }, registry, providers, histories, calls, events, client,
+  return { root, stateFile, get service() { return service; }, get registry() { return options.registry; }, providers, histories, calls, events, client,
     fail: () => { failTarget = true; },
     complete: id => client(id).emit({ method: 'turn/completed', params: { threadId: 'original-thread', turn: { id: 'done', status: 'completed' } } }),
-    restart: async () => { service.close(); options.registry = await createEmployeeProjectRegistry({ stateFile, workspaceRoot: root, definitions: [definition] }); service = createEmployeeRuntimeService(options); },
+    restart: async ({ defaultModelSettings: nextDefaults = defaultModelSettings } = {}) => {
+      service.close();
+      options.registry = await createEmployeeProjectRegistry({
+        stateFile, workspaceRoot: root, definitions: [definition], defaultModelSettings: nextDefaults,
+      });
+      service = createEmployeeRuntimeService(options);
+    },
   };
 }
 
 test('employee switches providers and returns with full history and stable conversation identity', async t => {
   const f = await fixture(t);
+  const ordinaryRoutes = path.join(f.root, 'ordinary-conversation-routes.json');
+  const ordinaryState = JSON.stringify({ 'ordinary-thread': {
+    providerId: 'ordinary-provider', model: 'ordinary-model', createdBy: 'user',
+    summary: { threadId: 'ordinary-thread', source: 'codex', title: '普通对话' },
+  } });
+  await fs.writeFile(ordinaryRoutes, ordinaryState);
   await f.service.updateModelSettings('researcher', { model: 'ccswitch_vip::model-b', reasoningEffort: 'high' });
   await f.service.updateModelSettings('researcher', { reasoningEffort: 'medium' });
   assert.equal(f.registry.get('researcher').pendingModelSettings.modelProviderId, 'ccswitch_vip');
@@ -99,6 +118,7 @@ test('employee switches providers and returns with full history and stable conve
   assert.equal(f.registry.get('researcher').mainThreadId, 'original-thread');
   assert.equal(f.registry.get('researcher').conversationId, 'original-conversation');
   assert.equal(f.calls.filter(c => c.id === 'current' && c.method === 'thread/resume' && c.params.path).at(-1).params.modelProvider, 'native-current');
+  assert.equal(await fs.readFile(ordinaryRoutes, 'utf8'), ordinaryState, '员工切换只迁移自己的 thread');
 });
 
 test('failed switch leaves previous provider usable and settings unchanged', async t => {
@@ -109,6 +129,45 @@ test('failed switch leaves previous provider usable and settings unchanged', asy
   assert.equal(f.registry.get('researcher').modelProviderId, 'current');
   await f.service.sendMessage({ employeeId: 'researcher', text: 'still works' });
   assert.equal(f.histories.get('current').at(-1), 'still works');
+});
+
+test('automatic default migration stays default and follows a later default change', async t => {
+  const firstDefault = { modelProviderId: 'ccswitch_deepseek', model: 'deepseek-flash', reasoningEffort: 'high' };
+  const f = await fixture(t, {
+    defaultModelSettings: firstDefault,
+    initialEmployee: { modelProviderId: 'current', model: 'model-a', reasoningEffort: 'medium', mainThreadId: 'original-thread' },
+  });
+  assert.deepEqual(f.registry.get('researcher').pendingModelSettings, {
+    ...firstDefault, modelSelectionSource: 'default',
+  });
+  await f.service.sendMessage({ employeeId: 'researcher', text: 'default migration' });
+  f.complete('ccswitch_deepseek');
+  assert.equal(f.registry.get('researcher').modelSelectionSource, 'default');
+  assert.equal(f.registry.get('researcher').pendingModelSettings, null);
+  await f.restart({ defaultModelSettings: {
+    modelProviderId: 'ccswitch_next', model: 'deepseek-v4-pro', reasoningEffort: 'high',
+  } });
+  assert.equal(f.registry.get('researcher').modelProviderId, 'ccswitch_deepseek');
+  assert.equal(f.registry.get('researcher').pendingModelSettings.modelSelectionSource, 'default');
+  assert.equal(f.registry.get('researcher').pendingModelSettings.modelProviderId, 'ccswitch_next');
+  await f.service.sendMessage({ employeeId: 'researcher', text: 'second default migration' });
+  assert.equal(f.registry.get('researcher').modelProviderId, 'ccswitch_next');
+  assert.equal(f.registry.get('researcher').modelSelectionSource, 'default');
+});
+
+test('failed automatic default migration leaves the old provider and source unchanged', async t => {
+  const defaultModelSettings = { modelProviderId: 'ccswitch_deepseek', model: 'deepseek-flash', reasoningEffort: 'high' };
+  const f = await fixture(t, {
+    defaultModelSettings,
+    initialEmployee: { modelProviderId: 'current', model: 'model-a', reasoningEffort: 'medium', mainThreadId: 'original-thread' },
+  });
+  f.fail();
+  await assert.rejects(f.service.sendMessage({ employeeId: 'researcher', text: 'must not migrate' }), /target unavailable/);
+  const employee = f.registry.get('researcher');
+  assert.equal(employee.modelProviderId, 'current');
+  assert.equal(employee.model, 'model-a');
+  assert.equal(employee.modelSelectionSource, 'default');
+  assert.equal(employee.pendingModelSettings.modelSelectionSource, 'default');
 });
 
 test('switching away from an unavailable old provider does not resume it before migrating history', async t => {
@@ -133,7 +192,12 @@ test('switching away from an unavailable old provider does not resume it before 
 test('restart restores selected employee provider; old provider events cannot complete its new task', async t => {
   const f = await fixture(t);
   await f.service.updateModelSettings('researcher', { model: 'ccswitch_vip::model-b' });
-  await f.restart();
+  assert.equal(f.registry.get('researcher').pendingModelSettings.modelSelectionSource, 'explicit');
+  await f.restart({ defaultModelSettings: {
+    modelProviderId: 'ccswitch_deepseek', model: 'deepseek-flash', reasoningEffort: 'high',
+  } });
+  assert.equal(JSON.parse(await fs.readFile(f.stateFile, 'utf8')).employees[0].pendingModelSettings.modelSelectionSource, 'explicit');
+  assert.equal(f.registry.get('researcher').modelSelectionSource, 'explicit');
   await f.service.sendMessage({ employeeId: 'researcher', text: 'after restart' });
   f.complete('current');
   assert.equal((await f.service.getStatus('researcher')).status.active, true);

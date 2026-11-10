@@ -7,7 +7,7 @@ import { createGroupTaskService } from './group-task-service.mjs';
 import { readJson, sendJson } from '../../windows/server/http/request-utils.mjs';
 
 // Injectable extension: reuse host authentication, room storage, execution and SSE.
-export async function extendGroupRooms({ stateRoot, roomDirectory, services, projects, employees, createServiceOptions, broadcast, onMessageCreated }) {
+export async function extendGroupRooms({ stateRoot, roomDirectory, services, projects, employees, createServiceOptions, broadcast, onMessageCreated, defaultModelSettings = null }) {
   const file = path.join(stateRoot, 'rooms.json');
   const rooms = roomDirectory.list().map(room => roomDirectory.require(room.id));
   let records = [];
@@ -18,39 +18,47 @@ export async function extendGroupRooms({ stateRoot, roomDirectory, services, pro
     Object.assign(roomDirectory, createGroupRoomDirectory({ rooms }));
     roomDirectory.list = () => rooms.map(store => { const snapshot = store.snapshot(); return { ...snapshot.room, lastActivityAt: snapshot.messages.at(-1)?.createdAt || snapshot.room.lastActivityAt }; });
   };
-  decorate();
-  for (const store of rooms) {
-    const snapshot = store.snapshot();
-    const identity = projects().find(project => project.projectId === snapshot.room.projectId);
-    if (!identity) throw new Error('群聊关联项目不存在');
-    await services.get(snapshot.room.id)?.close();
-    services.set(snapshot.room.id, await createGroupTaskService({ ...createServiceOptions(identity, store), room: store,
-      stateRoot: path.join(stateRoot, 'tasks', snapshot.room.id) }));
-  }
   const pending = new Map();
+  let recordsChanged = false;
   let writes = Promise.resolve();
   const save = () => {
     const text = JSON.stringify(records, null, 2);
     writes = writes.catch(() => {}).then(async () => { await fs.mkdir(stateRoot, { recursive: true }); await fs.writeFile(`${file}.tmp`, text); await fs.rename(`${file}.tmp`, file); });
     return writes;
   };
-  const register = async record => {
+  decorate();
+  for (const store of rooms) {
+    const snapshot = store.snapshot();
+    const identity = projects().find(project => project.projectId === snapshot.room.projectId);
+    if (!identity) continue;
+    await services.get(snapshot.room.id)?.close();
+    services.set(snapshot.room.id, await createGroupTaskService({ ...createServiceOptions(identity, store), room: store,
+      stateRoot: path.join(stateRoot, 'tasks', snapshot.room.id) }));
+  }
+  const register = async (record, { allowMissing = false } = {}) => {
     const identity = projects().find(project => project.projectId === record.projectId && project.kind !== 'employee');
-    if (!identity) throw Object.assign(new Error('群聊关联项目不存在'), { statusCode: 400 });
+    if (!identity && !allowMissing) throw Object.assign(new Error('群聊关联项目不存在'), { statusCode: 400 });
+    if (!identity && !record.archived) {
+      record.archived = true;
+      recordsChanged = true;
+    }
     const profiles = employees().filter(employee => record.agentIds.includes(employee.id));
     if (profiles.length !== record.agentIds.length) throw Object.assign(new Error('群聊员工不存在'), { statusCode: 400 });
-    const store = await createGroupRoomStore({ stateFile: path.join(stateRoot, `${record.id}.json`), project: identity.name,
-      projectId: identity.projectId, roomId: record.id, agentDefinitions: profiles, broadcast, onMessageCreated });
+    const store = await createGroupRoomStore({ stateFile: path.join(stateRoot, `${record.id}.json`), project: identity?.name || record.name,
+      projectId: identity?.projectId || record.projectId, roomId: record.id, agentDefinitions: profiles, broadcast, onMessageCreated, defaultModelSettings });
     const snapshot = store.snapshot;
     store.snapshot = () => { const data = snapshot(); return { ...data, room: { ...data.room, name: record.name, archived: Boolean(record.archived), lastActivityAt: data.messages.at(-1)?.createdAt || record.createdAt } }; };
-    const service = await createGroupTaskService({ ...createServiceOptions(identity, store), room: store,
-      stateRoot: path.join(stateRoot, 'tasks', record.id) });
-    services.set(record.id, service);
+    if (identity) {
+      const service = await createGroupTaskService({ ...createServiceOptions(identity, store), room: store,
+        stateRoot: path.join(stateRoot, 'tasks', record.id) });
+      services.set(record.id, service);
+    }
     rooms.push(store);
     decorate();
     return store.snapshot().room;
   };
-  for (const record of records) if (!original.has(record.id)) await register(record);
+  for (const record of records) if (!original.has(record.id)) await register(record, { allowMissing: true });
+  if (recordsChanged) await save();
   roomDirectory.create = async input => {
     const requestId = typeof input.requestId === 'string' && /^[\w-]{1,80}$/.test(input.requestId) ? input.requestId : '';
     if (!requestId) throw Object.assign(new Error('创建请求标识无效'), { statusCode: 400 });

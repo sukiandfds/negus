@@ -203,10 +203,12 @@ export const createAppServerConversationStore = ({
   client = createAppServerClient(),
   supervision = {},
 }) => {
-  const allowedProjectRoots = [...new Set(projectRoots.map((root) => path.resolve(root).toLowerCase()))];
   const isAllowedProjectRoot = (cwd) => {
     if (!cwd) return false;
-    try { return allowedProjectRoots.includes(path.resolve(cwd).toLowerCase()); } catch { return false; }
+    try {
+      const resolved = path.resolve(cwd).toLowerCase();
+      return projectRoots.some((root) => path.resolve(root).toLowerCase() === resolved);
+    } catch { return false; }
   };
   const isSameProjectRoot = (left, right) => {
     if (!left || !right) return false;

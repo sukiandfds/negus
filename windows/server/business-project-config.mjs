@@ -22,3 +22,27 @@ export const loadBusinessProjects = async (configFile) => {
     return [];
   }
 };
+
+export const createBusinessProjectLoader = (configFile) => {
+  let signature = "";
+  let projects = [];
+  let queue = Promise.resolve();
+  return () => {
+    const next = queue.then(async () => {
+      let current = "";
+      try {
+        const stat = await fs.stat(configFile, { bigint: true });
+        current = `${stat.mtimeNs}:${stat.size}`;
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+        current = "missing";
+      }
+      if (current === signature) return projects;
+      projects = current === "missing" ? [] : await loadBusinessProjects(configFile);
+      signature = current;
+      return projects;
+    });
+    queue = next.catch(() => {});
+    return next;
+  };
+};

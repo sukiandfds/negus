@@ -142,10 +142,83 @@ test('restart observes active native work without repeating it, and recovers pen
   assert.equal(restored.get(task.id).result, 'restored');
 });
 
-test('unknown native status keeps the lane occupied until authoritative reconciliation', async t => {
+test('restart keeps only recent tasks with exact native evidence, without refreshing their activity time', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-kernel-recovery-policy-'));
+  const stateFile = path.join(root, 'tasks.json');
+  const current = new Date();
+  const recent = new Date(current.getTime() - 1000).toISOString();
+  const stale = new Date(current.getTime() - 31 * 60 * 1000).toISOString();
+  const task = (id, state, runtime, updatedAt = recent) => ({ id, requestKey: id, lane: id, conversationId: id,
+    agentId: 'a', title: id, instructions: id, state, runtime, createdAt: updatedAt, updatedAt });
+  await fs.writeFile(stateFile, JSON.stringify({ version: 1, deliveries: [], tasks: [
+    task('terminal', 'completed', { threadId: 'thread-terminal', turnId: 'turn-terminal' }, stale),
+    task('stale', 'running', { threadId: 'thread-stale', turnId: 'turn-stale' }, stale),
+    task('no-turn', 'running', { threadId: 'thread-no-turn' }),
+    task('queued', 'queued', { threadId: 'thread-queued' }),
+    task('observe', 'running', { threadId: 'thread-observe', turnId: 'turn-observe' }),
+  ] }));
+  let release;
+  const observation = new Promise(resolve => { release = resolve; });
+  const observed = [];
+  const broadcasts = [];
+  let executed = 0;
+  const runtime = {
+    execute: async () => { executed += 1; throw Error('must not execute'); },
+    observe: async (item, controls) => {
+      observed.push(item);
+      await controls.started({ threadId: item.runtime.threadId, turnId: item.runtime.turnId });
+      return observation;
+    },
+  };
+  const kernel = await createTaskKernel({ stateFile, runtime, deliver: async () => ({}), broadcast: event => broadcasts.push(event) });
+  t.after(async () => { await kernel.close(); await fs.rm(root, { recursive: true, force: true }); });
+  await until(() => observed.length === 1);
+  const before = kernel.list().find(item => item.id === 'observe');
+  assert.equal(before.updatedAt, recent);
+  assert.deepEqual(broadcasts, [], 'reattaching to existing work must not publish a new activity event');
+  assert.equal(executed, 0);
+  assert.equal(observed[0].runtime.turnId, 'turn-observe');
+  assert.equal(kernel.get('terminal').state, 'completed');
+  assert.equal(kernel.get('stale').state, 'interrupted');
+  assert.equal(kernel.get('no-turn').state, 'interrupted');
+  assert.equal(kernel.get('queued').state, 'interrupted');
+  assert.equal(kernel.get('stale').updatedAt, stale);
+  release({ status: 'completed', text: 'observed' });
+  await until(() => kernel.get('observe').state === 'completed');
+});
+
+test('timed reconciliation interrupts evidence-free work without execution or timestamp refresh', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-kernel-timed-recovery-'));
+  let observations = 0;
+  const kernel = await createTaskKernel({
+    stateFile: path.join(root, 'tasks.json'),
+    runtime: {
+      execute: async (task, controls) => {
+        await controls.checkpoint({ threadId: 'starting-thread', starting: true, previousTurnIds: [] });
+        return { status: 'unknown', error: 'start reply lost' };
+      },
+      observe: async () => { observations += 1; return { status: 'completed', text: 'must not run' }; },
+    },
+    deliver: async () => ({}),
+    recoveryIntervalMs: 5,
+  });
+  t.after(async () => { await kernel.close(); await fs.rm(root, { recursive: true, force: true }); });
+  const task = await kernel.enqueue(input('evidence-free'));
+  await until(() => kernel.get(task.id).state === 'needs-reconciliation');
+  const updatedAt = kernel.get(task.id).updatedAt;
+  await until(() => kernel.get(task.id).state === 'interrupted');
+  assert.equal(kernel.get(task.id).updatedAt, updatedAt);
+  assert.equal(observations, 0);
+  assert.equal(kernel.hasPendingWork(), false);
+});
+
+test('uncertain native work with exact turn evidence waits for authoritative reconciliation', async t => {
   let known = false;
   const { kernel, started } = await setup(t, { runtime: {
-    execute: async () => { throw Object.assign(Error('start reply lost'), { ambiguous: true }); },
+    execute: async (task, controls) => {
+      await controls.checkpoint({ threadId: 'thread-uncertain', turnId: 'turn-uncertain' });
+      throw Object.assign(Error('start reply lost'), { ambiguous: true });
+    },
     observe: async () => known ? { status: 'completed', text: 'found' } : { status: 'unknown', error: 'offline' },
   } });
   const a = await kernel.enqueue(input('uncertain'));

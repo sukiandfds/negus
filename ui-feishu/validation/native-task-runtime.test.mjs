@@ -43,7 +43,7 @@ test('restart recovers the exact persisted turn without starting another', async
     assert.equal(method, 'thread/read');
     return { thread: { turns: [{ id: 'old', status: 'completed', items: [] }, { id: 'turn', status: 'completed', items: [{ type: 'agentMessage', text: '恢复结果' }] }] } };
   });
-  const result = await f.runtime.observe({ id: 'task', runtime: { turnId: 'turn' } }, f.controls);
+  const result = await f.runtime.observe({ id: 'task', runtime: { threadId: 'thread', turnId: 'turn' } }, f.controls);
   assert.equal(result.text, '恢复结果');
   assert.equal(f.listeners.size, 0);
 });
@@ -51,7 +51,7 @@ test('restart recovers the exact persisted turn without starting another', async
 test('an idle thread with only another completed turn cannot settle the requested turn', async () => {
   const f = fixture(async () => ({ thread: { status: 'idle', turns: [{ id: 'other', status: 'completed', items: [{ type: 'agentMessage', text: '其他结果' }] }] } }));
   const result = await f.runtime.observe({ id: 'task', runtime: { turnId: 'turn' } }, f.controls);
-  assert.equal(result.status, 'unknown');
+  assert.equal(result.status, 'interrupted');
   assert.ok(!result.text);
 });
 
@@ -67,7 +67,17 @@ test('lost start response reconciles the new turn, never replays turn/start', as
 
 test('recovery without turn ID excludes history that predates this task', async () => {
   const f = fixture(async () => ({ thread: { turns: [{ id: 'old', status: 'completed' }] } }));
-  assert.equal((await f.runtime.observe({ id: 'task', runtime: { starting: true, previousTurnIds: ['old'] } }, f.controls)).status, 'unknown');
+  assert.equal((await f.runtime.observe({ id: 'task', runtime: { starting: true, previousTurnIds: ['old'] } }, f.controls)).status, 'interrupted');
+  assert.deepEqual(f.calls, []);
+});
+
+test('registration-pending recovery never re-enters execution', async () => {
+  const f = fixture(async () => ({ thread: { turns: [] } }));
+  const result = await f.runtime.observe({ id: 'task', runtime: {
+    threadId: 'thread', registrationPending: true,
+  } }, f.controls);
+  assert.equal(result.status, 'interrupted');
+  assert.deepEqual(f.calls, []);
 });
 
 test('restart confirms idle native thread as interrupted instead of waiting on stale in-progress history', async () => {
@@ -75,6 +85,18 @@ test('restart confirms idle native thread as interrupted instead of waiting on s
   const result = await f.runtime.observe({ id: 'task', runtime: { turnId: 'turn' } }, f.controls);
   assert.equal(result.status, 'interrupted');
   assert.equal(f.calls.filter(call => call.method === 'turn/start').length, 0);
+});
+
+test('restart treats an unreadable or missing native turn as interrupted', async () => {
+  for (const request of [
+    async () => { throw Error('thread not loaded'); },
+    async () => ({ thread: { status: { type: 'idle' }, turns: [{ id: 'other', status: 'completed' }] } }),
+  ]) {
+    const f = fixture(request);
+    const result = await f.runtime.observe({ id: 'task', runtime: { threadId: 'thread', turnId: 'turn' } }, f.controls);
+    assert.equal(result.status, 'interrupted');
+    assert.equal(f.calls.filter(call => call.method === 'turn/start').length, 0);
+  }
 });
 
 test('periodic native check recovers a lost completion event', async () => {
@@ -101,15 +123,14 @@ test('crash after thread checkpoint but before start intent cannot return histor
 test('legacy uncertain start without a persisted history boundary stays unconfirmed', async () => {
   const f = fixture(async () => ({ thread: { turns: [{ id: 'old', status: 'completed', items: [{ type: 'agentMessage', text: '旧答案' }] }] } }));
   const result = await f.runtime.observe({ id: 'task', runtime: { threadId: 'thread', starting: true } }, f.controls);
-  assert.equal(result.status, 'unknown');
+  assert.equal(result.status, 'interrupted');
   assert.ok(!result.text);
 });
 
-test('recovery only adopts a unique turn after the durable start boundary', async () => {
+test('recovery never adopts a unique turn without a persisted turn ID', async () => {
   const history = [{ id: 'old', status: 'completed' }, { id: 'new', status: 'completed', items: [{ type: 'agentMessage', text: '本次结果' }] }];
   const f = fixture(async () => ({ thread: { status: 'idle', turns: history } }));
   const task = { id: 'task', runtime: { threadId: 'thread', starting: true, previousTurnIds: ['old'] } };
-  assert.equal((await f.runtime.observe(task, f.controls)).text, '本次结果');
-  history.push({ id: 'other', status: 'completed', items: [{ type: 'agentMessage', text: '他人结果' }] });
-  assert.equal((await f.runtime.observe(task, f.controls)).status, 'unknown');
+  assert.equal((await f.runtime.observe(task, f.controls)).status, 'interrupted');
+  assert.deepEqual(f.calls, []);
 });

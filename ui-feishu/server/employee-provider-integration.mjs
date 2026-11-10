@@ -62,7 +62,7 @@ export function adaptEmployeeProviderSource(source) {
   const startThread = async (employee) => {`);
   replace('      if (hadExistingThread) {\n        const authoritative', '      if (hadExistingThread) {\n        const beforeRead = statusFor(employee.id);\n        const authoritative');
   replace('if (authoritative.known && authoritative.active) {', 'if (authoritative.known && authoritative.active && statusFor(employee.id) === beforeRead) {');
-  replace('  const sendMessage = async ({ employeeId, text, attachments = [], requestId = "" }) => {', '  const sendMessage = async ({ employeeId, text, attachments = [], requestId = "" }) => {\n    await modelChanges.get(employeeId);\n    await reconcileEmployeeIdle(employeeId);\n    const pending = registry.require(employeeId).pendingModelSettings;\n    if (pending) await applyModelSettings(employeeId, pending);');
+  replace('  const sendMessage = async ({ employeeId, text, attachments = [], requestId = "" }) => {', '  const sendMessage = async ({ employeeId, text, attachments = [], requestId = "" }) => {\n    await modelChanges.get(employeeId);\n    await reconcileEmployeeIdle(employeeId);\n    const pending = registry.require(employeeId).pendingModelSettings;\n    if (pending) await applyModelSettings(employeeId, pending, { source: pending.modelSelectionSource || "default" });');
   replace('  const updateModelSettings = async (employeeId, settings = {}) => {', `  const updateModelSettings = (employeeId, settings = {}) => {
     const previous = modelChanges.get(employeeId);
     const task = (async () => {
@@ -74,7 +74,7 @@ export function adaptEmployeeProviderSource(source) {
       const employee = registry.require(employeeId);
       const selected = { ...employee, ...employee.pendingModelSettings, ...settings };
       const route = modelProviders.resolveRoute({ model: selected.model, modelProviderId: Object.hasOwn(settings, "model") ? settings.modelProviderId || "" : selected.modelProviderId });
-      const pending = { modelProviderId: route.modelProviderId, model: route.model, reasoningEffort: selected.reasoningEffort };
+      const pending = { modelProviderId: route.modelProviderId, model: route.model, reasoningEffort: selected.reasoningEffort, modelSelectionSource: "explicit" };
       if (!employee.mainThreadId) return applyModelSettings(employeeId, pending);
       await registry.setPendingModelSettings(employeeId, pending);
       return { employee: { ...employee, ...pending }, status: statusFor(employeeId) };
@@ -82,7 +82,7 @@ export function adaptEmployeeProviderSource(source) {
     modelChanges.set(employeeId, task);
     return task.finally(() => { if (modelChanges.get(employeeId) === task) modelChanges.delete(employeeId); });
   };
-  const applyModelSettings = async (employeeId, settings = {}) => {`);
+  const applyModelSettings = async (employeeId, settings = {}, options = {}) => {`);
   replace('const requestedProviderId = requestedModel && modelProviders && !explicitProviderId', 'const requestedProviderId = Object.hasOwn(settings, "model") && requestedModel && modelProviders && !explicitProviderId');
   replace(`    if (employee.mainThreadId && currentRoute.modelProviderId !== requestedRoute.modelProviderId) {
       throw statusError("现有员工 Thread 暂不支持跨供应商切换；请为新 Thread 选择该模型", 409);
@@ -117,7 +117,7 @@ export function adaptEmployeeProviderSource(source) {
           freshThreads.delete(threadId);
         }
       }
-      const updated = await registry.setModelSettings(employee.id, nextSettings);
+      const updated = await registry.setModelSettings(employee.id, nextSettings, { source: options.source || "explicit" });
       return { employee: updated, status: statusFor(employee.id) };
     } catch (error) {
       if (switchingProvider && threadId && originalClient) {

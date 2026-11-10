@@ -110,8 +110,8 @@ test("employee registry keeps identity state private from API-shaped values", as
   assert.equal("instructions" in employee, false);
   assert.equal(registry.require("developer").instructions.includes("Legacy policy marker"), false);
   const grok = registry.get("grok");
-  assert.equal(grok.modelProviderId, "fusheng-grok");
-  assert.equal(grok.model, "grok-4.6");
+  assert.equal(grok.modelProviderId, "current");
+  assert.equal(grok.model, "");
   assert.equal(grok.mainThreadId, null);
 });
 

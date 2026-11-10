@@ -298,6 +298,11 @@ test("three execution paths load the same rule snapshot at the start of a turn",
 
   await registry.bindMainThread("developer", "leader");
   const tasks = await createBackgroundTaskService({ stateFile: path.join(root, "tasks.json"), registry, growthService: growth,
+    modelProviders: {
+      providers: () => [{ id: "ccswitch_deepseek", displayName: "DeepSeek", models: [{ model: "deepseek-flash" }] }],
+      isProviderConfigured: async () => true,
+      resolveRoute: ({ model, modelProviderId }) => ({ model, modelProviderId }),
+    },
     conversations: { createSession: async () => ({ threadId: "worker" }), renameSession: async () => {}, sendMessage: async () => {} },
     bindings: { bindRuntime: async value => value }, queue: { enqueue: async () => {} },
     execution: { getStatus: () => ({ active: true, turnId: "leader-turn" }) } });
