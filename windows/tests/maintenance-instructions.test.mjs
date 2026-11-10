@@ -27,6 +27,7 @@ test("employee and group instruction builder preserves role and context and incl
   assert.match(prompt, /本轮上下文/);
   assert.match(prompt, /negus_service_maintenance/);
   assert.match(prompt, /scheduled 仅代表已安排/);
+  assert.match(prompt, /::file\{path="文件的服务器绝对路径"\}/);
 });
 test("maintenance instructions identify host platform and keep unsupported recovery explicit", () => {
   const mac = maintenanceInstructions({ platform: "darwin", root: "/apps/Negus" });

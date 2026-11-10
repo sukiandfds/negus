@@ -22,7 +22,7 @@ const signature = (value: unknown, omitStream = false) => JSON.stringify(value,
         || (key === 'detail' && this.phase === 'working' && (this.type === 'execution_status' || this.id === 'reasoning-current')))) ? undefined : field;
   });
 export const withStreamingStatus = (status: ThreadSnapshot['executionStatus'], live?: ThreadSnapshot['executionStatus']) =>
-  status.turnId && live?.turnId === status.turnId ? { ...status,
+  status.active && status.turnId && live?.turnId === status.turnId ? { ...status,
     streamingItemId: live.streamingItemId ?? status.streamingItemId, streamingText: live.streamingText ?? status.streamingText,
     commentary: live.commentary ?? status.commentary } : status;
 const refreshSession = (current: SessionDetail, incoming: SessionDetail) => {

@@ -912,3 +912,51 @@ context-management-service.mjs增加8行，补原生轮次完成/中断终态收
 - 路径：旧配置不可用时直接读取其本地历史，不启动旧供应商；压缩续写文件使用最新 rollout；`.jsonl.zst` 同样支持。
 - 验证：跨配置复制到外部配置、切回当前配置、压缩文件、源文件保护及失败清理回归通过；员工跨配置回归10/10、旧项目路由回归11/11通过；TypeScript 和生产构建通过。DeepSeek 复核确认通过且无必须修复项。完整 provider 测试另有既有 `current::gpt-bad` 断言失败，与本次路径无关。
 - 生效：前端已发布，当前服务返回版本`feishu-mw7lxwgm`；后端受控重启任务`1794128763759-77562`成功加载release`1794128760027-f5dbc26b`，新进程PID`77618`。
+
+### 2026-11-09 Codex 来源与子代理标识
+
+- 用户可见变化：Negus 创建的普通对话保持原来源标签；从 Codex 创建后在 Negus 查看的对话显示“来自codex”；原生 Codex 子代理在消息列表和标题中显示“Codex 子代理”。
+- 根因：原生历史中的子代理来源字段存在 `subagent` 小写形态，列表摘要此前只识别 `subAgent`；普通会话没有 Negus `createdBy` 时又被默认显示为“来自用户”。
+- 实现：`app-server-conversation-store.mjs` 同时识别大小写来源并透传父线程；`provider-conversation-store.mjs` 每个 Provider 只读取一次现有 JSONL 原生子代理索引，补回 `thread/list` 未返回的子代理标记与父线程，索引失败时降级并在下次刷新重试；`conversationDirectory.ts` 对没有 Negus 创建来源的普通会话标为 `codex`；`ConversationOrigin.tsx` 复用原标签样式显示“来自codex”。
+- 验证：`conversation-source-revision.test.mjs` 与 `project-identity-store.test.mjs` 10/10、`conversation-summary.test.mjs` 20/20、Provider 定向 `current native index` 1/1、TypeScript `--noEmit`、Node 语法和 `git diff --check` 通过；独立复核最终通过。
+- 发布：前端已发布；后端受控重启任务 `1794222109367-3156` 成功加载 release `1794222084522-e673a6cb`，进程 PID `3212`，线上 `/api/version` 返回 `feishu-mw95if0w`。真实线程 `01a1b5fc-bab1-71e3-944c-7f719d5744f5` 的 `/api/sessions` 与项目目录均返回 `nativeSubagent:true`、父线程 `01a1b5f4-6ff1-7ea1-8119-6bbcd8d06f6d`。
+
+### 2026-11-09 新后台任务目录即时同步
+
+- 用户截图推翻了“来源筛选隐藏”推断：截图中“来自助手”筛选已包含旧任务；员工父行已有最新运行状态，但新线程 `01a1c0f0-d87c-73c3-99b5-3c7dbcd6d4fd` 未进入 children。该推断已撤回，不保留来源筛选代码修改。
+- 根因：`usePageSnapshot` 的项目合并逻辑把本轮候选正文尚未读成功的新目录项暂时挡在 children 外；新项没有旧缓存行可保留，正文读取失败后也不会自动重现。
+- 实现：把同一合并逻辑复用为 `mergeDirectoryProjects`，新出现且无旧缓存的目录项先展示，正文仍按现有批次/独立读取补齐。既有事件合并和目录资源失效排队逻辑保持；不新增目录状态、轮询、来源筛选或任务状态逻辑。
+- 验证：`conversation-summary.test.mjs` 22/22、`shared-cache.test.mjs` 10/10 通过，覆盖新任务正文未完成即出现在员工 children、任务 origin/active、旧任务保留与最新状态、重复失效合并；TypeScript `--noEmit`、Vite 生产构建和 `git diff --check` 通过。证据见 `work/task-directory-sync-20261109/`。
+- 未发布、未重启、未提交推送，未做浏览器运行态验收。
+
+### 2026-11-09 任务目录状态同步风控补修
+
+- 风控任务 `4c5f4b80` 发现：正文失败时旧实现仍保留准备阶段的 `active=true`，目录更新为 completed/failed/systemError 后任务行和员工父行会滞后。
+- 实现：`mergeDirectoryProjects` 不再接收正文成功/候选集合，改为最新目录项目及同线程条目覆盖旧缓存字段；旧缓存只保留目录未提供的字段。选中线程的实时执行状态仍由现有 `statusByThread` 覆盖。事件、缓存失效、轮询和状态存储均未新增。
+- 回归覆盖完整顺序：初始无任务→running（正文失败）→completed→failed→systemError→正文成功；同时覆盖员工父行同步、实时状态优先、重复线程去重、旧任务保留、归档/移除不复活、缓存重复失效合并。
+- 验证：`conversation-summary.test.mjs` 24/24、`shared-cache.test.mjs` 10/10，共 34/34；TypeScript、Vite 生产构建和 `git diff --check` 通过。证据见 `work/task-directory-sync-20261109/`。
+- 未发布、未重启、未提交推送，未做浏览器运行态验收；待产品分析交原风控任务复核。
+
+### 2026-11-09 任务目录标题与实时状态接线补修
+
+- 风控任务 `56c98975` 确认标题和实时状态仍有缺口：正文 session 旧标题可覆盖最新目录标题；未 committed 的 live 新任务未进入 `statusByThread`，员工父行也未聚合选中子任务的活动状态。
+- 实现：目录 `entry.title` 优先于 session 标题；`snapshotStatusByThread` 从真实 `ConversationStore` 合并 committed/live，selected 实时状态优先，非 selected 仅 active live 覆盖目录、terminal live 回落目录；员工父行聚合活动子任务。
+- 真实接线回归使用实际 `ConversationStore` 构造未 committed live 状态，而非手工传入 `statusByThread`；同时验证正文成功前后目录标题不变、未 committed running 同时点亮任务和员工父行、selected terminal 优先目录、非 selected terminal 回目录。
+- 验证：`conversation-summary.test.mjs` 26/26、`shared-cache.test.mjs` 10/10，共 36/36；TypeScript、Vite 生产构建和 `git diff --check` 通过。
+- 未发布、未重启、未提交推送，未做浏览器运行态验收；待产品分析再次交原风控任务复核。
+
+### 2026-11-10 断线恢复后的终态回对齐
+
+- 用户复现 thread `01a1c0d8-eff4-7b52-aade-e15d421a206f`：后端 session 与目录均为 completed/inactive、`hasFinalAnswer=true`，页面仍显示断线前 running。
+- 实现：`recoverRealtime` 在同一恢复入口合并 sessions/directory 刷新与当前选中 thread 的 `loadSession(..., {recovery:true})`；同一 thread 并发恢复复用同一 Promise。窗口 focus、pageshow、online 和页面可见继续复用现有恢复事件。
+- 终态快照现在是权威：同一 turn 的旧 live streaming 只在后端 status 仍 active 时叠加；completed/failed/interrupted/systemError 会清除 stale streaming/activities 的运行展示，同时保留正文 final answer。后端仍 working 时 active 不变。
+- 验证：目录/缓存 37/37、真实 `useProjectConversations` recovery hook 接线 1/1；TypeScript、Vite 生产构建和 `git diff --check` 通过。完整 `conversation-send-state.test.mjs` 另有1项未触及的既有上下文设置断言失败，恢复新增用例单独通过。证据见 `work/task-directory-sync-20261109/`。
+- 未发布、未重启、未提交推送，未做浏览器运行态验收。
+
+### 2026-11-10 旧 committed 与父行终态残留补修
+
+- 风控任务 `dda1cd34`：无 live 的 non-selected 旧 committed active 仍覆盖目录 completed；selected live terminal 已生效但目录 project.status 仍 running 时员工父行继续显示后台运行。
+- `snapshotStatusByThread` 现在以真实 Store 为输入：全线程真实 live 优先、selected live 最终优先；旧 committed 仅在目录缺失或目录 active 且 turnId 一致时补充。目录 completed/failed/systemError 不再被旧 committed active 覆盖。
+- 员工父行改为聚合映射后的主对话、群任务和子任务有效状态，移除对目录 `project.status.active` 的直接信任；多任务任一有效 active 才运行。
+- 验证使用真实 `ConversationStore` 和实际目录派生，不手工构造状态覆盖表。目录/缓存 41/41、真实 recovery hook 1/1；TypeScript、Vite 生产构建和 `git diff --check` 通过。
+- 现有标题、正文失败状态更新、断线恢复、新任务先出现、线程去重、归档/移除、短时失效合并均保持通过。未发布、未重启、未提交推送。

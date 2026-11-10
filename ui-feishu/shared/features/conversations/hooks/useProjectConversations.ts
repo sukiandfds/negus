@@ -78,6 +78,7 @@ export function useProjectConversations() {
   const [userInputError, setUserInputError] = useState("");
   const reconcilingSubmissionsRef = useRef(new Set<string>());
   const reconciledSubmissionsRef = useRef(new Set<string>());
+  const realtimeRecoveryRef = useRef<{ threadId: string; task: Promise<boolean> } | null>(null);
   const submittingThreads = useRef(new Set<string>());
   const draftNames = useRef(new Map<string, string>());
   const contextManagement = useContextManagement(serverThreadId, selection.store);
@@ -735,9 +736,23 @@ export function useProjectConversations() {
       userInputRequest: String(current.userInputRequest?.requestId) === String(event.requestId) ? null : current.userInputRequest }), true);
   }, [contextManagement.handleEvent, execution.handleEvent, followUpQueue.handleEvent, goal.handleEvent, selection.addOptimisticMessage, selection.updateOptimisticMessage, selection.selectedIdRef]);
   const recoverRealtime = useCallback((_reason: RealtimeRecoveryReason) => {
-    onSessionsChanged();
+    const threadId = selection.selectedIdRef.current;
+    const pending = realtimeRecoveryRef.current;
+    if (pending?.threadId === threadId) return pending.task;
     window.dispatchEvent(new Event('negus:realtime-recovered'));
-  }, [onSessionsChanged]);
+    const task = (async () => {
+      const session = threadId && !isPendingThread(threadId)
+        ? selection.loadSession(threadId, { recovery: true })
+        : Promise.resolve(false);
+      const [, result] = await Promise.allSettled([onSessionsChanged(), session]);
+      return result.status === 'fulfilled' && result.value === true;
+    })();
+    realtimeRecoveryRef.current = { threadId, task };
+    void task.finally(() => {
+      if (realtimeRecoveryRef.current?.task === task) realtimeRecoveryRef.current = null;
+    });
+    return task;
+  }, [onSessionsChanged, selection.loadSession, selection.selectedIdRef]);
   const connected = useConversationEvents(
     onSessionsChanged,
     handleEvent,

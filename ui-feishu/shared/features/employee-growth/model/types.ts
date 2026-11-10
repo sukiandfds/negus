@@ -1,5 +1,5 @@
 export type GrowthCategory = "fact" | "rule" | "skill" | string;
-export type GrowthProposalStatus = "ready" | "pending" | "approved" | "rejected" | "failed";
+export type GrowthProposalStatus = "ready" | "pending" | "approved" | "rejected" | "failed" | "disabled" | "deleted";
 
 export interface GrowthFact {
   id: string;

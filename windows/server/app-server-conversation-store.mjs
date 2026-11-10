@@ -144,24 +144,29 @@ const titlePromptFrom = (text) => [
   String(text || "").slice(0, 2000),
 ].join("\n");
 
-export const inputFromAttachments = async (text, attachments = [], attachmentContent) => {
+export const inputFromAttachments = async (text, attachments = []) => {
+  const files = attachments.filter((attachment) =>
+    attachment.name && attachment.path
+      && !String(attachment.mimeType || "").startsWith("image/")
+      && !String(attachment.mimeType || "").startsWith("audio/"));
+  const prompt = files.length
+    ? [
+        "# Files mentioned by the user:",
+        "",
+        ...files.map((attachment) => `## ${attachment.name}: ${attachment.path}`),
+        "",
+        "## My request for Codex:",
+        "",
+        text,
+      ].join("\n")
+    : text;
   const input = [];
-  if (text) input.push({ type: "text", text, text_elements: [] });
+  if (prompt) input.push({ type: "text", text: prompt, text_elements: [] });
   for (const attachment of attachments) {
-    if (attachment.mimeType.startsWith("image/")) {
+    if (String(attachment.mimeType || "").startsWith("image/")) {
       input.push({ type: "localImage", path: attachment.path });
-    } else if (attachment.mimeType.startsWith("audio/")) {
+    } else if (String(attachment.mimeType || "").startsWith("audio/")) {
       input.push({ type: "localAudio", path: attachment.path });
-    } else {
-      input.push({ type: "mention", name: attachment.name, path: attachment.path });
-      const analysis = await attachmentContent?.inspect?.(attachment);
-      if (analysis?.status === "ready" && analysis.content) {
-        input.push({
-          type: "text",
-          text: `\n\n[附件正文：${attachment.name}]\n${analysis.content}\n[附件正文结束]`,
-          text_elements: [],
-        });
-      }
     }
   }
   return input;
@@ -192,6 +197,7 @@ export const createAppServerConversationStore = ({
   autoTitleStateFile = "", onAutoTitleChanged,
   autoTitleEnabled = true,
   historyFallback,
+  nativeSubagents,
   attachmentContent,
   threadRuntimeOptions = async () => null,
   client = createAppServerClient(),
@@ -399,8 +405,12 @@ export const createAppServerConversationStore = ({
     latestAssistant: "",
     archived,
     forkedFromId: thread.forkedFromId || null,
-    parentThreadId: thread.parentThreadId || thread.source?.subAgent?.thread_spawn?.parent_thread_id || null,
-    nativeSubagent: Boolean(thread.source && typeof thread.source === 'object' && Object.hasOwn(thread.source, 'subAgent')),
+    parentThreadId: thread.parentThreadId
+      || thread.source?.subAgent?.thread_spawn?.parent_thread_id
+      || thread.source?.subagent?.thread_spawn?.parent_thread_id
+      || null,
+    nativeSubagent: Boolean(thread.source && typeof thread.source === 'object'
+      && (Object.hasOwn(thread.source, 'subAgent') || Object.hasOwn(thread.source, 'subagent'))),
     cwd: thread.cwd || null,
     ...(thread.model ? { model: thread.model } : {}),
   });
@@ -425,6 +435,7 @@ export const createAppServerConversationStore = ({
       }));
     return summaries.sort((left, right) => sessionTime(right.updatedAt) - sessionTime(left.updatedAt));
   };
+  const listNativeSubagents = async (archived = false) => nativeSubagents?.(archived) || [];
 
   const createSession = async (model = "", requestedProjectRoot = "", options = {}) => {
     const cwd = requestedProjectRoot ? path.resolve(requestedProjectRoot) : projectRoot;
@@ -989,7 +1000,7 @@ export const createAppServerConversationStore = ({
   };
 
   return {
-    listSessions, createSession, renameSession, findSession, sendMessage, steerMessage, interrupt,
+    listSessions, listNativeSubagents, createSession, renameSession, findSession, sendMessage, steerMessage, interrupt,
     forkSession, archiveSession, unarchiveSession,
     listModels, updateModel, updateReasoningEffort, getRuntimeContext, getThreadStatus,
     revertSession, compactContext, reviewSession, getGoal, setGoal, clearGoal,

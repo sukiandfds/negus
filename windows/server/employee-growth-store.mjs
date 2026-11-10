@@ -23,11 +23,17 @@ export const createEmployeeGrowthStore = async ({ stateFile, registry }) => {
     });
   }
   let writeQueue = Promise.resolve();
+  let ruleStatusQueue = Promise.resolve();
   const persist = () => {
     writeQueue = writeQueue.catch(() => {}).then(async () => {
       await writeJsonFileAtomic(stateFile, { version: 1, employees: Object.fromEntries(entries) });
     });
     return writeQueue;
+  };
+  const queueRuleStatus = operation => {
+    const result = ruleStatusQueue.then(operation, operation);
+    ruleStatusQueue = result.then(() => {}, () => {});
+    return result;
   };
   const requireEntry = (employeeId) => {
     const id = clean(employeeId, 80);
@@ -36,8 +42,10 @@ export const createEmployeeGrowthStore = async ({ stateFile, registry }) => {
     return { id, entry };
   };
   const appendLog = (entry, log) => {
-    entry.logs.push({ id: randomUUID(), createdAt: now(), ...log });
+    const value = { id: randomUUID(), createdAt: now(), ...log };
+    entry.logs.push(value);
     if (entry.logs.length > 500) entry.logs.splice(0, entry.logs.length - 500);
+    return value;
   };
   await persist();
   return {
@@ -86,6 +94,30 @@ export const createEmployeeGrowthStore = async ({ stateFile, registry }) => {
       await persist();
       return cloneJson(proposal);
     },
+    setRuleStatus: (employeeId, proposalId, status, { requestId = "" } = {}) => queueRuleStatus(async () => {
+      const { entry } = requireEntry(employeeId);
+      const proposal = entry.proposals.find((item) => item.id === proposalId && item.kind === "rule");
+      if (!proposal) throw Object.assign(new Error("Rule does not exist."), { statusCode: 404 });
+      if (proposal.status === status) return { ...cloneJson(proposal), changed: false };
+      if (status === "disabled" && proposal.status !== "approved") throw Object.assign(new Error("Rule is not active."), { statusCode: 409 });
+      const previous = cloneJson(proposal);
+      const previousLogs = cloneJson(entry.logs);
+      proposal.status = status;
+      proposal.statusChangedAt = now();
+      proposal.statusRequestId = clean(requestId, 120) || null;
+      const transitionLog = appendLog(entry, { action: `rule_${status}`, itemId: proposal.id, requestId: proposal.statusRequestId });
+      try {
+        await persist();
+      } catch (error) {
+        for (const key of Object.keys(proposal)) delete proposal[key];
+        Object.assign(proposal, previous);
+        const currentLogs = entry.logs.filter(item => item.id !== transitionLog.id);
+        const currentIds = new Set(currentLogs.map(item => item.id));
+        entry.logs = [...previousLogs.filter(item => !currentIds.has(item.id)), ...currentLogs].slice(-500);
+        throw error;
+      }
+      return { ...cloneJson(proposal), changed: true };
+    }),
     requeue: async (employeeId, proposalId, { error = "", requestId = "" } = {}) => {
       const { entry } = requireEntry(employeeId);
       const proposal = entry.proposals.find((item) => item.id === clean(proposalId, 120));
@@ -101,6 +133,9 @@ export const createEmployeeGrowthStore = async ({ stateFile, registry }) => {
       appendLog(entry, log);
       await persist();
     },
-    close: () => writeQueue,
+    close: async () => {
+      await ruleStatusQueue;
+      return writeQueue;
+    },
   };
 };

@@ -42,6 +42,33 @@ test("publishes only complete bubbles, without final answer deltas", () => {
   assert.equal(tracker.getStatus("thread-1").activities.length, 0);
 });
 
+test("publishes generated files with existing file blocks in the completed realtime message", () => {
+  const events = [];
+  const registerMedia = (source) => ({
+    id: "generated-file",
+    name: "report.md",
+    path: source,
+    mimeType: "text/markdown",
+    url: "/api/media/generated-file",
+  });
+  const tracker = createExecutionTracker({ broadcast: (event) => events.push(event), registerMedia });
+  tracker.markSubmitted("thread-1");
+  tracker.handleProtocolMessage({
+    method: "item/completed",
+    params: { threadId: "thread-1", item: {
+      id: "answer-1",
+      type: "agentMessage",
+      phase: "final_answer",
+      text: "报告已生成。\n::file{path=\"/tmp/report.md\"}",
+    } },
+  });
+
+  const message = events.find((event) => event.type === "assistant_message_completed")?.message;
+  assert.equal(message.text, "报告已生成。");
+  assert.deepEqual(message.blocks.map((block) => block.type), ["markdown", "file"]);
+  assert.equal(message.blocks[1].source, "/api/media/generated-file");
+});
+
 test("publishes Codex user-input requests for the web conversation", () => {
   const events = [];
   const tracker = createExecutionTracker({ broadcast: (event) => events.push(event) });

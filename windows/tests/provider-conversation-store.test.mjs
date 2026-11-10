@@ -131,6 +131,32 @@ test('native header restores a child omitted by thread/list in its actual provid
   assert.deepEqual(reads, [['isolated', id]]);
 });
 
+test('current native index fills missing source and retries after an index read failure', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-current-native-index-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const child = { threadId: 'child', parentThreadId: 'parent', nativeSubagent: true,
+    cwd: root, title: 'child', updatedAt: new Date().toISOString() };
+  let indexCalls = 0;
+  const current = {
+    listSessions: async () => [{ ...child, nativeSubagent: false, parentThreadId: null }],
+    listNativeSubagents: async () => {
+      indexCalls += 1;
+      if (indexCalls === 1) throw new Error('index unavailable');
+      return [child];
+    },
+  };
+  const service = createProviderConversationStore({ current,
+    providers: { getClient: async () => null }, createStore: () => current,
+    stateFile: path.join(root, 'routes.json') });
+  await service.registerSession({ threadId: 'parent', cwd: root }, 'current', 'model');
+  const first = await service.listSessions('all', false);
+  assert.equal(first.find(item => item.threadId === 'child')?.nativeSubagent, false);
+  const second = await service.listSessions('all', false);
+  assert.equal(second.find(item => item.threadId === 'child')?.nativeSubagent, true);
+  assert.equal(second.find(item => item.threadId === 'child')?.parentThreadId, 'parent');
+  assert.equal(indexCalls, 2);
+});
+
 test("background task history and controls use its saved provider after reopening", async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-task-provider-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

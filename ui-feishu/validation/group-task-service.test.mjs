@@ -7,6 +7,8 @@ import { createGroupTaskService } from '../server/group-task-service.mjs';
 import { createGroupRoomStore } from '../../windows/server/group-room-store.mjs';
 import { routeMessage } from '../kernel/message-routing.mjs';
 import { mentionedAgentIds } from '../../windows/server/multi-agent/agent-routing.mjs';
+import { createEmployeeGrowthStore } from '../../windows/server/employee-growth-store.mjs';
+import { createEmployeeGrowthService } from '../../windows/server/employee-growth-service.mjs';
 const until = async check => { const deadline = Date.now() + 4000; while (!check()) { if (Date.now() > deadline) assert.fail('condition timed out'); await new Promise(resolve => setTimeout(resolve, 5)); } };
 
 test('群聊自然语言不广播，明确点名优先', async () => {
@@ -129,13 +131,18 @@ test('held 续派不读历史，同轮 steer 只归属原 turn，无法确认停
 
 test('其他群或其他员工不能续派来源员工的后台任务', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-group-isolation-'));
+  const employees = ['manager', 'dev'].map(id => ({ id, contextRoot: root }));
+  const registry = { list: () => employees, require: id => employees.find(employee => employee.id === id) };
+  const growthStore = await createEmployeeGrowthStore({ stateFile: path.join(root, 'growth.json'), registry });
+  const growthService = createEmployeeGrowthService({ registry, store: growthStore });
+  const rule = await growthService.addRule('dev', '每次标注一手来源', 'manual');
   const listeners = new Set(); const threads = new Map(); const starts = [];
   const client = { subscribe: callback => { listeners.add(callback); return () => listeners.delete(callback); }, request: async (method, params) => {
     if (method === 'thread/start') { const thread = { id: `t${threads.size}`, turns: [], config: params.config }; threads.set(thread.id, thread); return { thread }; }
     const thread = threads.get(params.threadId);
     if (method === 'thread/resume') { thread.config = params.config; return { thread }; }
     if (method === 'thread/read') return { thread };
-    if (method === 'turn/start') { const turn = { id: `v${starts.length}`, status: 'inProgress', items: [] }; thread.turns.push(turn); starts.push({ thread, turn });
+    if (method === 'turn/start') { const turn = { id: `v${starts.length}`, status: 'inProgress', items: [] }; thread.turns.push(turn); starts.push({ thread, turn, instructions: params.developerInstructions });
       queueMicrotask(() => listeners.forEach(callback => callback({ method: 'turn/started', params: { threadId: thread.id, turn } }))); return { turn }; }
     if (method === 'turn/interrupt') { const turn = thread.turns.find(item => item.id === params.turnId); turn.status = 'interrupted';
       queueMicrotask(() => listeners.forEach(callback => callback({ method: 'turn/completed', params: { threadId: thread.id, turn } }))); }
@@ -146,11 +153,11 @@ test('其他群或其他员工不能续派来源员工的后台任务', async t 
     const room = await createGroupRoomStore({ stateFile: path.join(root, `${id}.json`), roomId: id, project: '测试',
       agentDefinitions: [{ id: 'manager', name: '运营管理' }, { id: 'dev', name: '技术研发' }] });
     rooms.push(room);
-    services.push(await createGroupTaskService({ stateRoot: path.join(root, id), room, projectRoot: root, appServerClient: client,
+    services.push(await createGroupTaskService({ stateRoot: path.join(root, id), room, projectRoot: root, appServerClient: client, growthService,
       queue: { list: () => [], enqueue: async () => ({}), release: async () => ({}) }, execution: { getStatus: () => ({ active: false }) },
       registerSession: async () => {}, bindings: { bindRuntime: async () => {} } }));
   }
-  t.after(async () => { await Promise.all(services.map(service => service.close())); await Promise.all(rooms.map(room => room.close())); await fs.rm(root, { recursive: true, force: true }); });
+  t.after(async () => { await Promise.all(services.map(service => service.close())); await Promise.all(rooms.map(room => room.close())); await growthStore.close(); await fs.rm(root, { recursive: true, force: true }); });
   const send = (service, id, text) => service.receive({ requestId: id, agentIds: [], message: { type: 'human', authorId: 'fixture', authorName: '测试', text, attachments: [] } });
   const call = (index, body) => { const config = starts[index].thread.config['mcp_servers.negus_handoffs']; return fetch(config.env.NEGUS_HANDOFF_ENDPOINT,
     { method: 'POST', headers: { Authorization: `Bearer ${config.env.NEGUS_HANDOFF_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); };
@@ -159,9 +166,14 @@ test('其他群或其他员工不能续派来源员工的后台任务', async t 
   const created = await call(0, { action: 'background', requestId: 'bg', title: '执行', instructions: '验证' });
   assert.equal(created.status, 200); const task = await created.json();
   await until(() => starts.length === 2);
+  assert.match(starts[0].instructions, /每次标注一手来源/);
+  assert.match(starts[1].instructions, /每次标注一手来源/);
+  await growthService.changeRule('dev', rule.id, 'disabled');
   await send(services[1], 'two', '@技术研发 工作');
   await send(services[0], 'three', '@运营管理 工作');
   await until(() => starts.length === 4);
+  assert.doesNotMatch(starts[2].instructions, /每次标注一手来源/);
+  assert.match(starts[1].instructions, /每次标注一手来源/);
   for (const index of [2, 3]) {
     const response = await call(index, { action: 'followup', taskId: task.id, requestId: 'wrong', instructions: '不允许' });
     assert.equal(response.status, 403);

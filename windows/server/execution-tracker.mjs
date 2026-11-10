@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { activityFromItem, detailFromItem, stateFromItem, terminalPhases } from "./execution/activity.mjs";
+import { messageFromThreadItem } from "./content-blocks.mjs";
 import { writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
-export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTerminal = () => {} }) => {
+export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTerminal = () => {}, registerMedia = () => null }) => {
   const statuses = new Map();
   const completedMessages = new Map();
   const messageTimes = new Map();
@@ -359,14 +360,15 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
         }
       }
       if (params.item?.type === "agentMessage") {
-        const text = String(params.item.text || "").trim();
-        if (text && itemId) {
+        const parsed = messageFromThreadItem({ ...params.item, type: "agentMessage" }, registerMedia);
+        const text = String(parsed?.text || "").trim();
+        if ((text || parsed?.blocks?.length) && itemId) {
           const key = itemKey(threadId, itemId);
           const createdAt = messageTimes.get(key) || new Date().toISOString();
           messageTimes.set(key, createdAt);
           const turnId = eventTurnId || statuses.get(threadId)?.turnId || "";
-          const message = { id: `codex:${encodeURIComponent(turnId || "unknown")}:${encodeURIComponent(itemId)}`,
-            itemId, turnId, role: "assistant", text, phase: params.item.phase || "final_answer", createdAt, serverTimestamp: true };
+          const message = { ...parsed, id: `codex:${encodeURIComponent(turnId || "unknown")}:${encodeURIComponent(itemId)}`,
+            itemId, turnId, role: "assistant", text: parsed?.text || "", phase: params.item.phase || "final_answer", createdAt, serverTimestamp: true };
           completedMessages.set(key, { threadId, message });
           schedulePersist();
           broadcastThreadEvent(threadId, { type: "assistant_message_completed", threadId, message });

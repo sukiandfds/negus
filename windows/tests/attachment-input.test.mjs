@@ -5,7 +5,6 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
 import { inputFromAttachments } from "../server/app-server-conversation-store.mjs";
-import { createAttachmentContentService } from "../server/attachment-content-service.mjs";
 import { createMediaService } from "../server/media-service.mjs";
 
 const pngHeader = (width, height) => {
@@ -25,26 +24,24 @@ test("maps uploaded files to Codex native input types", async () => {
     { name: "notes.pdf", mimeType: "application/pdf", path: "C:\\uploads\\notes.pdf" },
   ]);
 
-  assert.deepEqual(input, [
-    { type: "text", text: "检查附件", text_elements: [] },
-    { type: "localImage", path: "C:\\uploads\\screen.png" },
-    { type: "localAudio", path: "C:\\uploads\\voice.m4a" },
-    { type: "mention", name: "notes.pdf", path: "C:\\uploads\\notes.pdf" },
-  ]);
+  assert.deepEqual(input.map((item) => item.type), ["text", "localImage", "localAudio"]);
+  assert.match(input[0].text, /^# Files mentioned by the user:/u);
+  assert.match(input[0].text, /## notes\.pdf: C:\\uploads\\notes\.pdf/u);
+  assert.match(input[0].text, /## My request for Codex:\n\n检查附件$/u);
 });
 
-test("injects readable text attachment content while preserving the file mention", async () => {
+test("passes text attachments as local files without injecting their content", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-readable-attachment-"));
   try {
     const file = path.join(root, "notes.md");
     await fs.writeFile(file, "可读取的附件正文", "utf8");
-    const attachmentContent = createAttachmentContentService();
     const input = await inputFromAttachments("检查附件", [
       { name: "notes.md", mimeType: "text/markdown", path: file },
-    ], attachmentContent);
+    ]);
 
-    assert.deepEqual(input.map((item) => item.type), ["text", "mention", "text"]);
-    assert.match(input[2].text, /可读取的附件正文/u);
+    assert.deepEqual(input.map((item) => item.type), ["text"]);
+    assert.match(input[0].text, new RegExp(`## notes\\.md: ${file.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`, "u"));
+    assert.doesNotMatch(input[0].text, /可读取的附件正文/u);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

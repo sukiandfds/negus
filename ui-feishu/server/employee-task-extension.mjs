@@ -11,7 +11,7 @@ import { followupTask } from './task-followup.mjs';
 
 // Adapts the same kernel to employee conversations and existing task conversations.
 export async function extendEmployeeTasks(original, { stateRoot, registry, modelProviders, appServerClient,
-  bindings, execution, queue, conversations, registerSession, providerForThread = async () => null, broadcast = () => {}, employeeHierarchy = null }) {
+  bindings, execution, queue, conversations, registerSession, growthService = null, providerForThread = async () => null, broadcast = () => {}, employeeHierarchy = null }) {
   let kernel;
   let closing = false;
   const taskProviders = new Map();
@@ -27,9 +27,9 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
   };
   const handoffInstructions = '保持本员工的姓名、职位和职责，直接回答日常聊天和专业讨论，不自称“前台助手”，也不以派工为由推卸职责；尽量在30秒内回应。直接处理需求澄清、规划和结果汇总；开发、测试、验证、资料搜集、电脑操作等实操调用 negus_handoffs.create_background_task 创建独立任务对话，需要其他员工专长时可转交协作，由你负责汇总结果。派工时写清目标、输入、授权边界、验收步骤和返回格式（结论、证据路径、验证结果、失败原因）；工具确认接单后，简短告知用户并结束本轮回复，不等待、轮询或停止后台任务，主对话继续接待用户。创建失败须说明真实原因，不假称已派工。收到已有任务的结果通知时，先核对是否达到用户要求；接单或执行结束不等于工作完成。未完成则在原授权内继续处理或明确补派缺失部分，不重复派发同一任务、不只转述未完成就停下；依据返回证据核对标准，不重复执行已验证的操作；证据缺失或矛盾只补派缺项，完成后向用户简洁交付结果。';
   const backgroundInstructions = '你是独立后台任务执行者，直接执行本任务中用户已授权的工作并完成必要验证，不再创建或委派后台任务。最终回复包含实际结果、证据和未完成项，由系统送回来源助手；不要自行向来源对话发消息。';
-  const instructions = (employee, background = false) => employeeTurnInstructions(employee.instructions, background
+  const instructions = (employee, background = false) => employeeTurnInstructions(employee.instructions, [growthService?.getContext(employee.id), background
     ? backgroundInstructions
-    : `${handoffInstructions}\n你只能向这些直属下属派工：${JSON.stringify(hierarchy.childrenOf(employee.id))}\n员工名单：${JSON.stringify(registry.list().map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`);
+    : `${handoffInstructions}\n你只能向这些直属下属派工：${JSON.stringify(hierarchy.childrenOf(employee.id))}\n员工名单：${JSON.stringify(registry.list().map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`].filter(Boolean).join('\n'));
   const followup = async (source, input) => {
     const target = kernel.get(input.taskId);
     const sameSource = target?.source?.threadId === source.runtime.threadId;

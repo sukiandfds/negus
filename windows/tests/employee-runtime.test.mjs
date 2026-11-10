@@ -6,7 +6,7 @@ import test from "node:test";
 import { createEmployeeProjectRegistry } from "../server/employee-project-registry.mjs";
 import { createEmployeeRuntimeService } from "../server/employee-runtime-service.mjs";
 
-const fixture = async (t, { execution = null, onTurnCompleted = null, taskService = null, readHistory, registerSession } = {}) => {
+const fixture = async (t, { execution = null, onTurnCompleted = null, taskService = null, growthService = null, readHistory, registerSession } = {}) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-employee-runtime-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const registry = await createEmployeeProjectRegistry({
@@ -46,6 +46,7 @@ const fixture = async (t, { execution = null, onTurnCompleted = null, taskServic
     execution,
     onTurnCompleted,
     taskService,
+    growthService,
   });
   t.after(async () => {
     runtime.close();
@@ -53,6 +54,16 @@ const fixture = async (t, { execution = null, onTurnCompleted = null, taskServic
   });
   return { registry, client, conversationStore, runtime, events, calls, get listener() { return listener; } };
 };
+
+test("a failed memory suggestion cannot fail an accepted employee turn", async t => {
+  let attempted = false;
+  const { runtime, events } = await fixture(t, { growthService: { suggestFromMessage: async () => { attempted = true; throw Error("storage unavailable"); } } });
+  const result = await runtime.sendMessage({ employeeId: "developer", text: "记住，标注来源", requestId: "memory" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(attempted, true);
+  assert.equal(result.status, "inProgress");
+  assert.equal(events.filter(event => event.type === "employee_status").at(-1).status.phase, "working");
+});
 
 test("employee history preserves ordinary messages and pagination on the selected provider", async (t) => {
   const messages = [

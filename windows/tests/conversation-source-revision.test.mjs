@@ -15,6 +15,7 @@ test('native list asks for all subagent sources and labels only native source, n
       assert.equal(method, 'thread/list'); seen.push(params.sourceKinds);
       return { data: [
         { id: 'native', cwd: root, updatedAt: 1, source: { subAgent: { thread_spawn: { parent_thread_id: 'parent', depth: 1 } } } },
+        { id: 'native-lower', cwd: root, updatedAt: 1, source: { subagent: { thread_spawn: { parent_thread_id: 'parent-lower', depth: 1 } } } },
         { id: 'fork', cwd: root, updatedAt: 1, source: 'appServer', parentThreadId: 'parent' },
       ] };
     } },
@@ -23,6 +24,8 @@ test('native list asks for all subagent sources and labels only native source, n
     const sessions = await store.listSessions();
     assert.equal(sessions.find(item => item.threadId === 'native').nativeSubagent, true);
     assert.equal(sessions.find(item => item.threadId === 'native').parentThreadId, 'parent');
+    assert.equal(sessions.find(item => item.threadId === 'native-lower').nativeSubagent, true);
+    assert.equal(sessions.find(item => item.threadId === 'native-lower').parentThreadId, 'parent-lower');
     assert.equal(sessions.find(item => item.threadId === 'fork').nativeSubagent, false);
     assert.ok(['subAgent', 'subAgentReview', 'subAgentCompact', 'subAgentThreadSpawn', 'subAgentOther', 'appServer'].every(kind => seen[0].includes(kind)));
   } finally { store.close(); }

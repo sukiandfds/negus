@@ -7,12 +7,18 @@ import { extendEmployeeTasks } from '../server/employee-task-extension.mjs';
 import { messageFromThreadItem } from '../../windows/server/content-blocks.mjs';
 import { createFollowUpQueueStore } from '../../windows/server/follow-up-queue-store.mjs';
 import { createFollowUpQueueService } from '../../windows/server/follow-up-queue-service.mjs';
+import { createEmployeeGrowthStore } from '../../windows/server/employee-growth-store.mjs';
+import { createEmployeeGrowthService } from '../../windows/server/employee-growth-service.mjs';
 const until = async check => { const end = Date.now() + 3000; while (!check()) { if (Date.now() > end) assert.fail('condition timed out'); await new Promise(resolve => setTimeout(resolve, 5)); } };
 
 for (const background of [false, true]) test(`employee ${background ? 'background' : 'delegation'} creates an independent conversation and receives its result`, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-employee-kernel-'));
   const employees = [{ id: 'a', name: '助手', modelProviderId: 'external', reasoningEffort: 'high', projectRoot: root, mainThreadId: 'main', conversationId: 'direct-a' }, { id: 'b', name: '研究员', modelProviderId: 'external', reasoningEffort: 'high', projectRoot: root }];
   const registry = { list: () => employees, require: id => { const employee = employees.find(item => item.id === id); if (!employee) throw Error('员工不存在'); return employee; } };
+  employees.forEach(employee => { employee.contextRoot = root; });
+  const growthStore = await createEmployeeGrowthStore({ stateFile: path.join(root, 'growth.json'), registry });
+  const growthService = createEmployeeGrowthService({ registry, store: growthStore });
+  const rule = await growthService.addRule(background ? 'a' : 'b', '每次标注一手来源', 'manual');
   const listeners = new Set(); const threads = new Map([['main', { id: 'main', turns: [{ id: 'main-turn', status: 'inProgress' }] }]]);
   const starts = []; const bindings = []; const results = []; const created = []; const registrations = [];
   let mainActive = true;
@@ -22,7 +28,7 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
       if (method === 'thread/read') return { thread: threads.get(params.threadId) };
       if (method === 'turn/start') {
         const turn = { id: `child-turn-${starts.length}`, status: 'inProgress', items: [] };
-        threads.get(params.threadId).turns.push(turn); starts.push({ threadId: params.threadId, turn, effort: params.effort });
+        threads.get(params.threadId).turns.push(turn); starts.push({ threadId: params.threadId, turn, effort: params.effort, instructions: params.developerInstructions });
         queueMicrotask(() => listeners.forEach(callback => callback({ method: 'turn/started', params: { threadId: params.threadId, turn } })));
         return { turn };
       }
@@ -31,13 +37,13 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
   const original = { leaderConfig: () => ({}), leaderInstructions: () => '', ownsThread: () => false, list: () => [], directoryEntries: () => [], runtimeOptions: () => null, hasPendingWork: () => false, close: async () => {} };
   const modelProviders = { providers: () => [{ id: 'vip', displayName: 'VIP', models: [{ model: 'gpt-6.1-terra' }] }],
     isProviderConfigured: async () => true, resolveRoute: route => route, getClient: async () => client };
-  const extension = await extendEmployeeTasks(original, { stateRoot: root, registry, appServerClient: client, modelProviders,
+  const extension = await extendEmployeeTasks(original, { stateRoot: root, registry, growthService, appServerClient: client, modelProviders,
     registerSession: async (...args) => registrations.push(args),
     bindings: { bindRuntime: async binding => bindings.push(binding), findByRuntimeSession: (_, id) => bindings.find(binding => binding.runtimeSessionId === id) }, execution: { getStatus: id => ({ active: id === 'main' && mainActive, turnId: 'main-turn' }) },
     queue: { list: () => [], enqueue: async value => { results.push(value);
       threads.get(value.threadId).turns[0].items = [{ type: 'userMessage', content: [{ type: 'inputText', text: value.text }] }];
       return { id: value.submissionId, state: 'pending' }; } }, broadcast: () => {} });
-  t.after(async () => { await extension.close(); await fs.rm(root, { recursive: true, force: true }); });
+  t.after(async () => { await extension.close(); await growthStore.close(); await fs.rm(root, { recursive: true, force: true }); });
   const config = extension.leaderConfig('a')['mcp_servers.negus_handoffs'];
   const delegate = async requestId => {
     const response = await fetch(config.env.NEGUS_HANDOFF_ENDPOINT, { method: 'POST', headers: { Authorization: `Bearer ${config.env.NEGUS_HANDOFF_TOKEN}` },
@@ -49,6 +55,13 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
   await until(() => starts.length === 1);
   assert.equal(created[0].model, 'gpt-6.1-terra');
   assert.equal(starts[0].effort, 'xhigh');
+  assert.match(starts[0].instructions, /每次标注一手来源/);
+  assert.match(extension.runtimeOptions({ id: starts[0].threadId }).turn.developerInstructions, /每次标注一手来源/);
+  await growthService.changeRule(background ? 'a' : 'b', rule.id, 'disabled');
+  assert.doesNotMatch(extension.runtimeOptions({ id: starts[0].threadId }).turn.developerInstructions, /每次标注一手来源/);
+  assert.match(starts[0].instructions, /每次标注一手来源/);
+  await growthService.changeRule(background ? 'a' : 'b', rule.id, 'deleted');
+  assert.doesNotMatch(extension.runtimeOptions({ id: starts[0].threadId }).turn.developerInstructions, /每次标注一手来源/);
   const agentId = background ? 'a' : 'b';
   assert.equal(bindings.length, 1); assert.equal(bindings[0].conversationKind, 'task'); assert.equal(bindings[0].agentId, agentId);
   assert.notEqual(starts[0].threadId, 'main');

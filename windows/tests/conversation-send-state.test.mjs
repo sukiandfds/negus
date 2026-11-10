@@ -215,6 +215,98 @@ test('first send creates one draft with final settings and survives navigating a
   assert.equal(sessions.get('real').messages[0].deliveryState, 'failed');
 });
 
+test('realtime recovery rechecks the selected session once and applies backend terminal state', async () => {
+  let recover; const calls = []; let sessionRefreshes = 0;
+  const store = new ConversationStore({ cachedSessions: [], partialSessionIds: [] });
+  const selectedIdRef = { current: 'task' };
+  const noop = () => {};
+  const deferredA = deferred(), deferredB = deferred();
+  let gates = [deferredA, deferredB];
+  let backendStatus = {
+    type: 'execution_status', threadId: 'task', turnId: 'turn-recovered', phase: 'completed',
+    label: 'Codex 已完成', detail: '', commentary: '', streamingItemId: '', streamingText: '',
+    activities: [], active: false, hasFinalAnswer: true, startedAt: null, updatedAt: '2026-11-09T15:10:10Z',
+  };
+  store.update('task', { executionStatus: {
+    ...backendStatus, phase: 'working', label: 'Codex 正在处理任务', active: true,
+    streamingText: '断线前残留', hasFinalAnswer: false,
+  } }, true);
+  const loadSession = (id, options) => {
+    calls.push([id, options]);
+    return gates.shift().promise.then(() => {
+      const empty = store.empty(id);
+      store.commit(id, { ...empty, session: { threadId: id, title: '恢复任务', messages: [
+        { id: 'final', role: 'assistant', text: '最终答复', createdAt: '2026-11-09T15:10:10Z' },
+      ] }, executionStatus: backendStatus }, store.revisions.get(id) || 0);
+      return true;
+    });
+  };
+  const selection = {
+    store, selectedId: 'task', selectedIdRef, loadingSession: false,
+    get session() { return store.get('task', false).session; },
+    cachedSessions: new Map(),
+    loadSession, loadOlder: noop, selectSession: noop, setSessionError: noop,
+    addOptimisticMessage: noop, updateOptimisticMessage: noop, removeOptimisticMessage: noop,
+  };
+  const execution = {
+    get status() { return store.get('task').executionStatus; },
+    get streamingText() { return store.get('task').executionStatus.streamingText || ''; },
+    commentaryText: '', sending: false, sendingSlow: false,
+    handleEvent: noop, sendMessage: async () => null, interrupt: async () => false,
+    refreshStatus: async () => store.get('task').executionStatus,
+  };
+  const render = await harness('features/conversations/hooks/useProjectConversations.ts', {
+    currentConversationId: () => 'scope-task', HttpError: Error,
+    conversationApi: {}, executionApi: {}, modelApi: {},
+    useContextManagement: () => ({ status: { threadId: 'task', model: 'model', reasoningEffort: 'high', phase: 'idle', updatedAt: null },
+      applyModelSettings: noop, handleEvent: noop, markSubmitted: noop, completeSettings: noop }),
+    useConversationSession: () => selection,
+    useConversationCatalog: () => ({ sessions: [], archivedView: false, initialSyncReady: true,
+      refreshSessions: async () => { sessionRefreshes += 1; return []; }, setArchiveViewMode: noop,
+      createSession: async () => '', archiveSession: noop, unarchiveSession: noop,
+      archivedByThread: {}, archivedBusyIds: new Set() }),
+    useCodexExecution: () => execution,
+    useFollowUpQueue: () => ({ items: [], loading: false, busy: false, error: '', handleEvent: noop }),
+    useThreadGoal: () => ({ goal: null, busy: false, handleEvent: noop }),
+    useConversationEvents: (_changed, _handler, recovery) => { recover = recovery; return true; },
+    useModels: () => ({ models: [{ model: 'model', modelProviderId: 'provider' }], loading: false, changing: false, error: '',
+      clearPending: noop, change: async () => true, changeReasoningEffort: async () => true, applyPending: async () => true }),
+    readInitialConversationState: () => ({}), readModelCatalog: () => [],
+    readModelDefaults: () => ({}), useModelDefaults: () => ({}),
+    resolveVisibleModel: (_models, _defaults, recorded, session) => recorded || session || 'model',
+    resolveVisibleEffort: (_models, _defaults, _model, effort) => effort || 'high',
+    providerIdOf: entry => entry.modelProviderId, readLocalCache: () => null,
+    createClientId: () => 'id', createSubmissionId: () => 'submission',
+    createOptimisticMessage: () => ({}), isPendingThread: id => id.startsWith('pending:'),
+  });
+  globalThis.window = {
+    ...globalThis.window, location: { search: '?thread=task', pathname: '/' },
+    history: { replaceState() {} }, dispatchEvent() {}, addEventListener() {}, removeEventListener() {},
+  };
+
+  let hook = render('useProjectConversations');
+  assert.equal(hook.executionStatus.active, true);
+  const first = recover('resumed');
+  const second = recover('reconnected');
+  assert.equal(first, second);
+  assert.equal(calls.length, 1);
+  assert.equal(sessionRefreshes, 1);
+  deferredA.resolve(); assert.equal(await first, true);
+  hook = render('useProjectConversations');
+  assert.equal(hook.executionStatus.active, false);
+  assert.equal(hook.executionStatus.phase, 'completed');
+  assert.equal(hook.executionStatus.hasFinalAnswer, true);
+  assert.equal(hook.executionStatus.streamingText, '');
+
+  backendStatus = { ...backendStatus, phase: 'working', label: 'Codex 正在处理任务', active: true,
+    hasFinalAnswer: false, updatedAt: '2026-11-09T15:11:00Z' };
+  const working = recover('resumed');
+  deferredB.resolve(); assert.equal(await working, true);
+  hook = render('useProjectConversations');
+  assert.equal(hook.executionStatus.active, true);
+  assert.equal(calls.filter(call => call[1]?.recovery).length, 2);
+});
+
 for (const phase of ['completed', 'failed']) test(`late send response cannot replace ${phase} received in real time`, async () => {
   const gate = deferred();
   const render = await harness('features/execution/hooks/useCodexExecution.ts', {

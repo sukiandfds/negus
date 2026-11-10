@@ -8,6 +8,7 @@ import { completeOutputJob } from "./multi-agent/output-job.mjs";
 import { agentStateFromItem, terminalAgentPhases } from "./multi-agent/protocol-state.mjs";
 import { CURRENT_MODEL_PROVIDER_ID } from "./model-provider-service.mjs";
 import { executionPolicy, turnExecutionPolicy } from "./execution-policy.mjs";
+import { generatedFilesFromText } from "./content-blocks.mjs";
 
 const missingThreadPattern = /\bthread(?:\s+id)?\s+not\s+found\b/iu;
 
@@ -38,6 +39,8 @@ export const createMultiAgentService = ({
   onContextDelivered = async () => {},
   appServerClient = null,
   modelProviders = null,
+  growthService = null,
+  registerMedia = () => null,
 }) => {
   const defaultClient = appServerClient || createAppServerClient();
   const ownsDefaultClient = !appServerClient;
@@ -196,16 +199,18 @@ export const createMultiAgentService = ({
       const workId = currentRun?.threadId === params.threadId
         ? currentRun.workId
         : `${agentId}:${params.item.id || params.turnId || "message"}`;
+      const generated = generatedFilesFromText(params.item.text, registerMedia);
       const messageWrite = room.addMessage({
         type: "agent",
         authorId: agentId,
         authorName: room.getAgent(agentId)?.name || "Codex Agent",
         agentId,
-        text: params.item.text,
+        text: generated.text,
+        attachments: generated.files,
         workId,
       });
       if (currentRun?.threadId === params.threadId) {
-        currentRun.finalText = params.item.text;
+        currentRun.finalText = generated.text;
         currentRun.messageWrite = messageWrite;
       }
       void messageWrite.catch((error) => console.warn(`[multi-agent] message write failed: ${error.message}`));
@@ -415,7 +420,7 @@ export const createMultiAgentService = ({
         input: await inputFromAttachments(prompt, inputAttachments, attachmentContent),
         cwd: projectRoot,
         ...turnExecutionPolicy,
-        developerInstructions: employeeTurnInstructions(agent.instructions),
+        developerInstructions: employeeTurnInstructions(agent.instructions, growthService?.getContext(agent.id)),
       });
       try {
         await onContextDelivered({

@@ -40,7 +40,10 @@ const sessionMessage = (message: GroupMessage, currentMemberId: string): Session
   authorId: message.authorId,
   authorName: message.authorName,
   text: message.text,
-  blocks: attachmentBlocks(message),
+  blocks: [
+    ...(message.text ? [{ id: `${message.id}-text`, type: "markdown" as const, text: message.text }] : []),
+    ...attachmentBlocks(message),
+  ],
   createdAt: message.createdAt,
   sequence: message.sequence,
   deliveryState: message.type === "human" && message.pending ? "sending" : message.type === "human" && message.failure ? "failed" : undefined,

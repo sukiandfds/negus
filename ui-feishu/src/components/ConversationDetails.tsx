@@ -13,7 +13,7 @@ export function ConversationDetails({ c, usage, agentId, selectedName, onClose }
           <div className="profile-card"><Avatar name={selectedName} agentId={agentId} size="large" /><h3>{selectedName}</h3><span>{c.session?.title || '尚未选择对话'}</span></div>
           <div className="detail-stats"><span><MessageCircle size={15} />消息记录<strong>{c.session?.messageCount ?? '—'}</strong></span><span><Activity size={15} />连接状态<strong>{c.connected ? '已连接' : '正在连接'}</strong></span></div>
           <div className="detail-controls"><UsageSummaryControl currentModel={c.usageModel} models={c.models} snapshot={usage.snapshot} loading={usage.loading} error={usage.error} onRefresh={() => void usage.refresh(true)} /><IntelligenceEfficiencyControl /></div>
-          {agentId && <><EmployeeCapabilityPanel employeeId={agentId} /><EmployeeGrowthPanel /></>}
+          {agentId && <><EmployeeCapabilityPanel employeeId={agentId} /><EmployeeGrowthPanel employeeId={agentId} /></>}
           {!agentId && c.session && <button className="detail-action" disabled={c.archiveBusyIds.has(c.selectedId)} onClick={() => void (c.session?.archived ? c.unarchiveSession(c.selectedId) : c.archiveSession(c.selectedId))}><Archive size={16} />{c.session.archived ? '恢复对话' : '归档对话'}</button>}
         </aside>;
 }

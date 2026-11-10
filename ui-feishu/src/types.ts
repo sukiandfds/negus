@@ -13,7 +13,7 @@ export type Conversation = {
   id: string; name: string; subtitle: string; agentId?: string;
   threadId?: string | null; conversationId?: string | null; time?: string | null;
   main?: boolean; active?: boolean; pending?: boolean; session?: SessionSummary;
-  origin?: 'user' | 'assistant';
+  origin?: 'user' | 'assistant' | 'codex';
   nativeSubagent?: boolean;
   kind?: 'project' | 'automation' | 'group'; label?: string; preview?: string; roomId?: string;
   projectId?: string; children?: Conversation[];

@@ -26,6 +26,28 @@ const publicStatus = (value) => {
   };
 };
 
+const employeeWorkStatus = (mainStatus, groups, tasks) => {
+  const groupCount = groups.filter((item) => item.status?.active).length;
+  const taskCount = tasks.filter((item) => item.status?.active).length;
+  const activeCount = (mainStatus?.active ? 1 : 0) + groupCount + taskCount;
+  if (!activeCount) return mainStatus;
+  const label = groupCount || taskCount
+    ? activeCount > 1
+      ? `正在进行 ${activeCount} 项工作`
+      : groupCount
+        ? "正在群聊工作"
+        : "正在处理后台任务"
+    : "正在主对话工作";
+  const indicators = [mainStatus?.indicator, ...groups.map((item) => item.status?.indicator), ...tasks.map((item) => item.status?.indicator)];
+  return {
+    ...mainStatus,
+    phase: "running",
+    label,
+    active: true,
+    indicator: indicators.includes("red") ? "red" : "green",
+  };
+};
+
 const latestTimestamp = (values) => values
   .filter(Boolean)
   .map((value) => ({ value, time: Date.parse(value) }))
@@ -175,6 +197,7 @@ export const createEmployeeProjectDirectory = ({
         mainSummary.lastActivityAt,
         ...groupConversations.map((conversation) => conversation.lastActivityAt),
       ]);
+      const workStatus = employeeWorkStatus(status, groupConversations, taskConversations);
       if (statusKey) conversationStatuses[statusKey] = status;
       const employeeConversationEntries = [
         ...(mainThreadId || mainConversationId ? [{
@@ -212,7 +235,7 @@ export const createEmployeeProjectDirectory = ({
         employeeId: clean(employee.id, 80),
         mainConversationId,
         mainThreadId,
-        status,
+        status: workStatus,
         lastActivityAt,
         conversations: employeeConversationEntries,
       };

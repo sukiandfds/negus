@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { blocksFromContent, messageFromItem, messageFromThreadItem } from "../server/content-blocks.mjs";
+import { blocksFromContent, generatedFilesFromText, messageFromItem, messageFromThreadItem } from "../server/content-blocks.mjs";
 import { inputFromAttachments } from "../server/app-server-conversation-store.mjs";
 import { visibleConversationMessages } from "../server/conversation-summary-service.mjs";
 
@@ -8,10 +8,9 @@ const registerMedia = () => null;
 
 test("attachment content stays available to the model but out of user prose and summaries", async () => {
   const document = "文档正文\n<options><option>不应显示</option></options>\n![不应登记](/private/document.png)\n[附件正文：notes.md]\n嵌套标记\n[附件正文结束]";
-  const content = await inputFromAttachments("请阅读附件", [{ name: "notes.md", path: "/uploads/notes.md", mimeType: "text/markdown" }], {
-    inspect: async () => ({ status: "ready", content: document }),
-  });
-  assert.ok(content[2].text.includes(document));
+  const content = await inputFromAttachments("请阅读附件", [{ name: "notes.md", path: "/uploads/notes.md", mimeType: "text/markdown" }]);
+  assert.match(content[0].text, /## notes\.md: \/uploads\/notes\.md/u);
+  assert.doesNotMatch(content[0].text, /文档正文/u);
   const registered = [];
   const register = (source) => { registered.push(source); return { url: "/api/media/notes", name: "notes.md" }; };
   for (const message of [
@@ -52,12 +51,57 @@ test("preserves ordinary marker examples, incomplete envelopes, and assistant te
 });
 
 test("multiple attachments keep separate cards without leaking either document", async () => {
-  const content = await inputFromAttachments("两个文档", ["one.md", "two.txt"].map((name) => ({ name, path: `/uploads/${name}`, mimeType: "text/plain" })), {
-    inspect: async () => ({ status: "ready", content: "正文" }),
-  });
+  const content = await inputFromAttachments("两个文档", ["one.md", "two.txt"].map((name) => ({ name, path: `/uploads/${name}`, mimeType: "text/plain" })));
   const message = messageFromThreadItem({ type: "userMessage", content }, (source) => ({ url: `/api/media/${source.split("/").pop()}` }));
   assert.equal(message.text, "两个文档");
   assert.deepEqual(message.blocks.filter((block) => block.type === "file").map((block) => block.name), ["one.md", "two.txt"]);
+});
+
+test("turns generated file delivery directives into existing download cards", () => {
+  const register = (source) => ({
+    id: "generated-file",
+    name: "report.md",
+    path: source,
+    mimeType: "text/markdown",
+    url: "/api/media/generated-file",
+  });
+  const message = messageFromThreadItem({
+    id: "generated-message",
+    type: "agentMessage",
+    phase: "final_answer",
+    text: "报告已生成。\n::file{path=\"/tmp/report.md\"}\n请下载查看。",
+  }, register);
+
+  assert.equal(message.text, "报告已生成。\n请下载查看。");
+  assert.deepEqual(message.blocks.map((block) => block.type), ["markdown", "file"]);
+  assert.equal(message.blocks[1].name, "report.md");
+  assert.equal(message.blocks[1].source, "/api/media/generated-file");
+
+  const groupMessage = generatedFilesFromText("附件如下。\n::file{path=\"/tmp/report.md\"}", register);
+  assert.equal(groupMessage.text, "附件如下。");
+  assert.equal(groupMessage.files[0].url, "/api/media/generated-file");
+});
+
+test("keeps file directive examples inside fenced code blocks", () => {
+  const text = "```text\n::file{path=\"/tmp/report.md\"}\n```";
+  const message = messageFromThreadItem({ type: "agentMessage", text }, registerMedia);
+  assert.equal(message.text, text);
+  assert.deepEqual(message.blocks.map((block) => block.type), ["markdown"]);
+});
+
+test("preserves file directives in user text and nested shorter fences", () => {
+  const userText = "::file{path=\"/tmp/report.md\"}";
+  const user = messageFromThreadItem({ type: "userMessage", content: userText }, registerMedia);
+  assert.equal(user.text, userText);
+
+  const fenced = "````text\n```\n::file{path=\"/tmp/report.md\"}\n```\n````";
+  const assistant = messageFromThreadItem({ type: "agentMessage", text: fenced }, () => ({
+    id: "unexpected",
+    name: "report.md",
+    url: "/api/media/unexpected",
+  }));
+  assert.equal(assistant.text, fenced);
+  assert.deepEqual(assistant.blocks.map((block) => block.type), ["markdown"]);
 });
 
 test("normalizes slash-prefixed Windows drive paths in markdown images", () => {

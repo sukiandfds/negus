@@ -79,6 +79,7 @@ const execution = createExecutionTracker({
   broadcast: realtime.broadcast,
   stateFile: path.join(projectRoot, "runtime", "execution-runs.json"),
   onTurnTerminal: (event) => followUpQueue?.handleTurnTerminal(event),
+  registerMedia: media.register,
 });
 let contextManagement;
 let employeeRegistry;
@@ -99,6 +100,7 @@ const modelProviders = createModelProviderService({
 });
 const conversationStoreOptions = {
   historyFallback: (...args) => jsonlConversations.findSession(...args),
+  nativeSubagents: archived => jsonlConversations.listNativeSubagents(archived),
   projectRoot,
   projectRoots,
   autoTitleStateFile: path.join(projectRoot, "runtime", "conversation-display-titles.json"),
@@ -386,8 +388,10 @@ const employeeGrowth = createEmployeeGrowthService({
   conversationStore: employeeConversationStore,
   broadcast: realtime.broadcast,
 });
+for (const employee of employeeRegistry.list()) await employeeGrowth.syncRules(employee.id);
 agentTasks = await createBackgroundTaskService({
   stateFile: path.join(projectRoot, "runtime", "background-tasks.json"), registry: employeeRegistry,
+  growthService: employeeGrowth,
   conversations, modelProviders, bindings: employeeConversationStore, queue: followUpQueue, execution, broadcast: realtime.broadcast,
 });
 employeeRuntime = createEmployeeRuntimeService({
@@ -406,6 +410,7 @@ employeeRuntime = createEmployeeRuntimeService({
   attachmentContent,
   client: appServerClient,
   modelProviders,
+  registerMedia: media.register,
 });
 const employeeProjectDirectory = createEmployeeProjectDirectory({
   agentTasks,
@@ -450,6 +455,7 @@ const resolveArtifactInputs = (artifactIds) => [...new Set(Array.isArray(artifac
 const multiAgentDirectory = new Map(groupRoomEntries.map(({ identity, room }) => {
   const roomId = room.snapshot().room.id;
   const service = createMultiAgentService({
+    growthService: { getContext: id => employeeRegistry.get(id) ? employeeGrowth.getContext(id) : "" },
     projectRoot: identity.root || identity.roots?.project || projectRoot,
     employeeWorkRoots: Object.fromEntries(employeeRegistry.list().map((employee) => [employee.id, employee.projectRoot])),
     room,
@@ -458,6 +464,7 @@ const multiAgentDirectory = new Map(groupRoomEntries.map(({ identity, room }) =>
     attachmentContent,
     resolveAttachments: media.resolveMany,
     resolveArtifacts: resolveArtifactInputs,
+    registerMedia: media.register,
     onContextDelivered: ({ agentId, threadId, messages }) => recordEmployeeGroupContext({
       identity,
       room,

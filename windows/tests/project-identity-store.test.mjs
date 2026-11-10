@@ -212,6 +212,43 @@ test("directory reads existing employee group bindings without creating them", a
   assert.equal(first.projects.length, second.projects.length);
 });
 
+test("directory aggregates employee work across main, groups, and background tasks", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-project-directory-work-status-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const worker = employee(root);
+  const directory = createEmployeeProjectDirectory({
+    project: "negus",
+    projectRoot: root,
+    registry: { list: () => [worker] },
+    employeeRuntime: { getStatus: async () => ({ status: { phase: "idle", active: false } }) },
+    employeeConversations: { findByAgentRoom: () => ({
+      conversationId: "group:room:developer",
+      runtimeKind: "codex",
+      runtimeSessionId: "group-thread",
+    }) },
+    roomDirectory: {
+      listForAgent: () => [{ id: "room", projectId: "project:personal:negus", name: "项目群" }],
+      get: () => ({
+        getAgent: () => ({ threadId: "group-thread", phase: "working", label: "working", active: true }),
+        snapshot: () => ({ messages: [] }),
+      }),
+    },
+    agentTasks: {
+      directoryEntries: () => [{ id: "task-chat", conversationId: "handoff-task", threadId: "task-thread",
+        title: "后台任务", status: { phase: "running", label: "running", active: true } }],
+      providerForThread: () => "current",
+    },
+    conversations: { listSessions: async () => [], findSession: async () => null },
+  });
+
+  const listing = await directory.list();
+  const project = listing.projects.find((item) => item.employeeId === "developer");
+  assert.equal(project.status.phase, "running");
+  assert.equal(project.status.label, "正在进行 2 项工作");
+  assert.equal(project.status.active, true);
+  assert.equal(project.status.indicator, "green");
+});
+
 test("directory never assigns employee Runtime threads to a business project", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-project-directory-owner-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

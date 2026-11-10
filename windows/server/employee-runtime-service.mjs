@@ -31,10 +31,11 @@ const textFromItem = (item) => item?.type === "agentMessage"
 const policyFor = () => ({ sandbox: "danger-full-access", approvalPolicy: "never" });
 const turnPolicyFor = () => ({ sandboxPolicy: { type: "dangerFullAccess" }, approvalPolicy: "never" });
 
-const publicMessage = ({ id, role, text, turnId, itemId, createdAt }) => ({
+const publicMessage = ({ id, role, text, blocks, turnId, itemId, createdAt }) => ({
   id: clean(id, 240),
   role: role === "user" ? "user" : "assistant",
   text: String(text || ""),
+  ...(Array.isArray(blocks) && blocks.length ? { blocks } : {}),
   ...(turnId ? { turnId: clean(turnId, 160) } : {}),
   ...(itemId ? { itemId: clean(itemId, 160) } : {}),
   createdAt: createdAt || new Date().toISOString(),
@@ -56,6 +57,7 @@ export const createEmployeeRuntimeService = ({
   client = null,
   modelProviders = null,
   registerSession,
+  registerMedia = () => null,
 }) => {
   const defaultClient = client || createAppServerClient();
   const ownsDefaultClient = !client;
@@ -67,8 +69,6 @@ export const createEmployeeRuntimeService = ({
   const statuses = new Map();
   const openPromises = new Map();
   const sendLocks = new Map();
-  const turnInputs = new Map();
-  const lastAssistantReplies = new Map();
   let closed = false;
 
   const subscribeClient = (runtimeClient) => {
@@ -296,7 +296,7 @@ export const createEmployeeRuntimeService = ({
   const readNativeMessages = async (threadId, employee) => {
     const runtimeClient = await clientForThread(threadId, employee);
     const result = await runtimeClient.request("thread/read", { threadId, includeTurns: true });
-    return messagesFromTurns(result?.thread?.turns, () => null)
+    return messagesFromTurns(result?.thread?.turns, registerMedia)
       .filter((message) => message.role === "user" || message.role === "assistant")
       .map((message) => publicMessage(message));
   };
@@ -444,15 +444,6 @@ export const createEmployeeRuntimeService = ({
         void Promise.resolve(sendLocks.get(employeeId)).catch(() => {}).then(() => onTurnCompleted(completion))
           .catch((cause) => console.warn(`[employee-runtime] completion listener failed: ${String(cause?.message || cause)}`));
       }
-      if (status === "completed" && growthService) {
-        void growthService.reviewTask({
-          employeeId,
-          threadId,
-          turnId,
-          taskText: turnInputs.get(employeeId) || "",
-          replyText: lastAssistantReplies.get(threadId) || "",
-        }).catch(() => {});
-      }
       return;
     }
     if (method === "item/agentMessage/delta") {
@@ -482,7 +473,6 @@ export const createEmployeeRuntimeService = ({
       const text = textFromItem(item);
       if (!text.trim()) return;
       const role = item.type === "agentMessage" ? "assistant" : "user";
-      if (role === "assistant") lastAssistantReplies.set(threadId, text);
       broadcast({
         type: "employee_message_completed",
         employeeId,
@@ -556,10 +546,12 @@ export const createEmployeeRuntimeService = ({
             ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}),
             additionalContext: { 'negus.model': { kind: 'application', value: `本轮调用模型：${employee.model || '未取得'}。回答模型身份时以本轮请求为准，不以历史回复或全局默认配置推断。此标识不证明供应商内部实际模型。` }, 'negus.employee': { kind: 'application', value: '以下是本员工当前生效的职责和工作要求，替代对话中旧的员工身份及派工说明。\n' + [
               communicationInstructions, employee.instructions,
-              [runtimeClient.turnDeveloperInstructions === true ? context : "", taskService?.leaderInstructions(employee.id)].filter(Boolean).join("\n"),
+              [context, taskService?.leaderInstructions(employee.id)].filter(Boolean).join("\n"),
             ].filter(Boolean).join('\n') } },
           } : {}),
         });
+        if (growthService?.suggestFromMessage) void Promise.resolve().then(() => growthService.suggestFromMessage(employee.id, cleanText, cleanRequestId))
+          .catch(error => console.warn(`[employee-runtime] memory suggestion failed: ${String(error?.message || error)}`));
         freshThreads.delete(threadId);
         const currentStatus = statusFor(employee.id);
         if (currentStatus.active && ["submitted", "working"].includes(currentStatus.phase)) {
@@ -589,7 +581,6 @@ export const createEmployeeRuntimeService = ({
         throw error;
       }
     })();
-    turnInputs.set(employee.id, cleanText);
     sendLocks.set(employee.id, sending);
     try {
       return await sending;

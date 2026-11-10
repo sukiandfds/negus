@@ -6,18 +6,84 @@ const UI_DIRECTIVES = [
   /<oai-mem-citation>[\s\S]*?<\/oai-mem-citation>/giu,
 ];
 
+const generatedFileDirective = /^\s*::file\{path=(?:"((?:\\.|[^"\\])*)"|'([^']+)')\}\s*$/iu;
+
+const nextFence = (line, fence) => {
+  const match = /^\s*(`{3,}|~{3,})/u.exec(line);
+  if (!match) return fence;
+  if (!fence) return { marker: match[1][0], length: match[1].length };
+  return fence.marker === match[1][0] && match[1].length >= fence.length ? null : fence;
+};
+
 const stripCodexDirectives = (value) => {
-  let fence = "";
+  let fence = null;
   return String(value || "").split("\n").filter((line) => {
-    const fenceMatch = /^\s*(`{3,}|~{3,})/u.exec(line);
-    if (fenceMatch) {
-      const marker = fenceMatch[1][0];
-      fence = fence === marker ? "" : fence || marker;
-      return true;
-    }
+    const wasInFence = Boolean(fence);
+    fence = nextFence(line, fence);
+    if (wasInFence) return true;
     if (fence) return true;
+    if (generatedFileDirective.test(line)) return true;
     return !/^\s*::[a-z][a-z0-9-]*\{.*\}\s*$/iu.test(line);
   }).join("\n");
+};
+
+export const generatedFilesFromText = (value, registerMedia) => {
+  const files = [];
+  const seen = new Set();
+  let fence = null;
+  const text = String(value || "").split("\n").filter((line) => {
+    const wasInFence = Boolean(fence);
+    fence = nextFence(line, fence);
+    if (wasInFence) return true;
+    if (fence) return true;
+    const match = generatedFileDirective.exec(line);
+    if (!match) return true;
+    let source = match[2] || match[1] || "";
+    if (match[1]) {
+      try { source = JSON.parse(`"${match[1]}"`); } catch {}
+    }
+    if (!/^(?:\/|[A-Za-z]:[\\/]|file:)/u.test(source)) return true;
+    const media = registerMedia(source);
+    if (media?.url && !seen.has(media.url)) {
+      seen.add(media.url);
+      files.push(media);
+    }
+    return false;
+  }).join("\n").replace(/\n{3,}/gu, "\n\n").trim();
+  return { text, files };
+};
+
+const assistantBlocksFromContent = (value, registerMedia) => {
+  const files = [];
+  const seen = new Set();
+  const clean = (item) => {
+    if (typeof item === "string") {
+      const parsed = generatedFilesFromText(item, registerMedia);
+      for (const file of parsed.files) {
+        if (seen.has(file.url)) continue;
+        seen.add(file.url);
+        files.push(file);
+      }
+      return parsed.text;
+    }
+    if (Array.isArray(item)) return item.map(clean);
+    if (item && typeof item === "object") {
+      for (const key of ["content", "message", "text", "input_text", "output_text"]) {
+        if (key in item) return { ...item, [key]: clean(item[key]) };
+      }
+    }
+    return item;
+  };
+  return [
+    ...blocksFromContent(clean(value), registerMedia),
+    ...files.map((file) => ({
+      id: blockId("file", file.url),
+      type: "file",
+      source: file.url,
+      name: file.name || path.basename(file.path || "file"),
+      file,
+    })),
+  ];
 };
 
 const optionBlocksFrom = (value) => {
@@ -254,7 +320,7 @@ export const messageFromItem = (item, registerMedia) => {
     return null;
   }
 
-  const blocks = role === "user" ? userBlocksFromContent(content, registerMedia) : blocksFromContent(content, registerMedia);
+  const blocks = role === "user" ? userBlocksFromContent(content, registerMedia) : assistantBlocksFromContent(content, registerMedia);
   const text = visibleText(blocks);
   if (role === "user" && !isUsefulUserMessage(text, blocks)) return null;
   if (!blocks.length) return null;
@@ -320,7 +386,7 @@ export const messageFromThreadItem = (item, registerMedia) => {
   }
   if (item?.type === "agentMessage") {
     if (item.phase && !["final_answer", "commentary"].includes(item.phase)) return null;
-    const blocks = blocksFromContent(item.text, registerMedia);
+    const blocks = assistantBlocksFromContent(item.text, registerMedia);
     const text = visibleText(blocks);
     return blocks.length ? { id: item.id || blockId("message", item.text), role: "assistant", text, blocks, phase: item.phase } : null;
   }

@@ -202,6 +202,7 @@ export function useConversationEvents(
     connect();
     window.addEventListener("online", ensureCurrent);
     window.addEventListener("pageshow", ensureCurrent);
+    window.addEventListener("focus", ensureCurrent);
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       window.clearTimeout(eventTimer);
@@ -212,6 +213,7 @@ export function useConversationEvents(
       clearReconnectTimers();
       window.removeEventListener("online", ensureCurrent);
       window.removeEventListener("pageshow", ensureCurrent);
+      window.removeEventListener("focus", ensureCurrent);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       events?.close();
     };

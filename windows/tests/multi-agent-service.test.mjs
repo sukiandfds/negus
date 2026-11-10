@@ -534,14 +534,16 @@ test("passes files from a quoted message that is outside the context window", as
   }
   service.close();
   const started = requests.find((request) => request.method === "turn/start");
-  const paths = (started?.params.input || []).map((item) => item.path).filter(Boolean);
+  const input = started?.params.input || [];
+  const paths = input.map((item) => item.path).filter(Boolean);
+  const prompt = input.filter((item) => item.type === "text").map((item) => item.text).join("\n");
   assert.deepEqual(resolvedIds, ["current-file", "quoted-file"]);
   assert.deepEqual(paths, [
     "D:\\files\\direct.png",
     "D:\\files\\current-file.png",
     "D:\\files\\quoted-file.png",
-    "D:\\files\\quoted-artifact.md",
   ]);
+  assert.ok(prompt.includes("## quoted-artifact.md: D:\\files\\quoted-artifact.md"));
 });
 
 test("keeps a later aside from replacing the assigned request", () => {

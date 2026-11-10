@@ -325,8 +325,16 @@ export const createProviderConversationStore = ({ current, providers, createStor
     const lists = [];
     for (const providerId of ids) {
       const store = await storeFor(providerId);
-      const native = providerId === 'current' ? [] : await store.listNativeSubagents?.(args[1]) || [];
-      const listed = await store.listSessions(...args);
+      const native = await store.listNativeSubagents?.(args[1]).catch(() => []) || [];
+      const nativeById = new Map(native.map(session => [session.threadId, session]));
+      const listed = (await store.listSessions(...args)).map(session => {
+        const indexed = nativeById.get(session.threadId);
+        return indexed ? {
+          ...session,
+          nativeSubagent: indexed.nativeSubagent === true,
+          parentThreadId: indexed.parentThreadId || session.parentThreadId || null,
+        } : session;
+      });
       const knownIds = new Set(listed.map(session => session.threadId));
       const sessions = [...listed, ...native.filter(session => !knownIds.has(session.threadId))];
       for (const session of sessions) if (session.nativeSubagent && !routes[session.threadId]) {

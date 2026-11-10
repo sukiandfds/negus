@@ -14,7 +14,7 @@ import { backgroundToolConfig, executionPolicy, turnExecutionPolicy } from './ex
 import { followupTask } from './task-followup.mjs';
 
 export async function createGroupTaskService({ stateRoot, room, projectRoot, employeeWorkRoots = {}, modelProviders,
-  appServerClient, broadcast = () => {}, attachmentContent, resolveAttachments = () => [], resolveArtifacts = () => [], onContextDelivered = async () => {}, bindings, agentTasks, queue, execution, registerSession, providerForThread = async () => null }) {
+  appServerClient, broadcast = () => {}, attachmentContent, resolveAttachments = () => [], resolveArtifacts = () => [], onContextDelivered = async () => {}, bindings, agentTasks, queue, execution, registerSession, growthService = null, providerForThread = async () => null }) {
   const roomId = room.snapshot().room.id;
   const log = event => console.log(JSON.stringify({ scope: 'negus-tasks', roomId, at: new Date().toISOString(), ...event }));
   let kernel;
@@ -95,7 +95,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       const client = await clientFor({ ...agent, modelProviderId });
       const independent = task.conversationId !== roomId;
       let threadId = task.runtime.threadId || task.resumeThreadId || (recovering || independent ? '' : agent.threadId);
-      const taskInstructions = task.background ? '你是独立后台任务执行者，执行已授权工作并验证，结果返回来源员工；不得再次派工。' : instructionsFor(agent);
+      const taskInstructions = [task.background ? '你是独立后台任务执行者，执行已授权工作并验证，结果返回来源员工；不得再次派工。' : instructionsFor(agent), growthService?.getContext(agent.id)].filter(Boolean).join('\n');
       const options = { ...executionPolicy, developerInstructions: taskInstructions, config: task.background ? backgroundToolConfig : tools.config(task.id),
         ...(agent.model ? { model: agent.model } : {}) };
       const registerBackground = async () => {

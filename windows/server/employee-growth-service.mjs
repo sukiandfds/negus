@@ -19,6 +19,7 @@ const managedRules = (rules) => [
 
 export const createEmployeeGrowthService = ({ registry, store, reviewer, broadcast = () => {}, conversationStore }) => {
   const activeReviews = new Map();
+  const notifyRuleChange = event => { try { broadcast(event); } catch (error) { console.warn(`[employee-growth] notification failed: ${String(error?.message || error)}`); } };
   const readLastTurn = async (employeeId, fallback = {}) => {
     try {
       const messages = await conversationStore?.readMessages?.(registry.require(employeeId).conversationId);
@@ -64,11 +65,35 @@ export const createEmployeeGrowthService = ({ registry, store, reviewer, broadca
 
   const get = (employeeId) => store.get(employeeId);
   const getContext = (employeeId) => {
-    const value = store.get(employeeId);
-    return JSON.stringify({
-      facts: value.facts.filter((item) => item.status === "saved").slice(-40),
-      approved: value.proposals.filter((item) => item.status === "approved").slice(-40),
-    });
+    let value;
+    try { value = store.get(employeeId); }
+    catch (error) { if (error.statusCode === 404) return ""; throw error; }
+    const section = (title, items) => items.length ? `${title}：\n${items.map((item) => `- ${item.text}`).join("\n")}` : "";
+    return [section("员工已保存事实", value.facts.filter(item => item.status === "saved")),
+      section("员工全局有效规则", value.proposals.filter(item => item.kind === "rule" && item.status === "approved")),
+      section("员工已批准 Skill", value.proposals.filter(item => item.kind === "skill" && item.status === "approved"))].filter(Boolean).join("\n\n");
+  };
+
+  const suggestFromMessage = async (employeeId, text, requestId) => {
+    const value = clean(text);
+    if (!/^(?:(?:请记住|记住)\s*[,，:：、\s]|规则\s*[:：]|(?:以后|今后)(?:都|必须)|后续都)/u.test(value)) return null;
+    const proposal = await store.addProposal(employeeId, { kind: "rule", text: value, source: "direct-message" }, { requestId: requestId ? `message:${requestId}` : "" });
+    broadcast({ type: "employee_growth_ready", employeeId });
+    return proposal;
+  };
+
+  const syncRules = async (employeeId) => {
+    const root = path.resolve(registry.require(employeeId).contextRoot);
+    const file = path.join(root, "AGENTS.md");
+    let content = "";
+    try { content = await fs.readFile(file, "utf8"); } catch (error) { if (error.code !== "ENOENT") throw error; }
+    const begin = "<!-- NEGUS-MANAGED-EMPLOYEE-RULES:BEGIN -->";
+    const end = "<!-- NEGUS-MANAGED-EMPLOYEE-RULES:END -->";
+    const start = content.indexOf(begin), finish = content.indexOf(end);
+    const block = managedRules([]);
+    if (start >= 0 && finish > start) content = `${content.slice(0, start)}${block}${content.slice(finish + end.length)}`;
+    else content = `${content.trimEnd()}${content.trim() ? "\n\n" : ""}${block}\n`;
+    await writeTextFileAtomic(file, content);
   };
 
   const decide = async (employeeId, proposalId, decision, { requestId = "" } = {}) => {
@@ -78,23 +103,14 @@ export const createEmployeeGrowthService = ({ registry, store, reviewer, broadca
     const employee = registry.require(employeeId);
     const updated = await store.decide(employeeId, proposalId, decision, { requestId });
     if (decision !== "approved") return updated;
+    if (updated.kind === "rule") {
+      notifyRuleChange({ type: "employee_growth_written", employeeId, proposal: updated });
+      return updated;
+    }
     try {
       const root = path.resolve(employee.contextRoot);
       if (!inside(root, root)) throw new Error("Invalid employee context root.");
-      if (updated.kind === "rule") {
-        const file = path.join(root, "AGENTS.md");
-        let content = "";
-        try { content = await fs.readFile(file, "utf8"); } catch {}
-        const begin = "<!-- NEGUS-MANAGED-EMPLOYEE-RULES:BEGIN -->";
-        const end = "<!-- NEGUS-MANAGED-EMPLOYEE-RULES:END -->";
-        const currentRules = store.get(employeeId).proposals.filter((item) => item.kind === "rule" && item.status === "approved");
-        const block = managedRules(currentRules);
-        const start = content.indexOf(begin);
-        const finish = content.indexOf(end);
-        if (start >= 0 && finish > start) content = `${content.slice(0, start)}${block}${content.slice(finish + end.length)}`;
-        else content = `${content.trimEnd()}${content.trim() ? "\n\n" : ""}${block}\n`;
-        await writeTextFileAtomic(file, content);
-      } else if (updated.kind === "skill") {
+      if (updated.kind === "skill") {
         const slug = slugify(updated.slug || updated.text);
         if (!slug) throw new Error("Skill slug is invalid.");
         const file = path.join(root, ".agents", "skills", slug, "SKILL.md");
@@ -113,5 +129,16 @@ export const createEmployeeGrowthService = ({ registry, store, reviewer, broadca
     }
   };
 
-  return { reviewTask, get, getContext, decide };
+  const addRule = async (employeeId, text, requestId) => {
+    const value = clean(text);
+    if (!value) throw Object.assign(new Error("规则不能为空"), { statusCode: 400 });
+    const proposal = await store.addProposal(employeeId, { kind: "rule", text: value, source: "manual" }, { requestId: requestId ? `manual:${requestId}` : "" });
+    return decide(employeeId, proposal.id, "approved", { requestId });
+  };
+  const changeRule = async (employeeId, proposalId, status, { requestId = "" } = {}) => {
+    const { changed, ...result } = await store.setRuleStatus(employeeId, proposalId, status, { requestId });
+    if (changed) notifyRuleChange({ type: "employee_growth_ready", employeeId });
+    return result;
+  };
+  return { reviewTask, get, getContext, decide, suggestFromMessage, addRule, changeRule, syncRules };
 };

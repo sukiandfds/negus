@@ -5,18 +5,8 @@ import { isPendingThread } from '../shared/features/conversations/model/pendingT
 import { readConversationBatches } from '../shared/features/conversations/state/conversationBatch';
 import { type ThreadSnapshot } from '../shared/features/conversations/state/conversationStore';
 import { readModelDefaults, resolveVisibleModel, resolveVisibleEffort } from '../shared/features/models/model/modelDefaults';
-import { buildConversationDirectory } from './conversationDirectory';
+import { buildConversationDirectory, mergeDirectoryProjects, snapshotStatusByThread } from './conversationDirectory';
 import { latestMessagePreview } from './taskNotice';
-
-// Empty employee/project entries have no thread to read. Existing threads keep their batch snapshot.
-const mergeProjects = (previous: DirectoryState['projects'], next: DirectoryState['projects'], good: Set<string>, eligible: Set<string>) => next.map(project => {
-  const old = previous.find(item => item.id === project.id);
-  const children = new Map((old?.conversations || []).filter(item => project.conversations?.some(next => next.id === item.id && Boolean(next.archived) === Boolean(item.archived))).map(item => [item.threadId || item.id, item]));
-  for (const item of project.conversations || []) if (!item.threadId || good.has(item.threadId) || !eligible.has(item.threadId)) children.set(item.threadId || item.id, item);
-  return { ...(old && project.mainThreadId && !good.has(project.mainThreadId) ? old : project),
-    status: good.has(project.mainThreadId || '') ? project.status : old?.status,
-    conversations: [...children.values()] };
-});
 
 // FEAT-001: batch initial reads, then sync changed threads independently into the same store.
 export function usePageSnapshot(conversations: ConversationState, directory: DirectoryState) {
@@ -92,10 +82,15 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
         read.abort.abort(); independentReads.current.delete(id);
       }
     }
+    // Directory membership is visible immediately; body reads fill the same row later.
+    setShown(previous => {
+      const projects = mergeDirectoryProjects(previous.projects, directory.projects);
+      return JSON.stringify(projects) === JSON.stringify(previous.projects) ? previous : { ...previous, projects };
+    });
     if (!entries.length) {
       initialLoading.current = false;
       setSyncing(false);
-      const projects = mergeProjects(shown.projects, directory.projects, new Set(), eligible);
+      const projects = mergeDirectoryProjects(shown.projects, directory.projects);
       if (!shown.committed || JSON.stringify(projects) !== JSON.stringify(shown.projects)
         || shown.sessions.some(item => !c.sessions.some(next => next.threadId === item.threadId))) {
         setShown(previous => ({ ...previous, committed: true, project: c.project, projects,
@@ -129,7 +124,7 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
             sessions.set(summary.threadId, { ...summary, ...fields, updatedAt: summary.updatedAt, latestMessage });
           }
           return { sessions: [...sessions.values()], committed: true, project: current.project,
-            projects: mergeProjects(previous.projects, live.current.directory.projects, good, eligible) };
+            projects: mergeDirectoryProjects(previous.projects, live.current.directory.projects) };
         });
         store.notify();
       };
@@ -205,8 +200,7 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
       presentation: Object.fromEntries(states.map(([id, { session: _session, ...view }]) => [id, { ...view, visibleModel: '', visibleEffort: '', usageModel: '', streamingText: '', commentaryText: '' }])) });
   }, [shown, c.sessions, c.selectedId, store.getPersistSnapshot()]);
   return { committed: shown.committed, conversations: display, directory: { ...directory, projects: shown.projects,
-    statusByThread: Object.fromEntries(states.map(([id, view]) => [id,
-      id === c.selectedId && store.synced.has(id) ? executionStatus : view.executionStatus])),
+    statusByThread: snapshotStatusByThread(store, c.selectedId, shown.projects),
     contextByThread: Object.fromEntries(states.map(([id, view]) => [id, view.contextStatus.phase])),
     goalByThread: Object.fromEntries(states.map(([id, view]) => [id, view.goal])) } };
 }
