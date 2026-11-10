@@ -1,3 +1,4 @@
+import { cloudflareMcpArguments } from './connections/cloudflare-runtime.mjs';
 import { imageMcpArguments } from "./image-generation/image-runtime.mjs";
 import { githubEnvironment } from "./github-runtime.mjs";
 import { computerMcpArguments, nativeComputerMcpArguments } from "./computer-control/runtime.mjs";
@@ -7,6 +8,24 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import TOML from "@iarna/toml";
 import { requestWithNeutralIdentity, sharedModelCatalogArguments } from './model-catalog.mjs';
+
+// Scan each incoming chunk once; assemble an incomplete JSONL record only at its newline.
+export const createProtocolLineReader = () => {
+  let parts = [];
+  return chunk => {
+    const lines = [];
+    let start = 0, newline;
+    while ((newline = chunk.indexOf("\n", start)) >= 0) {
+      const segment = chunk.slice(start, newline);
+      const line = parts.length ? [...parts, segment].join("") : segment;
+      parts = [];
+      lines.push(line.trim());
+      start = newline + 1;
+    }
+    if (start < chunk.length) parts.push(chunk.slice(start));
+    return lines;
+  };
+};
 
 export const streamRetryArguments = (home) => {
   let config;
@@ -178,7 +197,6 @@ export const createAppServerClient = ({
 } = {}) => {
   let closed = false;
   let child;
-  let buffer = "";
   let nextId = 1;
   let initializePromise;
   let restartPromise;
@@ -236,7 +254,7 @@ export const createAppServerClient = ({
       environment.NO_PROXY, environment.no_proxy, process.env.NO_PROXY, process.env.no_proxy,
       ...modelProviderNoProxyHosts(effectiveHome),
     ].filter(Boolean).flatMap((value) => String(value).split(",")).map((value) => value.trim()).filter(Boolean))].join(",");
-    const spawned = spawn(selected.command, [...selected.prefixArgs, "app-server", "-c", 'web_search="live"', ...streamRetryArguments(effectiveHome), ...sharedModelCatalogArguments(), ...imageMcpArguments(), ...computerMcpArguments(), ...nativeComputerMcpArguments()], {
+    const spawned = spawn(selected.command, [...selected.prefixArgs, "app-server", "-c", 'web_search="live"', ...streamRetryArguments(effectiveHome), ...sharedModelCatalogArguments(), ...imageMcpArguments(), ...computerMcpArguments(), ...nativeComputerMcpArguments(), ...cloudflareMcpArguments()], {
       cwd: workingDirectory,
       env: buildAppServerEnvironment({
         environment: noProxy ? { ...environment, NO_PROXY: noProxy, no_proxy: noProxy } : environment,
@@ -247,7 +265,7 @@ export const createAppServerClient = ({
       windowsHide: true,
     });
     child = spawned;
-    buffer = "";
+    const readLines = createProtocolLineReader();
     spawned.stdout.setEncoding("utf8");
     spawned.stderr.setEncoding("utf8");
     spawned.stderr.on("data", (chunk) => {
@@ -255,11 +273,7 @@ export const createAppServerClient = ({
       if (stderrLines.length > 200) stderrLines.splice(0, stderrLines.length - 200);
     });
     spawned.stdout.on("data", (chunk) => {
-      buffer += chunk;
-      let newline;
-      while ((newline = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, newline).trim();
-        buffer = buffer.slice(newline + 1);
+      for (const line of readLines(chunk)) {
         if (!line) continue;
         try {
           const message = JSON.parse(line);
@@ -348,7 +362,6 @@ export const createAppServerClient = ({
       child = undefined;
       initializePromise = undefined;
       neutralThreads.clear();
-      buffer = "";
       rejectPending(new Error(`Codex app-server restarting: ${reason}`));
       pendingUserInputs.clear();
       previous?.kill();

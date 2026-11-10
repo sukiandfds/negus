@@ -116,7 +116,7 @@ const conversationStoreOptions = {
   attachmentContent,
   registerMedia: media.register,
   onProtocolMessage: (message) => {
-    execution.handleProtocolMessage(message);
+    if (!employeeRuntime?.ownsThread(message?.params?.threadId)) execution.handleProtocolMessage(message);
     void agentTasks?.onProtocolMessage(message).catch(error => console.error("[agent-tasks]", error.message));
     void appServerConversations.handleProtocolMessage(message).catch((error) => {
       console.error("[model-settings] Could not save successful selection:", error.message);

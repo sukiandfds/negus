@@ -22,3 +22,13 @@ Codex原生cua_repl首次getState实测可列应用，但浏览器清单失败�
 2026-10-03进度快照：正式版本1790959880810-8092ecde已通过权限、截图与GitHub API检查。自建输入工具实测返回成功但页面没有文字；本机原生工具已完成输入、点击和页面回执，独立渠道原生MCP复用已加入源码，但仍有调用兼容错误，尚未发布或完成正式验收。代理曾因lsof无输出被误判未监听，后续真实代理请求及netstat证实可用；GitHub网页经代理HTTP200。详细过程见docs/negus-knowledge/records/NEGUS_DEMO_PROGRESS_2026-10-03.md。
 
 用户要求先推送一版GitHub，按当前项目源码保存进度快照，包含此前工作区已有修改，排除work临时资料与runtime。前端TypeScript检查及Vite构建成功；本次相关测试28通过。扩大到windows/tests全部测试：354项，343通过、10失败、1跳过；失败集中在会话/群聊加载测试的data URL相对导入，以及heartbeat-message测试缺依赖。此快照不标记为稳定发布或电脑操控验收完成。
+
+## 2026-11-10 Cloudflare 官方账号连接
+
+来源：本次 Codex 对话。用户原话：“我的需求是后续我通过公网访问negus，也能在服务器端连接到cloudflare帮我管理”；“请你帮我开发好相关功能，我作为用户来体验一下，怎么用negus接入我的cloudflare”“最小代码改动快速敏捷开发好”。
+
+有效决定：设置中提供官方 Cloudflare OAuth 连接；账号归当前 Negus 工作空间，在服务器独立保存和刷新凭据，普通对话、员工及模型渠道共用。连接能力与供应商 CODEX_HOME 分离。先完成连接、断开、连接测试与助手工具调用；后续域名统计展示复用连接，本次不新增数据面板或插件市场。当前 Negus 是单工作空间访问令牌模型，本次不引入多用户账户系统。连接不是对任意远程资源修改的授权。保留原 Wrangler 与提供方内手工 Cloudflare 授权，不复制其凭据。
+
+交互：设置 → 账号连接 → 连接 Cloudflare → 在 Cloudflare 官方页面登录、选择权限和账号 → 回到 Negus。公网回调绑定启动授权的浏览器，PKCE、10分钟有效期及一次性 state；只接受配置中的公网域名或本机地址，凭据不返回页面/模型。断开删除 Negus 本地凭据，Cloudflare 侧撤销授权可在其控制台完成。工具每次读取共享连接，连接或断开不要求用户重建对话。
+
+实现范围：`windows/server/connections/cloudflare*.mjs`、`routes/connection-routes.mjs`、`app-server-client.mjs`、单聊和员工共用提示词、设置页。基线 develop / 340baaaadc9a0a6bec28047ad565d55bd38228ec。预计业务新增250～400行，修改15～25行，另加回归测试及SDK依赖。发布和验证证据见 updates.md。

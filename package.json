@@ -37,6 +37,7 @@
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",
+    "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
     "image-size": "2.0.2",
     "sharp": "^0.34.5",

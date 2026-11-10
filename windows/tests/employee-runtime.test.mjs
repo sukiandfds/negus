@@ -3,8 +3,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { createEmployeeProjectDirectory } from "../server/employee-project-directory.mjs";
 import { createEmployeeProjectRegistry } from "../server/employee-project-registry.mjs";
 import { createEmployeeRuntimeService } from "../server/employee-runtime-service.mjs";
+import { createEmployeeProjectDirectoryRoutes } from "../server/routes/employee-project-directory-routes.mjs";
 
 const fixture = async (t, { execution = null, onTurnCompleted = null, taskService = null, growthService = null, readHistory, registerSession } = {}) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-employee-runtime-"));
@@ -52,7 +54,7 @@ const fixture = async (t, { execution = null, onTurnCompleted = null, taskServic
     runtime.close();
     await registry.close();
   });
-  return { registry, client, conversationStore, runtime, events, calls, get listener() { return listener; } };
+  return { root, registry, client, conversationStore, runtime, events, calls, get listener() { return listener; } };
 };
 
 test("a failed memory suggestion cannot fail an accepted employee turn", async t => {
@@ -186,6 +188,405 @@ test("employee runtime mirrors status and message progress to the shared convers
   });
 });
 
+test("the current turn completion publishes idle immediately", async (t) => {
+  const f = await fixture(t);
+  await f.runtime.sendMessage({ employeeId: "developer", text: "finish current turn", requestId: "current-complete" });
+  f.listener({ method: "turn/completed", params: {
+    threadId: "employee-thread",
+    turnId: "employee-turn",
+    turn: { id: "employee-turn", status: "completed" },
+  } });
+  const status = (await f.runtime.getStatus("developer")).status;
+  assert.equal(status.active, false);
+  assert.equal(status.phase, "idle");
+  assert.equal(status.turnId, "");
+  assert.deepEqual(f.events.filter(event => event.type === "employee_status").at(-1).status, status);
+});
+
+test("late completion and output from another turn cannot change the current status or reply", async (t) => {
+  const f = await fixture(t);
+  await f.runtime.sendMessage({ employeeId: "developer", text: "new turn", requestId: "new-turn" });
+  const before = (await f.runtime.getStatus("developer")).status;
+  const messagesBefore = f.events.filter(event => event.type === "employee_message_completed").length;
+  const deltasBefore = f.events.filter(event => event.type === "employee_assistant_delta").length;
+
+  f.listener({ method: "turn/completed", params: {
+    threadId: "employee-thread",
+    turn: { id: "old-turn", status: "completed" },
+  } });
+  f.listener({ method: "item/completed", params: {
+    threadId: "employee-thread",
+    turnId: "old-turn",
+    item: { id: "old-final", type: "agentMessage", phase: "final_answer", text: "old answer" },
+  } });
+  f.listener({ method: "item/agentMessage/delta", params: {
+    threadId: "employee-thread", turnId: "old-turn", itemId: "old-final", delta: "old",
+  } });
+
+  const status = (await f.runtime.getStatus("developer")).status;
+  assert.deepEqual(status, before);
+  assert.equal(f.events.filter(event => event.type === "employee_message_completed").length, messagesBefore);
+  assert.equal(f.events.filter(event => event.type === "employee_assistant_delta").length, deltasBefore);
+});
+
+test("stale turn events during a new submission cannot clear or change it", async (t) => {
+  const f = await fixture(t);
+  let releaseStart;
+  let reachedStart;
+  const startReached = new Promise(resolve => { reachedStart = resolve; });
+  const startGate = new Promise(resolve => { releaseStart = resolve; });
+  const request = f.client.request.bind(f.client);
+  f.client.request = async (method, params) => {
+    if (method === "turn/start") {
+      reachedStart();
+      await startGate;
+    }
+    return request(method, params);
+  };
+
+  const sending = f.runtime.sendMessage({ employeeId: "developer", text: "new submission", requestId: "new-submission" });
+  await startReached;
+  const before = (await f.runtime.getStatus("developer")).status;
+  const messagesBefore = f.events.filter(event => event.type === "employee_message_completed").length;
+  const deltasBefore = f.events.filter(event => event.type === "employee_assistant_delta").length;
+
+  f.listener({ method: "turn/completed", params: {
+    threadId: "employee-thread", turn: { id: "old-turn", status: "completed" },
+  } });
+  f.listener({ method: "item/completed", params: {
+    threadId: "employee-thread",
+    turnId: "old-turn",
+    item: { id: "old-final", type: "agentMessage", phase: "final_answer", text: "old answer" },
+  } });
+  f.listener({ method: "item/agentMessage/delta", params: {
+    threadId: "employee-thread", turnId: "old-turn", itemId: "old-final", delta: "old",
+  } });
+
+  assert.deepEqual((await f.runtime.getStatus("developer")).status, before);
+  assert.equal(f.events.filter(event => event.type === "employee_message_completed").length, messagesBefore);
+  assert.equal(f.events.filter(event => event.type === "employee_assistant_delta").length, deltasBefore);
+  releaseStart();
+  await sending;
+  const status = (await f.runtime.getStatus("developer")).status;
+  assert.equal(status.active, true);
+  assert.equal(status.phase, "working");
+  assert.equal(status.turnId, "employee-turn");
+});
+
+test("a compatible completion without a turn ID still returns the employee to idle", async (t) => {
+  const f = await fixture(t);
+  await f.runtime.sendMessage({ employeeId: "developer", text: "legacy completion", requestId: "legacy-complete" });
+  f.listener({ method: "turn/completed", params: {
+    threadId: "employee-thread",
+    turn: { status: "completed" },
+  } });
+  const status = (await f.runtime.getStatus("developer")).status;
+  assert.equal(status.active, false);
+  assert.equal(status.phase, "idle");
+  assert.equal(status.turnId, "");
+});
+
+test("old turn/started while idle does not reactivate the employee", async (t) => {
+  const f = await fixture(t);
+  await f.runtime.sendMessage({ employeeId: "developer", text: "finish", requestId: "finish" });
+  f.listener({ method: "turn/completed", params: {
+    threadId: "employee-thread",
+    turn: { id: "employee-turn", status: "completed" },
+  } });
+  const idle = (await f.runtime.getStatus("developer")).status;
+  f.listener({ method: "turn/started", params: {
+    threadId: "employee-thread",
+    turn: { id: "old-turn" },
+  } });
+  assert.deepEqual((await f.runtime.getStatus("developer")).status, idle);
+});
+
+test("turn/start only binds after its response confirms the candidate turn", async (t) => {
+  const f = await fixture(t);
+  let releaseStart;
+  let reachedStart;
+  const startReached = new Promise(resolve => { reachedStart = resolve; });
+  const startGate = new Promise(resolve => { releaseStart = resolve; });
+  const request = f.client.request.bind(f.client);
+  f.client.request = async (method, params) => {
+    if (method === "turn/start") {
+      reachedStart();
+      await startGate;
+    }
+    return request(method, params);
+  };
+
+  const sending = f.runtime.sendMessage({ employeeId: "developer", text: "new task", requestId: "new-task" });
+  await startReached;
+  f.listener({ method: "turn/started", params: {
+    threadId: "employee-thread",
+    turn: { id: "employee-turn" },
+  } });
+  let status = (await f.runtime.getStatus("developer")).status;
+  assert.equal(status.phase, "submitted");
+  assert.equal(status.turnId, "");
+
+  f.listener({ method: "turn/started", params: {
+    threadId: "employee-thread",
+    turn: { id: "other-turn" },
+  } });
+  f.listener({ method: "turn/completed", params: {
+    threadId: "employee-thread",
+    turn: { status: "completed" },
+  } });
+  status = (await f.runtime.getStatus("developer")).status;
+  assert.equal(status.phase, "submitted");
+  assert.equal(status.active, true);
+
+  f.listener({ method: "turn/completed", params: {
+    threadId: "employee-thread",
+    turn: { id: "employee-turn", status: "completed" },
+  } });
+  status = (await f.runtime.getStatus("developer")).status;
+  assert.equal(status.phase, "submitted");
+  assert.equal(status.active, true);
+
+  releaseStart();
+  await sending;
+  status = (await f.runtime.getStatus("developer")).status;
+  assert.equal(status.phase, "idle");
+  assert.equal(status.active, false);
+  assert.equal(status.turnId, "");
+});
+
+test("compatible completion without a turn ID can arrive before the start response", async (t) => {
+  const f = await fixture(t);
+  let releaseStart;
+  let reachedStart;
+  const startReached = new Promise(resolve => { reachedStart = resolve; });
+  const startGate = new Promise(resolve => { releaseStart = resolve; });
+  const request = f.client.request.bind(f.client);
+  f.client.request = async (method, params) => {
+    if (method === "turn/start") {
+      reachedStart();
+      await startGate;
+    }
+    return request(method, params);
+  };
+
+  const sending = f.runtime.sendMessage({ employeeId: "developer", text: "legacy early completion", requestId: "legacy-early" });
+  await startReached;
+  f.listener({ method: "turn/completed", params: {
+    threadId: "employee-thread",
+    turn: { status: "completed" },
+  } });
+  let status = (await f.runtime.getStatus("developer")).status;
+  assert.equal(status.phase, "submitted");
+  assert.equal(status.active, true);
+
+  releaseStart();
+  await sending;
+  status = (await f.runtime.getStatus("developer")).status;
+  assert.equal(status.phase, "idle");
+  assert.equal(status.active, false);
+  assert.equal(status.turnId, "");
+});
+
+test("steer preserves the current turn and accepts its delta and final answer", async (t) => {
+  const f = await fixture(t);
+  await f.runtime.sendMessage({ employeeId: "developer", text: "first", requestId: "first" });
+  let releaseSteer;
+  let reachedSteer;
+  const steerReached = new Promise(resolve => { reachedSteer = resolve; });
+  const steerGate = new Promise(resolve => { releaseSteer = resolve; });
+  const request = f.client.request.bind(f.client);
+  f.client.request = async (method, params) => {
+    if (method === "turn/steer") {
+      reachedSteer();
+      await steerGate;
+    }
+    return request(method, params);
+  };
+
+  const deltasBefore = f.events.filter(event => event.type === "employee_assistant_delta").length;
+  const messagesBefore = f.events.filter(event => event.type === "employee_message_completed").length;
+  const steering = f.runtime.sendMessage({ employeeId: "developer", text: "follow up", requestId: "follow-up" });
+  await steerReached;
+  assert.equal((await f.runtime.getStatus("developer")).status.turnId, "employee-turn");
+  f.listener({ method: "item/agentMessage/delta", params: {
+    threadId: "employee-thread", turnId: "employee-turn", itemId: "steer-answer", delta: "new",
+  } });
+  f.listener({ method: "item/completed", params: {
+    threadId: "employee-thread", turnId: "employee-turn",
+    item: { id: "steer-answer", type: "agentMessage", phase: "final_answer", text: "new answer" },
+  } });
+  assert.equal(f.events.filter(event => event.type === "employee_assistant_delta").length, deltasBefore + 1);
+  assert.equal(f.events.filter(event => event.type === "employee_message_completed").length, messagesBefore + 1);
+
+  releaseSteer();
+  await steering;
+  assert.equal((await f.runtime.getStatus("developer")).status.turnId, "employee-turn");
+});
+
+test("a failed submission cannot replay its buffered events into the next send", async (t) => {
+  const f = await fixture(t);
+  let starts = 0;
+  let releaseFirst;
+  let reachedFirst;
+  const firstReached = new Promise(resolve => { reachedFirst = resolve; });
+  const firstGate = new Promise(resolve => { releaseFirst = resolve; });
+  const request = f.client.request.bind(f.client);
+  f.client.request = async (method, params) => {
+    if (method === "turn/start" && ++starts === 1) {
+      reachedFirst();
+      await firstGate;
+      throw Error("start unavailable");
+    }
+    return request(method, params);
+  };
+
+  const first = f.runtime.sendMessage({ employeeId: "developer", text: "first", requestId: "first" });
+  await firstReached;
+  f.listener({ method: "item/completed", params: {
+    threadId: "employee-thread", turnId: "employee-turn",
+    item: { id: "stale-early", type: "agentMessage", phase: "final_answer", text: "must not replay" },
+  } });
+  releaseFirst();
+  await assert.rejects(first, /start unavailable/);
+  const messagesBefore = f.events.filter(event => event.type === "employee_message_completed").length;
+  await f.runtime.sendMessage({ employeeId: "developer", text: "second", requestId: "second" });
+  assert.equal(f.events.filter(event => event.type === "employee_message_completed").length, messagesBefore);
+});
+
+test("untagged agent output is rejected while untagged completion remains compatible", async (t) => {
+  const f = await fixture(t);
+  await f.runtime.sendMessage({ employeeId: "developer", text: "current", requestId: "current" });
+  const deltasBefore = f.events.filter(event => event.type === "employee_assistant_delta").length;
+  const messagesBefore = f.events.filter(event => event.type === "employee_message_completed").length;
+  f.listener({ method: "item/agentMessage/delta", params: {
+    threadId: "employee-thread", itemId: "untagged", delta: "old",
+  } });
+  f.listener({ method: "item/completed", params: {
+    threadId: "employee-thread",
+    item: { id: "untagged", type: "agentMessage", phase: "final_answer", text: "old answer" },
+  } });
+  assert.equal(f.events.filter(event => event.type === "employee_assistant_delta").length, deltasBefore);
+  assert.equal(f.events.filter(event => event.type === "employee_message_completed").length, messagesBefore);
+  f.listener({ method: "turn/completed", params: {
+    threadId: "employee-thread",
+    turn: { status: "completed" },
+  } });
+  const status = (await f.runtime.getStatus("developer")).status;
+  assert.equal(status.active, false);
+  assert.equal(status.phase, "idle");
+});
+
+test("a late old completion cannot clear a newly confirmed turn", async (t) => {
+  const f = await fixture(t);
+  await f.runtime.sendMessage({ employeeId: "developer", text: "first turn", requestId: "first-turn" });
+  f.listener({ method: "turn/completed", params: {
+    threadId: "employee-thread",
+    turn: { id: "employee-turn", status: "completed" },
+  } });
+  const request = f.client.request.bind(f.client);
+  f.client.request = async (method, params) => method === "turn/start"
+    ? { turn: { id: "next-turn", status: "inProgress" } }
+    : request(method, params);
+  await f.runtime.sendMessage({ employeeId: "developer", text: "next turn", requestId: "next-turn" });
+  f.listener({ method: "turn/started", params: {
+    threadId: "employee-thread",
+    turn: { id: "next-turn" },
+  } });
+  f.listener({ method: "turn/completed", params: {
+    threadId: "employee-thread",
+    turn: { id: "employee-turn", status: "completed" },
+  } });
+  const status = (await f.runtime.getStatus("developer")).status;
+  assert.equal(status.active, true);
+  assert.equal(status.phase, "working");
+  assert.equal(status.turnId, "next-turn");
+});
+
+test("opening an active employee thread recovers its unfinished turn", async (t) => {
+  const f = await fixture(t);
+  await f.registry.bindMainThread("developer", "employee-thread");
+  const request = f.client.request.bind(f.client);
+  f.client.request = async (method, params) => method === "thread/read"
+    ? { thread: {
+      id: params.threadId,
+      status: { type: "active" },
+      turns: [{ id: "recovered-turn", status: "inProgress", items: [] }],
+    } }
+    : request(method, params);
+
+  await f.runtime.open("developer");
+  let status = (await f.runtime.getStatus("developer")).status;
+  assert.equal(status.active, true);
+  assert.equal(status.turnId, "recovered-turn");
+  f.listener({ method: "turn/completed", params: {
+    threadId: "employee-thread",
+    turn: { id: "recovered-turn", status: "completed" },
+  } });
+  status = (await f.runtime.getStatus("developer")).status;
+  assert.equal(status.active, false);
+  assert.equal(status.turnId, "");
+});
+
+test("an active thread without a recoverable turn ends in the safe interrupted state", async (t) => {
+  const f = await fixture(t);
+  await f.registry.bindMainThread("developer", "employee-thread");
+  const request = f.client.request.bind(f.client);
+  f.client.request = async (method, params) => method === "thread/read"
+    ? { thread: { id: params.threadId, status: { type: "active" }, turns: [] } }
+    : request(method, params);
+
+  await f.runtime.open("developer");
+  const status = (await f.runtime.getStatus("developer")).status;
+  assert.equal(status.active, false);
+  assert.equal(status.phase, "interrupted");
+  assert.equal(status.turnId, "");
+});
+
+test("project directory becomes idle when the current turn completes", async (t) => {
+  const f = await fixture(t);
+  const directory = createEmployeeProjectDirectory({
+    project: "negus",
+    projectRoot: f.root,
+    registry: f.registry,
+    employeeRuntime: f.runtime,
+    employeeConversations: f.conversationStore,
+    conversations: {
+      findSession: async () => ({ threadId: "employee-thread", messages: [], updatedAt: null }),
+      listSessions: async () => [],
+    },
+  });
+  const route = createEmployeeProjectDirectoryRoutes({ directory });
+  const read = async () => {
+    let body = "";
+    await route({ method: "GET" }, { writeHead() {}, end(value) { body = value; } }, new URL("http://localhost/api/project-directory"));
+    return JSON.parse(body).projects.find(project => project.employeeId === "developer");
+  };
+
+  await f.runtime.sendMessage({ employeeId: "developer", text: "directory status", requestId: "directory-status" });
+  let employee = await read();
+  assert.equal(employee.status.active, true);
+  assert.equal(employee.status.label, "正在主对话工作");
+  f.listener({ method: "turn/completed", params: {
+    threadId: "employee-thread",
+    turn: { id: "employee-turn", status: "completed" },
+  } });
+  employee = await read();
+  assert.equal(employee.status.active, false);
+  assert.equal(employee.status.label, "等待任务");
+});
+
+test("an event from a previous employee thread is ignored", async (t) => {
+  const f = await fixture(t);
+  await f.runtime.sendMessage({ employeeId: "developer", text: "current thread", requestId: "current-thread" });
+  const before = (await f.runtime.getStatus("developer")).status;
+  await f.registry.bindMainThread("developer", "replacement-thread");
+  f.listener({ method: "turn/completed", params: {
+    threadId: "employee-thread",
+    turn: { id: "employee-turn", status: "completed" },
+  } });
+  assert.deepEqual((await f.runtime.getStatus("developer")).status, before);
+});
+
 test("only interrupts the exact Turn owned by the requested Goal", async (t) => {
   const completions = [];
   const { runtime, calls, listener } = await fixture(t, {
@@ -315,21 +716,34 @@ for (const state of ['idle', 'active', 'unknown']) test(`existing product leader
   await f.registry.bindMainThread('researcher', 'existing-product');
   const original = f.client.request;
   f.client.request = async (method, params) => method === 'thread/read'
-    ? { thread: { id: params.threadId, status: state === 'unknown' ? undefined : { type: state }, turns: [] } }
+    ? { thread: {
+      id: params.threadId,
+      status: state === 'unknown' ? undefined : { type: state },
+      turns: state === 'active' ? [{ id: 'active-turn', status: 'inProgress', items: [] }] : [],
+    } }
     : original(method, params);
   await f.runtime.open('researcher');
   const unloads = f.calls.filter(c => c.method === 'thread/unsubscribe');
   assert.equal(unloads.length, 1);
   assert.equal(f.calls.some(c => c.method === 'thread/start'), false);
   if (state === 'idle') assert.ok(f.calls.find(c => c.method === 'thread/resume').params.config['mcp_servers.negus_tasks']);
-  if (state === 'active') assert.equal((await f.runtime.getStatus('researcher')).status.active, true);
+  if (state === 'active') {
+    const status = (await f.runtime.getStatus('researcher')).status;
+    assert.equal(status.active, true);
+    assert.equal(status.turnId, 'active-turn');
+  }
 });
 
 test('completion callback waits for send lock even when a turn completes before its start response', async t => {
   let completion;
+  const completionStatuses = [];
   const finished = new Promise(resolve => { completion = resolve; });
   const f = await fixture(t, { onTurnCompleted: async () => {
-    try { await f.runtime.sendMessage({ employeeId: 'researcher', text: '后台结果' }); completion(); }
+    try {
+      completionStatuses.push((await f.runtime.getStatus('researcher')).status);
+      await f.runtime.sendMessage({ employeeId: 'researcher', text: '后台结果' });
+      completion();
+    }
     catch (error) { completion(error); }
   } });
   const original = f.client.request;
@@ -345,6 +759,9 @@ test('completion callback waits for send lock even when a turn completes before 
   await f.runtime.sendMessage({ employeeId: 'researcher', text: '主对话' });
   assert.equal(await finished, undefined);
   assert.equal(f.calls.filter(c => c.method === 'turn/start').length, 2);
+  assert.equal(completionStatuses[0].active, false);
+  assert.equal(completionStatuses[0].phase, 'idle');
+  assert.equal(completionStatuses[0].turnId, '');
 });
 
 test("employee steering preserves submission identity and current turn when response has no turn object", async (t) => {

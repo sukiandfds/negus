@@ -30,6 +30,7 @@ async function fixture(t, { defaultModelSettings = null, initialEmployee = null 
     if (clients.has(id)) return clients.get(id);
     const listeners = new Set();
     let active = false;
+    let currentTurnId = "";
     const runtime = { model: 'model-a', effort: 'medium' };
     const c = {
       subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
@@ -53,10 +54,12 @@ async function fixture(t, { defaultModelSettings = null, initialEmployee = null 
           const history = histories.get(id);
           if (!history) throw Error(`missing history for ${id}: ${[...histories.keys()].join(',')}`);
           history.push(params.input[0].text);
-          return { turn: { id: `turn-${calls.length}`, status: 'inProgress' } };
+          currentTurnId = `turn-${calls.length}`;
+          return { turn: { id: currentTurnId, status: 'inProgress' } };
         }
         return {};
       },
+      get currentTurnId() { return currentTurnId; },
     };
     clients.set(id, c); return c;
   }
@@ -83,7 +86,9 @@ async function fixture(t, { defaultModelSettings = null, initialEmployee = null 
   t.after(async () => { service.close(); await registry.close(); await fs.rm(root, { recursive: true, force: true }); });
   return { root, stateFile, get service() { return service; }, get registry() { return options.registry; }, providers, histories, calls, events, client,
     fail: () => { failTarget = true; },
-    complete: id => client(id).emit({ method: 'turn/completed', params: { threadId: 'original-thread', turn: { id: 'done', status: 'completed' } } }),
+    complete: id => client(id).emit({ method: 'turn/completed', params: {
+      threadId: 'original-thread', turn: { id: client(id).currentTurnId, status: 'completed' },
+    } }),
     restart: async ({ defaultModelSettings: nextDefaults = defaultModelSettings } = {}) => {
       service.close();
       options.registry = await createEmployeeProjectRegistry({
@@ -199,11 +204,56 @@ test('restart restores selected employee provider; old provider events cannot co
   assert.equal(JSON.parse(await fs.readFile(f.stateFile, 'utf8')).employees[0].pendingModelSettings.modelSelectionSource, 'explicit');
   assert.equal(f.registry.get('researcher').modelSelectionSource, 'explicit');
   await f.service.sendMessage({ employeeId: 'researcher', text: 'after restart' });
-  f.complete('current');
+  f.client('current').emit({ method: 'turn/completed', params: {
+    threadId: 'original-thread', turn: { id: 'old-provider-turn', status: 'completed' },
+  } });
   assert.equal((await f.service.getStatus('researcher')).status.active, true);
   f.complete('ccswitch_vip');
   assert.equal((await f.service.getStatus('researcher')).status.active, false);
   assert.equal(f.histories.get('ccswitch_vip').at(-1), 'after restart');
+});
+
+test('all subscribed providers reach employee runtime; only the current turn can complete it', async t => {
+  const f = await fixture(t);
+  await f.service.updateModelSettings('researcher', { model: 'ccswitch_vip::model-b' });
+  const sent = await f.service.sendMessage({ employeeId: 'researcher', text: 'current provider turn' });
+  assert.equal((await f.service.getStatus('researcher')).status.turnId, sent.turnId);
+
+  const deltasBefore = f.events.filter(event => event.type === 'employee_assistant_delta').length;
+  f.client('current').emit({ method: 'item/agentMessage/delta', params: {
+    threadId: 'original-thread', turnId: sent.turnId, itemId: 'current-delta', delta: 'reaches handler',
+  } });
+  assert.equal(f.events.filter(event => event.type === 'employee_assistant_delta').length, deltasBefore + 1);
+
+  f.client('current').emit({ method: 'turn/completed', params: {
+    threadId: 'original-thread', turn: { id: 'old-provider-turn', status: 'completed' },
+  } });
+  f.client('current').emit({ method: 'turn/started', params: {
+    threadId: 'original-thread', turn: { id: 'old-provider-turn' },
+  } });
+  const messagesBefore = f.events.filter(event => event.type === 'employee_message_completed').length;
+  f.client('current').emit({ method: 'item/completed', params: {
+    threadId: 'original-thread', turnId: 'old-provider-turn',
+    item: { id: 'old-final', type: 'agentMessage', phase: 'final_answer', text: 'old answer' },
+  } });
+  let status = (await f.service.getStatus('researcher')).status;
+  assert.equal(status.active, true);
+  assert.equal(status.turnId, sent.turnId);
+  assert.equal(f.events.filter(event => event.type === 'employee_message_completed').length, messagesBefore);
+
+  f.client('ccswitch_vip').emit({ method: 'turn/completed', params: {
+    threadId: 'original-thread', turn: { id: sent.turnId, status: 'completed' },
+  } });
+  status = (await f.service.getStatus('researcher')).status;
+  assert.equal(status.active, false);
+  assert.equal(status.phase, 'idle');
+  assert.equal(status.turnId, '');
+  f.client('current').emit({ method: 'turn/started', params: {
+    threadId: 'original-thread', turn: { id: 'old-provider-turn' },
+  } });
+  status = (await f.service.getStatus('researcher')).status;
+  assert.equal(status.active, false);
+  assert.equal(status.phase, 'idle');
 });
 
 test('sending waits for a concurrent provider change, and busy employee rejects switching', async t => {

@@ -7,7 +7,7 @@
     "研究 Agent",
     "研究"
   ],
-  "responsibility": "只读调研、产品分析、技术验证和方案比较",
+  "responsibility": "需求澄清、用户流程分析、产品方案、优先级与验收",
   "delegatesTo": [
     "grok"
   ],

@@ -1,3 +1,4 @@
+import { cloudflareInstructions } from './connections/cloudflare-runtime.mjs';
 import { basePrompt } from "./base-prompt.mjs";
 import { imageInstructions } from "./image-generation/image-runtime.mjs";
 import { githubInstructions } from "./github-runtime.mjs";
@@ -22,7 +23,7 @@ export const employeeTurnInstructions = (instructions = "", context = "") => [
   maintenanceInstructions(),
   imageInstructions(),
   computerInstructions(),
-  githubInstructions(),
+  githubInstructions(), cloudflareInstructions(),
 ].filter(Boolean).join("\n\n");
 
 const normalize = (value, workRoot) => {

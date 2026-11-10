@@ -40,9 +40,8 @@ registerHooks({ load(url, context, nextLoad) {
       .replace(projectsMarker, 'const businessProjects = [...await loadBusinessProjectConfig(), ...await existingProjects(projectRoot)];')
       .replace('const conversations = createConversationService({', 'let conversations = createConversationService({')
       .replace(conversationsMarker, `conversations = await withExistingConversations(conversations, conversationStoreOptions);\n${conversationsMarker}`);
-    const executionMarker = '    execution.handleProtocolMessage(message);';
+    const executionMarker = '    if (!employeeRuntime?.ownsThread(message?.params?.threadId)) execution.handleProtocolMessage(message);';
     if (!source.includes(executionMarker)) throw new Error('Employee execution integration changed');
-    source = source.replace(executionMarker, '    if (!employeeRuntime?.ownsThread(message?.params?.threadId)) execution.handleProtocolMessage(message);');
     const employeeMarker = 'employeeRuntime = createEmployeeRuntimeService({';
     if (!source.includes(employeeMarker)) throw new Error('Employee task extension: host integration point changed');
     source = `import { extendEmployeeTasks } from ${JSON.stringify(employeeTasks)};\n` + source.replace(employeeMarker, `agentTasks = await extendEmployeeTasks(agentTasks, {

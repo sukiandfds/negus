@@ -1,3 +1,4 @@
+import { createConnectionRoutes } from './routes/connection-routes.mjs';
 import { createImageSettingsRoutes } from "./routes/image-settings-routes.mjs";
 import { createLynnWorkbenchRoutes } from "./routes/lynn-workbench-routes.mjs";
 import { createConversationForwardRoutes } from "./routes/conversation-forward-routes.mjs";
@@ -35,6 +36,7 @@ export const createRequestHandler = ({
     },
   });
   const routes = [
+    createConnectionRoutes(),
     createLynnWorkbenchRoutes(),
     createImageSettingsRoutes({ projectRoot }),
     async (request, response, url) => {

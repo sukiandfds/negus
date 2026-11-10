@@ -612,6 +612,44 @@ taskId + artifactId
 
 当前有效决定：员工列表入口汇总该员工的主对话、群会话和后台任务状态。只有主对话运行时显示“正在主对话工作”，只有群会话运行时显示“正在群聊工作”，只有后台任务运行时显示“正在处理后台任务”，多个工作同时运行时显示进行中的数量。普通对话原有运行提示保持不变；不新增一套员工状态存储，直接复用现有目录、群房间与任务状态。
 
+### 2026-11-10 员工主对话完成后状态必须回落
+
+来源：本次用户确认的真实 bug 与修复边界，2026-11-10；未提供消息标识。
+
+用户反馈原话：
+
+> 完成后仍显示正在主对话工作
+
+> 最终答复显示完成后，员工目录和主对话状态必须自动恢复空闲；“正在主对话工作”只能代表真实正在运行。若用户马上发送下一条消息，可重新进入运行状态。
+
+根因：最近 Provider 迁移适配把员工运行时对 Provider 客户端订阅的协议事件改成按 `threadClients` 当前客户端对象身份过滤，当前 Provider 的真实完成事件可能在该入口被丢弃。正文仍由最终消息正常显示，但员工状态收不到当前轮次的 `turn/completed`，因此 `active` 一直为 true，直到下一次发送触发已有核对。
+
+当前有效决定：所有已订阅 Provider 客户端的协议事件都进入同一个员工协议处理入口。空闲或 inactive 时的 `turn/started` 必须忽略；`turn/start` 提交中收到的 started 只记录为当前单次发送的候选 turnId，不直接改变界面状态，只有 `turn/start` 返回相同 turnId 后才绑定为 working。已有当前 active turnId 时，不同 started 忽略，相同保持。steer 提交期间始终保留原 turnId，使同一轮 delta 与最终正文继续显示；`turn/start` 新任务才从空 turnId 开始。
+
+带 turnId 的 delta、最终正文和完成事件必须匹配当前 turnId。无 turnId 的 agentMessage delta/final answer 一律拒绝，不得进入员工正文或 execution tracker；只有无 turnId 的 `turn/completed` 保留兼容回落。
+
+`turn/start` 的 submitted、空 turnId 阶段会把 possible-current 的 started、agentMessage delta、final answer 和带 turnId completion 以原始协议事件的深拷贝按到达顺序保存在本次发送对象中，不广播正文、不改变状态、不进入 execution tracker。无 turnId delta/final 直接拒绝；无 turnId completion 最多兼容保存一个。响应返回 confirmedTurnId 后先绑定 working，再只按原序回放 matching turnId 的事件；不匹配的旧 Provider/旧 turn 全部丢弃。若没有 matching 带 ID completion，才回放一个兼容的无 turnId completion。回放走正常 `handleProtocolMessage`/`acceptsProtocolMessage` 路径，各事件、正文和 execution 只处理一次，completion 回放后立即 idle。无 turnId completion 本身无法与旧 Provider 的无标识迟到事件严格区分，这是保留兼容规则时接受的协议边界。
+
+`acceptsProtocolMessage` 作为纯检查位于共享 execution 之前：当前员工主线程和当前 turn 的正文/完成可进入 execution tracker，旧线程、旧 turn、无 turnId 正文和未确认轮次不得进入，非员工 thread 行为不变。恢复已有活动线程时读取未完成 turnId；无法取得 turnId 时进入安全中断态，不留下 active 但无法接收完成的状态。
+
+合法无 turnId completion 的原始员工事件仍按原 payload 处理，员工 completion 只生成一次。正式 execution 接线在 tracker 前生成独立深拷贝，用当前 active turnId 或 start 响应 confirmedTurnId 同时补齐 `params.turnId` 与 `params.turn.id`；原始员工消息及 completion payload 不修改。拿不到 confirmed turnId 时不向 execution 投递 completion，保持现有提交失败或安全语义。带 ID 与无 ID completion 同时存在时以带 ID 事件优先，只向员工和 execution 各投递一次。
+
+本次不新增跨事件状态系统、定时器、轮询或延迟 `readAuthoritativeStatus` 兜底；不修改目录组件、消息正文或受保护的 `ConversationView.tsx`、`useReturnToBottom.ts`。若用户紧接着发送下一条消息，正常进入新的运行状态。
+
+### 2026-11-10 产品分析岗位职责与沟通方式
+
+来源：本次用户对话，2026-11-10；未提供消息标识。
+
+用户原话：
+
+> 现在产品分析的工作职责，把我原话的要求加入进去。现在这个员工的体验太糟糕了，完全不像一个产品的角色
+
+> 你作为产品应该和我保持高效明晰的沟通。减少冗余信息。我关注功能开发前后的用户体验的改变。具体到进入哪个页面，点击哪里，有什么反馈。然后才是代码逻辑的简单介绍。然后才是代码改动量。具体更细节的内容，不是我关注的，你应该知道但是不用时刻和我汇报。通常，我习惯的开发节奏是，针对一个功能，你和我明确需要沟通哪些细节问题，给我一个大致的问题提纲。然后我觉得可以之后，你逐条问题和我过。然后保持有关系的几个小改动一起修改开发。我很难和你说明。比如我说 我晚上要吃番茄炒蛋。 那你应该梳理清楚，有几个途径，比如外卖还是自己做，一般番茄炒蛋是怎么做的。然后如果有可以复用 的番茄可用就优先复用。又比如锅里有东西就先倒掉锅。然后拿番茄、洗番茄，切番茄适合一起做，那就先一起做好。不能拿了番茄，又出门去买鸡蛋，买完鸡蛋回来又去刷锅，就很乱。你理解吗？
+
+> 问题提纲我一般只看看有多少条要我回答的。不要问我太愚蠢的问题。
+
+当前有效决定：将 `researcher`（产品分析）收敛为用户目标和产品结果负责人。职责先核查真实用户流程，再提供带问题数量的集中式问题提纲；只询问真正影响页面、操作、反馈、权限、数据、范围或优先级的产品决策。用户认可后逐条澄清，相关小改按依赖一次编排、优先复用现有代码和组件并删除重复逻辑。汇报先讲修改前后用户进入哪个页面、点击或输入什么、看到什么，再讲核心逻辑、代码改动量和风险，减少后台过程与无关技术细节。职位职责同步改为需求澄清、用户流程分析、产品方案、优先级与验收。
+
 ## 2026-11-09 员工全局规则（本轮决定与实现）
 
 来源：本次用户对话，日期 2026-11-09；未提供消息标识。

@@ -45,10 +45,6 @@ export function adaptEmployeeProviderSource(source) {
     source = source.replace(before, after);
   };
   replace('  const sendLocks = new Map();', '  const sendLocks = new Map();\n  const modelChanges = new Map();');
-  replace('runtimeClient.subscribe(handleProtocolMessage)', `runtimeClient.subscribe(message => {
-      const owner = threadClients.get(message?.params?.threadId);
-      if (!owner || owner === runtimeClient) handleProtocolMessage(message);
-    })`);
   replace('  const ensureOpen = async (employeeId) => {', '  const ensureOpen = async (employeeId) => {\n    await modelChanges.get(employeeId);');
   replace('  const startThread = async (employee) => {', `  const reconcileEmployeeIdle = async (employeeId) => {
     const status = statusFor(employeeId);

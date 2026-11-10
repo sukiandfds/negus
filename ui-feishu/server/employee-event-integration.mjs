@@ -11,9 +11,13 @@ export function adaptEmployeeRuntimeSource(source) {
   if (start < 0 || end < 0) throw Error('Employee event handler integration changed');
   let handler = source.slice(start, end);
   handler = handler.replace('    if (!employeeId) return;', `    if (!employeeId) return;
-    execution?.handleProtocolMessage?.(message);
+    const executionMessage = normalizeExecutionProtocolMessage(message);
+    if (executionMessage) execution?.handleProtocolMessage?.(executionMessage);
     const publishNativeStatus = patch => publishStatus(employeeId, patch, false);`)
     .replaceAll('publishStatus(employeeId, {', 'publishNativeStatus({');
+  const completionCall = 'publishTurnCompletion({ employeeId, threadId, turnId, status, error });';
+  if (!handler.includes(completionCall)) throw Error('Employee completion integration changed');
+  handler = handler.replace(completionCall, 'publishTurnCompletion({ employeeId, threadId, turnId, status, error }, false);');
   const duplicate = `      execution?.publishThreadEvent?.(threadId, {
         type: "assistant_delta",
         threadId,

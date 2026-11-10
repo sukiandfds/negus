@@ -369,6 +369,7 @@ export const createAppServerConversationStore = ({
     const threads = [];
     for (const root of projectRoots) {
       let cursor = null;
+      const seenCursors = new Set();
       do {
         const params = {
           cursor,
@@ -384,6 +385,8 @@ export const createAppServerConversationStore = ({
         const result = await client.request("thread/list", params);
         threads.push(...result.data);
         cursor = result.nextCursor;
+        if (cursor && seenCursors.has(cursor)) throw new Error("thread/list returned a repeated pagination cursor");
+        if (cursor) seenCursors.add(cursor);
       } while (cursor);
     }
     for (const thread of threads) threadCache.set(thread.id, thread);
@@ -538,10 +541,13 @@ export const createAppServerConversationStore = ({
   const listModels = async () => {
     const models = [];
     let cursor = null;
+    const seenCursors = new Set();
     do {
       const result = await client.request("model/list", { cursor, limit: 100 });
       models.push(...result.data);
       cursor = result.nextCursor;
+      if (cursor && seenCursors.has(cursor)) throw new Error("model/list returned a repeated pagination cursor");
+      if (cursor) seenCursors.add(cursor);
     } while (cursor);
     return models.map((entry) => ({
       id: entry.id,

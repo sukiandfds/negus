@@ -126,6 +126,64 @@ export const createEmployeeRuntimeService = ({
     updatedAt: null,
   };
 
+  const turnIdFromMessage = (message) => clean(
+    message?.params?.turnId || message?.params?.turn?.id || message?.params?.item?.turnId,
+    160,
+  );
+
+  const clearEarlyEvents = (submission) => {
+    if (!submission) return;
+    submission.earlyEvents.length = 0;
+    submission.earlyCompletionWithoutTurnId = null;
+  };
+
+  const acceptsProtocolMessage = (message) => {
+    const threadId = clean(message?.params?.threadId, 120);
+    const employeeId = threadEmployees.get(threadId);
+    if (!employeeId) return true;
+    if (clean(registry.get(employeeId)?.mainThreadId, 120) !== threadId) return false;
+    const method = message?.method || "";
+    const turnId = turnIdFromMessage(message);
+    const current = statusFor(employeeId);
+    const submission = sendLocks.get(employeeId);
+    if (method === "turn/started") {
+      return Boolean(turnId && current.active && current.turnId === turnId);
+    }
+    if (method === "turn/completed") {
+      if (!turnId) return submission?.requestMethod !== "turn/start" || Boolean(submission?.boundTurnId);
+      return current.turnId === turnId;
+    }
+    if (method === "item/agentMessage/delta") {
+      return Boolean(turnId && current.active && current.turnId === turnId);
+    }
+    if (method === "item/completed") {
+      if (message?.params?.item?.type !== "agentMessage") return true;
+      return Boolean(turnId && current.active && current.turnId === turnId);
+    }
+    if (turnId && (method.startsWith("item/") || method === "error")) {
+      return Boolean(current.active && current.turnId === turnId);
+    }
+    return true;
+  };
+
+  const normalizeExecutionProtocolMessage = (message) => {
+    const threadId = clean(message?.params?.threadId, 120);
+    const employeeId = threadEmployees.get(threadId);
+    if (!employeeId) return message;
+    if (!acceptsProtocolMessage(message)) return null;
+    if (message?.method !== "turn/completed" || turnIdFromMessage(message)) return message;
+    const current = statusFor(employeeId);
+    const confirmedTurnId = current.active ? clean(current.turnId, 160) : "";
+    if (!confirmedTurnId) return null;
+    const normalized = structuredClone(message);
+    normalized.params = {
+      ...(normalized.params || {}),
+      turnId: confirmedTurnId,
+      turn: { ...(normalized.params?.turn || {}), id: confirmedTurnId },
+    };
+    return normalized;
+  };
+
   const publishStatus = (employeeId, patch = {}) => {
     const current = statusFor(employeeId);
     const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
@@ -147,6 +205,22 @@ export const createEmployeeRuntimeService = ({
       });
     }
     return next;
+  };
+
+  const publishTurnCompletion = ({ employeeId, threadId, turnId, status, error }, syncExecution = true) => {
+    publishStatus(employeeId, {
+      phase: status === "failed" ? "failed" : status === "interrupted" ? "interrupted" : "idle",
+      label: status === "failed" ? "执行失败" : status === "interrupted" ? "已中断" : "等待任务",
+      detail: error,
+      active: false,
+      turnId: "",
+    }, syncExecution);
+    const completion = { employeeId, threadId, turnId, status, error };
+    broadcast({ type: "employee_turn_completed", ...completion });
+    if (typeof onTurnCompleted === "function") {
+      void Promise.resolve(sendLocks.get(employeeId)?.promise).catch(() => {}).then(() => onTurnCompleted(completion))
+        .catch((cause) => console.warn(`[employee-runtime] completion listener failed: ${String(cause?.message || cause)}`));
+    }
   };
 
   const rememberThread = (employeeId, threadId) => {
@@ -203,7 +277,7 @@ export const createEmployeeRuntimeService = ({
   const readAuthoritativeStatus = async (threadId, employee) => {
     try {
       const runtimeClient = await clientForThread(threadId, employee);
-      const result = await runtimeClient.request("thread/read", { threadId, includeTurns: false });
+      const result = await runtimeClient.request("thread/read", { threadId, includeTurns: true });
       const thread = result?.thread || result || {};
       const rawStatus = thread.status || thread.state;
       const active = thread.active === true
@@ -212,9 +286,17 @@ export const createEmployeeRuntimeService = ({
         || rawStatus?.type === "active"
         || (Array.isArray(thread.activeFlags) && thread.activeFlags.length > 0)
         || (thread.activeFlags && typeof thread.activeFlags === "object" && Object.keys(thread.activeFlags).length > 0);
-      return { known: Boolean(rawStatus || thread.active !== undefined || thread.activeFlags), active };
+      const unfinished = [...(Array.isArray(thread.turns) ? thread.turns : [])].reverse().find((turn) => {
+        const value = turn?.status || turn?.state;
+        return ["active", "inProgress"].includes(String(value?.type || value));
+      });
+      return {
+        known: Boolean(rawStatus || thread.active !== undefined || thread.activeFlags),
+        active,
+        turnId: clean(unfinished?.id || thread.turnId || rawStatus?.turnId, 160),
+      };
     } catch {
-      return { known: false, active: false };
+      return { known: false, active: false, turnId: "" };
     }
   };
 
@@ -280,7 +362,16 @@ export const createEmployeeRuntimeService = ({
       if (hadExistingThread) {
         const authoritative = await readAuthoritativeStatus(threadId, registry.require(employee.id));
         if (authoritative.known && authoritative.active) {
-          publishStatus(employee.id, { phase: "working", label: "正在处理", detail: "", active: true, turnId: statusFor(employee.id).turnId });
+          const turnId = authoritative.turnId || clean(statusFor(employee.id).turnId, 160);
+          publishStatus(employee.id, turnId
+            ? { phase: "working", label: "正在处理", detail: "", active: true, turnId }
+            : {
+              phase: "interrupted",
+              label: "已中断",
+              detail: "无法取得正在运行的任务编号，请重新发送",
+              active: false,
+              turnId: "",
+            });
         }
       }
       return { employee: registry.require(employee.id), binding, threadId };
@@ -409,49 +500,90 @@ export const createEmployeeRuntimeService = ({
     const threadId = clean(message?.params?.threadId, 120);
     const employeeId = threadEmployees.get(threadId);
     if (!employeeId) return;
+    if (clean(registry.get(employeeId)?.mainThreadId, 120) !== threadId) return;
     const params = message.params || {};
     const method = message.method || "";
+    const initialStatus = statusFor(employeeId);
+    const initialSubmission = sendLocks.get(employeeId);
+    const bufferingStart = initialStatus.active
+      && initialStatus.phase === "submitted"
+      && !initialStatus.turnId
+      && initialSubmission?.threadId === threadId
+      && initialSubmission.requestMethod === "turn/start"
+      && !initialSubmission.boundTurnId
+      && !initialSubmission.replaying;
+    if (bufferingStart) {
+      const turnId = turnIdFromMessage(message);
+      if (method === "turn/started") {
+        if (!turnId) return;
+        if (!initialSubmission.candidateTurnId) initialSubmission.candidateTurnId = turnId;
+        initialSubmission.earlyEvents.push(structuredClone(message));
+        return;
+      }
+      if (method === "item/agentMessage/delta") {
+        if (!turnId) return;
+        initialSubmission.earlyEvents.push(structuredClone(message));
+        return;
+      }
+      if (method === "item/completed") {
+        const item = params.item;
+        if (item?.type === "agentMessage" && (!item.phase || item.phase === "final_answer")) {
+          if (!turnId) return;
+          initialSubmission.earlyEvents.push(structuredClone(message));
+          return;
+        }
+      }
+      if (method === "turn/completed") {
+        if (turnId) {
+          initialSubmission.earlyEvents.push(structuredClone(message));
+        } else if (!initialSubmission.earlyCompletionWithoutTurnId) {
+          initialSubmission.earlyCompletionWithoutTurnId = structuredClone(message);
+        }
+        return;
+      }
+    }
     if (method === "thread/goal/updated" || method === "thread/goal/cleared") {
       execution?.publishThreadEvent?.(threadId, { type: "goal_status", threadId, conversationId: registry.require(employeeId).conversationId, goal: params.goal || null });
       return;
     }
 
     if (method === "turn/started") {
-      freshThreads.delete(threadId);
-      publishStatus(employeeId, {
-        phase: "working",
-        label: "正在处理",
-        detail: "",
-        active: true,
-        turnId: clean(params.turnId || params.turn?.id, 160),
-      });
+      const turnId = turnIdFromMessage(message);
+      const current = statusFor(employeeId);
+      if (!turnId || !current.active) return;
+      if (current.phase === "submitted" && !current.turnId) {
+        const submission = sendLocks.get(employeeId);
+        if (submission?.threadId === threadId && !submission.candidateTurnId) submission.candidateTurnId = turnId;
+        return;
+      }
+      if (current.turnId && current.turnId !== turnId) return;
+      if (current.turnId === turnId) freshThreads.delete(threadId);
       return;
     }
     if (method === "turn/completed") {
       const status = String(params.turn?.status || "completed");
-      const turnId = clean(params.turnId || params.turn?.id || statusFor(employeeId).turnId, 160);
+      const eventTurnId = turnIdFromMessage(message);
+      const turnId = eventTurnId || clean(statusFor(employeeId).turnId, 160);
+      const current = statusFor(employeeId);
       const error = String(params.turn?.error?.message || "");
-      publishStatus(employeeId, {
-        phase: status === "failed" ? "failed" : status === "interrupted" ? "interrupted" : "idle",
-        label: status === "failed" ? "执行失败" : status === "interrupted" ? "已中断" : "等待任务",
-        detail: error,
-        active: false,
-        turnId: "",
-      });
-      const completion = { employeeId, threadId, turnId, status, error };
-      broadcast({ type: "employee_turn_completed", ...completion });
-      if (typeof onTurnCompleted === "function") {
-        void Promise.resolve(sendLocks.get(employeeId)).catch(() => {}).then(() => onTurnCompleted(completion))
-          .catch((cause) => console.warn(`[employee-runtime] completion listener failed: ${String(cause?.message || cause)}`));
+      const submission = sendLocks.get(employeeId);
+      if (!eventTurnId && submission?.requestMethod === "turn/start" && !submission.boundTurnId) return;
+      if (!eventTurnId && !current.active) return;
+      if (eventTurnId && current.turnId !== eventTurnId) {
+        return;
       }
+      publishTurnCompletion({ employeeId, threadId, turnId, status, error });
       return;
     }
     if (method === "item/agentMessage/delta") {
+      const turnId = turnIdFromMessage(message);
+      const current = statusFor(employeeId);
+      if (!turnId || !current.active || current.turnId !== turnId) return;
       const deltaEvent = {
         type: "employee_assistant_delta",
         employeeId,
         threadId,
-        turnId: clean(params.turnId, 160),
+        turnId,
         itemId: clean(params.itemId || params.item?.id, 160),
         delta: String(params.delta || params.text || ""),
       };
@@ -469,6 +601,9 @@ export const createEmployeeRuntimeService = ({
       const item = params.item;
       if (!item || !["userMessage", "agentMessage"].includes(item.type)) return;
       if (item.type === "agentMessage" && item.phase && item.phase !== "final_answer") return;
+      const turnId = turnIdFromMessage(message);
+      const current = statusFor(employeeId);
+      if (item.type === "agentMessage" && (!turnId || !current.active || current.turnId !== turnId)) return;
       void conversationStore.recordRuntimeEvent(message).catch(() => {});
       const text = textFromItem(item);
       if (!text.trim()) return;
@@ -481,7 +616,7 @@ export const createEmployeeRuntimeService = ({
           id: item.id || `${params.turnId || "turn"}:${role}:${text}`,
           role,
           text,
-          turnId: params.turnId || item.turnId,
+          turnId,
           itemId: item.id,
         }),
       });
@@ -507,6 +642,28 @@ export const createEmployeeRuntimeService = ({
     }
   };
 
+  const replayEarlyEvents = (employeeId, submission, confirmedTurnId) => {
+    if (!submission) return;
+    const earlyEvents = submission.earlyEvents;
+    const compatibleCompletion = submission.earlyCompletionWithoutTurnId;
+    let completionReplayed = false;
+    submission.replaying = true;
+    try {
+      for (const event of earlyEvents) {
+        if (turnIdFromMessage(event) !== confirmedTurnId) continue;
+        if (event.method === "turn/completed") {
+          if (completionReplayed) continue;
+          completionReplayed = true;
+        }
+        handleProtocolMessage(event);
+      }
+      if (!completionReplayed && compatibleCompletion) handleProtocolMessage(compatibleCompletion);
+    } finally {
+      submission.replaying = false;
+      clearEarlyEvents(submission);
+    }
+  };
+
   subscribeClient(defaultClient);
 
   const sendMessage = async ({ employeeId, text, attachments = [], requestId = "" }) => {
@@ -516,23 +673,35 @@ export const createEmployeeRuntimeService = ({
     if (cleanText.length > 32000) throw statusError("消息过长", 413);
     const cleanRequestId = clean(requestId, 120) || randomUUID();
     if (sendLocks.has(employee.id)) throw statusError("员工消息正在提交", 409);
+    const submission = {
+      threadId: "",
+      promise: null,
+      requestMethod: "",
+      candidateTurnId: "",
+      earlyEvents: [],
+      earlyCompletionWithoutTurnId: null,
+      replaying: false,
+    };
+    sendLocks.set(employee.id, submission);
     const sending = (async () => {
       const { binding, threadId } = await ensureOpen(employee.id);
+      submission.threadId = threadId;
       if (registry.require(employee.id).conversationArchived) await unarchiveSession(employee.id);
       const current = statusFor(employee.id);
+      const requestMethod = current.active && current.turnId ? "turn/steer" : "turn/start";
+      submission.requestMethod = requestMethod;
       publishStatus(employee.id, {
         phase: "submitted",
         label: "已提交",
         detail: "",
         active: true,
-        turnId: "",
+        turnId: requestMethod === "turn/steer" ? current.turnId : "",
       });
       try {
         await resumeThread(threadId, registry.require(employee.id));
         const context = await contextProvider?.(employee.id);
         const runtimeClient = await clientForThread(threadId, registry.require(employee.id));
         const input = await inputFromAttachments(cleanText, attachments, attachmentContent);
-        const requestMethod = current.active && current.turnId ? "turn/steer" : "turn/start";
         const result = await runtimeClient.request(requestMethod, {
           threadId,
           input,
@@ -554,21 +723,27 @@ export const createEmployeeRuntimeService = ({
           .catch(error => console.warn(`[employee-runtime] memory suggestion failed: ${String(error?.message || error)}`));
         freshThreads.delete(threadId);
         const currentStatus = statusFor(employee.id);
+        const completedTurnId = clean(result?.turn?.id || result?.turnId || (requestMethod === "turn/steer" ? current.turnId : ""), 160);
+        if (requestMethod === "turn/start" && !completedTurnId) {
+          throw statusError("Codex 未返回当前任务编号，无法确认执行状态", 502);
+        }
+        submission.boundTurnId = completedTurnId;
         if (currentStatus.active && ["submitted", "working"].includes(currentStatus.phase)) {
           publishStatus(employee.id, {
             phase: "working",
             label: "正在处理",
             active: true,
-            turnId: clean(result?.turn?.id || result?.turnId || (requestMethod === "turn/steer" ? current.turnId : ""), 160),
+            turnId: completedTurnId,
           });
         }
+        replayEarlyEvents(employee.id, submission, completedTurnId);
         return {
           requestId: cleanRequestId,
           employeeId: employee.id,
           conversationId: binding.conversationId,
           threadId,
           status: requestMethod === "turn/steer" ? "steered" : "inProgress",
-          turnId: clean(result?.turn?.id || result?.turnId || (requestMethod === "turn/steer" ? current.turnId : ""), 160),
+          turnId: completedTurnId,
         };
       } catch (error) {
         publishStatus(employee.id, {
@@ -576,16 +751,17 @@ export const createEmployeeRuntimeService = ({
           label: isOccupiedError(error) ? "被占用中" : "提交失败",
           detail: String(error?.message || error),
           active: isOccupiedError(error),
-          turnId: "",
+          turnId: requestMethod === "turn/steer" ? current.turnId : "",
         });
         throw error;
       }
     })();
-    sendLocks.set(employee.id, sending);
+    submission.promise = sending;
     try {
       return await sending;
     } finally {
-      if (sendLocks.get(employee.id) === sending) sendLocks.delete(employee.id);
+      if (sendLocks.get(employee.id) === submission) sendLocks.delete(employee.id);
+      clearEarlyEvents(submission);
     }
   };
 
@@ -768,6 +944,7 @@ export const createEmployeeRuntimeService = ({
 
   const close = () => {
     closed = true;
+    for (const submission of sendLocks.values()) clearEarlyEvents(submission);
     for (const unsubscribe of clientSubscriptions.values()) unsubscribe?.();
     clientSubscriptions.clear();
     if (ownsDefaultClient) defaultClient.close();
@@ -789,6 +966,7 @@ export const createEmployeeRuntimeService = ({
     sendMessage,
     confirmModification,
     getStatus,
+    acceptsProtocolMessage,
     updateModelSettings,
     getRuntimeContext: runtimeContextForThread,
     getThreadStatus: threadStatus,

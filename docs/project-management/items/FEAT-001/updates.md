@@ -985,3 +985,11 @@ context-management-service.mjs增加8行，补原生轮次完成/中断终态收
 - 本轮业务源码 4 文件约 +44/−25 行：`native-task-runtime.mjs` +2/−6、`task-kernel.mjs` +12/−4、`project-identity-store.mjs` +7/−0、`group-extension.mjs` +23/−15。测试覆盖恢复 `turn/start=0`、定时无证据收敛、`updatedAt` 不变、stale 群任务不占用员工、key 改名保 ID、并发 mtime 刷新、新 root、删除项目目录消失、缺失项目群归档且启动不阻断、普通群不受影响、员工 thread/消息保留。
 - 定向验证：task-kernel/native-task-runtime 27/27；employee-task-extension 14/14；group-task-service 相关恢复 4/4；project-identity-store/group-extension 9/9；动态 root 会话 1/1；MJS 语法、loader 转换入口及 `git diff --check` 通过。证据 `/tmp/negus-risk-fix-task-20261110.log`、`/tmp/negus-risk-fix-employee-20261110.log`、`/tmp/negus-risk-fix-group-task-20261110.log`、`/tmp/negus-risk-fix-project-group-20261110.log`、`/tmp/negus-risk-fix-root-session-20261110.log`、`/tmp/negus-risk-fix-static-20261110.log`。完整 group-task-service 同时含并行任务新增的员工 Provider 迁移用例，其失败不属于本轮两处改动，未触碰相应文件。
 - 当前只完成源码与隔离验证，运行服务仍加载旧版本；用户可见行为尚未切换，不可宣称已生效。可交增量风控复核。
+
+### 2026-11-10 大消息卡顿快速修复与推送检查
+
+- 用户授权：先修无需进一步定位的缺陷，检查后将全部最新代码推送 GitHub。协议接收改为每个子进程独立分块读取器，新块仅扫描一次，完整记录到齐后合并解析；会话和模型列表共2处增加重复/循环游标检测，异常终止不返回假完整结果。不改滚动、缓存、正常分页或消息内容。
+- 本次性能修复实际业务 +26/-9 行（排除同文件此前 Cloudflare 接入 +2/-1），新增测试54行。64MiB分块消息完整组装解析约44ms；覆盖UTF8字节断点、CRLF、多条/空行/坏JSON、跨子进程片段隔离、正常分页及重复和A→B→A游标。
+- 相关26项：25通过、1 Windows跳过。扩展检查580项：565通过、14失败、1跳过；14失败涉及9测试文件，用HEAD原始源码临时归档及相同依赖复跑，失败名称逐项一致。既有失败包括3个历史任务/heartbeat测试缺模块，空正文与未加载线程/补充消息、前端旧断言、供应商迁移夹具及生图尺寸旧断言；没有把既有失败计作本次新增故障。
+- TypeScript、Vite、差异格式及候选快照隔离API/页面/版本验证通过；候选1794323239863-2ad54ab9，回退1794318966433-94591791。浏览器高CPU保留为后续独立定位，本次不因缺证据修改页面逻辑。
+- 正式发布：任务1794323347537-47157一次启动成功，运行快照1794323239863-2ad54ab9。版本/项目/Cloudflare状态API均200，耗时约3/0/1ms；重启后即时CPU0%、RSS约210MB，不能用该即时采样替代长时间使用验证。统一提交包含现有Cloudflare、员工状态和岗位说明改动，临时截图/诊断目录不提交。

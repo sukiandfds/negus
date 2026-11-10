@@ -272,3 +272,21 @@
 - 保持：成功删除、重复删除幂等以及停用、批准、拒绝、添加行为不变；未增加新状态系统。
 - 验证：approved/disabled 删除失败回滚、并发日志保留、成功重试和重复删除回归通过；相关 Node/UI 测试 76/76、TypeScript、`git diff --check` 通过。证据见 `work/employee-memory-20261109/implementation-result.md`。
 - 状态：仅 develop 工作区文件已修改；未提交、推送、发布或重启，运行服务尚未加载，等待原风控任务增量复核。
+
+### 2026-11-10 员工主对话完成后状态不回落
+
+- 用户反馈：员工主对话已经显示完整最终答案并保存消息后，员工目录和主对话详情仍持续显示“正在主对话工作”；用户要求完成后立即空闲，该状态只能代表真实运行，马上发送下一条消息时可重新进入运行。
+- 根因：最近 Provider 迁移适配按 `threadClients` 客户端对象身份过滤订阅事件，当前 Provider 真实完成事件可能被入口丢弃；正文正常完成，但员工运行时没有收到当前轮次完成，直到下一次发送才回落。
+- 修复前体验：用户看到最终答案后仍看到“正在主对话工作”，容易误以为模型仍在运行；状态要等再次发送消息才恢复。
+- 修复后体验：当前 Provider 的当前轮次完成后立即回到空闲，无需下一条消息；空闲态旧 started、旧线程和旧轮次事件不会重新点亮或清除新任务；快速追加消息仍沿用原 turn，正文和完成状态连续；即使模型极快，started、delta、final 和 completion 全部早于 `turn/start` 响应，也会在响应确认后按原序显示一次，不会出现“已提交→空闲但没有答案”；无 turnId 正文不会混入正文，无 turnId 完成仍兼容回落，并使员工状态与共享 execution 同时进入 completed/inactive；马上发送下一条消息可正常重新显示运行。
+- 实现：恢复所有已订阅 Provider 客户端事件进入统一员工协议处理。`employee-runtime-service.mjs` 在 submitted、空 turnId 阶段将 possible-current started、delta、final 和带 turnId completion 深拷贝到本次 `sendLocks` 发送对象，无 turnId completion 最多兼容保存一个。响应确认 turnId 后先绑定 working，只按到达顺序回放 matching turnId 事件；无 matching 带 ID completion 时才补一个无 turnId completion。回放直接进入正常 `handleProtocolMessage`，`acceptsProtocolMessage` 在 initial early 阶段拒绝 execution，在 replay 阶段放行当前事件。正式 execution 接线对合法无 turnId completion 生成仅用于 tracker 的深拷贝，用当前 active 或 confirmed turnId 补齐两个 turn ID 字段；原始员工消息和 completion payload 不修改，拿不到 ID 时不向 execution 投递，带 ID 与无 ID 同时存在时带 ID 优先且总 completion 一次。steer 不缓冲并保留原 turnId。读取活动线程时用 `thread/read includeTurns:true` 恢复未完成 turnId，无法取得时进入安全中断态。send 成功、失败和 service close 都清理缓冲。未新增跨事件状态 Map、定时器、轮询或延迟核对，未修改目录组件、消息正文、`ConversationView.tsx`、`useReturnToBottom.ts`。
+- 验证：`windows/tests/employee-runtime.test.mjs` 31/31、`ui-feishu/validation/employee-provider.test.mjs` 13/13、`ui-feishu/validation/realtime-regression.test.mjs` 7/7，三文件组合 51/51；相关 MJS 语法及 `git diff --check` 通过。覆盖普通与早到无 turnId completion 的员工/execution 双状态同步、无 ID 与 matching ID completion 同时存在时总 completion 一次、无 confirmed ID 时安全失败且不静默清 execution、started/delta×2/final/completion 全部早于 start 响应的真实适配和 execution 链路、响应前无正文/execution 正文广播、响应后按原序各一次；以及深拷贝、旧 turn 丢弃、steer、失败提交不跨下一轮泄漏、活动线程 turnId 恢复、安全中断和目录 working→idle。无 turnId completion 无法与旧 Provider 无标识迟到事件严格区分，为兼容边界。证据见 [verification.md](../../../../work/employee-status-completion-20261110/verification.md)。
+- 状态：仅 develop 工作区源码、定向测试和 FEAT-002 记录已修改；未提交、推送、发布或重启，运行服务尚未加载本修复，未做真实 Provider 生产复现。
+
+### 2026-11-10 产品分析岗位职责与沟通方式
+
+- 用户反馈：产品分析不符合产品角色的沟通和工作方式，体验太差。要求把其原话中的高效沟通、用户体验优先、集中式问题提纲、问题数量提示、相关问题成组开发、复用优先和减少冗余信息加入岗位职责。
+- 修复前体验：产品分析只有宽泛的“调研、核实、比较方案”说明，容易先讲技术方案或过程，问题零散，没有明确按用户真实页面和操作结果组织汇报。
+- 修复后体验：产品分析先核查当前用户流程，再直接说明需要用户回答的问题数量并给出集中提纲；只问会改变产品结果的事项。确认后按依赖顺序组织相关小改，优先复用并删除重复逻辑；汇报先讲用户操作和前后反馈，再讲核心逻辑、改动量和风险。
+- 实现：更新 `employees/researcher/employee.json` 的岗位职责和 `employees/researcher/system-prompt.md`，保留用户原话并转成可执行工作规则；FEAT-002 记录用户原话和当前有效决定。
+- 状态：职责文件已修改；需后端重启后加载。当前员工状态修复仍在进行，避免提前加载混合改动，本次未重启、未发布。
