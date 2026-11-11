@@ -13,12 +13,6 @@ export function executionParams(method, params, runtimeConfig = {}) {
   return { ...params, ...executionPolicy };
 }
 
-export function adaptExecutionClientSource(source) {
-  const marker = '    return requestRaw(method, params, options.timeoutMs);';
-  if (!source.includes(marker)) throw Error('Execution policy integration changed');
-  return `import { executionParams } from ${JSON.stringify(import.meta.url)};\n` + source.replace(marker, `
-    return requestRaw(method, executionParams(method, params), options.timeoutMs);`);
-}
 export const backgroundToolConfig = {
   'mcp_servers.negus_handoffs': { enabled: false, command: process.execPath },
   'mcp_servers.negus_tasks': { enabled: false, command: process.execPath },

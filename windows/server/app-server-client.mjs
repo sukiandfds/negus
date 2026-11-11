@@ -1,3 +1,4 @@
+import { executionParams } from "../../ui-feishu/server/execution-policy.mjs";
 import { cloudflareMcpArguments } from './connections/cloudflare-runtime.mjs';
 import { imageMcpArguments } from "./image-generation/image-runtime.mjs";
 import { githubEnvironment } from "./github-runtime.mjs";
@@ -350,7 +351,8 @@ export const createAppServerClient = ({
     if (restartPromise) await restartPromise;
     await initialize();
     return requestWithNeutralIdentity(method, params, (method, params) => {
-    return requestRaw(method, params, options.timeoutMs);
+
+    return requestRaw(method, executionParams(method, params), options.timeoutMs);
     }, neutralThreads);
   };
 

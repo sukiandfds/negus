@@ -1,3 +1,6 @@
+import { extendGroupRooms } from "../../ui-feishu/server/group-extension.mjs";
+import { extendEmployeeTasks } from "../../ui-feishu/server/employee-task-extension.mjs";
+import { existingProjects, withExistingConversations } from "../../ui-feishu/server/existing-projects.mjs";
 import { createBackgroundTaskService } from "../server/background-tasks/service.mjs";
 import { backgroundTaskRoute } from "../server/background-tasks/model-policy.mjs";
 import http from "node:http";
@@ -62,7 +65,7 @@ const deviceName = String(getArg("--device-name", os.hostname())).trim() || os.h
 const device = { name: deviceName, startedAt: new Date().toISOString() };
 const sessionRoot = process.env.CODEX_SESSION_DIR || path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "sessions");
 const loadBusinessProjectConfig = createBusinessProjectLoader(path.join(projectRoot, "runtime", "business-projects.json"));
-const businessProjects = await loadBusinessProjectConfig();
+const businessProjects = [...await loadBusinessProjectConfig(), ...await existingProjects(projectRoot)];
 const projectRoots = [projectRoot, ...businessProjects.map((entry) => entry.root)];
 const retainedProjects = businessProjects.filter((entry) => entry.kind === "personal");
 const refreshBusinessProjects = async () => {
@@ -183,12 +186,13 @@ const appServerConversations = createProviderConversationStore({
 const conversationVersions = createConversationVersionStore({
   stateFile: path.join(projectRoot, "runtime", "conversation-versions.json"),
 });
-const conversations = createConversationService({
+let conversations = createConversationService({
   primary: appServerConversations,
   fallback: jsonlConversations,
   contentVersionStore: conversationVersions,
   supplementalMessages: imageGenerationRuns,
 });
+conversations = await withExistingConversations(conversations, conversationStoreOptions);
 followUpQueue = createFollowUpQueueService({
   stateFile: path.join(projectRoot, "runtime", "follow-up-queues.json"),
   execution,
@@ -410,6 +414,14 @@ agentTasks = await createBackgroundTaskService({
   growthService: employeeGrowth,
   conversations, modelProviders, bindings: employeeConversationStore, queue: followUpQueue, execution, broadcast: realtime.broadcast,
 });
+agentTasks = await extendEmployeeTasks(agentTasks, {
+      stateRoot: path.join(process.env.NEGUS_UI_STATE_ROOT || path.join(projectRoot, 'runtime', 'ui-feishu'), 'employee-tasks'),
+      registry: employeeRegistry, growthService: employeeGrowth, modelProviders, appServerClient, bindings: employeeConversationStore,
+      providerForThread: threadId => appServerConversations.getRecordedProviderForThread(threadId),
+      conversations: appServerConversations,
+      registerSession: appServerConversations.registerSession,
+      execution, queue: followUpQueue, broadcast: realtime.broadcast,
+    });
 employeeRuntime = createEmployeeRuntimeService({
   readHistory: appServerConversations.findSessionForProvider,
   readRevision: appServerConversations.getSourceRevisionForProvider,
@@ -524,6 +536,24 @@ const conversationForward = createConversationForwardService({
   stateRoot: path.join(projectRoot, "runtime", "conversation-forwards"), queue: followUpQueue,
 });
 void followUpQueue.start();
+
+await extendGroupRooms({ stateRoot: path.resolve(process.env.NEGUS_UI_STATE_ROOT || path.join(projectRoot, 'runtime', 'ui-feishu')), roomDirectory: groupRoomDirectory, services: multiAgentDirectory,
+  projects: () => projectIdentity.list(), employees: () => employeeRegistry.listRuntimeProfiles(), broadcast: realtime.broadcast,
+  onMessageCreated: broadcastEmployeeGroupMessage,
+  defaultModelSettings: employeeDefaultSettings,
+  createServiceOptions: (identity, room) => ({ projectRoot: identity.root || projectRoot,
+    // Group work is performed on the selected project, so every employee sees
+    // the same repository and can review one another's changes.  The private
+    // employee roots are for personal conversations and must not become the
+    // cwd for a project group.
+    employeeWorkRoots: Object.fromEntries(employeeRegistry.list().map(employee => [employee.id, identity.root || projectRoot])),
+    broadcast: event => realtime.broadcast({ ...event, roomId: room.snapshot().room.id }), webOutputs, attachmentContent,
+    resolveAttachments: media.resolveMany, resolveArtifacts: resolveArtifactInputs,
+    onContextDelivered: ({ agentId, threadId, messages }) => recordEmployeeGroupContext({ identity, room, agentId, threadId, messages }),
+    appServerClient, modelProviders, growthService: employeeGrowth, bindings: employeeConversationStore, agentTasks, queue: followUpQueue, execution,
+    registerSession: appServerConversations.registerSession, providerForThread: threadId => appServerConversations.getRecordedProviderForThread(threadId),
+  }),
+});
 const requestHandler = createRequestHandler({
   conversationForward, agentTasks,
   token, project, projectRoot, device, observerPort, conversations, execution, media, realtime, submissions,
@@ -541,7 +571,7 @@ const close = async () => {
   server.close();
   realtime.close();
   conversations.close();
-  for (const service of new Set(multiAgentDirectory.values())) service.close();
+  await Promise.allSettled([...new Set(multiAgentDirectory.values())].map(service => service.close()));
   webOutputs.close();
   employeeRuntime.close();
   modelProviders.close();

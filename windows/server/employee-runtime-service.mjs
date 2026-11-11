@@ -1,3 +1,4 @@
+import { transferEmployeeThread } from "../../ui-feishu/server/employee-provider-integration.mjs";
 import { communicationInstructions } from "./base-prompt.mjs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -69,6 +70,7 @@ export const createEmployeeRuntimeService = ({
   const statuses = new Map();
   const openPromises = new Map();
   const sendLocks = new Map();
+  const modelChanges = new Map();
   let closed = false;
 
   const subscribeClient = (runtimeClient) => {
@@ -184,7 +186,7 @@ export const createEmployeeRuntimeService = ({
     return normalized;
   };
 
-  const publishStatus = (employeeId, patch = {}) => {
+  const publishStatus = (employeeId, patch = {}, syncExecution = true) => {
     const current = statusFor(employeeId);
     const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
     statuses.set(employeeId, next);
@@ -195,7 +197,7 @@ export const createEmployeeRuntimeService = ({
       modificationConfirmed: Boolean(registry.get(employeeId)?.modificationConfirmed),
     });
     const threadId = clean(registry.get(employeeId)?.mainThreadId, 120);
-    if (threadId && execution?.publishStatus) {
+    if (syncExecution && threadId && execution?.publishStatus) {
       execution.publishStatus(threadId, {
         phase: next.phase,
         label: next.label,
@@ -300,6 +302,15 @@ export const createEmployeeRuntimeService = ({
     }
   };
 
+  const reconcileEmployeeIdle = async (employeeId) => {
+    const status = statusFor(employeeId);
+    const employee = registry.require(employeeId);
+    if (!status.active || !employee.mainThreadId || sendLocks.has(employeeId)) return;
+    const native = await readAuthoritativeStatus(employee.mainThreadId, employee);
+    if (native.known && !native.active && statusFor(employeeId) === status) {
+      publishStatus(employeeId, { phase: "idle", label: "等待任务", active: false, turnId: "", detail: "" });
+    }
+  };
   const startThread = async (employee) => {
     const runtimeClient = await clientForEmployee(employee);
     const route = routeForEmployee(employee);
@@ -330,6 +341,7 @@ export const createEmployeeRuntimeService = ({
   };
 
   const ensureOpen = async (employeeId) => {
+    await modelChanges.get(employeeId);
     if (closed) throw new Error("员工运行时已关闭");
     const employee = registry.require(employeeId);
     const existing = openPromises.get(employee.id);
@@ -360,8 +372,9 @@ export const createEmployeeRuntimeService = ({
         turnId: "",
       });
       if (hadExistingThread) {
+        const beforeRead = statusFor(employee.id);
         const authoritative = await readAuthoritativeStatus(threadId, registry.require(employee.id));
-        if (authoritative.known && authoritative.active) {
+        if (authoritative.known && authoritative.active && statusFor(employee.id) === beforeRead) {
           const turnId = authoritative.turnId || clean(statusFor(employee.id).turnId, 160);
           publishStatus(employee.id, turnId
             ? { phase: "working", label: "正在处理", detail: "", active: true, turnId }
@@ -500,6 +513,9 @@ export const createEmployeeRuntimeService = ({
     const threadId = clean(message?.params?.threadId, 120);
     const employeeId = threadEmployees.get(threadId);
     if (!employeeId) return;
+    const executionMessage = normalizeExecutionProtocolMessage(message);
+    if (executionMessage) execution?.handleProtocolMessage?.(executionMessage);
+    const publishNativeStatus = patch => publishStatus(employeeId, patch, false);
     if (clean(registry.get(employeeId)?.mainThreadId, 120) !== threadId) return;
     const params = message.params || {};
     const method = message.method || "";
@@ -572,7 +588,7 @@ export const createEmployeeRuntimeService = ({
       if (eventTurnId && current.turnId !== eventTurnId) {
         return;
       }
-      publishTurnCompletion({ employeeId, threadId, turnId, status, error });
+      publishTurnCompletion({ employeeId, threadId, turnId, status, error }, false);
       return;
     }
     if (method === "item/agentMessage/delta") {
@@ -588,13 +604,6 @@ export const createEmployeeRuntimeService = ({
         delta: String(params.delta || params.text || ""),
       };
       broadcast(deltaEvent);
-      execution?.publishThreadEvent?.(threadId, {
-        type: "assistant_delta",
-        threadId,
-        turnId: deltaEvent.turnId,
-        itemId: deltaEvent.itemId,
-        delta: deltaEvent.delta,
-      });
       return;
     }
     if (method === "item/completed") {
@@ -624,7 +633,7 @@ export const createEmployeeRuntimeService = ({
       return;
     }
     if (method.endsWith("/requestApproval")) {
-      publishStatus(employeeId, {
+      publishNativeStatus({
         phase: "waitingOnApproval",
         label: "等待原生审批",
         detail: "",
@@ -633,7 +642,7 @@ export const createEmployeeRuntimeService = ({
       return;
     }
     if (method === "item/tool/requestUserInput" || method === "mcpServer/elicitation/request") {
-      publishStatus(employeeId, {
+      publishNativeStatus({
         phase: "waitingOnUserInput",
         label: "等待补充信息",
         detail: "",
@@ -667,6 +676,10 @@ export const createEmployeeRuntimeService = ({
   subscribeClient(defaultClient);
 
   const sendMessage = async ({ employeeId, text, attachments = [], requestId = "" }) => {
+    await modelChanges.get(employeeId);
+    await reconcileEmployeeIdle(employeeId);
+    const pending = registry.require(employeeId).pendingModelSettings;
+    if (pending) await applyModelSettings(employeeId, pending, { source: pending.modelSelectionSource || "default" });
     const employee = registry.require(employeeId);
     const cleanText = String(text || "").trim();
     if (!cleanText && !attachments.length) throw statusError("消息不能为空", 400);
@@ -793,14 +806,33 @@ export const createEmployeeRuntimeService = ({
     };
   };
 
-  const updateModelSettings = async (employeeId, settings = {}) => {
+  const updateModelSettings = (employeeId, settings = {}) => {
+    const previous = modelChanges.get(employeeId);
+    const task = (async () => {
+      await previous?.catch(() => {});
+      await openPromises.get(employeeId);
+      if (sendLocks.has(employeeId)) throw statusError("员工正在处理消息，不能修改配置", 409);
+      await reconcileEmployeeIdle(employeeId);
+      if (statusFor(employeeId).active) throw statusError("员工正在处理消息，不能修改模型", 409);
+      const employee = registry.require(employeeId);
+      const selected = { ...employee, ...employee.pendingModelSettings, ...settings };
+      const route = modelProviders.resolveRoute({ model: selected.model, modelProviderId: Object.hasOwn(settings, "model") ? settings.modelProviderId || "" : selected.modelProviderId });
+      const pending = { modelProviderId: route.modelProviderId, model: route.model, reasoningEffort: selected.reasoningEffort, modelSelectionSource: "explicit" };
+      if (!employee.mainThreadId) return applyModelSettings(employeeId, pending);
+      await registry.setPendingModelSettings(employeeId, pending);
+      return { employee: { ...employee, ...pending }, status: statusFor(employeeId) };
+    })();
+    modelChanges.set(employeeId, task);
+    return task.finally(() => { if (modelChanges.get(employeeId) === task) modelChanges.delete(employeeId); });
+  };
+  const applyModelSettings = async (employeeId, settings = {}, options = {}) => {
     const employee = registry.require(employeeId);
     if (statusFor(employee.id).active) throw statusError("员工正在处理消息，不能修改模型", 409);
     const requestedModel = Object.prototype.hasOwnProperty.call(settings, "model")
       ? clean(settings.model, 120)
       : clean(employee.model, 120);
     const explicitProviderId = clean(settings.modelProviderId, 80);
-    const requestedProviderId = requestedModel && modelProviders && !explicitProviderId
+    const requestedProviderId = Object.hasOwn(settings, "model") && requestedModel && modelProviders && !explicitProviderId
       ? ""
       : explicitProviderId || clean(employee.modelProviderId, 80) || CURRENT_MODEL_PROVIDER_ID;
     if (!modelProviders && requestedProviderId !== CURRENT_MODEL_PROVIDER_ID) {
@@ -816,9 +848,7 @@ export const createEmployeeRuntimeService = ({
       model: clean(settings.model, 120),
     };
     const currentRoute = routeForEmployee(employee);
-    if (employee.mainThreadId && currentRoute.modelProviderId !== requestedRoute.modelProviderId) {
-      throw statusError("现有员工 Thread 暂不支持跨供应商切换；请为新 Thread 选择该模型", 409);
-    }
+    const switchingProvider = currentRoute.modelProviderId !== requestedRoute.modelProviderId;
     const runtimeClient = modelProviders
       ? await modelProviders.getClient(requestedRoute)
       : defaultClient;
@@ -826,37 +856,56 @@ export const createEmployeeRuntimeService = ({
     const reasoningEffort = Object.prototype.hasOwnProperty.call(settings, "reasoningEffort")
       ? clean(settings.reasoningEffort, 40)
       : clean(employee.reasoningEffort, 40);
-    if (employee.mainThreadId) {
-      threadClients.set(employee.mainThreadId, runtimeClient);
-      await resumeThread(employee.mainThreadId, employee);
-      if (requestedRoute.model && requestedRoute.model !== currentRoute.model) {
-        await runtimeClient.request("thread/settings/update", {
-          threadId: employee.mainThreadId,
-          model: requestedRoute.model,
-        });
+    const nextSettings = { modelProviderId: requestedRoute.modelProviderId, model: requestedRoute.model, reasoningEffort };
+    const threadId = employee.mainThreadId;
+    let originalClient;
+    try {
+      if (threadId) {
+        originalClient = await clientForThread(threadId, employee);
+        if (switchingProvider) {
+          await transferEmployeeThread({ source: originalClient, target: runtimeClient, providers: modelProviders,
+            threadId, route: requestedRoute, reasoningEffort,
+            config: { ...taskService?.leaderConfig(employee.id), ...(reasoningEffort ? { model_reasoning_effort: reasoningEffort } : {}) },
+            instructions: employeeTurnInstructions(employee.instructions, taskService?.leaderInstructions(employee.id)),
+            policy: policyFor(employee),
+          });
+          threadClients.set(threadId, runtimeClient);
+          freshThreads.delete(threadId);
+          taskConfiguredClients.set(threadId, runtimeClient);
+        } else {
+          await resumeThread(threadId, employee);
+          if (requestedRoute.model && requestedRoute.model !== currentRoute.model) {
+            await runtimeClient.request("thread/settings/update", { threadId, model: requestedRoute.model });
+          }
+          if (reasoningEffort && reasoningEffort !== clean(employee.reasoningEffort, 40)) {
+            await runtimeClient.request("thread/settings/update", { threadId, effort: reasoningEffort });
+          }
+          freshThreads.delete(threadId);
+        }
       }
-      if (reasoningEffort && reasoningEffort !== clean(employee.reasoningEffort, 40)) {
-        await runtimeClient.request("thread/settings/update", {
-          threadId: employee.mainThreadId,
-          effort: reasoningEffort,
-        });
+      const updated = await registry.setModelSettings(employee.id, nextSettings, { source: options.source || "explicit" });
+      return { employee: updated, status: statusFor(employee.id) };
+    } catch (error) {
+      if (switchingProvider && threadId && originalClient) {
+        await runtimeClient.request("thread/unsubscribe", { threadId }).catch(() => {});
+        threadClients.set(threadId, originalClient);
+        freshThreads.delete(threadId);
+        taskConfiguredClients.delete(threadId);
+        await resumeThread(threadId, employee).catch(() => {});
       }
+      throw error;
     }
-    const updated = await registry.setModelSettings(employee.id, {
-      modelProviderId: requestedRoute.modelProviderId,
-      model: requestedRoute.model,
-      reasoningEffort,
-    }, { source: 'explicit' });
-    return { employee: updated, status: statusFor(employee.id) };
+
   };
 
   const runtimeContextForThread = async (threadId) => {
     const cleanThreadId = clean(threadId, 120);
     const employeeId = threadEmployees.get(cleanThreadId);
     if (!employeeId) throw statusError("员工 Thread 不存在", 404);
-    const employee = registry.require(employeeId);
+    const saved = registry.require(employeeId);
+    const employee = saved.pendingModelSettings || saved;
     return {
-      model: employee.model || "",
+      model: employee.modelProviderId?.startsWith("ccswitch_") ? employee.modelProviderId + "::" + employee.model : employee.model || "",
       modelProvider: employee.modelProviderId || CURRENT_MODEL_PROVIDER_ID,
       reasoningEffort: employee.reasoningEffort || "",
     };

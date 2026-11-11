@@ -148,9 +148,11 @@ test("employee runtime binds one main thread with main-agent host access", async
 test("employee runtime mirrors status and message progress to the shared conversation UI", async (t) => {
   const statuses = [];
   const threadEvents = [];
+  const forwarded = [];
   const execution = {
     publishStatus: (threadId, status) => statuses.push({ threadId, ...status }),
     publishThreadEvent: (threadId, event) => threadEvents.push({ threadId, event }),
+    handleProtocolMessage: (message) => forwarded.push(message.method),
   };
   const { runtime, listener } = await fixture(t, { execution });
 
@@ -171,17 +173,10 @@ test("employee runtime mirrors status and message progress to the shared convers
   listener({ method: "turn/completed", params: { threadId: "employee-thread", turn: { id: "employee-turn", status: "completed" } } });
 
   assert.equal(statuses.some((event) => event.threadId === "employee-thread" && event.phase === "working" && event.active), true);
-  assert.equal(statuses.at(-1).phase, "idle");
-  assert.deepEqual(threadEvents[0], {
-    threadId: "employee-thread",
-    event: {
-      type: "assistant_delta",
-      threadId: "employee-thread",
-      turnId: "employee-turn",
-      itemId: "assistant-item",
-      delta: "done",
-    },
-  });
+  // The execution tracker owns the turn's events: they are forwarded once, not mirrored a second time.
+  assert.deepEqual(forwarded, ["item/agentMessage/delta", "item/completed", "turn/completed"]);
+  assert.equal(threadEvents.some(({ event }) => event.type === "assistant_delta"), false);
+  assert.equal((await runtime.getStatus("developer")).status.phase, "idle");
   assert.deepEqual(threadEvents.at(-1), {
     threadId: "employee-thread",
     event: { type: "sessions_changed", threadId: "employee-thread" },
@@ -673,13 +668,11 @@ test("a new direct employee Thread uses the selected provider without migrating 
   assert.equal(opened.conversation.threadId, "grok-thread");
   assert.equal(currentCalls.some((call) => call.method === "thread/start"), false);
   assert.equal(grokCalls.find((call) => call.method === "thread/start").params.model, "grok-4.6");
-  await assert.rejects(
-    () => runtime.updateModelSettings("researcher", { model: "gpt-5.6-terra" }),
-    /跨供应商/u,
-  );
+  // A later cross-provider choice is saved for the next send; the existing thread stays where it is.
+  await runtime.updateModelSettings("researcher", { model: "gpt-5.6-terra" });
   assert.equal(registry.get("researcher").modelProviderId, "fusheng-grok");
-  await runtime.sendMessage({ employeeId: "researcher", text: "identify your model" });
-  assert.equal(grokCalls.some((call) => call.method === "turn/start"), true);
+  assert.equal(registry.get("researcher").pendingModelSettings.model, "gpt-5.6-terra");
+  assert.equal(currentCalls.some((call) => call.method === "thread/start"), false);
 });
 
 test("employee native goal notifications and controls share the owned client", async t => {
