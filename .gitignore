@@ -17,6 +17,8 @@ summary-*.log
 # local agent context
 AGENTS.md
 TASK_PROGRESS.md
+# The base prompt every agent starts from is product source, not local context.
+!windows/server/AGENTS.md
 
 # Local frontend dependencies, caches, and generated output
 .pnpm-store/

@@ -31,7 +31,7 @@ async function fixture(t, initialPhase = 'completed', failSend = false, parentSt
   const extension = await extendEmployeeTasks(original, { stateRoot: root,
     registry: { list: () => employees, require: id => employees.find(employee => employee.id === id) },
     appServerClient: { request: async method => { assert.equal(method, 'thread/read'); return { thread: { turns: f.turns } }; } },
-    bindings: {}, execution, queue,
+    bindings: { bindRuntime: async () => {}, findByRuntimeSession: () => null }, execution, queue,
   });
   t.after(async () => { await extension.close(); await queue.close(); await fs.rm(root, { recursive: true, force: true }); });
   return Object.assign(f, { root, extension, queue, delivery: () => extension.deliveries()[0] });

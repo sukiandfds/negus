@@ -19,6 +19,28 @@ test('群聊自然语言不广播，明确点名优先', async () => {
   }
 });
 
+// FEAT-002 2026-11-07: 运营管理和员工都是可选的，未点名消息不能因此报错。
+test('未点名消息在没有运营管理或没有员工的群里不报错', async t => {
+  const client = { subscribe: () => () => {}, request: async method => method === 'thread/start' ? { thread: { id: 'thread' } }
+    : method === 'thread/read' ? { thread: { turns: [] } } : method === 'turn/start' ? { turn: { id: 'turn' } } : {} };
+  for (const [agentDefinitions, expected] of [
+    [[], []],
+    [[{ id: 'developer', name: '技术研发' }], ['developer']],
+    [[{ id: 'developer', name: '技术研发' }, { id: 'negus-assistant', name: 'negus助手' }], ['negus-assistant']],
+    [[{ id: 'negus-assistant', name: 'negus助手' }, { id: 'manager', name: '运营管理' }], ['manager']],
+  ]) {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-group-reception-'));
+    const room = await createGroupRoomStore({ stateFile: path.join(root, 'room.json'), roomId: 'room', project: '测试', agentDefinitions });
+    const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root, appServerClient: client });
+    t.after(async () => { await service.close(); await room.close(); await fs.rm(root, { recursive: true, force: true }); });
+    const { message } = await service.receive({ requestId: 'plain', agentIds: [], message: { type: 'human', authorId: 'u', authorName: '用户', text: '帮我看一下这个需求', attachments: [] } });
+    assert.equal(message.text, '帮我看一下这个需求');
+    await until(() => !service.hasPendingWork() || service.tasks().length === expected.length);
+    assert.deepEqual(service.tasks().map(task => task.agentId), expected);
+    assert.deepEqual(room.snapshot().messages.filter(item => item.failure).map(item => item.text), []);
+  }
+});
+
 test('群内员工默认使用 DeepSeek，显式修改后重启仍保留', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-group-model-default-'));
   const stateFile = path.join(root, 'room.json');

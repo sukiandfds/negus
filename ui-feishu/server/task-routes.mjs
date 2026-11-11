@@ -45,12 +45,11 @@ export function createTaskRoutes({ roomDirectory, multiAgentDirectory, groupRoom
     const text = String(body.text || '').trim();
     const attachments = media.resolveMany(body.attachmentIds);
     if (!text && !attachments.length) throw Object.assign(Error('消息不能为空'), { statusCode: 400 });
-    if (!room.snapshot().agents.length) throw Object.assign(Error('当前群聊没有可接待的员工'), { statusCode: 409 });
     const requestId = String(body.clientMessageId || randomUUID());
     if (requestId.length > 80) throw Object.assign(Error('消息重试标识过长'), { statusCode: 400 });
     const result = await service.receive({ requestId, agentIds: Array.isArray(body.agentIds) ? body.agentIds : [body.agentId],
       message: { type: 'human', authorId: member.id, authorName: member.name, text, replyTo: body.replyTo,
         attachments: attachments.map(({ id, name, mimeType, url }) => ({ id, name, mimeType, url })) } });
-    sendJson(response, result, 202); return true;
+    sendJson(response, room.snapshot().agents.length ? result : { ...result, listening: true }, 202); return true;
   };
 }

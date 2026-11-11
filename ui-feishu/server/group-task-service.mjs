@@ -14,6 +14,9 @@ import { backgroundToolConfig, executionPolicy, turnExecutionPolicy } from './ex
 import { followupTask } from './task-followup.mjs';
 import { transferEmployeeThread } from './employee-provider-integration.mjs';
 
+// Unaddressed messages go to 运营管理 when it is in the group, then negus助手, then the first member.
+export const receptionAgentId = members => ['manager', 'negus-assistant'].find(id => members.some(member => member.id === id)) || members[0]?.id;
+
 export async function migrateGroupAgentThread({
   agent, room, modelProviders, clientFor, transferThread = transferEmployeeThread,
 }) {
@@ -282,6 +285,8 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
     publish: async entry => (await room.addMessageWithStatus({ ...entry.input.message, clientMessageId: entry.input.requestId })).message,
     dispatch: async (input, message, intake) => {
       const members = room.snapshot().agents;
+      // FEAT-002 2026-11-07: employees are optional, so a group may have nobody to wake.
+      if (!members.length) return { agentIds: [], agentNames: [], status: 'listening' };
       const quoted = message.replyTo?.id
         ? room.snapshot().messages.find(candidate => candidate.id === String(message.replyTo.id))
         : null;
@@ -289,7 +294,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
         ? String(quoted.agentId || quoted.authorId || '').trim()
         : '';
       const routing = intake.routing || await routeMessage({ text: message.text, members, explicitIds: mentionedAgentIds(message.text, members),
-        requestedIds: input.agentIds, receptionId: 'manager', allowBroadcast: false,
+        requestedIds: input.agentIds, receptionId: receptionAgentId(members), allowBroadcast: false,
         replyAgentId,
         log });
       if (!intake.routing) await intake.saveRouting(routing);
