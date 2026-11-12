@@ -73,9 +73,29 @@ export const createEmployeeRuntimeService = ({
   const modelChanges = new Map();
   let closed = false;
 
+  // A dead app-server never sends turn/completed for the turns it was
+  // running, so every active employee on that client is ended here.
+  const handleClientExit = (runtimeClient) => {
+    for (const [employeeId, status] of statuses) {
+      if (!status.active) continue;
+      const threadId = clean(registry.get(employeeId)?.mainThreadId, 120);
+      if ((threadClients.get(threadId) || defaultClient) !== runtimeClient) continue;
+      publishTurnCompletion({
+        employeeId, threadId, turnId: clean(status.turnId, 160), status: "interrupted", error: "Codex 进程已退出",
+      });
+    }
+  };
+
   const subscribeClient = (runtimeClient) => {
     if (!runtimeClient || clientSubscriptions.has(runtimeClient)) return;
-    clientSubscriptions.set(runtimeClient, runtimeClient.subscribe(handleProtocolMessage));
+    const unsubscribeProtocol = runtimeClient.subscribe(handleProtocolMessage);
+    const unsubscribeHealth = runtimeClient.subscribeHealth?.((event) => {
+      if (event?.phase === "exited") handleClientExit(runtimeClient);
+    });
+    clientSubscriptions.set(runtimeClient, () => {
+      unsubscribeProtocol?.();
+      unsubscribeHealth?.();
+    });
   };
 
   // Let getClient() refresh shared ccswitch providers before validating the

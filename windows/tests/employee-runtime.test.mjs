@@ -16,9 +16,11 @@ const fixture = async (t, { execution = null, onTurnCompleted = null, taskServic
     workspaceRoot: "D:\\project",
   });
   let listener = () => {};
+  let healthListener = () => {};
   const calls = [];
   const client = {
     subscribe(handler) { listener = handler; return () => {}; },
+    subscribeHealth(handler) { healthListener = handler; return () => {}; },
     close() {},
     async request(method, params) {
       calls.push({ method, params });
@@ -54,7 +56,10 @@ const fixture = async (t, { execution = null, onTurnCompleted = null, taskServic
     runtime.close();
     await registry.close();
   });
-  return { root, registry, client, conversationStore, runtime, events, calls, get listener() { return listener; } };
+  return {
+    root, registry, client, conversationStore, runtime, events, calls,
+    get listener() { return listener; }, get healthListener() { return healthListener; },
+  };
 };
 
 test("a failed memory suggestion cannot fail an accepted employee turn", async t => {
@@ -788,4 +793,38 @@ test('employee fork registers as ordinary user conversation without replacing th
   assert.equal(f.registry.require('developer').mainThreadId, before.mainThreadId);
   assert.equal(f.registry.require('developer').conversationId, before.conversationId);
   assert.equal(result.conversationId, undefined);
+});
+
+test("an app-server exit ends the running employee turn instead of leaving it active", async (t) => {
+  const completed = [];
+  const statuses = [];
+  const execution = { publishStatus: (threadId, status) => statuses.push({ threadId, ...status }) };
+  const f = await fixture(t, { execution, onTurnCompleted: (completion) => completed.push(completion) });
+  await f.runtime.sendMessage({ employeeId: "developer", text: "long task", requestId: "exit-1" });
+  f.listener({ method: "turn/started", params: { threadId: "employee-thread", turn: { id: "employee-turn" } } });
+  assert.equal((await f.runtime.getStatus("developer")).status.active, true);
+
+  f.healthListener({ phase: "recovering", threadId: "employee-thread" });
+  assert.equal((await f.runtime.getStatus("developer")).status.active, true, "only an exit ends the turn");
+
+  f.healthListener({ phase: "exited", error: new Error("gone") });
+  const status = (await f.runtime.getStatus("developer")).status;
+  assert.equal(status.active, false);
+  assert.equal(status.phase, "interrupted");
+  assert.equal(status.detail, "Codex 进程已退出");
+  assert.equal(statuses.at(-1).threadId, "employee-thread");
+  assert.equal(statuses.at(-1).active, false);
+  assert.equal(f.events.filter((event) => event.type === "employee_turn_completed").at(-1).status, "interrupted");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(completed.at(-1)?.status, "interrupted");
+});
+
+test("a repeated app-server exit does not complete the same employee turn twice", async (t) => {
+  const f = await fixture(t);
+  await f.runtime.sendMessage({ employeeId: "developer", text: "long task", requestId: "exit-2" });
+  f.listener({ method: "turn/started", params: { threadId: "employee-thread", turn: { id: "employee-turn" } } });
+  f.healthListener({ phase: "exited" });
+  f.healthListener({ phase: "exited" });
+  const completions = f.events.filter((event) => event.type === "employee_turn_completed");
+  assert.equal(completions.length, 1);
 });

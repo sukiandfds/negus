@@ -22,6 +22,7 @@ import { createConversationForwardService } from "../server/conversation-forward
 import { createFollowUpQueueService } from "../server/follow-up-queue-service.mjs";
 import { createContextManagementService } from "../server/context-management-service.mjs";
 import { createRequestHandler } from "../server/request-handler.mjs";
+import { parseTrustedProxies } from "../server/http/access-control.mjs";
 import { createStaticFileServer } from "../server/static-files.mjs";
 import { createWebVersionReader } from "../server/web-version.mjs";
 import { createGroupRoomStore } from "../server/group-room-store.mjs";
@@ -61,6 +62,10 @@ const projectRoot = path.resolve(getArg("--project-root", process.cwd()));
 const employeesRoot = path.join(projectRoot, "employees");
 const webRoot = path.resolve(getArg("--web-root", path.join(process.cwd(), "ui-feishu", "dist")));
 const token = getArg("--token", randomBytes(12).toString("hex"));
+// Comma-separated peer addresses whose forwarding headers may name the real
+// client, e.g. "127.0.0.1,::1" when a cloudflared tunnel on this machine is
+// the only ingress. Empty by default: the socket address is always used.
+const trustedProxies = parseTrustedProxies(getArg("--trusted-proxy", process.env.NEGUS_TRUSTED_PROXIES || ""));
 const deviceName = String(getArg("--device-name", os.hostname())).trim() || os.hostname();
 const device = { name: deviceName, startedAt: new Date().toISOString() };
 const sessionRoot = process.env.CODEX_SESSION_DIR || path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "sessions");
@@ -556,7 +561,7 @@ await extendGroupRooms({ stateRoot: path.resolve(process.env.NEGUS_UI_STATE_ROOT
 });
 const requestHandler = createRequestHandler({
   conversationForward, agentTasks,
-  token, project, projectRoot, device, observerPort, conversations, execution, media, realtime, submissions,
+  token, trustedProxies, project, projectRoot, device, observerPort, conversations, execution, media, realtime, submissions,
   followUpQueue, contextManagement, groupRoom, roomDirectory: groupRoomDirectory, multiAgent, multiAgentDirectory, artifacts, webOutputs, fushengUsage, readWebVersion, serveStatic,
   agentConversationStore, agentPublicationService, employeeRuntime,
   employeeProjectDirectory, employeeGrowth,

@@ -112,11 +112,13 @@ export async function createBackgroundTaskService({ stateFile, registry, modelPr
     if (method === 'task/health') {
       if (!active(task)) return;
       const ended = params.phase === 'authoritative' && params.status?.type === 'idle';
-      if (!ended && !['recovered', 'failed'].includes(params.phase)) return;
+      // recovered/exited: the app-server process that ran the turn is gone.
+      if (!ended && !['recovered', 'failed', 'exited'].includes(params.phase)) return;
       method = 'turn/completed';
       params.turn = { id: task.turnId,
         status: ended && params.finalAnswerCompleted ? 'completed' : params.phase === 'failed' ? 'failed' : 'interrupted',
-        error: params.phase === 'failed' ? { message: String(params.error?.message || params.error || '运行连接恢复失败') } : null };
+        error: params.phase === 'failed' ? { message: String(params.error?.message || params.error || '运行连接恢复失败') }
+          : params.phase === 'exited' ? { message: 'Codex 进程已退出' } : null };
     }
     if (method === 'turn/started') {
       task.state = 'running'; task.error = ''; task.turnId = params.turn?.id || params.turnId;

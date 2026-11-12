@@ -22,13 +22,13 @@ import { createProjectReviewRoutes } from "./routes/project-review-routes.mjs";
 import { createDesktopAutomationReader } from "./desktop-automations.mjs";
 
 export const createRequestHandler = ({
-  token, project, projectRoot, device, observerPort, conversations, execution, media, realtime, submissions,
+  token, trustedProxies = [], project, projectRoot, device, observerPort, conversations, execution, media, realtime, submissions,
   conversationForward, followUpQueue, contextManagement, groupRoom, roomDirectory, multiAgent, multiAgentDirectory, artifacts, webOutputs, fushengUsage, readWebVersion, serveStatic,
   agentConversationStore, agentPublicationService,
   employeeRuntime, employeeProjectDirectory, employeeGrowth, modelProviders, projectActivityIndex, projectStatus, agentTasks,
 }) => {
   const readAutomations = createDesktopAutomationReader();
-  const accessGuard = createAccessGuard({ token });
+  const accessGuard = createAccessGuard({ token, trustedProxies });
   const maintenance = createMaintenanceGate({
     projectRoot,
     isBusy: () => {

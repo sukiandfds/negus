@@ -32,14 +32,25 @@ const queryToken = (request) => {
   }
 };
 
-// Tunnels and reverse proxies connect from loopback, so the real client is
-// only visible in the forwarding headers they add.
-const clientAddress = (request) => String(
-  request.headers?.["cf-connecting-ip"]
-  || String(request.headers?.["x-forwarded-for"] || "").split(",")[0]
-  || request.socket?.remoteAddress
-  || "unknown",
-).trim();
+// IPv4 peers on a dual-stack socket appear as "::ffff:1.2.3.4".
+const normalizeAddress = (value) => String(value || "").trim().replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/iu, "").toLowerCase();
+
+export const parseTrustedProxies = (value) => new Set(String(value || "")
+  .split(",").map(normalizeAddress).filter(Boolean));
+
+// Forwarding headers can be set by anyone, so they only identify the client
+// when the direct peer is an explicitly trusted proxy or ingress (for example
+// a cloudflared tunnel on this machine). Otherwise the socket address is used.
+const clientAddress = (request, trustedProxies) => {
+  const peer = normalizeAddress(request.socket?.remoteAddress) || "unknown";
+  if (!trustedProxies.has(peer)) return peer;
+  const cloudflare = normalizeAddress(request.headers?.["cf-connecting-ip"]);
+  if (cloudflare) return cloudflare;
+  // Proxies append to X-Forwarded-For, so the nearest untrusted hop is the
+  // last entry the trusted chain did not add itself.
+  const hops = String(request.headers?.["x-forwarded-for"] || "").split(",").map(normalizeAddress).filter(Boolean);
+  return hops.reverse().find((hop) => !trustedProxies.has(hop)) || peer;
+};
 
 export const authorized = (request, token) => sameSecret(queryToken(request), token)
   || sameSecret(cookieToken(request), token);
@@ -58,13 +69,14 @@ export const rememberAuthorizedDevice = (request, response, url, token) => {
 // window is short so someone whose saved link went stale after a token change
 // is not locked out for long once they open the new link.
 export const createAccessGuard = ({
-  token, maxFailures = 10, windowMs = 60 * 1000, maxTrackedClients = 2000, now = () => Date.now(),
+  token, trustedProxies = [], maxFailures = 10, windowMs = 60 * 1000, maxTrackedClients = 2000, now = () => Date.now(),
 }) => {
+  const trusted = new Set([...trustedProxies].map(normalizeAddress).filter(Boolean));
   const failures = new Map();
 
   // Returns { allowed } and, when refused, the HTTP status to answer with.
   const check = (request) => {
-    const address = clientAddress(request);
+    const address = clientAddress(request, trusted);
     let record = failures.get(address);
     if (record && now() - record.startedAt >= windowMs) {
       failures.delete(address);
