@@ -1,8 +1,9 @@
-import fs from "node:fs";
-import fsp from "node:fs/promises";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { activityFromItem, detailFromItem, maxActivities, stateFromItem, terminalPhases } from "./execution/activity.mjs";
+import { createJsonStateWriter, readJsonStateSync } from "./state/json-state-file.mjs";
+import {
+  activityFromItem, detailFromItem, isSettledThreadStatus, maxActivities, stateFromItem, stateFromThreadStatus,
+  terminalPhases,
+} from "./execution/activity.mjs";
 
 export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
   const statuses = new Map();
@@ -14,47 +15,35 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
   const protocolEventTimes = new Map();
   const eventSequences = new Map();
   const eventEpoch = randomUUID();
-  const maxRetiredTurns = 20;
+  const maxRememberedTurns = 20;
   const maxItemTurns = 500;
   let persistTimer;
-  let persistChain = Promise.resolve();
+  const stateWriter = createJsonStateWriter(stateFile, { label: "execution-tracker" });
 
-  if (stateFile) {
-    try {
-      const stored = JSON.parse(fs.readFileSync(stateFile, "utf8"));
-      for (const status of stored.statuses || []) {
-        if (!status?.threadId) continue;
-        const needsRestartNormalization = status.phase === "systemError"
-          && status.label === "Codex 自动恢复失败";
-        statuses.set(status.threadId, status.active || needsRestartNormalization ? {
-          ...status,
-          phase: "interrupted",
-          label: "项目服务已重启，上一任务已中断",
-          active: false,
-          streamingItemId: "",
-          streamingText: "",
-          updatedAt: new Date().toISOString(),
-          eventEpoch,
-          eventSeq: 0,
-        } : { ...status, eventEpoch, eventSeq: 0 });
-      }
-    } catch {}
+  // A turn cannot survive a restart of this service: its app-server child is
+  // gone, so anything still marked active is reported as interrupted.
+  for (const status of readJsonStateSync(stateFile).statuses || []) {
+    if (!status?.threadId) continue;
+    const interruptedByRestart = status.active
+      || (status.phase === "systemError" && status.label === "Codex 自动恢复失败");
+    statuses.set(status.threadId, {
+      ...status,
+      ...(interruptedByRestart ? {
+        phase: "interrupted",
+        label: "项目服务已重启，上一任务已中断",
+        active: false,
+        streamingItemId: "",
+        streamingText: "",
+        updatedAt: new Date().toISOString(),
+      } : {}),
+      eventEpoch,
+      eventSeq: 0,
+    });
   }
 
-  const persist = () => {
-    if (!stateFile) return Promise.resolve();
-    const payload = `${JSON.stringify({
-      version: 1,
-      statuses: [...statuses.values()].slice(-50),
-    }, null, 2)}\n`;
-    persistChain = persistChain.catch(() => {}).then(async () => {
-      await fsp.mkdir(path.dirname(stateFile), { recursive: true });
-      const temporary = `${stateFile}.${process.pid}.tmp`;
-      await fsp.writeFile(temporary, payload, "utf8");
-      await fsp.rename(temporary, stateFile);
-    }).catch((error) => console.warn(`[execution-tracker] state persistence failed: ${error.message}`));
-    return persistChain;
-  };
+  const persist = () => stateWriter
+    .write({ version: 1, statuses: [...statuses.values()].slice(-50) })
+    .catch(() => {});
 
   const schedulePersist = () => {
     if (!stateFile) return;
@@ -65,21 +54,15 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
 
   const itemKey = (threadId, itemId) => `${threadId}:${itemId}`;
 
-  const retireTurn = (threadId, turnId) => {
+  const rememberTurn = (registry, threadId, turnId) => {
     if (!threadId || !turnId) return;
-    const turns = retiredTurns.get(threadId) || new Set();
+    const turns = registry.get(threadId) || new Set();
     turns.add(turnId);
-    while (turns.size > maxRetiredTurns) turns.delete(turns.values().next().value);
-    retiredTurns.set(threadId, turns);
+    while (turns.size > maxRememberedTurns) turns.delete(turns.values().next().value);
+    registry.set(threadId, turns);
   };
-
-  const rememberCompletedTurn = (threadId, turnId) => {
-    if (!threadId || !turnId) return;
-    const turns = completedTurns.get(threadId) || new Set();
-    turns.add(turnId);
-    while (turns.size > maxRetiredTurns) turns.delete(turns.values().next().value);
-    completedTurns.set(threadId, turns);
-  };
+  const retireTurn = (threadId, turnId) => rememberTurn(retiredTurns, threadId, turnId);
+  const rememberCompletedTurn = (threadId, turnId) => rememberTurn(completedTurns, threadId, turnId);
 
   const rememberItemTurn = (threadId, itemId, turnId) => {
     if (!threadId || !itemId || !turnId) return;
@@ -108,6 +91,22 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
     broadcast({ ...value, ...nextEventMetadata(threadId) });
   };
 
+  // Updates an activity in place so a running step keeps its position, and
+  // appends new ones while keeping only the most recent few.
+  const upsertActivity = (activities, activity) => activities.some((value) => value.id === activity.id)
+    ? activities.map((value) => value.id === activity.id ? activity : value)
+    : [...activities, activity].slice(-maxActivities);
+
+  // Applies a change that does not move the turn to another phase.
+  const patchStatus = (threadId, patch, { announce = true } = {}) => {
+    const previous = statuses.get(threadId);
+    if (!previous) return;
+    const status = { ...previous, ...patch, ...nextEventMetadata(threadId) };
+    statuses.set(threadId, status);
+    schedulePersist();
+    if (announce) broadcast(status);
+  };
+
   const publish = (threadId, next) => {
     if (!threadId) return;
     const previous = statuses.get(threadId);
@@ -119,13 +118,8 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
     if (beginsTurn && previous?.turnId && previous.turnId !== incomingTurnId) {
       retireTurn(threadId, previous.turnId);
     }
-    let activities = beginsTurn ? [] : previous?.activities || [];
-    if (next.activity) {
-      const index = activities.findIndex((activity) => activity.id === next.activity.id);
-      activities = index >= 0
-        ? activities.map((activity, activityIndex) => activityIndex === index ? next.activity : activity)
-        : [...activities, next.activity].slice(-maxActivities);
-    }
+    const currentActivities = beginsTurn ? [] : previous?.activities || [];
+    const activities = next.activity ? upsertActivity(currentActivities, next.activity) : currentActivities;
     const status = {
       type: "execution_status",
       threadId,
@@ -175,14 +169,10 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
       ? { ...existingReasoning, label: "分析完成", completed: true, updatedAt: new Date().toISOString() }
       : activityFromItem(item, true);
     if (!activity) return;
-    const index = previous.activities.findIndex((value) => value.id === activity.id);
-    const activities = index >= 0
-      ? previous.activities.map((value, activityIndex) => activityIndex === index ? activity : value)
-      : [...previous.activities, activity].slice(-maxActivities);
-    const status = { ...previous, activities, updatedAt: activity.updatedAt, ...nextEventMetadata(threadId) };
-    statuses.set(threadId, status);
-    schedulePersist();
-    broadcast(status);
+    patchStatus(threadId, {
+      activities: upsertActivity(previous.activities, activity),
+      updatedAt: activity.updatedAt,
+    });
   };
 
   const addCommentaryActivity = (threadId, itemId, text) => {
@@ -198,10 +188,7 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
       updatedAt: now,
     };
     const activities = [...previous.activities.filter((value) => value.id !== activity.id), activity].slice(-maxActivities);
-    const status = { ...previous, commentary: text, activities, updatedAt: now, ...nextEventMetadata(threadId) };
-    statuses.set(threadId, status);
-    schedulePersist();
-    broadcast(status);
+    patchStatus(threadId, { commentary: text, activities, updatedAt: now });
   };
 
   const addReasoningSummary = (threadId, itemId, delta) => {
@@ -277,16 +264,9 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
       // current turn. The turn completion event or authoritative probe owns
       // the terminal transition once a turn has actually started.
       if (status.type === "idle" && current?.active && current.phase !== "submitted") return;
-      if (status.type === "systemError") {
-        publish(threadId, { phase: "systemError", label: "Codex 连接异常" });
-      } else if (status.type === "active" && status.activeFlags?.includes("waitingOnApproval")) {
-        publish(threadId, { phase: "waitingOnApproval", label: "需要在电脑端确认" });
-      } else if (status.type === "active" && status.activeFlags?.includes("waitingOnUserInput")) {
-        publish(threadId, { phase: "waitingOnUserInput", label: "Codex 正在等待补充信息" });
-      } else if (status.type === "active") {
-        publish(threadId, { phase: "working", label: "Codex 正在处理任务" });
-      } else if (status.type === "idle" && !terminalPhases.has(statuses.get(threadId)?.phase)) {
-        publish(threadId, { phase: "idle", label: "Codex 已就绪" });
+      const state = stateFromThreadStatus(status);
+      if (state?.phase !== "idle" || !terminalPhases.has(current?.phase)) {
+        if (state) publish(threadId, state);
       }
       return;
     }
@@ -348,19 +328,14 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
       const itemId = String(params.itemId || "");
       if (messagePhases.get(itemKey(threadId, itemId)) !== "commentary") {
         const previous = statuses.get(threadId);
-        if (previous) {
-          const streamingText = previous.streamingItemId === itemId
-            ? previous.streamingText + String(params.delta || "")
-            : String(params.delta || "");
-          statuses.set(threadId, {
-            ...previous,
-            streamingItemId: itemId,
-            streamingText,
-            updatedAt: new Date().toISOString(),
-            ...nextEventMetadata(threadId),
-          });
-          schedulePersist();
-        }
+        const delta = String(params.delta || "");
+        // The delta event itself reaches browsers; the accumulated text is
+        // kept so a page that opens mid-answer starts from the full draft.
+        patchStatus(threadId, {
+          streamingItemId: itemId,
+          streamingText: previous?.streamingItemId === itemId ? previous.streamingText + delta : delta,
+          updatedAt: new Date().toISOString(),
+        }, { announce: false });
         broadcastThreadEvent(threadId, { type: "assistant_delta", ...params, turnId: eventTurnId || previous?.turnId || "" });
       }
       return;
@@ -409,7 +384,7 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
     }
     if (event.phase === "authoritative") {
       const current = statuses.get(threadId);
-      if (event.status?.type === "idle" && current?.active) {
+      if (isSettledThreadStatus(event.status) && current?.active) {
         publish(threadId, {
           phase: event.finalAnswerCompleted ? "completed" : "idle",
           label: event.finalAnswerCompleted ? "Codex 已完成" : "Codex 已就绪",
@@ -440,10 +415,12 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
       });
       return;
     }
-    if (event.phase === "recovered") {
+    if (event.phase === "recovered" || event.phase === "exited") {
+      // Idle threads were not running anything the user needs to hear about.
+      if (event.phase === "exited" && !statuses.get(threadId)?.active) return;
       publish(threadId, {
         phase: "interrupted",
-        label: "连接已恢复，上一任务已中断",
+        label: event.phase === "recovered" ? "连接已恢复，上一任务已中断" : "Codex 进程已退出，上一任务已中断",
         active: false,
         lastProbeAt,
       });
@@ -464,26 +441,16 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
   const reconcile = (threadId, authoritativeStatus) => {
     const current = statuses.get(threadId);
     if (!current?.active) return getStatus(threadId);
-    const type = authoritativeStatus?.type;
-    const flags = authoritativeStatus?.activeFlags || [];
-    if (type === "idle") {
-      publish(threadId, { phase: "idle", label: "Codex 已就绪" });
-    } else if (type === "systemError") {
-      publish(threadId, { phase: "systemError", label: "Codex 连接异常" });
-    } else if (type === "active" && flags.includes("waitingOnApproval")) {
-      publish(threadId, { phase: "waitingOnApproval", label: "需要在电脑端确认" });
-    } else if (type === "active" && flags.includes("waitingOnUserInput")) {
-      publish(threadId, { phase: "waitingOnUserInput", label: "Codex 正在等待补充信息" });
-    } else if (type === "active") {
-      publish(threadId, { phase: "working", label: "Codex 正在处理任务" });
-    } else {
-      publish(threadId, {
-        phase: "unknown",
-        label: "状态暂时无法确认",
-        detail: "实时状态暂时无法确认，可以等待自动恢复或手动停止后重试",
-        active: true,
-      });
-    }
+    // Until Codex has accepted the turn the thread may not even be loaded;
+    // the submission itself reports success or failure.
+    if (current.phase === "submitted" && authoritativeStatus?.type === "notLoaded") return current;
+    const settled = isSettledThreadStatus(authoritativeStatus) ? { phase: "idle", label: "Codex 已就绪" } : null;
+    publish(threadId, settled || stateFromThreadStatus(authoritativeStatus) || {
+      phase: "unknown",
+      label: "状态暂时无法确认",
+      detail: "实时状态暂时无法确认，可以等待自动恢复或手动停止后重试",
+      active: true,
+    });
     return getStatus(threadId);
   };
 

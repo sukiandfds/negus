@@ -27,7 +27,6 @@ export default defineConfig(({ command }) => {
         input: {
           main: "index.html",
           group: "group.html",
-          progress: "progress.html",
           projectManagement: "project-management.html",
         },
       },

@@ -1,5 +1,4 @@
-import fs from "node:fs/promises";
-import path from "node:path";
+import { createJsonStateWriter, readJsonState } from "./state/json-state-file.mjs";
 
 const DEFAULT_THRESHOLD = 80;
 const MIN_THRESHOLD = 50;
@@ -25,17 +24,13 @@ export const createContextManagementService = async ({
   stateFile, broadcast, getExecutionStatus, getRuntimeContext, compactContext,
 }) => {
   const states = new Map();
-  let settings = { version: 1, defaultThreshold: DEFAULT_THRESHOLD, threads: {} };
-  let writeChain = Promise.resolve();
-
-  try {
-    const stored = JSON.parse(await fs.readFile(stateFile, "utf8"));
-    settings = {
-      version: 1,
-      defaultThreshold: Number.isInteger(stored.defaultThreshold) ? stored.defaultThreshold : DEFAULT_THRESHOLD,
-      threads: stored.threads && typeof stored.threads === "object" ? stored.threads : {},
-    };
-  } catch {}
+  const stateWriter = createJsonStateWriter(stateFile, { label: "context-management" });
+  const stored = await readJsonState(stateFile);
+  let settings = {
+    version: 1,
+    defaultThreshold: Number.isInteger(stored.defaultThreshold) ? stored.defaultThreshold : DEFAULT_THRESHOLD,
+    threads: stored.threads && typeof stored.threads === "object" ? stored.threads : {},
+  };
 
   const thresholdFor = (threadId) => Object.prototype.hasOwnProperty.call(settings.threads, threadId)
     ? settings.threads[threadId]
@@ -56,17 +51,6 @@ export const createContextManagementService = async ({
     states.set(threadId, next);
     broadcast(publicStatus(next));
     return next;
-  };
-
-  const persistSettings = () => {
-    const snapshot = JSON.stringify(settings, null, 2);
-    writeChain = writeChain.then(async () => {
-      await fs.mkdir(path.dirname(stateFile), { recursive: true });
-      const temporary = `${stateFile}.tmp`;
-      await fs.writeFile(temporary, `${snapshot}\n`, "utf8");
-      await fs.rename(temporary, stateFile);
-    });
-    return writeChain;
   };
 
   const startCompaction = async (threadId, source) => {
@@ -113,7 +97,7 @@ export const createContextManagementService = async ({
     const current = statusFor(threadId);
     const threshold = current.autoCompactThreshold;
     if (threshold === null || current.percentage === null || current.percentage < threshold) {
-      if (current.lastAutoTriggerTokens !== null) states.set(threadId, { ...current, lastAutoTriggerTokens: null });
+      if (current.lastAutoTriggerTokens != null) states.set(threadId, { ...current, lastAutoTriggerTokens: null });
       return;
     }
     if (["queued", "compacting"].includes(current.phase)) return;
@@ -139,7 +123,7 @@ export const createContextManagementService = async ({
       throw error;
     }
     settings = { ...settings, threads: { ...settings.threads, [threadId]: threshold } };
-    await persistSettings();
+    await stateWriter.write(settings);
     publish(threadId, { autoCompactThreshold: threshold });
     maybeAutoCompact(threadId);
     return publicStatus(statusFor(threadId));
@@ -191,6 +175,6 @@ export const createContextManagementService = async ({
     setThreshold,
     requestCompaction,
     handleProtocolMessage,
-    close: () => writeChain,
+    close: () => stateWriter.flush(),
   };
 };

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { createJsonStateWriter, readJsonState } from "./state/json-state-file.mjs";
 
 const cleanText = (value, maxLength) => String(value || "").trim().slice(0, maxLength);
 
@@ -68,15 +69,12 @@ const publicArtifact = (artifact) => {
 
 export const createArtifactService = async ({ stateFile, allowedRoot, projectId, media, broadcast }) => {
   const artifacts = new Map();
-  let writeQueue = Promise.resolve();
+  const stateWriter = createJsonStateWriter(stateFile, { label: "artifact-service" });
   const root = path.resolve(allowedRoot);
   await fs.mkdir(root, { recursive: true });
   const realRoot = await fs.realpath(root);
 
-  let stored = {};
-  try {
-    stored = JSON.parse(await fs.readFile(stateFile, "utf8"));
-  } catch {}
+  const stored = await readJsonState(stateFile);
   for (const artifact of Array.isArray(stored.artifacts) ? stored.artifacts : []) {
     if (!artifact?.id || !Array.isArray(artifact.versions) || !artifact.versions.length) continue;
     artifacts.set(artifact.id, artifact);
@@ -87,18 +85,7 @@ export const createArtifactService = async ({ stateFile, allowedRoot, projectId,
     }
   }
 
-  const persist = () => {
-    const payload = `${JSON.stringify({ version: 1, artifacts: [...artifacts.values()] }, null, 2)}\n`;
-    writeQueue = writeQueue
-      .catch(() => {})
-      .then(async () => {
-        await fs.mkdir(path.dirname(stateFile), { recursive: true });
-        const temporary = `${stateFile}.${process.pid}.tmp`;
-        await fs.writeFile(temporary, payload, "utf8");
-        await fs.rename(temporary, stateFile);
-      });
-    return writeQueue;
-  };
+  const persist = () => stateWriter.write({ version: 1, artifacts: [...artifacts.values()] });
 
   const resolveAllowedFile = async (relativePath) => {
     const supplied = cleanText(relativePath, 500);
@@ -237,5 +224,5 @@ export const createArtifactService = async ({ stateFile, allowedRoot, projectId,
   };
 
   await persist();
-  return { publish, get, list, review, close: () => writeQueue };
+  return { publish, get, list, review, close: () => stateWriter.flush() };
 };

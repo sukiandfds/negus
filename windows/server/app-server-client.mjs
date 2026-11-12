@@ -46,12 +46,17 @@ const inspectCandidate = (entrypoint) => {
     windowsHide: true,
   });
   if (result.error || result.status !== 0) return null;
-  const version = `${result.stdout || ""} ${result.stderr || ""}`.trim();
+  const version = String(result.stdout || result.stderr || "").trim().split(/\r?\n/u)[0];
   if (!versionParts(version)) return null;
   return { ...launch, entrypoint, version };
 };
 
+const isWindows = process.platform === "win32";
+
+// Codex Desktop on Windows ships its own CLI; newer builds live in versioned
+// sub-directories, so every one is a candidate and the newest runnable wins.
 const desktopCandidates = () => {
+  if (!isWindows) return [];
   const localAppData = process.env.LOCALAPPDATA
     || path.join(process.env.USERPROFILE || "", "AppData", "Local");
   const binRoot = path.join(localAppData, "OpenAI", "Codex", "bin");
@@ -64,6 +69,27 @@ const desktopCandidates = () => {
   return candidates;
 };
 
+// A globally installed CLI: the npm package on Windows, otherwise whatever
+// `codex` resolves to on PATH (npm, Homebrew or a standalone binary).
+const installedCandidates = () => {
+  const candidates = [];
+  if (isWindows) {
+    const appData = process.env.APPDATA || path.join(process.env.USERPROFILE || "", "AppData", "Roaming");
+    candidates.push(path.join(appData, "npm", "node_modules", "@openai", "codex", "bin", "codex.js"));
+  }
+  const names = isWindows ? ["codex.exe"] : ["codex"];
+  for (const directory of String(process.env.PATH || "").split(path.delimiter).filter(Boolean)) {
+    for (const name of names) candidates.push(path.join(directory, name));
+  }
+  if (process.platform === "darwin") candidates.push("/Applications/Codex.app/Contents/Resources/codex");
+  return candidates;
+};
+
+const newestRunnable = (candidates) => [...new Set(candidates)]
+  .map(inspectCandidate)
+  .filter(Boolean)
+  .sort((left, right) => compareVersions(right.version, left.version))[0] || null;
+
 const resolveCodexCommand = () => {
   const override = process.env.CODEX_APP_SERVER_BIN?.trim();
   if (override) {
@@ -71,21 +97,13 @@ const resolveCodexCommand = () => {
     if (!selected) throw new Error(`CODEX_APP_SERVER_BIN is not a runnable Codex CLI: ${override}`);
     return selected;
   }
-
-  const desktop = desktopCandidates()
-    .map(inspectCandidate)
-    .filter(Boolean)
-    .sort((left, right) => compareVersions(right.version, left.version));
-  if (desktop.length) return desktop[0];
-
-  const appData = process.env.APPDATA
-    || path.join(process.env.USERPROFILE || "", "AppData", "Roaming");
-  const globalNpm = inspectCandidate(path.join(
-    appData, "npm", "node_modules", "@openai", "codex", "bin", "codex.js",
-  ));
-  if (globalNpm) return globalNpm;
-
-  throw new Error("No runnable Codex app-server runtime was found.");
+  // Prefer the Desktop runtime so the Web panel speaks the same protocol
+  // version as the app the user already has open.
+  const selected = newestRunnable(desktopCandidates()) || newestRunnable(installedCandidates());
+  if (!selected) {
+    throw new Error("No runnable Codex app-server runtime was found. Install Codex or set CODEX_APP_SERVER_BIN.");
+  }
+  return selected;
 };
 
 export const createAppServerClient = ({ requestTimeoutMs = 15000 } = {}) => {
@@ -95,6 +113,7 @@ export const createAppServerClient = ({ requestTimeoutMs = 15000 } = {}) => {
   let initializePromise;
   let restartPromise;
   let probeFailures = 0;
+  let selectedRuntime;
   const pending = new Map();
   const listeners = new Set();
   const healthListeners = new Set();
@@ -138,7 +157,8 @@ export const createAppServerClient = ({ requestTimeoutMs = 15000 } = {}) => {
 
   const start = () => {
     if (child && !child.killed) return;
-    const selected = resolveCodexCommand();
+    // Resolving runs every candidate once with --version, so remember the result.
+    const selected = selectedRuntime ||= resolveCodexCommand();
     console.log(`[app-server-client] using ${selected.entrypoint} (${selected.version})`);
     const spawned = spawn(selected.command, [...selected.prefixArgs, "app-server"], {
       cwd: process.cwd(),
@@ -186,13 +206,18 @@ export const createAppServerClient = ({ requestTimeoutMs = 15000 } = {}) => {
       rejectPending(error);
       if (child === spawned) child = undefined;
     });
+    spawned.stdin.on("error", () => {});
     spawned.once("exit", (code) => {
       const tail = stderrLines.slice(-20).join("\n");
-      rejectPending(new Error(`Codex app-server exited with code ${code ?? "unknown"}${tail ? `: ${tail}` : ""}`));
-      if (child === spawned) {
-        child = undefined;
-        initializePromise = undefined;
-      }
+      const error = new Error(`Codex app-server exited with code ${code ?? "unknown"}${tail ? `: ${tail}` : ""}`);
+      rejectPending(error);
+      // A deliberate restart or close has already replaced `child`; only an
+      // exit nobody asked for is reported, because every turn it was running
+      // is lost and nothing else will ever announce that.
+      if (child !== spawned) return;
+      child = undefined;
+      initializePromise = undefined;
+      emitHealth({ phase: "exited", error });
     });
   };
 
@@ -206,7 +231,13 @@ export const createAppServerClient = ({ requestTimeoutMs = 15000 } = {}) => {
       }, timeoutMs);
       timer.unref?.();
       pending.set(id, { resolve, reject, timer });
-      writeMessage({ method, id, params });
+      try {
+        writeMessage({ method, id, params });
+      } catch (error) {
+        clearTimeout(timer);
+        pending.delete(id);
+        reject(error);
+      }
     });
   };
 
@@ -272,8 +303,9 @@ export const createAppServerClient = ({ requestTimeoutMs = 15000 } = {}) => {
 
   const close = () => {
     rejectPending(new Error("Codex app-server client closed"));
-    child?.kill();
+    const previous = child;
     child = undefined;
+    previous?.kill();
     initializePromise = undefined;
     healthListeners.clear();
   };

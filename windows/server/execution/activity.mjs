@@ -19,6 +19,22 @@ export const detailFromItem = (item) => {
   return "";
 };
 
+// Maps the thread status Codex reports to the phase shown in the browser.
+// Returns null for a status this service does not know how to describe.
+// An authoritative read that finds the thread idle, or no longer loaded by the
+// app-server at all, proves that no turn is running on it any more.
+export const isSettledThreadStatus = (status) => status?.type === "idle" || status?.type === "notLoaded";
+
+export const stateFromThreadStatus = (status) => {
+  const flags = status?.activeFlags || [];
+  if (status?.type === "idle") return { phase: "idle", label: "Codex 已就绪" };
+  if (status?.type === "systemError") return { phase: "systemError", label: "Codex 连接异常" };
+  if (status?.type !== "active") return null;
+  if (flags.includes("waitingOnApproval")) return { phase: "waitingOnApproval", label: "需要在电脑端确认" };
+  if (flags.includes("waitingOnUserInput")) return { phase: "waitingOnUserInput", label: "Codex 正在等待补充信息" };
+  return { phase: "working", label: "Codex 正在处理任务" };
+};
+
 export const stateFromItem = (item) => {
   switch (item?.type) {
     case "reasoning": return { phase: "working", label: "Codex 正在分析任务" };

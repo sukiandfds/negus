@@ -1,7 +1,5 @@
-import path from "node:path";
 import { sendJson } from "../http/request-utils.mjs";
 import { readProjectManagement, readProjectManagementEntry } from "../project-management-store.mjs";
-import { readProjectProgress } from "../project-progress-store.mjs";
 
 const createObserverReader = (observerPort) => async (threadId = "") => {
   try {
@@ -16,7 +14,6 @@ const createObserverReader = (observerPort) => async (threadId = "") => {
 
 export const createSystemRoutes = ({ token, project, projectRoot, device, observerPort, media, realtime }) => {
   const readObserverStatus = createObserverReader(observerPort);
-  const progressFile = path.join(projectRoot, "docs", "feature-development", "FEATURE_INDEX.md");
   return async (request, response, url) => {
     if (url.pathname === "/api/project") {
       sendJson(response, { name: project, root: projectRoot, mode: "interactive" });
@@ -28,10 +25,6 @@ export const createSystemRoutes = ({ token, project, projectRoot, device, observ
     }
     if (url.pathname === "/api/share-link" && request.method === "GET") {
       sendJson(response, { token });
-      return true;
-    }
-    if (url.pathname === "/api/project-progress" && request.method === "GET") {
-      sendJson(response, await readProjectProgress({ project, projectRoot, progressFile }));
       return true;
     }
     if (url.pathname === "/api/project-management" && request.method === "GET") {

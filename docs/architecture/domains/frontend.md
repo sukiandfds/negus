@@ -6,12 +6,12 @@
 | --- | --- |
 | `web-ui/src/main.tsx` | 单人 Web 入口与应用启动 |
 | `web-ui/src/group-main.tsx` | 群聊入口 |
-| `web-ui/src/progress-main.tsx` | 项目进度入口（最新产品分支） |
 | `web-ui/src/project-management-main.tsx` | 项目管理入口（最新产品分支） |
 | `web-ui/src/App.tsx` | 单人页面组装，不承载具体业务规则 |
 | `web-ui/src/components/` | 跨功能 UI 外壳和纯展示组件 |
 | `web-ui/src/features/<feature>/` | 单一功能的组件、数据访问、Hook、状态和类型 |
 | `web-ui/src/shared/` | 跨功能稳定 API、媒体类型、实时事件和公共模型 |
+| `web-ui/src/shared/realtime/realtimeConnection.ts` | 单人页与群聊共用的 SSE 连接：事件编号去重、断线重连、补发缺口时通知调用方重新加载 |
 | `web-ui/src/pwa/` | Service Worker 与 PWA 注册 |
 | `web-ui/src/styles/` | 全局样式与设计令牌 |
 

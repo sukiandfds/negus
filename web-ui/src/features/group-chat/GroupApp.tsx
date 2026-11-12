@@ -53,7 +53,8 @@ export function GroupApp() {
           error={group.error}
           onModeChange={setMode}
           onAgentChange={setAgentId}
-          onSend={(text, targetAgentId) => group.send(mode, targetAgentId, text)}
+          onSend={(text, targetAgentIds, attachmentIds) => group.send(mode, targetAgentIds, text, attachmentIds)}
+          onInterrupt={group.interrupt}
         />
       </main>
       <AgentRoster agents={snapshot.agents} selectedId={agentId} onSelect={(id) => { setAgentId(id); setMode("development"); }} />

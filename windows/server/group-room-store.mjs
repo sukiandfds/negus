@@ -1,6 +1,5 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { createJsonStateWriter, readJsonState } from "./state/json-state-file.mjs";
 
 const agentDefinitions = [
   {
@@ -46,10 +45,8 @@ const initialAgent = (definition, saved = {}) => ({
 });
 
 export const createGroupRoomStore = async ({ stateFile, project, broadcast }) => {
-  let stored = {};
-  try {
-    stored = JSON.parse(await fs.readFile(stateFile, "utf8"));
-  } catch {}
+  const stored = await readJsonState(stateFile);
+  const stateWriter = createJsonStateWriter(stateFile, { label: "group-room" });
 
   const savedAgents = new Map((Array.isArray(stored.agents) ? stored.agents : []).map((agent) => [agent.id, agent]));
   const agents = new Map(agentDefinitions.map((definition) => [definition.id, initialAgent(definition, savedAgents.get(definition.id))]));
@@ -62,24 +59,14 @@ export const createGroupRoomStore = async ({ stateFile, project, broadcast }) =>
     }))
     .slice(-300);
   const members = new Map();
-  let writeQueue = Promise.resolve();
-
-  const persist = () => {
-    const payload = JSON.stringify({
-      version: 1,
-      messages: messages.slice(-300),
-      agents: [...agents.values()].map(({ instructions, ...agent }) => agent),
-    }, null, 2);
-    writeQueue = writeQueue
-      .catch(() => {})
-      .then(async () => {
-        await fs.mkdir(path.dirname(stateFile), { recursive: true });
-        await fs.writeFile(stateFile, payload, "utf8");
-      });
-    return writeQueue;
-  };
-
   const publicAgent = ({ instructions, ...agent }) => agent;
+
+  const persist = () => stateWriter.write({
+    version: 1,
+    messages,
+    agents: [...agents.values()].map(publicAgent),
+  });
+
   const activeMembers = () => {
     const cutoff = Date.now() - 60000;
     return [...members.values()].filter((member) => Date.parse(member.lastSeenAt) >= cutoff);
@@ -162,5 +149,5 @@ export const createGroupRoomStore = async ({ stateFile, project, broadcast }) =>
   };
 
   await persist();
-  return { snapshot, touchMember, addMessage, getAgent, getMessage, attachArtifact, updateAgent, close: () => writeQueue };
+  return { snapshot, touchMember, addMessage, getAgent, getMessage, attachArtifact, updateAgent, close: () => stateWriter.flush() };
 };

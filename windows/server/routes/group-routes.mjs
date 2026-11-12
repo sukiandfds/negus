@@ -10,6 +10,20 @@ export const createGroupRoutes = ({ groupRoom, media, multiAgent, webOutputs }) 
     sendJson(response, groupRoom.touchMember(body.memberId, body.name));
     return true;
   }
+  if (url.pathname === "/api/group/interrupt" && request.method === "POST") {
+    const body = await readJson(request);
+    const member = groupRoom.touchMember(body.memberId, body.authorName);
+    const result = await multiAgent.interrupt();
+    if (!result.interrupted) {
+      sendJson(response, { error: "当前没有可停止的 Agent 任务" }, 409);
+      return true;
+    }
+    await groupRoom.addMessage({
+      type: "system", authorId: "system", authorName: "系统", text: `${member.name} 停止了当前的 Agent 任务`,
+    });
+    sendJson(response, result, 202);
+    return true;
+  }
   if (url.pathname !== "/api/group/message" || request.method !== "POST") return false;
 
   const body = await readJson(request);

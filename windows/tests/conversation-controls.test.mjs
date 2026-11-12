@@ -169,7 +169,7 @@ test("reads the authoritative status from the service-owned app-server", async (
     request: async (method, params) => {
       assert.equal(method, "thread/read");
       assert.deepEqual(params, { threadId: "thread-1", includeTurns: false });
-      return { thread: { id: "thread-1", status: { type: "idle" } } };
+      return { thread: { id: "thread-1", cwd: "D:\\project", status: { type: "idle" } } };
     },
   };
   const store = createAppServerConversationStore({
@@ -505,7 +505,9 @@ test("forks, archives, and restores a project thread through app-server actions"
     archived: false,
     forkedFromId: null,
   });
-  assert.deepEqual(calls.slice(-2).map((call) => call.method), ["thread/archive", "thread/unarchive"]);
+  // Restoring re-reads the thread first: an archived thread is not cached,
+  // and it must be proven to belong to this project before it is touched.
+  assert.deepEqual(calls.slice(-3).map((call) => call.method), ["thread/archive", "thread/read", "thread/unarchive"]);
   store.close();
 });
 

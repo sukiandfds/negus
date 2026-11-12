@@ -1,7 +1,6 @@
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { randomBytes } from "node:crypto";
 import { createJsonlConversationStore } from "../server/jsonl-conversation-store.mjs";
 import { createAppServerConversationStore } from "../server/app-server-conversation-store.mjs";
 import { createConversationService } from "../server/conversation-service.mjs";
@@ -10,6 +9,7 @@ import { createMediaService } from "../server/media-service.mjs";
 import { createRealtimeHub } from "../server/realtime-hub.mjs";
 import { createExecutionTracker } from "../server/execution-tracker.mjs";
 import { createContextManagementService } from "../server/context-management-service.mjs";
+import { minimumStrongTokenLength, resolveAccessToken } from "../server/http/access-control.mjs";
 import { createRequestHandler } from "../server/request-handler.mjs";
 import { createStaticFileServer } from "../server/static-files.mjs";
 import { createWebVersionReader } from "../server/web-version.mjs";
@@ -26,11 +26,20 @@ const getArg = (name, fallback) => {
 };
 
 const port = Number(getArg("--port", "9360"));
+const host = getArg("--host", "0.0.0.0");
 const observerPort = Number(getArg("--observer-port", "9350"));
 const project = getArg("--project", "codex-collab-panel-demo");
 const projectRoot = path.resolve(getArg("--project-root", process.cwd()));
 const webRoot = path.resolve(getArg("--web-root", path.join(process.cwd(), "web-ui", "dist")));
-const token = getArg("--token", randomBytes(12).toString("hex"));
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  console.error(`[remote-room-demo] invalid --port: ${getArg("--port", "")}`);
+  process.exit(1);
+}
+const { token, source: tokenSource } = resolveAccessToken({
+  explicitToken: getArg("--token", ""),
+  tokenFile: path.join(projectRoot, "runtime", "access-token"),
+});
+const loopbackOnly = ["127.0.0.1", "::1", "localhost"].includes(host);
 const deviceName = String(getArg("--device-name", os.hostname())).trim() || os.hostname();
 const device = { name: deviceName, startedAt: new Date().toISOString() };
 const sessionRoot = process.env.CODEX_SESSION_DIR || path.join(os.homedir(), ".codex", "sessions");
@@ -111,23 +120,49 @@ const requestHandler = createRequestHandler({
 });
 const server = http.createServer(requestHandler);
 
-const close = () => {
+// One rejected promise in a background task must not take down the service
+// and every turn it is supervising.
+process.on("unhandledRejection", (reason) => {
+  console.error("[remote-room-demo] unhandled rejection:", reason);
+});
+
+let closing = false;
+const close = async () => {
+  if (closing) return;
+  closing = true;
+  // If a state file cannot be flushed, still exit instead of hanging.
+  const forceExit = setTimeout(() => process.exit(1), 5000);
+  forceExit.unref();
   realtime.close();
-  void execution.close();
   conversations.close();
-  void contextManagement.close();
   multiAgent.close();
   webOutputs.close();
-  void artifacts.close();
-  void groupRoom.close();
   server.close();
+  server.closeAllConnections?.();
+  await Promise.allSettled([execution.close(), contextManagement.close(), artifacts.close(), groupRoom.close()]);
+  process.exit(0);
 };
 process.once("SIGINT", close);
 process.once("SIGTERM", close);
 
-server.listen(port, "0.0.0.0", () => {
+server.once("error", (error) => {
+  console.error(error.code === "EADDRINUSE"
+    ? `[remote-room-demo] port ${port} is already in use`
+    : `[remote-room-demo] server failed: ${error.message}`);
+  process.exit(1);
+});
+
+server.listen(port, host, () => {
   console.log(`[remote-room-demo] ${projectRoot}`);
   console.log(`[remote-room-demo] device: ${deviceName}`);
-  console.log(`[remote-room-demo] http://127.0.0.1:${port}/?token=${token}`);
-  console.log(`[remote-room-demo] http://127.0.0.1:${port}/group.html?token=${token}`);
+  console.log(`[remote-room-demo] http://127.0.0.1:${port}/?token=${encodeURIComponent(token)}`);
+  console.log(`[remote-room-demo] http://127.0.0.1:${port}/group.html?token=${encodeURIComponent(token)}`);
+  if (tokenSource === "generated") {
+    console.log("[remote-room-demo] a new access token was generated and saved to runtime/access-token");
+  }
+  if (!loopbackOnly && token.length < minimumStrongTokenLength) {
+    console.warn(`[remote-room-demo] WARNING: the access token is shorter than ${minimumStrongTokenLength} characters while the`
+      + " service accepts connections from other devices. Anyone who guesses it can run Codex on this computer."
+      + " Omit --token to use a generated one, or pass --host 127.0.0.1 to stay local.");
+  }
 });

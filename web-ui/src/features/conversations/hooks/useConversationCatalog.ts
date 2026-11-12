@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
-import { hasAccessToken } from "../../../shared/api/http";
 import { conversationApi } from "../data/conversationApi";
 import type { ProjectInfo, SessionDetail, SessionSummary } from "../model/types";
 import type { InitialConversationState } from "../state/initialConversation";
@@ -144,11 +143,6 @@ export function useConversationCatalog(
   }, [refreshSessions, selection.clearSelection, updateArchiveQuery]);
 
   useEffect(() => {
-    if (!hasAccessToken) {
-      setLoadingList(false);
-      setListError("访问链接缺少令牌，请运行 pnpm start:demo 并打开输出的完整链接");
-      return;
-    }
     const controller = new AbortController();
     const hasCachedList = Boolean(initial.sessions.length);
     const hasCachedSession = Boolean(initial.session);

@@ -3,6 +3,10 @@
   "private": true,
   "packageManager": "pnpm@10.28.2",
   "scripts": {
+    "build": "pnpm --dir web-ui install --frozen-lockfile && pnpm --dir web-ui build",
+    "start": "node windows/scripts/remote-room-demo.mjs",
+    "test": "node --test windows/tests/*.test.mjs macos/tests/*.test.mjs",
+    "check": "pnpm test && pnpm --dir web-ui build",
     "build:ui": "powershell -NoProfile -ExecutionPolicy Bypass -File windows/scripts/build-web-ui.ps1",
     "start:demo": "powershell -NoProfile -ExecutionPolicy Bypass -File windows/scripts/start-web-demo.ps1",
     "start:demo:build": "powershell -NoProfile -ExecutionPolicy Bypass -File windows/scripts/start-web-demo.ps1 -Build",
@@ -10,5 +14,8 @@
   },
   "dependencies": {
     "image-size": "2.0.2"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

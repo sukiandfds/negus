@@ -50,7 +50,6 @@ export interface StoredMember {
 }
 
 export type GroupEvent =
-  | { type: "connected" }
   | { type: "group_message_created"; message: GroupMessage }
   | { type: "group_message_updated"; message: GroupMessage }
   | { type: "group_agent_updated"; agent: GroupAgent }

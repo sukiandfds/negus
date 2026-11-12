@@ -5,6 +5,9 @@ export const createConversationService = ({ primary, fallback, contentVersionSto
     try {
       return await primary[operation](...args);
     } catch (error) {
+      // A refusal is an answer, not an outage: the fallback must not serve
+      // what the primary store deliberately declined.
+      if (error?.statusCode === 403) throw error;
       console.warn(`[conversation-service] app-server request failed, using JSONL fallback: ${error.message}`);
       return fallback[operation](...args);
     }
@@ -38,22 +41,18 @@ export const createConversationService = ({ primary, fallback, contentVersionSto
     return request;
   };
 
+  // Reads fall back to the JSONL files when the app-server is unavailable;
+  // everything that changes or runs a thread needs the app-server itself.
+  const primaryOperations = [
+    "createSession", "sendMessage", "steerMessage", "interrupt", "forkSession", "archiveSession",
+    "unarchiveSession", "listModels", "updateModel", "updateReasoningEffort", "getRuntimeContext",
+    "getThreadStatus", "compactContext", "assertProjectThread",
+  ];
+
   return {
+    ...Object.fromEntries(primaryOperations.map((operation) => [operation, (...args) => primary[operation](...args)])),
     listSessions: (...args) => withFallback("listSessions", ...args),
-    createSession: (...args) => primary.createSession(...args),
     findSession,
-    sendMessage: (...args) => primary.sendMessage(...args),
-    steerMessage: (...args) => primary.steerMessage(...args),
-    interrupt: (...args) => primary.interrupt(...args),
-    forkSession: (...args) => primary.forkSession(...args),
-    archiveSession: (...args) => primary.archiveSession(...args),
-    unarchiveSession: (...args) => primary.unarchiveSession(...args),
-    listModels: (...args) => primary.listModels(...args),
-    updateModel: (...args) => primary.updateModel(...args),
-    updateReasoningEffort: (...args) => primary.updateReasoningEffort(...args),
-    getRuntimeContext: (...args) => primary.getRuntimeContext(...args),
-    getThreadStatus: (...args) => primary.getThreadStatus(...args),
-    compactContext: (...args) => primary.compactContext(...args),
     close: () => {
       inFlightFinds.clear();
       primary.close();

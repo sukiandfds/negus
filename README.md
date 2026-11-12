@@ -3,6 +3,17 @@
 > 本仓库是基于 Codex Dream Skin 的私有实验分支，当前正在开发
 > **Codex Collab Panel**：Codex 右侧实时总结与跨设备项目协作面板。
 > 项目目标、当前进度和下一步见 [`PROJECT.md`](./PROJECT.md)。
+>
+> **启动协作面板（Windows / macOS / Linux，需要 Node 22+、pnpm 和已安装的 Codex）：**
+>
+> ```bash
+> pnpm install && pnpm build      # 构建网页
+> pnpm start -- --port 9360       # 启动服务，终端会输出带令牌的访问链接
+> pnpm test                       # 运行回归测试
+> ```
+>
+> 不传 `--token` 时会生成强令牌并保存在 `runtime/access-token`，重启后链接不变；`--host 127.0.0.1` 只允许本机访问。
+> Windows 上原有的 `pnpm start:demo` 脚本仍可使用。
 
 ---
 

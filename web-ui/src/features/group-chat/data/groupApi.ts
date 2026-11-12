@@ -1,4 +1,4 @@
-import { fetchJson, postJson, withAccessToken } from "../../../shared/api/http";
+import { fetchJson, postJson } from "../../../shared/api/http";
 import type { GroupMode, GroupSnapshot, StoredMember } from "../model/types";
 
 export const groupApi = {
@@ -16,5 +16,9 @@ export const groupApi = {
     { memberId: member.id, authorName: member.name, mode, agentIds, text, attachmentIds },
     signal,
   ),
-  eventsUrl: () => withAccessToken("/events"),
+  interrupt: (member: StoredMember, signal?: AbortSignal) => postJson<{ interrupted: boolean; agentIds: string[] }>(
+    "/api/group/interrupt",
+    { memberId: member.id, authorName: member.name },
+    signal,
+  ),
 };

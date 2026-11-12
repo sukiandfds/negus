@@ -349,13 +349,50 @@ test("reports an uncertain state when app-server cannot confirm an active thread
     params: { threadId: "thread-1", turn: { id: "turn-1" } },
   });
 
-  tracker.reconcile("thread-1", { type: "notLoaded" });
+  tracker.reconcile("thread-1", null);
 
   const status = tracker.getStatus("thread-1");
   assert.equal(status.active, true);
   assert.equal(status.phase, "unknown");
   assert.equal(status.label, "状态暂时无法确认");
   assert.equal(status.turnId, "turn-1");
+});
+
+test("ends a tracked turn when app-server no longer has the thread loaded", () => {
+  const tracker = createExecutionTracker({ broadcast: () => {} });
+  tracker.markSubmitted("thread-1");
+  // Before Codex accepts the turn the thread may legitimately be unloaded.
+  tracker.reconcile("thread-1", { type: "notLoaded" });
+  assert.equal(tracker.getStatus("thread-1").phase, "submitted");
+
+  tracker.handleProtocolMessage({
+    method: "turn/started",
+    params: { threadId: "thread-1", turn: { id: "turn-1" } },
+  });
+  tracker.reconcile("thread-1", { type: "notLoaded" });
+
+  const status = tracker.getStatus("thread-1");
+  assert.equal(status.active, false);
+  assert.equal(status.phase, "idle");
+});
+
+test("marks every running turn interrupted when the app-server process exits", () => {
+  const events = [];
+  const tracker = createExecutionTracker({ broadcast: (event) => events.push(event) });
+  tracker.markSubmitted("thread-1");
+  tracker.handleProtocolMessage({
+    method: "turn/started",
+    params: { threadId: "thread-1", turn: { id: "turn-1" } },
+  });
+  events.length = 0;
+
+  tracker.handleHealthState({ phase: "exited", threadId: "thread-1", error: new Error("gone") });
+  tracker.handleHealthState({ phase: "exited", threadId: "thread-idle", error: new Error("gone") });
+
+  assert.equal(tracker.getStatus("thread-1").phase, "interrupted");
+  assert.equal(tracker.getStatus("thread-1").active, false);
+  assert.equal(tracker.getStatus("thread-idle").phase, "idle");
+  assert.deepEqual(events.map((event) => event.type), ["execution_status", "sessions_changed"]);
 });
 
 test("restores explicit approval state from the authoritative thread", () => {

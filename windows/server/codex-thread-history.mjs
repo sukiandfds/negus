@@ -8,7 +8,9 @@ const olderCursorFrom = (result) => cursorValue(result?.nextCursor);
 
 const itemListMethods = ["thread/items/list", "thread/turns/items/list"];
 const itemListMethodByClient = new WeakMap();
-const unsupportedMethodPattern = /(?:method\s+not\s+found|unknown\s+method|unsupported\s+method|not\s+implemented|unrecognized\s+method)/iu;
+// Current app-server builds answer an unknown method with "Invalid request:
+// unknown variant `<method>`"; older ones used the JSON-RPC wording.
+const unsupportedMethodPattern = /(?:method\s+not\s+found|unknown\s+(?:method|variant)|unsupported\s+method|not\s+implemented|unrecognized\s+method)/iu;
 
 const turnPageLimit = (messageLimit) => {
   const safeLimit = Number.isSafeInteger(messageLimit) && messageLimit > 0 ? messageLimit : 60;

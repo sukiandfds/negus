@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Bot, MessagesSquare } from "lucide-react";
+import { ArrowUp, Bot, MessagesSquare, Square } from "lucide-react";
 import { AttachmentButton, AttachmentPreviews } from "../../attachments/components/AttachmentDraft";
 import { useAttachmentDraft } from "../../attachments/hooks/useAttachmentDraft";
 import type { GroupAgent, GroupMember, GroupMode } from "../model/types";
@@ -22,7 +22,7 @@ const mentionedAgentIds = (text: string, agents: GroupAgent[]) => agents
   .sort((left, right) => left.index - right.index)
   .map((value) => value.id);
 
-export function GroupComposer({ mode, agentId, agents, members, disabled, error, onModeChange, onAgentChange, onSend }: {
+export function GroupComposer({ mode, agentId, agents, members, disabled, error, onModeChange, onAgentChange, onSend, onInterrupt }: {
   mode: GroupMode;
   agentId: string;
   agents: GroupAgent[];
@@ -32,6 +32,7 @@ export function GroupComposer({ mode, agentId, agents, members, disabled, error,
   onModeChange: (mode: GroupMode) => void;
   onAgentChange: (agentId: string) => void;
   onSend: (text: string, targetAgentIds: string[], attachmentIds?: string[]) => Promise<boolean>;
+  onInterrupt: () => Promise<boolean>;
 }) {
   const [text, setText] = useState("");
   const draft = useAttachmentDraft();
@@ -39,6 +40,10 @@ export function GroupComposer({ mode, agentId, agents, members, disabled, error,
   const [activeMention, setActiveMention] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submittingRef = useRef(false);
+  const hasContent = Boolean(text.trim()) || draft.attachments.length > 0;
+  // Same rule as the single conversation: with an empty draft and an Agent
+  // at work, the send button stops the work instead.
+  const canStop = !hasContent && agents.some((agent) => agent.active);
   const mentionOptions = useMemo<MentionOption[]>(() => {
     const query = mention?.query.toLocaleLowerCase() || "";
     const options: MentionOption[] = [
@@ -164,7 +169,16 @@ export function GroupComposer({ mode, agentId, agents, members, disabled, error,
             </select>
           ) : <span className={styles.modeHint}>项目经理 Agent</span>}
           <span className={styles.composerSpacer} />
-          <button className={styles.sendButton} type="button" title="发送" aria-label="发送" disabled={disabled || draft.uploading || (!text.trim() && !draft.attachments.length)} onClick={() => void submit()}><ArrowUp /></button>
+          <button
+            className={styles.sendButton}
+            type="button"
+            title={canStop ? "停止当前 Agent 任务" : "发送"}
+            aria-label={canStop ? "停止当前 Agent 任务" : "发送"}
+            disabled={disabled || draft.uploading || (!hasContent && !canStop)}
+            onClick={() => canStop ? void onInterrupt() : void submit()}
+          >
+            {canStop ? <Square fill="currentColor" style={{ width: 10, height: 10 }} aria-hidden="true" /> : <ArrowUp />}
+          </button>
         </div>
       </div>
     </div>

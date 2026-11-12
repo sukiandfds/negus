@@ -215,7 +215,10 @@ export const createJsonlConversationStore = ({ sessionRoot, projectRoot, registe
       threadId: state.threadId,
       file: path.basename(header.file),
       source: state.cliVersion === "0.122.0" ? "happy" : "codex",
-      title: header.title?.trim() || "未命名会话",
+      // Same rule as the app-server store: an unnamed thread is shown by its first request.
+      title: header.title?.trim()
+        || previewText(state.messages.find((item) => item.role === "user")?.text, 60)
+        || "未命名会话",
       updatedAt: stat.mtime.toISOString(),
       messageCount: state.messages.length,
       latestUser: previewText(latestUser, 260),

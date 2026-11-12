@@ -9,13 +9,17 @@ const maxDiscussionTurns = 4;
 
 export { buildDiscussionPrompt, mentionedAgentIds } from "./multi-agent/discussion-prompt.mjs";
 
-export const createMultiAgentService = ({ projectRoot, room, broadcast, webOutputs }) => {
-  const client = createAppServerClient();
+export const createMultiAgentService = ({
+  projectRoot, room, broadcast, webOutputs, client = createAppServerClient(),
+}) => {
   const threadAgents = new Map();
   const activeModes = new Map();
   let currentRun = null;
   let workQueue = Promise.resolve();
   let closed = false;
+  // Bumped by every stop request: a discussion only keeps going while the
+  // generation it was queued under is still the current one.
+  let generation = 0;
 
   for (const agent of room.snapshot().agents) {
     if (agent.threadId) threadAgents.set(agent.threadId, agent.id);
@@ -46,12 +50,25 @@ export const createMultiAgentService = ({ projectRoot, room, broadcast, webOutpu
       .catch(() => run.resolve({ status, text: run.finalText, message: null }));
   };
 
+  const requestInterrupt = (run) => client
+    .request("turn/interrupt", { threadId: run.threadId, turnId: run.turnId })
+    .catch((error) => console.warn(`[multi-agent] interrupt failed: ${error.message}`));
+
+  // A stop can arrive before Codex has reported the turn id it needs.
+  const rememberTurn = (threadId, turnId) => {
+    const run = currentRun;
+    if (!turnId || run?.threadId !== threadId || run.turnId) return;
+    run.turnId = String(turnId);
+    if (run.interruptRequested) void requestInterrupt(run);
+  };
+
   const handleProtocolMessage = (message) => {
     const { method, params = {} } = message || {};
     const agentId = threadAgents.get(params.threadId);
     if (!agentId) return;
 
     if (method === "turn/started") {
+      rememberTurn(params.threadId, params.turn?.id);
       void setStatus(agentId, { phase: "working", label: "正在处理任务", detail: "", active: true });
       return;
     }
@@ -95,6 +112,11 @@ export const createMultiAgentService = ({ projectRoot, room, broadcast, webOutpu
   };
 
   const unsubscribe = client.subscribe(handleProtocolMessage);
+  // Without this a crashed app-server would leave the running Agent, and the
+  // whole queue behind it, waiting for the 30 minute reply timeout.
+  const unsubscribeHealth = client.subscribeHealth?.((event) => {
+    if (event?.phase === "exited" && currentRun) settleRun(currentRun.threadId, "failed", "Codex 进程已退出");
+  }) || (() => {});
 
   const ensureThread = async (agent) => {
     if (agent.threadId) {
@@ -111,17 +133,24 @@ export const createMultiAgentService = ({ projectRoot, room, broadcast, webOutpu
     const threadId = result.thread.id;
     threadAgents.set(threadId, agent.id);
     await client.request("thread/name/set", { threadId, name: `${agent.name} · ${agent.responsibility}` });
-    await room.updateAgent(agent.id, { threadId, phase: "idle", label: "等待任务", detail: "", active: false });
+    // Only record the new thread: the Agent is in the middle of starting a
+    // task, so its visible status must not drop back to idle here.
+    await room.updateAgent(agent.id, { threadId });
     return threadId;
   };
 
-  const runAgent = async ({ agentId, mode, requestText, followUp, attachments, outputJob }) => {
+  const runAgent = async ({ agentId, mode, requestText, followUp, attachments, outputJob, stopped }) => {
     if (closed) throw new Error("多 Agent 服务已关闭");
     const agent = room.getAgent(agentId);
     if (!agent) throw Object.assign(new Error("Agent 不存在"), { statusCode: 404 });
 
     await setStatus(agentId, { phase: "submitted", label: "已接收群聊任务", detail: "正在连接 Codex", active: true });
     const threadId = await ensureThread(agent);
+    if (stopped()) {
+      // Stopped while the thread was still being prepared: never start the turn.
+      finishStatus(agentId, { phase: "interrupted", label: "任务已取消", detail: "" });
+      return { status: "interrupted", text: "" };
+    }
     const outputInstructions = outputJob && outputJob.agentId === agentId
       ? webOutputs.buildAgentInstructions(outputJob)
       : "";
@@ -141,11 +170,12 @@ export const createMultiAgentService = ({ projectRoot, room, broadcast, webOutpu
     currentRun = { agentId, threadId, resolve: resolveRun, timer, finalText: "", messageWrite: null };
 
     try {
-      await client.request("turn/start", {
+      const started = await client.request("turn/start", {
         threadId,
         input: inputFromAttachments(prompt, attachments),
         cwd: projectRoot,
       });
+      rememberTurn(threadId, started?.turn?.id);
       return await completion;
     } catch (error) {
       if (currentRun?.threadId === threadId) currentRun = null;
@@ -155,14 +185,22 @@ export const createMultiAgentService = ({ projectRoot, room, broadcast, webOutpu
     }
   };
 
-  const runDiscussion = async ({ agentIds, mode, requestText, attachments, outputJob }) => {
+  const runDiscussion = async ({ agentIds, mode, requestText, attachments, outputJob, queuedGeneration }) => {
     const agents = room.snapshot().agents;
     const pending = cleanAgentIds(agentIds, agents);
     const runCounts = new Map();
     let needsManagerFollowUp = pending.some((id) => id !== "manager");
     let turns = 0;
+    const stopped = () => generation !== queuedGeneration;
 
-    while (turns < maxDiscussionTurns) {
+    if (stopped()) {
+      // Stopped while still waiting behind another discussion.
+      if (outputJob) webOutputs.abandonJob(outputJob.jobId);
+      finishStatus(pending[0], { phase: "interrupted", label: "任务已取消", detail: "" });
+      return;
+    }
+
+    while (turns < maxDiscussionTurns && !stopped()) {
       if (!pending.length && needsManagerFollowUp && (runCounts.get("manager") || 0) < 2) {
         pending.push("manager");
         needsManagerFollowUp = false;
@@ -175,9 +213,13 @@ export const createMultiAgentService = ({ projectRoot, room, broadcast, webOutpu
 
       const followUp = turns > 0;
       try {
-        const result = await runAgent({ agentId, mode, requestText, followUp, attachments, outputJob });
+        const result = await runAgent({ agentId, mode, requestText, followUp, attachments, outputJob, stopped });
         turns += 1;
         runCounts.set(agentId, (runCounts.get(agentId) || 0) + 1);
+        if (stopped()) {
+          if (outputJob) webOutputs.abandonJob(outputJob.jobId);
+          return;
+        }
         if (outputJob && outputJob.agentId === agentId) {
           await completeOutputJob({ outputJob, result, agentId, mode, room, webOutputs, setStatus, finishStatus });
           return;
@@ -218,12 +260,28 @@ export const createMultiAgentService = ({ projectRoot, room, broadcast, webOutpu
     if (outputJob) targets = ["developer"];
     const executionMode = outputJob ? "development" : mode;
     const jobId = outputJob?.jobId || randomUUID();
+    const queuedGeneration = generation;
     void setStatus(targets[0], { phase: "queued", label: "已加入讨论队列", detail: "", active: true });
     workQueue = workQueue
       .catch(() => {})
-      .then(() => runDiscussion({ agentIds: targets, mode: executionMode, requestText, attachments, outputJob }))
+      .then(() => runDiscussion({
+        agentIds: targets, mode: executionMode, requestText, attachments, outputJob, queuedGeneration,
+      }))
       .catch((error) => console.warn(`[multi-agent] discussion ${jobId} failed: ${error.message}`));
     return { jobId, agentIds: targets, status: "queued" };
+  };
+
+  // Stops the Agent that is running and drops every discussion queued behind
+  // it. Returns the Agents that were actually affected.
+  const interrupt = async () => {
+    const agentIds = room.snapshot().agents.filter((agent) => agent.active).map((agent) => agent.id);
+    generation += 1;
+    const run = currentRun;
+    if (run) {
+      run.interruptRequested = true;
+      if (run.turnId) await requestInterrupt(run);
+    }
+    return { interrupted: agentIds.length > 0, agentIds };
   };
 
   const close = () => {
@@ -234,8 +292,9 @@ export const createMultiAgentService = ({ projectRoot, room, broadcast, webOutpu
       currentRun = null;
     }
     unsubscribe();
+    unsubscribeHealth();
     client.close();
   };
 
-  return { enqueueDiscussion, close };
+  return { enqueueDiscussion, interrupt, close };
 };

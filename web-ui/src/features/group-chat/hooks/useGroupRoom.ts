@@ -11,7 +11,6 @@ export function useGroupRoom() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const sendingRef = useRef(false);
-  const realtime = useGroupEvents(setSnapshot);
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -23,6 +22,9 @@ export function useGroupRoom() {
       if (!signal?.aborted) setLoading(false);
     }
   }, []);
+
+  const resync = useCallback(() => { void refresh(); }, [refresh]);
+  const realtime = useGroupEvents(setSnapshot, resync);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -66,8 +68,20 @@ export function useGroupRoom() {
     }
   }, [member]);
 
+  const interrupt = useCallback(async () => {
+    if (!member) return false;
+    setError("");
+    try {
+      await groupApi.interrupt(member);
+      return true;
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+      return false;
+    }
+  }, [member]);
+
   return {
-    snapshot, member, loading, sending, error, join, send, refresh,
+    snapshot, member, loading, sending, error, join, send, interrupt, refresh,
     connected: realtime.connected,
     streaming: realtime.streaming,
     artifactEvent: realtime.artifactEvent,

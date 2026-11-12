@@ -6,7 +6,8 @@
 | --- | --- |
 | `windows/server/request-handler.mjs` | 统一请求入口、鉴权和路由分发 |
 | `windows/server/routes/` | 按功能解析请求并调用服务 |
-| `windows/server/http/` | HTTP 请求工具、访问控制等基础能力 |
+| `windows/server/http/` | HTTP 请求工具、访问控制（常量时间令牌比较、错误令牌限速、令牌持久化）等基础能力 |
+| `windows/server/state/` | 运行状态 JSON 文件的统一读写：损坏文件按无状态处理，写入串行且原子替换 |
 | `windows/server/*-service.mjs` | 功能服务、业务状态和外部协议适配 |
 | `windows/server/*-store.mjs` | 会话、群聊、项目管理和进度等持久化/读取 |
 | `windows/server/execution/` | 执行过程中的活动记录和事件辅助逻辑 |
@@ -19,7 +20,7 @@
 - 群聊与多 Agent：`group-room-store.mjs`、`multi-agent-service.mjs`、`multi-agent/`、`routes/group-routes.mjs`。
 - 附件与交付物：`media-service.mjs`、`artifact-service.mjs`、`routes/artifact-routes.mjs`。
 - 上下文与模型：`context-management-service.mjs`、模型相关接口和路由。
-- 项目管理、项目进度、用量监控：以最新产品分支中对应的 `project-*` 和 `fusheng-usage-service.mjs` 为独立业务域。
+- 项目管理、用量监控：`project-management-store.mjs` 和 `fusheng-usage-service.mjs` 为独立业务域。旧的 `project-progress-store.mjs` 与 `/api/project-progress` 已被项目管理页取代并删除（2026-11-12）。
 
 ## 依赖方向
 

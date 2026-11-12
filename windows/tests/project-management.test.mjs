@@ -163,3 +163,31 @@ test("maps the clean progress path to the independent page", async () => {
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("static files: revalidates pages, caches fingerprinted assets, and rejects bad paths", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "codex-static-files-"));
+  await fs.mkdir(path.join(root, "assets"));
+  await fs.writeFile(path.join(root, "index.html"), "home", "utf8");
+  await fs.writeFile(path.join(root, "sw.js"), "worker", "utf8");
+  await fs.writeFile(path.join(root, "assets", "main-abc123.js"), "bundle", "utf8");
+  await fs.writeFile(path.join(path.dirname(root), "outside.txt"), "outside", "utf8");
+  const staticServer = createStaticFileServer(root);
+  const server = http.createServer((request, response) => staticServer(new URL(request.url, "http://localhost"), response));
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const home = await fetch(`${base}/`);
+    assert.equal(await home.text(), "home");
+    assert.equal(home.headers.get("cache-control"), "no-cache");
+    assert.equal(home.headers.get("referrer-policy"), "no-referrer");
+    assert.equal((await fetch(`${base}/sw.js`)).headers.get("cache-control"), "no-cache");
+    assert.equal((await fetch(`${base}/assets/main-abc123.js`)).headers.get("cache-control"), "public, max-age=31536000, immutable");
+    assert.equal((await fetch(`${base}/missing.js`)).status, 404);
+    assert.equal((await fetch(`${base}/%E0%A4%A`)).status, 400);
+    assert.equal((await fetch(`${base}/..%2Foutside.txt`)).status, 403);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(path.join(path.dirname(root), "outside.txt"), { force: true });
+  }
+});

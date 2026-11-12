@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import fs from "node:fs/promises";
-import path from "node:path";
+import { createJsonStateWriter, readJsonState } from "./state/json-state-file.mjs";
 
 const fileVersion = 1;
 
@@ -57,28 +56,17 @@ export const createConversationVersionStore = ({ stateFile = "" } = {}) => {
   let loaded = false;
   let records = new Map();
   let queue = Promise.resolve();
+  const stateWriter = createJsonStateWriter(stateFile, { label: "conversation-version-store" });
 
   const load = async () => {
     if (loaded) return;
     loaded = true;
-    if (!stateFile) return;
-    try {
-      const stored = JSON.parse(await fs.readFile(stateFile, "utf8"));
-      if (stored?.version !== fileVersion || !stored.threads || typeof stored.threads !== "object") return;
-      records = new Map(Object.entries(stored.threads).filter(([, record]) => validRecord(record)));
-    } catch (error) {
-      if (error?.code !== "ENOENT") console.warn(`[conversation-version-store] state ignored: ${error.message}`);
-    }
+    const stored = await readJsonState(stateFile);
+    if (stored.version !== fileVersion || !stored.threads || typeof stored.threads !== "object") return;
+    records = new Map(Object.entries(stored.threads).filter(([, record]) => validRecord(record)));
   };
 
-  const persist = async () => {
-    if (!stateFile) return;
-    const payload = `${JSON.stringify({ version: fileVersion, threads: Object.fromEntries(records) }, null, 2)}\n`;
-    await fs.mkdir(path.dirname(stateFile), { recursive: true });
-    const temporary = `${stateFile}.${process.pid}.tmp`;
-    await fs.writeFile(temporary, payload, "utf8");
-    await fs.rename(temporary, stateFile);
-  };
+  const persist = () => stateWriter.write({ version: fileVersion, threads: Object.fromEntries(records) });
 
   const run = (operation) => {
     const next = queue.then(operation, operation);

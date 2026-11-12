@@ -2,6 +2,15 @@ import path from "node:path";
 import { previewText } from "./content-blocks.mjs";
 import { createAppServerClient } from "./app-server-client.mjs";
 import { messagesFromTurns, readRecentThreadPage } from "./codex-thread-history.mjs";
+import { isSettledThreadStatus } from "./execution/activity.mjs";
+
+// Windows paths are case-insensitive; everywhere else two paths that differ
+// only by case are different directories.
+const samePath = (left, right) => {
+  const a = path.resolve(left);
+  const b = path.resolve(right);
+  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+};
 
 const sourceFromThread = (thread) => thread.source === "cli" && thread.cliVersion === "0.122.0" ? "happy" : "codex";
 
@@ -93,9 +102,19 @@ export const createAppServerConversationStore = ({
     onProtocolMessage?.(message);
   };
 
+  // Once the app-server process is gone or replaced, every turn it was
+  // running is lost, not only the one whose health check noticed it.
+  const processLostPhases = new Set(["recovered", "failed", "exited"]);
+
   const handleHealthState = (event) => {
-    if (["recovered", "failed"].includes(event?.phase)) activeRuns.delete(event.threadId);
-    onHealthState?.(event);
+    if (!processLostPhases.has(event?.phase)) {
+      onHealthState?.(event);
+      return;
+    }
+    const threadIds = new Set([...activeRuns.keys(), event.threadId].filter(Boolean));
+    activeRuns.clear();
+    freshThreadRuntime.clear();
+    for (const threadId of threadIds) onHealthState?.({ ...event, threadId });
   };
 
   const unsubscribe = client.subscribe(handleProtocolMessage);
@@ -125,7 +144,7 @@ export const createAppServerConversationStore = ({
             status,
             finalAnswerCompleted: Boolean(run.finalAnswerCompleted),
           });
-          if (status?.type === "idle") activeRuns.delete(threadId);
+          if (isSettledThreadStatus(status)) activeRuns.delete(threadId);
         } catch {
           // The client emits checking/recovery events and owns the restart policy.
         }
@@ -168,10 +187,16 @@ export const createAppServerConversationStore = ({
     return threadPath.includes("/archived_sessions/") || threadPath.endsWith("/archived_sessions");
   };
 
+  // Codex Desktop names threads itself; a thread started from the Web panel
+  // has no name, so its first request stands in until one is set.
+  const titleFromThread = (thread) => thread.name?.trim()
+    || previewText(thread.preview, 60)
+    || "未命名会话";
+
   const summaryFromThread = (thread, archived = archivedFromThread(thread)) => ({
     threadId: thread.id,
     source: sourceFromThread(thread),
-    title: thread.name?.trim() || "未命名会话",
+    title: titleFromThread(thread),
     updatedAt: isoFromUnixSeconds(thread.updatedAt),
     messageCount: null,
     latestUser: "",
@@ -247,11 +272,24 @@ export const createAppServerConversationStore = ({
     };
   };
 
-  const readThreadMetadata = async (threadId) => {
+  const belongsToProject = (thread) => Boolean(thread?.cwd) && samePath(thread.cwd, projectRoot);
+
+  const assertProjectThread = (thread) => {
+    if (!belongsToProject(thread)) {
+      throw Object.assign(new Error("This conversation does not belong to the current project."), { statusCode: 403 });
+    }
+    return thread;
+  };
+
+  // Every operation on a thread id supplied by a browser goes through here:
+  // the app-server knows all threads on this computer, the panel must only
+  // expose the ones that belong to this project.
+  const ensureProjectThread = async (threadId) => {
     const cached = threadCache.get(threadId);
-    if (cached) return cached;
+    if (cached) return assertProjectThread(cached);
     const result = await client.request("thread/read", { threadId, includeTurns: false });
     if (!result?.thread) throw new Error("Codex did not return the requested thread");
+    assertProjectThread(result.thread);
     threadCache.set(result.thread.id, result.thread);
     return result.thread;
   };
@@ -264,7 +302,7 @@ export const createAppServerConversationStore = ({
     // Numeric `before` remains the legacy JSONL/app-server fallback contract.
     if (cursor !== undefined || (before === undefined && Number.isSafeInteger(limit) && limit > 0)) {
       try {
-        const thread = await readThreadMetadata(threadId);
+        const thread = await ensureProjectThread(threadId);
         if (source !== "all" && sourceFromThread(thread) !== source) return null;
         const page = await readRecentThreadPage({
           client,
@@ -280,15 +318,16 @@ export const createAppServerConversationStore = ({
           preferMessageUpdatedAt: before === undefined && cursor === undefined,
         });
       } catch (error) {
-        if (cursor !== undefined) throw error;
+        if (cursor !== undefined || error?.statusCode === 403) throw error;
         console.warn(`[conversation-store] native paginated history unavailable, using thread/read: ${error.message}`);
       }
     }
 
     const result = await client.request("thread/read", { threadId, includeTurns: true });
-    const thread = result.thread;
+    const thread = assertProjectThread(result.thread);
     if (source !== "all" && sourceFromThread(thread) !== source) return null;
-    threadCache.set(thread.id, thread);
+    // The full read carries turns; keep only the metadata in the cache.
+    threadCache.set(thread.id, { ...thread, turns: undefined });
     const messages = messagesFromTurns(thread.turns, registerMedia);
     const end = Math.min(Number.isSafeInteger(before) ? before : messages.length, messages.length);
     const start = limit ? Math.max(0, end - limit) : 0;
@@ -298,18 +337,6 @@ export const createAppServerConversationStore = ({
       nextBefore: start || null,
       preferMessageUpdatedAt: before === undefined,
     });
-  };
-
-  const getThread = async (threadId) => threadCache.get(threadId)
-    || (await client.request("thread/read", { threadId, includeTurns: false })).thread;
-
-  const ensureProjectThread = async (threadId) => {
-    const thread = await getThread(threadId);
-    if (!thread?.cwd || path.resolve(thread.cwd).toLowerCase() !== path.resolve(projectRoot).toLowerCase()) {
-      throw new Error("This conversation does not belong to the current project.");
-    }
-    threadCache.set(thread.id, thread);
-    return thread;
   };
 
   const resumeThread = async (threadId) => {
@@ -341,11 +368,9 @@ export const createAppServerConversationStore = ({
   };
 
   const unarchiveSession = async (threadId) => {
+    await ensureProjectThread(threadId);
     const result = await client.request("thread/unarchive", { threadId });
     if (!result?.thread) throw new Error("Codex 未返回恢复后的会话");
-    if (result.thread.cwd && path.resolve(result.thread.cwd).toLowerCase() !== path.resolve(projectRoot).toLowerCase()) {
-      throw new Error("This conversation does not belong to the current project.");
-    }
     threadCache.set(result.thread.id, result.thread);
     return summaryFromThread(result.thread, false);
   };
@@ -366,13 +391,19 @@ export const createAppServerConversationStore = ({
     }
   };
 
-  const steerMessage = async (threadId, turnId, text, attachments = []) => client.request("turn/steer", {
-    threadId,
-    expectedTurnId: turnId,
-    input: inputFromAttachments(text, attachments),
-  });
+  const steerMessage = async (threadId, turnId, text, attachments = []) => {
+    await ensureProjectThread(threadId);
+    return client.request("turn/steer", {
+      threadId,
+      expectedTurnId: turnId,
+      input: inputFromAttachments(text, attachments),
+    });
+  };
 
-  const interrupt = async (threadId, turnId) => client.request("turn/interrupt", { threadId, turnId });
+  const interrupt = async (threadId, turnId) => {
+    await ensureProjectThread(threadId);
+    return client.request("turn/interrupt", { threadId, turnId });
+  };
 
   const getRuntimeContext = async (threadId) => {
     const result = await resumeThread(threadId);
@@ -384,6 +415,7 @@ export const createAppServerConversationStore = ({
   };
 
   const getThreadStatus = async (threadId) => {
+    await ensureProjectThread(threadId);
     const request = client.probe?.bind(client) || client.request.bind(client);
     const result = await request(
       "thread/read",
@@ -427,6 +459,6 @@ export const createAppServerConversationStore = ({
     listSessions, createSession, findSession, sendMessage, steerMessage, interrupt,
     forkSession, archiveSession, unarchiveSession,
     listModels, updateModel, updateReasoningEffort, getRuntimeContext, getThreadStatus,
-    compactContext, close,
+    compactContext, assertProjectThread: async (threadId) => { await ensureProjectThread(threadId); }, close,
   };
 };

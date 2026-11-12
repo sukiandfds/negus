@@ -72,70 +72,29 @@ test("keeps API routes protected after route extraction", async () => {
   });
 });
 
-test("serves the current feature index as live project progress", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "codex-progress-route-"));
-  try {
-    const docs = path.join(root, "docs", "feature-development");
-    await fs.mkdir(docs, { recursive: true });
-    await fs.writeFile(path.join(docs, "FEATURE_INDEX.md"), "# Feature index\n\n| ID | Status |\n| --- | --- |\n| FEAT-001 | active |\n", "utf8");
-    await withServer(async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/project-progress?token=test-token`);
-      const payload = await response.json();
-      assert.equal(response.status, 200);
-      assert.match(payload.markdown, /FEAT-001/u);
-      assert.ok(Date.parse(payload.updatedAt));
-    }, root);
-  } finally {
-    await fs.rm(root, { recursive: true, force: true });
-  }
+test("answers unknown API paths as JSON instead of falling through to static files", async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/no-such-endpoint?token=test-token`);
+    assert.equal(response.status, 404);
+    assert.deepEqual(await response.json(), { error: "Not found" });
+  });
 });
 
-test("returns structured entries and update history for the progress panel", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "codex-progress-structured-"));
-  try {
-    const docs = path.join(root, "docs", "feature-development");
-    await fs.mkdir(path.join(docs, "features"), { recursive: true });
-    await fs.writeFile(path.join(docs, "FEATURE_INDEX.md"), [
-      "---",
-      "document_type: feature_index",
-      "---",
-      "# 功能开发索引",
-      "## 当前功能",
-      "| 功能编号 | 功能 | 当前状态 | 当前版本 | 最近更新 | 当前结论 | 记录 |",
-      "| --- | --- | --- | --- | --- | --- | --- |",
-      "| `FEAT-001` | 单人对话 | `in_progress` | `v1.0.0` | 2026-08-02 12:00 +08:00 | 正在补齐状态展示 | [FEAT-001-demo.md](./features/FEAT-001-demo.md) |",
-      "## 当前待办开发顺序",
-      "| 顺序 | 功能项目 | 当前要做什么 |",
-      "| --- | --- | --- |",
-      "| `P1` | `FEAT-001-I01` | 补齐状态展示 |",
-    ].join("\n"), "utf8");
-    await fs.writeFile(path.join(docs, "features", "FEAT-001-demo.md"), [
-      "---",
-      "feature_id: FEAT-001",
-      "status: in_progress",
-      "---",
-      "# FEAT-001",
-      "## 当前快照",
-      "- 用户等待回复时可以看到执行状态。",
-      "## 用户可见结果",
-      "- 用户可以判断任务是否仍在运行。",
-      "## 版本时间线",
-      "### 2026-08-02 12:00 +08:00 | v1.0.0 | in_progress",
-      "- 增加状态展示。",
-    ].join("\n"), "utf8");
-    await withServer(async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/project-progress?token=test-token`);
-      const payload = await response.json();
-      assert.equal(response.status, 200);
-      assert.equal(payload.entries.length, 1);
-      assert.equal(payload.entries[0].id, "FEAT-001");
-      assert.equal(payload.entries[0].status, "in_progress");
-      assert.equal(payload.entries[0].updates.length, 1);
-      assert.deepEqual(payload.plan.map((entry) => entry.id), ["FEAT-001"]);
-      assert.deepEqual(payload.inProgress.map((entry) => entry.id), ["FEAT-001"]);
-      assert.equal(payload.logs[0].entryId, "FEAT-001");
-    }, root);
-  } finally {
-    await fs.rm(root, { recursive: true, force: true });
-  }
+test("accepts the access cookie and temporarily refuses an address that keeps guessing", async () => {
+  await withServer(async (baseUrl) => {
+    const first = await fetch(`${baseUrl}/api/project?token=test-token`);
+    const cookie = first.headers.get("set-cookie").split(";")[0];
+    assert.equal((await fetch(`${baseUrl}/api/project`, { headers: { Cookie: cookie } })).status, 200);
+
+    // Requests without any credential are refused but never counted.
+    for (let attempt = 0; attempt < 15; attempt += 1) {
+      assert.equal((await fetch(`${baseUrl}/api/project`)).status, 401);
+    }
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      assert.equal((await fetch(`${baseUrl}/api/project?token=guess-${attempt}`)).status, 401);
+    }
+    const locked = await fetch(`${baseUrl}/api/project?token=test-token`);
+    assert.equal(locked.status, 429);
+    assert.ok(Number(locked.headers.get("retry-after")) > 0);
+  });
 });
