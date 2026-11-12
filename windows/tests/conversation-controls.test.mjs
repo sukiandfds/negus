@@ -1028,7 +1028,7 @@ test("an empty native body falls back only to the current store history", async 
     request: async (method) => {
       calls.push(method);
       if (method === "thread/read") return { thread: { ...thread, turns: [] } };
-      if (method === "thread/turns/list") throw new Error("thread not loaded: empty-native");
+      if (method === "thread/turns/list") return { data: [], nextCursor: null };
       throw new Error(`Unexpected request: ${method}`);
     },
   };

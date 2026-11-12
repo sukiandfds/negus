@@ -32,26 +32,6 @@ const queryToken = (request) => {
   }
 };
 
-// IPv4 peers on a dual-stack socket appear as "::ffff:1.2.3.4".
-const normalizeAddress = (value) => String(value || "").trim().replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/iu, "").toLowerCase();
-
-export const parseTrustedProxies = (value) => new Set(String(value || "")
-  .split(",").map(normalizeAddress).filter(Boolean));
-
-// Forwarding headers can be set by anyone, so they only identify the client
-// when the direct peer is an explicitly trusted proxy or ingress (for example
-// a cloudflared tunnel on this machine). Otherwise the socket address is used.
-const clientAddress = (request, trustedProxies) => {
-  const peer = normalizeAddress(request.socket?.remoteAddress) || "unknown";
-  if (!trustedProxies.has(peer)) return peer;
-  const cloudflare = normalizeAddress(request.headers?.["cf-connecting-ip"]);
-  if (cloudflare) return cloudflare;
-  // Proxies append to X-Forwarded-For, so the nearest untrusted hop is the
-  // last entry the trusted chain did not add itself.
-  const hops = String(request.headers?.["x-forwarded-for"] || "").split(",").map(normalizeAddress).filter(Boolean);
-  return hops.reverse().find((hop) => !trustedProxies.has(hop)) || peer;
-};
-
 export const authorized = (request, token) => sameSecret(queryToken(request), token)
   || sameSecret(cookieToken(request), token);
 
@@ -62,37 +42,4 @@ export const rememberAuthorizedDevice = (request, response, url, token) => {
   const attributes = [`${cookieName}=${encodeURIComponent(token)}`, "Path=/", "HttpOnly", "SameSite=Strict", "Max-Age=2592000"];
   if (secure) attributes.push("Secure");
   response.setHeader("Set-Cookie", attributes.join("; "));
-};
-
-// Slows down token guessing. Only requests that present a wrong credential
-// count; a request with no credential at all is simply unauthorised. The
-// window is short so someone whose saved link went stale after a token change
-// is not locked out for long once they open the new link.
-export const createAccessGuard = ({
-  token, trustedProxies = [], maxFailures = 10, windowMs = 60 * 1000, maxTrackedClients = 2000, now = () => Date.now(),
-}) => {
-  const trusted = new Set([...trustedProxies].map(normalizeAddress).filter(Boolean));
-  const failures = new Map();
-
-  // Returns { allowed } and, when refused, the HTTP status to answer with.
-  const check = (request) => {
-    const address = clientAddress(request, trusted);
-    let record = failures.get(address);
-    if (record && now() - record.startedAt >= windowMs) {
-      failures.delete(address);
-      record = undefined;
-    }
-    if (record && record.count >= maxFailures) {
-      return { allowed: false, status: 429, retryAfterSeconds: Math.ceil((record.startedAt + windowMs - now()) / 1000) };
-    }
-    if (authorized(request, token)) return { allowed: true };
-    if (queryToken(request) !== null || cookieToken(request)) {
-      if (record) record.count += 1;
-      else failures.set(address, { count: 1, startedAt: now() });
-      while (failures.size > maxTrackedClients) failures.delete(failures.keys().next().value);
-    }
-    return { allowed: false, status: 401 };
-  };
-
-  return { check };
 };

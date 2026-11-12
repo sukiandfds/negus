@@ -4,8 +4,8 @@ type: feature
 title: 原开发电脑远程运行、开发与应急恢复
 category: development
 priority: P5
-status: handoff_pending
-updated_at: 2026-09-30 09:02 +08:00
+status: in_progress
+updated_at: 2026-11-11
 source: docs/negus-knowledge/features/feature-records/FEAT-009-remote-development-host.md
 related: [FEAT-001, FEAT-006]
 ---
@@ -46,10 +46,19 @@ Mac 独立检查退出并恢复；前端只发布页面，后端等当前任务�
 
 ## 当前状态
 
-handoff_pending；定向测试、隔离构建和真实只读检查通过。正式首次加载及浏览器恢复未验收。
+受控重启、前端发布、三次启动失败回退、定时检查和恢复脚本已经用于当前运行环境；本次拉取后的新版成功启动。全新克隆缺少提示词导致启动失败的问题已修复。仍待确认的是没有任何可用 `deepseek-flash` 渠道时应严格停止，还是降级启动以便进入设置修复。
 
 ## 当前证据
 
 - `docs/negus-knowledge/features/feature-records/FEAT-009-remote-development-host.md`
 
 - `docs/operations/NEGUS_SERVICE_CONTROL.md`
+
+## 2026-11-11 待确认：模型配置缺失时的启动行为
+
+当前没有任何已配置渠道支持 `deepseek-flash` 时，后端在启动阶段直接退出，此时设置页也无法打开。需要用户确认：
+
+- 降级启动并允许进入设置页修复渠道；
+- 保持严格停止，由外部维护流程明确报错。
+
+这是开放问题，当前代码和现有“不得回退其他模型”决定下仍是严格停止。

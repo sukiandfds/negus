@@ -5,7 +5,7 @@ title: 文档方向核对与核心入口精简
 category: maintenance
 priority: P1
 status: implemented_pending_review
-updated_at: "2026-09-29 18:31 +08:00"
+updated_at: "2026-11-12 17:36 +08:00"
 source: docs/README.md
 related: [PM-001, PM-002, FEAT-022, FEAT-023]
 product_base_commit: c8c7b66d686fb3a896c4c939fe6dec9bb2d8d8d4
@@ -62,3 +62,9 @@ product_base_commit: c8c7b66d686fb3a896c4c939fe6dec9bb2d8d8d4
 用户原话：“要不先做2？”；在说明拆分后端802行对话接口文件后，用户要求“快速全部完成吧。让后让negus里的deepseek验证。”本步仅完整拆分该接口文件，群聊重做和其他精简项不在本步。保留原权限、身份、提交幂等与25个接口处理分支；共享入口负责授权和依赖装配，消息/历史/设置/互动各自独立文件。用户要求Negus里的DeepSeek验证，不能用普通新建接口派工或冒充该验证已完成。
 
 相关文件：windows/server/routes/conversation-routes.mjs、conversation-message-routes.mjs、conversation-history-routes.mjs、conversation-settings-routes.mjs、conversation-interaction-routes.mjs。
+
+### 2026-11-12 退役功能的测试清理
+
+用户原话：“请你把不需要的测试项删了清理好整理好。”
+
+当前有效决定：删除 Codex Dream Skin 的 3 个注入测试入口，`renderer-inject.test.mjs`、`injector-bootstrap.test.mjs`、`injector-one-shot.test.mjs`，并从 Windows 测试脚本移除对应调用。Dream Skin 的实现和共用代码暂保留，按此前“逐步退出”的决定另行清理。此次只整理测试，不发布、不重启。

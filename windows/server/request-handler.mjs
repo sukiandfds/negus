@@ -5,7 +5,7 @@ import { createImageSettingsRoutes } from "./routes/image-settings-routes.mjs";
 import { createLynnWorkbenchRoutes } from "./routes/lynn-workbench-routes.mjs";
 import { createConversationForwardRoutes } from "./routes/conversation-forward-routes.mjs";
 import { createMaintenanceGate } from "./http/maintenance-gate.mjs";
-import { createAccessGuard, rememberAuthorizedDevice } from "./http/access-control.mjs";
+import { authorized, rememberAuthorizedDevice } from "./http/access-control.mjs";
 import { sendJson } from "./http/request-utils.mjs";
 import { createArtifactRoutes } from "./routes/artifact-routes.mjs";
 import { createConversationRoutes } from "./routes/conversation-routes.mjs";
@@ -22,13 +22,12 @@ import { createProjectReviewRoutes } from "./routes/project-review-routes.mjs";
 import { createDesktopAutomationReader } from "./desktop-automations.mjs";
 
 export const createRequestHandler = ({
-  token, trustedProxies = [], project, projectRoot, device, observerPort, conversations, execution, media, realtime, submissions,
+  token, project, projectRoot, device, observerPort, conversations, execution, media, realtime, submissions,
   conversationForward, followUpQueue, contextManagement, groupRoom, roomDirectory, multiAgent, multiAgentDirectory, artifacts, webOutputs, fushengUsage, readWebVersion, serveStatic,
   agentConversationStore, agentPublicationService,
   employeeRuntime, employeeProjectDirectory, employeeGrowth, modelProviders, projectActivityIndex, projectStatus, agentTasks,
 }) => {
   const readAutomations = createDesktopAutomationReader();
-  const accessGuard = createAccessGuard({ token, trustedProxies });
   const maintenance = createMaintenanceGate({
     projectRoot,
     isBusy: () => {
@@ -79,13 +78,10 @@ export const createRequestHandler = ({
   return async (request, response) => {
     const url = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`);
     const protectedRoute = url.pathname.startsWith("/api/") || url.pathname === "/events";
-    if (protectedRoute) {
-      const access = accessGuard.check(request);
-      if (!access.allowed) {
-        response.writeHead(access.status, access.retryAfterSeconds ? { "Retry-After": String(access.retryAfterSeconds) } : {});
-        response.end(access.status === 429 ? "Too Many Requests" : "Unauthorized");
-        return;
-      }
+    if (protectedRoute && !authorized(request, token)) {
+      response.writeHead(401);
+      response.end("Unauthorized");
+      return;
     }
     rememberAuthorizedDevice(request, response, url, token);
 

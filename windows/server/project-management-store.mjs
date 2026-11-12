@@ -12,13 +12,22 @@ const STATUS_LABELS = {
   waiting_approval: "等待确认",
   implemented_uncommitted: "已实现，未提交",
   implemented_pending_review: "待体验",
+  implemented: "已实现",
+  implementation_in_progress: "进行中",
+  code_ready_pending_user_review: "待体验",
+  direction_updated: "方向已更新",
+  ready_for_technical_handoff: "待技术交接",
   accepted: "已确认",
   completed: "已完成",
   active: "正常",
   blocked: "已阻塞",
   paused: "已暂停",
+  paused_experiment: "试验暂停",
   cancelled: "已取消",
   retired: "已替代",
+  pending_review: "待体验",
+  handoff_pending: "待交接",
+  docs_synced: "已完成",
 };
 
 const TYPE_LABELS = {
@@ -36,6 +45,7 @@ const CATEGORY_LABELS = {
   maintenance: "Bug 与维护",
   decision: "产品决策",
   delivery: "验证与交付",
+  platform: "平台能力",
   documentation: "项目资料与历史记录",
 };
 
@@ -45,6 +55,7 @@ const CATEGORY_ORDER = [
   "Bug 与维护",
   "产品决策",
   "验证与交付",
+  "平台能力",
   "项目资料与历史记录",
 ];
 
@@ -130,6 +141,14 @@ const normalizeDate = (value) => {
 const timestamp = (value) => {
   const parsed = normalizeDate(value);
   return parsed === null ? String(value || "").trim() || null : new Date(parsed).toISOString();
+};
+
+const timestampFromHeading = (heading) => {
+  const match = String(heading || "").match(/^(\d{4}-\d{2}-\d{2})(?:\s+(\d{2}:\d{2}(?::\d{2})?))?(?:\s*([+-]\d{2}:?\d{2}))?/u);
+  if (!match) return null;
+  const time = match[2] || "00:00";
+  const value = `${match[1]}T${time}${match[3] || "+08:00"}`;
+  return normalizeDate(value) === null ? null : new Date(Date.parse(value)).toISOString();
 };
 
 const idsFrom = (value) => [...String(value || "").matchAll(/\b([A-Z][A-Z0-9]+-\d{3})\b/gu)].map((match) => match[1]);
@@ -253,7 +272,7 @@ const readText = async (file) => {
 };
 
 const parseUpdates = (markdown, fallback) => {
-  const headings = [...markdown.matchAll(/^###\s+(.+?)\s*$/gmu)];
+  const headings = [...markdown.matchAll(/^#{2,3}\s+(.+?)\s*$/gmu)];
   const updates = headings.map((heading, index) => {
     const bodyStart = heading.index + heading[0].length;
     const bodyEnd = headings[index + 1]?.index ?? markdown.length;
@@ -261,13 +280,17 @@ const parseUpdates = (markdown, fallback) => {
     const fields = {};
     for (const line of body.split(/\r?\n/u)) {
       const match = line.match(/^[-*]\s*([^：:]+)[：:]\s*(.*)$/u);
-      if (match) fields[match[1].trim()] = cleanMarkdown(match[2]);
+      if (match) {
+        const key = match[1].trim();
+        fields[key] = key === "状态" ? String(match[2] || "").trim() : cleanMarkdown(match[2]);
+      }
     }
     const change = fields["本次更新"] || firstUsefulLine(body) || "未记录本次更新";
+    const recordedStatus = String(fields["状态"] || "").match(/^[a-z][a-z_]*/iu)?.[0]?.toLowerCase() || fallback.status || "";
     return {
-      at: timestamp(heading[1]),
-      status: fields["状态"] || fallback.status || "",
-      statusLabel: statusLabel(fields["状态"] || fallback.status),
+      at: timestampFromHeading(heading[1]),
+      status: recordedStatus,
+      statusLabel: statusLabel(recordedStatus),
       change,
       userImpact: fields["用户影响"] || "未记录用户影响",
       evidence: fields["证据"] || "",

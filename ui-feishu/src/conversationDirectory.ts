@@ -91,7 +91,7 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
         pendingOpen: !project.mainThreadId, status: project.status,
       }) : null);
       if (!main) continue;
-      const mainActive = Boolean(directory.statusByThread[main.threadId || ''] || mainEntry?.status?.active);
+      const mainActive = Boolean(directory.statusByThread[main.threadId || '']?.active || mainEntry?.status?.active);
       const workRows = [...rows.filter(row => !row.main), ...groupRows];
       const activeWork = workRows.filter(row => row.active);
       const activeCount = Number(mainActive) + activeWork.length;

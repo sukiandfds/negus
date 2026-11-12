@@ -625,8 +625,9 @@ export const createAppServerConversationStore = ({
     // A bounded native page avoids expanding the complete rollout history for the common Web request.
     // Numeric `before` remains the legacy JSONL/app-server fallback contract.
     if (cursor !== undefined || (before === undefined && Number.isSafeInteger(limit) && limit > 0)) {
+      let thread;
       try {
-        const thread = await assertAccessibleThread(await readThreadMetadata(threadId));
+        thread = await assertAccessibleThread(await readThreadMetadata(threadId));
         if (source !== "all" && sourceFromThread(thread) !== source) return null;
         const page = await readRecentThreadPage({
           client,
@@ -635,15 +636,23 @@ export const createAppServerConversationStore = ({
           cursor,
           registerMedia,
         });
-        return detailFromMessages(thread, page.messages, {
+        const session = detailFromMessages(thread, page.messages, {
           messageCount: null,
           hasMore: Boolean(page.nextCursor),
           nextCursor: page.nextCursor,
           preferMessageUpdatedAt: before === undefined && cursor === undefined,
         });
+        if (!cursor && !session.messages.length) {
+          const fallback = await historyFallback?.(threadId, source, { before, cursor, limit });
+          if (fallback) return fallback;
+        }
+        return session;
       } catch (error) {
-        if (cursor !== undefined || Number.isSafeInteger(limit) && limit > 0 || error?.statusCode === 403) throw error;
-        console.warn(`[conversation-store] native paginated history unavailable, using thread/read: ${error.message}`);
+        if (cursor !== undefined || error?.statusCode === 403 || !threadNotLoaded(error)) throw error;
+        const fallback = await historyFallback?.(threadId, source, { before, cursor, limit });
+        if (fallback) return fallback;
+        if (thread) return detailFromMessages(thread, [], { messageCount: 0 });
+        throw error;
       }
     }
 

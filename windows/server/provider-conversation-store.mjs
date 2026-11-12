@@ -26,7 +26,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
     await providers.refreshShared?.().catch(() => {});
     let changed = false;
     for (const [id, route] of Object.entries(routes)) {
-      const copied = route?.crossProviderCopyFrom === route?.summary?.forkedFromId
+      const copied = (Boolean(route?.crossProviderCopyFrom) && route.crossProviderCopyFrom === route?.summary?.forkedFromId)
         || (route?.summary?.forkedFromId && route?.resumeInfo?.summary?.threadId
           && route.resumeInfo.summary.threadId !== id);
       if (!copied || !route.model) continue;
@@ -278,8 +278,9 @@ export const createProviderConversationStore = ({ current, providers, createStor
         await save();
       }
       if (method === "getRuntimeContext" && result?.model && !result.model.includes('::')) {
-        result.model = `${owner(id)}::${result.model}`;
-        result.modelProvider = owner(id);
+        const resultProviderId = owner(id);
+        if (resultProviderId !== "current") result.model = `${resultProviderId}::${result.model}`;
+        result.modelProvider = resultProviderId;
       }
       return result?.threadId ? decorate(result) : result;
     };

@@ -122,6 +122,34 @@ test("reads the independent project-management directory", async () => {
   }
 });
 
+test("uses Chinese labels for legacy requirement statuses", async () => {
+  const root = await writeFixture();
+  try {
+    const itemPath = path.join(root, "docs", "project-management", "items", "PM-001", "item.md");
+    const markdown = await fs.readFile(itemPath, "utf8");
+    await fs.writeFile(itemPath, markdown.replace("status: in_progress", "status: pending_review"), "utf8");
+    const document = await readProjectManagement({ project: "demo", projectRoot: root });
+    assert.equal(document.entries[0].statusLabel, "待体验");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("keeps an ISO date when an update heading also contains a title", async () => {
+  const root = await writeFixture();
+  try {
+    const updatesPath = path.join(root, "docs", "project-management", "items", "PM-001", "updates.md");
+    const markdown = await fs.readFile(updatesPath, "utf8");
+    await fs.writeFile(updatesPath, `${markdown}\n## 2026-08-03 需求梳理\n\n- 状态：仅工作区修改，尚未联调\n- 本次更新：整理需求。\n`, "utf8");
+    const document = await readProjectManagement({ project: "demo", projectRoot: root });
+    assert.equal(document.entries[0].updatedAt, "2026-08-02T16:00:00.000Z");
+    assert.equal(document.entries[0].updateSummary, "整理需求。");
+    assert.equal(document.entries[0].updates[0].statusLabel, "进行中");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("serves project-management data through its separate API", async () => {
   const root = await writeFixture();
   const server = http.createServer(createFixtureHandler(root));

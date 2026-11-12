@@ -9,6 +9,7 @@ import { routeMessage } from '../kernel/message-routing.mjs';
 import { mentionedAgentIds } from '../../windows/server/multi-agent/agent-routing.mjs';
 import { inputFromAttachments } from '../../windows/server/app-server-conversation-store.mjs';
 import { employeeTurnInstructions } from '../../windows/server/employee-definitions.mjs';
+import { basePrompt } from '../../windows/server/base-prompt.mjs';
 import { buildDiscussionPrompt } from '../../windows/server/multi-agent/discussion-prompt.mjs';
 import { backgroundToolConfig, executionPolicy, turnExecutionPolicy } from './execution-policy.mjs';
 import { followupTask } from './task-followup.mjs';
@@ -150,7 +151,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       const client = await clientFor({ ...agent, modelProviderId });
       const independent = task.conversationId !== roomId;
       let threadId = task.runtime.threadId || task.resumeThreadId || (recovering || independent ? '' : agent.threadId);
-      const taskInstructions = [task.background ? '你是独立后台任务执行者，执行已授权工作并验证，结果返回来源员工；不得再次派工。' : instructionsFor(agent), growthService?.getContext(agent.id)].filter(Boolean).join('\n');
+      const taskInstructions = [task.background ? `${basePrompt}\n你是独立后台任务执行者，执行已授权工作并验证，结果返回来源员工；不得再次派工。` : instructionsFor(agent), growthService?.getContext(agent.id)].filter(Boolean).join('\n');
       const options = { ...executionPolicy, developerInstructions: taskInstructions, config: task.background ? backgroundToolConfig : tools.config(task.id),
         ...(agent.model ? { model: agent.model } : {}) };
       const registerBackground = async () => {

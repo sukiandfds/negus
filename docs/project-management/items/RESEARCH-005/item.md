@@ -5,7 +5,7 @@ title: Negus 全系统日志与用户原文提取调研
 category: research
 priority: P1
 status: completed
-updated_at: 2026-10-06 17:46 +08:00
+updated_at: 2026-11-12 16:59 +08:00
 source: docs/negus-knowledge/research/NEGUS_SYSTEM_LOGGING_RESEARCH_2026-10-06.md
 related: [FEAT-001, FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-007, FEAT-015]
 product_base_commit: 427a708fa85f4564822caeac97c6601bd97b4745
@@ -16,6 +16,14 @@ product_base_commit: 427a708fa85f4564822caeac97c6601bd97b4745
 ## 用户原话
 
 > 按照之前说的，我要为整个Negus系统都加入日志功能。请你先调研一下，用户能在negus上进行的操作，看看要怎么开发这个整个negus系统的日志功能。用户发送的具体内容，则后续需要被单独提取出来，分析用户的要求喜好。请你先理解我的意思。不明白的你现在问我
+
+2026-11-12，来源：当前对话。用户原话：
+
+> 本地历史读取失败应报告该错误，别报给用户啊，你报给用户有什么用？之前都说了，这些都应该是系统内置的后台日志会有原因，而不是前端显示给用户啊？后续做使用日志时一起做。你标记好。
+
+## 当前有效决定
+
+本地历史读取等技术错误的详细原因写入 Negus 内置后台使用日志，不把内部异常文本直接展示给用户。前台只保留用户能理解的必要状态。该能力与后续系统使用日志一起实现，本轮只记录需求，不修改错误展示和日志代码。
 
 ## 助手初步理解
 

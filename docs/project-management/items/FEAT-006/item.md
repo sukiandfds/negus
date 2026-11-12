@@ -5,7 +5,7 @@ title: 固定公网入口与正式访问控制
 category: maintenance
 priority: null
 status: in_progress
-updated_at: 2026-08-06 23:35 +08:00
+updated_at: 2026-11-12 17:45 +08:00
 source: docs/negus-knowledge/features/feature-records/FEAT-006-stable-remote-access.md
 related: [FEAT-004, FEAT-009]
 ---
@@ -15,6 +15,12 @@ related: [FEAT-004, FEAT-009]
 ## 用户原话
 
 历史功能文档未保存原始用户原话，待补录；不能根据文件内容倒推原话。
+
+2026-11-12，来源：当前对话。用户原话：“3.写入需求表，表明这个功能暂不需要。”对应上一轮讨论中的“错误令牌限速”。
+
+## 当前有效决定
+
+错误令牌限速不纳入 Negus 访问控制需求。不因同一地址累计错误访问令牌次数而返回 429，不为此保留可信代理接线；访问控制只校验 query token 和 Cookie，错误凭证始终返回 401。
 
 ## 助手初步理解
 

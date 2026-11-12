@@ -4,8 +4,8 @@ type: feature
 title: 自然语言生图与自动化工作台
 category: development
 priority: P2
-status: handoff_pending
-updated_at: 2026-09-30
+status: in_progress
+updated_at: 2026-11-11
 source: docs/negus-knowledge/features/feature-records/FEAT-015-image-generation-and-automation-workbench.md
 related: [FEAT-001, FEAT-002, FEAT-003, FEAT-007, FEAT-008]
 owner: product_and_runtime
@@ -88,7 +88,7 @@ last_user_visible_change: 网页生图已进入真实 Codex Thread/Turn；2.35�
 
 ## 当前状态
 
-对话生图核心已完成：网页版关键词旁路和假 Turn 已删除，所有新请求进入真实 Codex app-server Thread/Turn，由 GPT-5.6 读取完整原话并调用 `negus_image`。HappyEvering 默认等待最终结果；`2.35：1 + 4K` 已真实生成 `3840x1632`，同一 Thread 已完成自动引用上一张图编辑和普通后续对话。工具图片进入 Media，并在同一 Turn 内去重。API Key 从被 Git 忽略的 `runtime/secrets.env` 加载。尚未实现的是 Artifact 登记、完整通用 `CapabilityRun`、自动化工作台和定时任务。
+对话生图核心已完成：自然语言请求进入真实 Codex Thread/Turn，并通过已配置的 `negus_image` 工具生成或编辑图片；同一 Thread 的连续改图、结果去重和普通后续对话已有实现。侧栏“增加边框”页面也已实现上传、2:3 居中裁剪、白边和旋转处理。尚未实现的是完整通用 `CapabilityRun`、Artifact 登记、批量模板、生图工作台和定时任务；这些后续范围的优先级尚未确认。
 
 ## 当前证据
 
@@ -106,3 +106,7 @@ last_user_visible_change: 网页生图已进入真实 Codex Thread/Turn；2.35�
 - `windows/tests/image-generation-mcp.test.mjs`
 - HappyEvering 官方文档：`https://api.happyevering.xyz/docs/`
 - 产品基线：`267a27cd9c6c8ab141dcc1e743d38d38a9d7f611`
+
+## 2026-11-11 后续范围
+
+对话生图和“增加边框”已经可用；批量模板、生图工作台、Artifact 登记和定时任务仍是后续需求。它们的具体优先顺序尚未确认，不应在用户选择范围前直接开发全部能力。

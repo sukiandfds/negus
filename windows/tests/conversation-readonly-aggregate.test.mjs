@@ -48,7 +48,7 @@ for (const loaded of [true, false]) test(`aggregate read does not start work for
     assert.equal(response.status, 200); return JSON.parse(response.body);
   };
   const first = await get('');
-  assert.ok(first.session.messages.length); assert.equal(first.context.model, 'current::model-a'); assert.equal(first.goal, null);
+  assert.ok(first.session.messages.length); assert.equal(first.context.model, 'model-a'); assert.equal(first.goal, null);
   assert.ok(first.sourceRevision);
   const before = calls.filter(method => method === 'thread/read').length;
   const bodiesBefore = fallbackCalls.filter(options => !options.metadataOnly).length;

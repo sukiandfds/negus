@@ -104,6 +104,17 @@ test('employee rows show aggregate work status instead of only the main conversa
   assert.equal(rows.all.find(entry => entry.threadId === 'A').label, '正在处理后台任务');
 });
 
+test('an idle live status does not mark the employee main conversation as working', () => {
+  const state = directory();
+  state.statusByThread.A = { phase: 'idle', label: '等待任务', active: false, turnId: '' };
+  state.projects[0].status = { phase: 'idle', label: '等待任务', active: false, turnId: '' };
+  state.projects[0].conversations[0].status = { phase: 'idle', label: '等待任务', active: false, turnId: '' };
+  const rows = buildConversationDirectory(state, [], false);
+  const employee = rows.employees.find(entry => entry.agentId === 'A');
+  assert.equal(employee.active, false);
+  assert.notEqual(employee.label, '正在主对话工作');
+});
+
 test('conversation created outside Negus is labeled as coming from codex', () => {
   const codexSession = session('codex-thread', 'Codex reply', '10');
   const negusSession = { ...session('negus-thread', 'Negus reply', '09'), createdBy: 'user' };

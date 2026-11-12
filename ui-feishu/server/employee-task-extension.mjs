@@ -25,7 +25,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     return { id: sourceThreadId ? `assistant:${sourceThreadId}` : `assistant:${providerId || 'current'}:${model || 'default'}`,
       name: named?.displayName || model || 'Negus 助手' };
   };
-  const handoffInstructions = '保持本员工的姓名、职位和职责，直接回答日常聊天和专业讨论，不自称“前台助手”，也不以派工为由推卸职责；尽量在30秒内回应。直接处理需求澄清、规划和结果汇总；开发、测试、验证、资料搜集、电脑操作等实操调用 negus_handoffs.create_background_task 创建独立任务对话，需要其他员工专长时可转交协作，由你负责汇总结果。派工时写清目标、输入、授权边界、验收步骤和返回格式（结论、证据路径、验证结果、失败原因）；工具确认接单后，简短告知用户并结束本轮回复，不等待、轮询或停止后台任务，主对话继续接待用户。创建失败须说明真实原因，不假称已派工。收到已有任务的结果通知时，先核对是否达到用户要求；接单或执行结束不等于工作完成。未完成则在原授权内继续处理或明确补派缺失部分，不重复派发同一任务、不只转述未完成就停下；依据返回证据核对标准，不重复执行已验证的操作；证据缺失或矛盾只补派缺项，完成后向用户简洁交付结果。';
+  const handoffInstructions = '保持本员工的姓名、职位和职责，直接回答日常聊天和专业讨论，不自称“前台助手”，也不以派工为由推卸职责；尽量在30秒内回应。先判断用户是在讨论、提问、指出问题还是明确要求执行；只有本轮用户已明确要求执行，且目标、当前现状、范围、不做事项、完成标准和授权边界都足以派工时，开发、测试、验证、资料搜集、电脑操作等实操才调用 negus_handoffs.create_background_task 创建独立任务对话。关键信息不足时先集中提问并等待回答，不得用猜测补全，不得先创建试探任务；质疑、批评和“为什么”不等于派工授权。需要其他员工专长时才转交协作，由你负责汇总结果。派工时写清目标、输入、授权边界、验收步骤和返回格式（结论、证据路径、验证结果、失败原因）；工具确认接单后，简短告知用户并结束本轮回复，不等待、轮询或停止后台任务，主对话继续接待用户。创建失败须说明真实原因，不假称已派工。收到已有任务的结果通知时，先核对是否达到用户要求；接单或执行结束不等于工作完成。未完成则在原授权内继续处理或明确补派缺失部分，不重复派发同一任务、不只转述未完成就停下；依据返回证据核对标准，不重复执行已验证的操作；证据缺失或矛盾只补派缺项，完成后向用户简洁交付结果。';
   const backgroundInstructions = '你是独立后台任务执行者，直接执行本任务中用户已授权的工作并完成必要验证，不再创建或委派后台任务。最终回复包含实际结果、证据和未完成项，由系统送回来源助手；不要自行向来源对话发消息。';
   const instructions = (employee, background = false) => employeeTurnInstructions(employee.instructions, [growthService?.getContext(employee.id), background
     ? backgroundInstructions
@@ -145,7 +145,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       if (!agentless) await bindings.bindRuntime({ conversationId: task.conversationId, agentId: employee.id, runtimeKind: 'codex', runtimeSessionId: threadId, conversationKind: 'task', title: task.title });
     };
     const taskInstructions = agentless
-      ? backgroundInstructions
+      ? employeeTurnInstructions('', backgroundInstructions)
       : instructions(employee, task.background);
     const options = { ...executionPolicy, developerInstructions: taskInstructions, config: task.background ? backgroundToolConfig : tools.config(task.id),
       ...(employee.model ? { model: employee.model } : {}) };
@@ -349,8 +349,8 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
           turn: { ...turnExecutionPolicy } };
       }
       if (!task && original.ownsThread(thread.id)) return original.runtimeOptions(thread);
-      if (task?.source?.kind === 'conversation' && !task.agentId) return { resume: { ...executionPolicy, developerInstructions: backgroundInstructions, config: task.background ? backgroundToolConfig : tools.config(`conversation:${thread.id}`) },
-        turn: { ...turnExecutionPolicy, developerInstructions: backgroundInstructions } };
+      if (task?.source?.kind === 'conversation' && !task.agentId) return { resume: { ...executionPolicy, developerInstructions: employeeTurnInstructions('', backgroundInstructions), config: task.background ? backgroundToolConfig : tools.config(`conversation:${thread.id}`) },
+        turn: { ...turnExecutionPolicy, developerInstructions: employeeTurnInstructions('', backgroundInstructions) } };
       let employee = registry.require(task?.agentId || binding.agentId);
       if (task?.background) employee = { ...employee, reasoningEffort: task.reasoningEffort || task.runtime?.reasoningEffort || employee.reasoningEffort };
       return { resume: { ...executionPolicy, developerInstructions: instructions(employee, task?.background), config: task?.background ? backgroundToolConfig : tools.config(`conversation:${thread.id}`) },

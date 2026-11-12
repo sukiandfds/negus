@@ -2,7 +2,7 @@
 document_type: project_management_index
 schema_version: 1
 project_id: negus
-last_updated: "2026-11-04"
+last_updated: "2026-11-12"
 ---
 
 # 项目管理目录
@@ -15,24 +15,52 @@ last_updated: "2026-11-04"
 | --- | --- |
 | 用户原话、纠正与冲突处理 | [PM-004](items/PM-004/item.md) |
 | 单聊缓存、发送、状态、配置、归档、分享 | [FEAT-001 功能导航](items/FEAT-001/item.md#功能导航2026-11-04整理) |
+| 整页点击、输入、内容更新和乐观消息延迟（已知问题版本） | [FEAT-001 问题与根因](items/FEAT-001/item.md#2026-11-12-整页响应延迟与乐观消息迟到已知问题版本) |
 | 历史图片导致发送变慢，待优化 | [调研与待办](items/FEAT-001/item.md#2026-11-04-含历史图片的长对话发送延迟待优化) |
 | 员工与群聊设计 | [FEAT-002](items/FEAT-002/item.md)；近期单聊派工澄清同时见FEAT-001功能导航 |
+| 多业务项目、员工会话与工作项目的归属 | [FEAT-017](items/FEAT-017/item.md) |
 | 图片、附件与内容渲染 | [FEAT-003](items/FEAT-003/item.md) |
 | 消息复制、分支、归档 | [FEAT-012](items/FEAT-012/item.md)、[FEAT-013](items/FEAT-013/item.md)、[FEAT-014](items/FEAT-014/item.md)；近期澄清见FEAT-001 |
+| 对话转发与独立摘要 | [FEAT-024](items/FEAT-024/item.md) |
+| 项目经理入口与项目记忆 | [FEAT-019](items/FEAT-019/item.md)、[FEAT-021](items/FEAT-021/item.md) |
+| 模型配置与共享渠道 | [FEAT-022](items/FEAT-022/item.md) |
+| 桌面工作空间 | [FEAT-023](items/FEAT-023/item.md) |
+| 固定公网入口、分享链接与访问控制 | [FEAT-006](items/FEAT-006/item.md)、[FEAT-020](items/FEAT-020/item.md) |
+| 系统使用日志与内部错误记录 | [RESEARCH-005](items/RESEARCH-005/item.md) |
+| Cloudflare 与电脑工具 | [BUG-025](items/BUG-025/item.md) |
 | Goal目标模式 | [FEAT-018](items/FEAT-018/item.md) |
+| Orca 群聊运行时试验 | [FEAT-010](items/FEAT-010/item.md)；已暂停，不是当前路线 |
 | 模块边界与文件精简 | [PM-003](items/PM-003/item.md) |
 
 ## 当前计划
 
-- `FEAT-001`：含历史图片的长对话上传优化，用户明确“之后抽空优化”；先留待办，具体方案待确认，当前不实施。
+以下是仍需开发、验证或产品决策的事项，按建议交接顺序排列；具体开工顺序和产品取舍仍由用户确认，不因列入本表自动获得发布或重启授权。
+
+| 顺序 | 条目 | 当前可执行范围 | 尚需确认或阻塞 |
+| --- | --- | --- | --- |
+| 1 | `FEAT-001` | 历史读取、分页、缓存和错误分类已有实现；当前存在已记录的整页响应延迟问题版本。 | 先收敛非当前活跃对话的高频正文读取与全页通知；图片压缩副本与画质取舍、聊天记录日期定位交互仍待确认。 |
+| 2 | `FEAT-002` | 群聊、员工任务、未点名接待兜底和零员工群已有实现。 | 员工共享上下文策略、页面没有运营管理时的接待顺序、员工详情页重设计。 |
+| 3 | `FEAT-015` | 对话自然语言生图、连续改图和“增加边框”工具已有实现。 | 批量模板、生图工作台、Artifact 登记和定时任务的优先范围。 |
+| 4 | `FEAT-006` | 固定公网入口与访问控制可用。 | 公网图片上传仍明显慢于本机，需要网络线路或上传方案。 |
+| 5 | `FEAT-009` | 前后端受控发布、定时检查、恢复和回退已有实现。 | 没有可用 DeepSeek 渠道时应严格停止还是降级启动，尚未确认。 |
+| 6 | `BUG-025` | Cloudflare 官方账号连接和共享工具已有实现，等待真实授权使用。 | 桌面浏览器与可见桌面的点击、输入仍待真实验收。 |
 
 ## 当前进行中
 
-- `PM-004`：持续维护需求原话与澄清；文档整理完成情况见其更新记录。
+- `PM-004`：持续维护用户原话、澄清和需求表；本次整理见其更新记录。
+
+## 交接前验证基线
+
+2026-11-11 对 `develop / c92c3d8` 加当前工作区改动执行了完整检查：
+
+- `windows/tests`：560 项，547 通过、12 失败、1 跳过。失败集中在历史读取回退、模型配置元数据、跨渠道会话、心拍提示词、图片尺寸参数及测试环境缺件。
+- `ui-feishu/validation`：141 项，131 通过、9 失败、1 跳过。9 项来自未启动的固定测试服务或缺少隔离环境变量，不能据此判定产品回归；也尚未取得完整 UI 通过结果。
+- TypeScript `--noEmit`、项目管理定向测试 5/5、37 个条目来源检查和文档链接检查均通过。
+- 详细失败清单见 `work/requirements-audit-20261111/verification.md`。接手开发前应先确认这些失败是正式行为变化、旧测试预期还是测试环境问题，不应把当前测试集描述为全绿。
 
 ## 条目目录
 
-以下覆盖全部29个现有条目；其中3个旧日期编号（BUG-20260926-01、BUG-20260927-01、RESEARCH-20260925-01）仅通过文档链接查阅，现有面板读取其余26项；名称链接用于阅读，文件夹列保留面板读取格式。状态、优先级和更新时间仍以各item.md为单一来源，不在索引重复维护。旧记录保留，未因本次整理改判功能已完成。
+以下覆盖全部37个现有条目；其中3个旧日期编号（BUG-20260926-01、BUG-20260927-01、RESEARCH-20260925-01）仅通过文档链接查阅，现有面板读取其余34项；名称链接用于阅读，文件夹列保留面板读取格式。状态、优先级和更新时间仍以各item.md为单一来源，不在索引重复维护。旧记录保留，未因本次整理改判功能已完成。
 
 | 条目编号 | 名称 | 类型 | 分类 | 文件夹 | 排序 |
 | --- | --- | --- | --- | --- | --- |
@@ -65,6 +93,14 @@ last_updated: "2026-11-04"
 | `FEAT-018` | [Codex 原生 Goal 目标模式入口](items/FEAT-018/item.md) | `feature` | `platform` | `items/FEAT-018/` | 27 |
 | `RESEARCH-004` | [Codex Desktop 与 negus 同会话协作调研](items/RESEARCH-004/item.md) | `research` | `research` | `items/RESEARCH-004/` | 28 |
 | `RESEARCH-20260925-01` | [Grok Bot 产品与 Agent 管理及 Negus 最小改造调研](items/RESEARCH-20260925-01/item.md) | `research` | `research` | `items/RESEARCH-20260925-01/` | 29 |
+| `FEAT-017` | [多业务项目与 Codex 会话归类](items/FEAT-017/item.md) | `feature` | `development` | `items/FEAT-017/` | 30 |
+| `FEAT-019` | [项目面板单项目经理 AI 入口](items/FEAT-019/item.md) | `feature` | `development` | `items/FEAT-019/` | 31 |
+| `FEAT-020` | [内测访问入口与共享链接](items/FEAT-020/item.md) | `feature` | `delivery` | `items/FEAT-020/` | 32 |
+| `FEAT-021` | [项目记忆入口与可解释上下文边界](items/FEAT-021/item.md) | `feature` | `development` | `items/FEAT-021/` | 33 |
+| `FEAT-022` | [CC Switch 共享渠道管理](items/FEAT-022/item.md) | `feature` | `development` | `items/FEAT-022/` | 34 |
+| `FEAT-023` | [自定义桌面](items/FEAT-023/item.md) | `feature` | `development` | `items/FEAT-023/` | 35 |
+| `FEAT-024` | [对话转发与公共摘要](items/FEAT-024/item.md) | `feature` | `development` | `items/FEAT-024/` | 36 |
+| `FEAT-010` | [Orca 群聊执行运行时适配技术试验](items/FEAT-010/item.md) | `research` | `research` | `items/FEAT-010/` | 37 |
 
 ## 历史排期（原目录，保留追溯）
 

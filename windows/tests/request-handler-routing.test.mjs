@@ -69,9 +69,11 @@ test("dispatches feature routes and preserves static fallback", async () => {
 
 test("keeps API routes protected after route extraction", async () => {
   await withServer(async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/api/project`);
-    assert.equal(response.status, 401);
-    assert.equal(await response.text(), "Unauthorized");
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const response = await fetch(`${baseUrl}/api/project?token=wrong-${attempt}`);
+      assert.equal(response.status, 401);
+      assert.equal(await response.text(), "Unauthorized");
+    }
   });
 });
 

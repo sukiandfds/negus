@@ -1,5 +1,20 @@
 # FEAT-009 更新记录
 
+### 2026-11-11 开发需求表状态校正
+
+- 状态：in_progress
+- 本次更新：根据当前运行版本和受控重启结果更新条目快照；受控重启、发布、失败回退和检查已实际使用，启动提示词缺失问题已修复，DeepSeek 不可用时的启动策略仍待用户确认。
+- 用户影响：用户可区分已工作的恢复机制和唯一待决的启动降级策略。
+- 证据：`runtime/negus-backend-result.json`、`docs/project-management/INDEX.md`。
+
+### 2026-11-11 最新提交启动验收
+
+- 状态：in_progress（启动链路本轮通过）
+- 本次更新：以当前工作区受控重启到 `develop / 55f293bb`，重启任务一次成功且未回退。
+- 运行结果：快照 `1794409080769-f1f4cefc`，PID `70262`；健康检查显示后端、前端和公网隧道均为 healthy。
+- 用户影响：新版后端已完成正式装配并可接收真实员工和群聊请求。
+- 证据：`runtime/negus-backend-result.json`、`docs/project-management/items/FEAT-002/updates.md`。
+
 ### 2026-07-28 17:43 +08:00
 
 - 状态：in_progress
