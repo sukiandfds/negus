@@ -610,3 +610,20 @@ test('native user receipt identifies the exact submitted message before assistan
   assert.equal(receipt.turnId, 'turn');
   assert.equal(receipt.threadId, 't');
 });
+
+test("marks a running turn interrupted when the app-server process exits", () => {
+  const events = [];
+  const tracker = createExecutionTracker({ broadcast: (event) => events.push(event) });
+  tracker.markSubmitted("thread-1");
+  tracker.handleProtocolMessage({
+    method: "turn/started",
+    params: { threadId: "thread-1", turn: { id: "turn-1" } },
+  });
+
+  tracker.handleHealthState({ phase: "exited", threadId: "thread-1", error: new Error("gone") });
+  tracker.handleHealthState({ phase: "exited", threadId: "thread-idle", error: new Error("gone") });
+
+  assert.equal(tracker.getStatus("thread-1").phase, "interrupted");
+  assert.equal(tracker.getStatus("thread-1").active, false);
+  assert.equal(tracker.getStatus("thread-idle").phase, "idle", "idle threads are not touched");
+});

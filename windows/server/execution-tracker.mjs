@@ -485,10 +485,12 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
       });
       return;
     }
-    if (event.phase === "recovered") {
+    if (event.phase === "recovered" || event.phase === "exited") {
+      // Idle threads were not running anything the user needs to hear about.
+      if (event.phase === "exited" && !statuses.get(threadId)?.active) return;
       publish(threadId, {
         phase: "interrupted",
-        label: "连接已恢复，上一任务已中断",
+        label: event.phase === "recovered" ? "连接已恢复，上一任务已中断" : "Codex 进程已退出，上一任务已中断",
         active: false,
         lastProbeAt,
       });

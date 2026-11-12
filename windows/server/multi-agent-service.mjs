@@ -54,7 +54,20 @@ export const createMultiAgentService = ({
 
   const subscribeClient = (runtimeClient) => {
     if (!runtimeClient || clientSubscriptions.has(runtimeClient)) return;
-    clientSubscriptions.set(runtimeClient, runtimeClient.subscribe(handleProtocolMessage));
+    const unsubscribeProtocol = runtimeClient.subscribe(handleProtocolMessage);
+    // Without this a crashed app-server would leave the running Agent, and the
+    // whole queue behind it, waiting for the reply timeout.
+    const unsubscribeHealth = runtimeClient.subscribeHealth?.((event) => {
+      if (event?.phase !== "exited" || !currentRun) return;
+      // Agents can run on different provider clients; only the one that died matters.
+      const owner = currentRun.client || threadClients.get(currentRun.threadId);
+      if (owner && owner !== runtimeClient) return;
+      settleRun(currentRun.threadId, "failed", "Codex 进程已退出");
+    });
+    clientSubscriptions.set(runtimeClient, () => {
+      unsubscribeProtocol?.();
+      unsubscribeHealth?.();
+    });
   };
 
   // Keep saved routes opaque until getClient() has refreshed shared providers.

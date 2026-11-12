@@ -309,12 +309,16 @@ export const createAppServerClient = ({
     });
     spawned.once("exit", (code) => {
       const tail = stderrLines.slice(-20).join("\n");
-      rejectPending(new Error(`Codex app-server exited with code ${code ?? "unknown"}${tail ? `: ${tail}` : ""}`));
+      const error = new Error(`Codex app-server exited with code ${code ?? "unknown"}${tail ? `: ${tail}` : ""}`);
+      rejectPending(error);
       pendingUserInputs.clear();
-      if (child === spawned) {
-        child = undefined;
-        initializePromise = undefined;
-      }
+      // A deliberate restart or close has already replaced `child`; only an
+      // exit nobody asked for is reported, because every turn it was running
+      // is lost and nothing else will ever announce that.
+      if (child !== spawned) return;
+      child = undefined;
+      initializePromise = undefined;
+      emitHealth({ phase: "exited", error });
     });
   };
 

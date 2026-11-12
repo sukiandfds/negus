@@ -321,7 +321,7 @@ test("reads the authoritative status from the service-owned app-server", async (
     request: async (method, params) => {
       assert.equal(method, "thread/read");
       assert.deepEqual(params, { threadId: "thread-1", includeTurns: false });
-      return { thread: { id: "thread-1", status: { type: "idle" } } };
+      return { thread: { id: "thread-1", cwd: "D:\\project", status: { type: "idle" } } };
     },
   };
   const store = createAppServerConversationStore({
@@ -660,7 +660,9 @@ test("forks, archives, and restores a project thread through app-server actions"
     nativeSubagent: false,
     cwd: "D:\\project",
   });
-  assert.deepEqual(calls.slice(-2).map((call) => call.method), ["thread/archive", "thread/unarchive"]);
+  // Restoring reads the thread first: an archived thread is not cached, and it
+  // must be proven to belong to this project before it is changed.
+  assert.deepEqual(calls.slice(-3).map((call) => call.method), ["thread/archive", "thread/read", "thread/unarchive"]);
   store.close();
 });
 
@@ -1308,4 +1310,35 @@ test("unloaded settings reuse project history metadata without resuming a thread
     await assert.rejects(() => store.getRuntimeContext('absent'), /thread not loaded/);
     await assert.rejects(() => store.getSessionResumeInfo('old'), /unexpected thread\/resume/);
   } finally { store.close(); history.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("refuses to read or drive a thread from another project", async () => {
+  const calls = [];
+  const foreign = { id: "thread-foreign", cwd: "D:\\other", name: "Private", updatedAt: 1, status: { type: "idle" }, turns: [] };
+  const client = {
+    subscribe: () => () => {},
+    close: () => {},
+    request: async (method, params) => {
+      calls.push(method);
+      if (method === "thread/read") return { thread: foreign };
+      if (method === "thread/turns/list") return { data: [{ id: "turn-1", items: [{ type: "userMessage", id: "m1", content: [{ type: "text", text: "secret" }] }] }] };
+      return {};
+    },
+  };
+  const store = createAppServerConversationStore({ projectRoot: "D:\\project", registerMedia: () => null, client });
+
+  for (const operation of [
+    () => store.findSession("thread-foreign", "all", { limit: 60 }),
+    () => store.findSession("thread-foreign"),
+    () => store.steerMessage("thread-foreign", "turn-1", "hello"),
+    () => store.interrupt("thread-foreign", "turn-1"),
+    () => store.getThreadStatus("thread-foreign"),
+    () => store.unarchiveSession("thread-foreign"),
+  ]) {
+    await assert.rejects(operation, (error) => error.statusCode === 403);
+  }
+  for (const method of ["thread/turns/list", "turn/steer", "turn/interrupt", "thread/unarchive"]) {
+    assert.equal(calls.includes(method), false, `${method} must not reach the app-server`);
+  }
+  store.close();
 });

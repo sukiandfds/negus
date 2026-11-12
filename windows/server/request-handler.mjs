@@ -5,7 +5,7 @@ import { createImageSettingsRoutes } from "./routes/image-settings-routes.mjs";
 import { createLynnWorkbenchRoutes } from "./routes/lynn-workbench-routes.mjs";
 import { createConversationForwardRoutes } from "./routes/conversation-forward-routes.mjs";
 import { createMaintenanceGate } from "./http/maintenance-gate.mjs";
-import { authorized, rememberAuthorizedDevice } from "./http/access-control.mjs";
+import { createAccessGuard, rememberAuthorizedDevice } from "./http/access-control.mjs";
 import { sendJson } from "./http/request-utils.mjs";
 import { createArtifactRoutes } from "./routes/artifact-routes.mjs";
 import { createConversationRoutes } from "./routes/conversation-routes.mjs";
@@ -28,6 +28,7 @@ export const createRequestHandler = ({
   employeeRuntime, employeeProjectDirectory, employeeGrowth, modelProviders, projectActivityIndex, projectStatus, agentTasks,
 }) => {
   const readAutomations = createDesktopAutomationReader();
+  const accessGuard = createAccessGuard({ token });
   const maintenance = createMaintenanceGate({
     projectRoot,
     isBusy: () => {
@@ -77,18 +78,25 @@ export const createRequestHandler = ({
 
   return async (request, response) => {
     const url = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`);
-    rememberAuthorizedDevice(request, response, url, token);
     const protectedRoute = url.pathname.startsWith("/api/") || url.pathname === "/events";
-    if (protectedRoute && !authorized(request, token)) {
-      response.writeHead(401);
-      response.end("Unauthorized");
-      return;
+    if (protectedRoute) {
+      const access = accessGuard.check(request);
+      if (!access.allowed) {
+        response.writeHead(access.status, access.retryAfterSeconds ? { "Retry-After": String(access.retryAfterSeconds) } : {});
+        response.end(access.status === 429 ? "Too Many Requests" : "Unauthorized");
+        return;
+      }
     }
+    rememberAuthorizedDevice(request, response, url, token);
 
     if (maintenance(request, response, url)) return;
     try {
       for (const route of routes) {
         if (await route(request, response, url)) return;
+      }
+      if (protectedRoute) {
+        sendJson(response, { error: "Not found" }, 404);
+        return;
       }
       await serveStatic(url, response);
     } catch (error) {

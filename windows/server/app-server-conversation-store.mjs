@@ -210,6 +210,17 @@ export const createAppServerConversationStore = ({
       return projectRoots.some((root) => path.resolve(root).toLowerCase() === resolved);
     } catch { return false; }
   };
+  const foreignThreadError = () => Object.assign(
+    new Error("This conversation does not belong to the current project."),
+    { statusCode: 403 },
+  );
+  // The app-server knows every thread on this computer. A thread id sent by a
+  // browser may only be read or driven when it belongs to a registered project
+  // or to a runtime this service manages (employees, agents).
+  const assertAccessibleThread = async (thread) => {
+    if (isAllowedProjectRoot(thread?.cwd) || await threadRuntimeOptions(thread)) return thread;
+    throw foreignThreadError();
+  };
   const isSameProjectRoot = (left, right) => {
     if (!left || !right) return false;
     try { return path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase(); } catch { return false; }
@@ -317,9 +328,18 @@ export const createAppServerConversationStore = ({
     onProtocolMessage?.(message);
   };
 
+  // Once the app-server process is gone or replaced, every turn it was
+  // running is lost, not only the one whose health check noticed it.
+  const processLostPhases = new Set(["recovered", "failed", "exited"]);
+
   const handleHealthState = (event) => {
-    if (["recovered", "failed"].includes(event?.phase)) activeRuns.delete(event.threadId);
-    onHealthState?.(event);
+    if (!processLostPhases.has(event?.phase)) {
+      onHealthState?.(event);
+      return;
+    }
+    const threadIds = new Set([...activeRuns.keys(), event.threadId].filter(Boolean));
+    activeRuns.clear();
+    for (const threadId of threadIds) onHealthState?.({ ...event, threadId });
   };
 
   const unsubscribe = client.subscribe(handleProtocolMessage);
@@ -606,7 +626,7 @@ export const createAppServerConversationStore = ({
     // Numeric `before` remains the legacy JSONL/app-server fallback contract.
     if (cursor !== undefined || (before === undefined && Number.isSafeInteger(limit) && limit > 0)) {
       try {
-        const thread = await readThreadMetadata(threadId);
+        const thread = await assertAccessibleThread(await readThreadMetadata(threadId));
         if (source !== "all" && sourceFromThread(thread) !== source) return null;
         const page = await readRecentThreadPage({
           client,
@@ -622,13 +642,13 @@ export const createAppServerConversationStore = ({
           preferMessageUpdatedAt: before === undefined && cursor === undefined,
         });
       } catch (error) {
-        if (cursor !== undefined || Number.isSafeInteger(limit) && limit > 0) throw error;
+        if (cursor !== undefined || Number.isSafeInteger(limit) && limit > 0 || error?.statusCode === 403) throw error;
         console.warn(`[conversation-store] native paginated history unavailable, using thread/read: ${error.message}`);
       }
     }
 
     const result = await client.request("thread/read", { threadId, includeTurns: true });
-    const thread = result.thread;
+    const thread = await assertAccessibleThread(result.thread);
     if (source !== "all" && sourceFromThread(thread) !== source) return null;
     threadCache.set(thread.id, thread);
     const messages = messagesFromTurns(thread.turns, registerMedia);
@@ -675,7 +695,8 @@ export const createAppServerConversationStore = ({
       return session;
     }
     catch (error) {
-      if (nativeReadCompleted || !historyFallback || options.cursor !== undefined) throw error;
+      // A refusal is an answer: the history fallback must not serve it either.
+      if (nativeReadCompleted || !historyFallback || options.cursor !== undefined || error?.statusCode === 403) throw error;
       const fallback = await historyFallback(threadId, source, options);
       if (!fallback) throw error;
       return fallback;
@@ -689,9 +710,7 @@ export const createAppServerConversationStore = ({
     const thread = await getThread(threadId);
     const belongsToProject = isAllowedProjectRoot(thread?.cwd);
     let runtimeOptions = await threadRuntimeOptions(thread);
-    if (!belongsToProject && !runtimeOptions) {
-      throw new Error("This conversation does not belong to the current project.");
-    }
+    if (!belongsToProject && !runtimeOptions) throw foreignThreadError();
     if (belongsToProject && !runtimeOptions) {
       let permissions = {};
       try { permissions = JSON.parse(await fs.readFile(path.join(projectRoot, "runtime", "thread-permissions.json"), "utf8")); }
@@ -747,11 +766,10 @@ export const createAppServerConversationStore = ({
   };
 
   const unarchiveSession = async (threadId) => {
+    // Checked before unarchiving: a refused thread must not be changed.
+    await assertAccessibleThread(await getThread(threadId));
     const result = await client.request("thread/unarchive", { threadId });
     if (!result?.thread) throw new Error("Codex 未返回恢复后的会话");
-    if (result.thread.cwd && !isAllowedProjectRoot(result.thread.cwd)) {
-      throw new Error("This conversation does not belong to the current project.");
-    }
     threadCache.set(result.thread.id, result.thread);
     return summaryFromThread(result.thread, false);
   };
@@ -791,6 +809,7 @@ export const createAppServerConversationStore = ({
   };
 
   const steerMessage = async (threadId, turnId, text, attachments = [], submissionId = "") => {
+    await assertAccessibleThread(await getThread(threadId));
     const developerInstructions = await getUserProfilePrompt();
     return client.request("turn/steer", {
       threadId,
@@ -801,7 +820,10 @@ export const createAppServerConversationStore = ({
     });
   };
 
-  const interrupt = async (threadId, turnId) => client.request("turn/interrupt", { threadId, turnId });
+  const interrupt = async (threadId, turnId) => {
+    await assertAccessibleThread(await getThread(threadId));
+    return client.request("turn/interrupt", { threadId, turnId });
+  };
 
   const readSettingsThread = async (threadId, options = {}) => {
     try { return (await ensureProjectThread(threadId)).thread; }
@@ -834,6 +856,7 @@ export const createAppServerConversationStore = ({
       { threadId, includeTurns: false },
       { timeoutMs: 5000, threadId },
     );
+    if (result?.thread) await assertAccessibleThread(result.thread);
     return result.thread?.status || null;
   };
 

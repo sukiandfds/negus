@@ -101,6 +101,9 @@ export const createConversationService = ({ primary, fallback, contentVersionSto
     try {
       return await primary[operation](...args);
     } catch (error) {
+      // A refusal is an answer, not an outage: the JSONL fallback must not
+      // serve what the primary store deliberately declined.
+      if (error?.statusCode === 403) throw error;
       const options = args[2] || {};
       if (operation === "findSession" && (options.cursor !== undefined
         || options.before === undefined && Number.isSafeInteger(options.limit) && options.limit > 0)) throw error;
