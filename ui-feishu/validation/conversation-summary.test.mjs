@@ -15,6 +15,8 @@ const bundle = await build({
     export { ConversationStore } from './shared/features/conversations/state/conversationStore';
     export { writeConversationSnapshot } from './shared/features/conversations/data/conversationSnapshot';
     export { readInitialConversationState } from './shared/features/conversations/state/initialConversation';
+    export { compactTime } from './src/presentation';
+    export { ContentRenderer } from './shared/features/conversations/rendering/ContentRenderer';
     export { ConversationRows } from './src/components/ConversationRows';
     export { createElement } from 'react'; export { renderToStaticMarkup } from 'react-dom/server';`,
     resolveDir: new URL('..', import.meta.url).pathname, loader: 'ts' },
@@ -24,7 +26,7 @@ const loaded = { exports: {} };
 new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(loaded, loaded.exports, require);
 const { buildConversationDirectory, mergeDirectoryProjects, snapshotStatusByThread, ConversationStore,
   writeConversationSnapshot, readInitialConversationState,
-  ConversationRows, createElement, renderToStaticMarkup } = loaded.exports;
+  compactTime, ContentRenderer, ConversationRows, createElement, renderToStaticMarkup } = loaded.exports;
 const time = hour => `2026-10-28T${hour}:00:00Z`;
 const session = (threadId, reply, hour) => ({ threadId, source: 'codex', title: threadId, updatedAt: time(hour),
   messageCount: 1, latestUser: '', latestAssistant: reply,
@@ -36,6 +38,27 @@ const directory = () => ({ statusByThread: {}, contextByThread: {}, projects: ['
 })) });
 const render = rows => renderToStaticMarkup(createElement(ConversationRows, { items: rows,
   c: { selectedId: 'A', archivedView: false, archiveBusyIds: new Set() }, opening: '', query: '', onOpen: () => {} }));
+
+test('compact time keeps the existing local date and clock formats', () => {
+  assert.equal(compactTime(''), '');
+  assert.equal(compactTime('not-a-date'), '');
+  const today = new Date();
+  today.setHours(8, 30, 0, 0);
+  assert.match(compactTime(today.toISOString()), /^08:30$/);
+  assert.equal(compactTime('2026-10-28T10:00:00Z'),
+    new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(new Date('2026-10-28T10:00:00Z')));
+});
+
+test('markdown content keeps formatting and file-link context', () => {
+  const html = renderToStaticMarkup(createElement(ContentRenderer, {
+    threadId: 'thread-A',
+    message: { id: 'message-A', role: 'assistant', text: '**粗体**\n\n[文档](guide.md)', createdAt: time('10') },
+  }));
+  assert.match(html, /<strong>粗体<\/strong>/);
+  assert.match(html, /guide\.md/);
+  assert.match(html, /threadId=thread-A/);
+  assert.match(html, /messageId=message-A/);
+});
 
 test('opening B then A preserves B preview after reopening and an A-only list refresh', () => {
   storage.clear();
@@ -236,6 +259,79 @@ const liveStatus = (phase, active) => ({
 const conversationStore = () => new ConversationStore({
   selectedId: taskThread, snapshotSavedAt: '', sessionIsPartial: false, session: null,
   cachedSessions: [], partialSessionIds: [], sessions: [],
+});
+
+test('unchanged snapshots finish requests without notifying, persisting or replacing state', async () => {
+  const store = conversationStore();
+  const base = store.empty(taskThread);
+  const snapshot = {
+    session: { ...session(taskThread, '已完成内容', '10'), contentVersion: 1, sourceRevision: 'r1' },
+    executionStatus: liveStatus('completed', false), contextStatus: { ...base.contextStatus, threadId: taskThread },
+    goal: null, queueItems: [], userInputRequest: null,
+  };
+  assert.equal(store.commit(taskThread, structuredClone(snapshot), 0), true);
+  const committed = store.committed.get(taskThread);
+  const persisted = store.getPersistSnapshot();
+  let notifications = 0;
+  store.subscribe(() => notifications++);
+
+  assert.equal(store.commit(taskThread, structuredClone(snapshot), 0), false);
+  assert.equal(notifications, 0);
+  assert.equal(store.getPersistSnapshot(), persisted);
+  assert.equal(store.committed.get(taskThread), committed);
+
+  const request = store.request(taskThread);
+  let accepted;
+  void request.then(value => { accepted = value; });
+  assert.equal(store.commit(taskThread, structuredClone(snapshot), store.revisions.get(taskThread)), true);
+  assert.equal(await request, true);
+  assert.equal(accepted, true);
+});
+
+test('an unchanged snapshot still notifies when it clears a stale live state', () => {
+  const store = conversationStore();
+  const base = store.empty(taskThread);
+  const snapshot = {
+    session: session(taskThread, '已完成内容', '10'),
+    executionStatus: liveStatus('idle', false), contextStatus: { ...base.contextStatus, threadId: taskThread },
+    goal: null, queueItems: [], userInputRequest: null,
+  };
+  store.commit(taskThread, snapshot, 0);
+  store.update(taskThread, { executionStatus: liveStatus('working', true) }, true);
+  let notifications = 0;
+  store.subscribe(() => notifications++);
+
+  const changed = store.commit(taskThread, structuredClone(snapshot), 0);
+  if (changed) store.notify();
+  assert.equal(changed, true);
+  assert.equal(store.live.has(taskThread), false);
+  assert.equal(store.get(taskThread).executionStatus.active, false);
+  assert.equal(notifications, 1);
+});
+
+test('optimistic confirmation remains visible work even when body content is unchanged', async () => {
+  const store = conversationStore();
+  const base = store.empty(taskThread);
+  const snapshot = {
+    session: session(taskThread, '原回复', '10'),
+    executionStatus: liveStatus('completed', false), contextStatus: { ...base.contextStatus, threadId: taskThread },
+    goal: null, queueItems: [], userInputRequest: null,
+  };
+  store.commit(taskThread, snapshot, 0);
+  store.addMessage(taskThread, { id: 'optimistic-submit-1', submissionId: 'submit-1', role: 'user', text: '新消息', createdAt: time('11') });
+  const persisted = store.getPersistSnapshot();
+  const request = store.request(taskThread);
+  const confirmed = {
+    ...snapshot,
+    session: { ...snapshot.session, messages: [...snapshot.session.messages,
+      { id: 'native-submit-1', submissionId: 'submit-1', role: 'user', text: '新消息', createdAt: time('11') }] },
+  };
+
+  assert.equal(store.commit(taskThread, confirmed, store.revisions.get(taskThread)), true);
+  assert.equal(store.get(taskThread).session.messages.some(message => message.id === 'native-submit-1'), true);
+  assert.equal(store.localPending.has(taskThread), false);
+  assert.ok(store.getPersistSnapshot() > persisted);
+  assert.equal(await request, true);
 });
 
 test('uncommitted live task status reaches both task and employee parent through store wiring', () => {

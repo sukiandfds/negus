@@ -36,7 +36,9 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
   [c.sessions, directory.projects, revisionKey]);
   const selectedThread = useRef(c.selectedId);
   if (selectedThread.current !== c.selectedId) {
-    selectedThread.current = c.selectedId; observed.current.delete(c.selectedId);
+    selectedThread.current = c.selectedId;
+    if (!store.committed.get(c.selectedId)?.session || store.errors.has(c.selectedId)
+      || store.dirty.has(c.selectedId) || store.freshBodies.has(c.selectedId)) observed.current.delete(c.selectedId);
   }
   const archiveView = useRef(c.archivedView);
   if (archiveView.current !== c.archivedView) {
@@ -68,14 +70,12 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
     // FEAT-001: synchronize the latest 20 conversations and the open conversation.
     const eligible = new Set(rows.slice(0, 20).map(row => row.threadId!));
     if (c.selectedId) eligible.add(c.selectedId);
-    for (const id of store.live.keys()) if (store.get(id).executionStatus.active) eligible.add(id);
-    const entries = rows.filter(row => eligible.has(row.threadId!) && (!observed.current.has(row.threadId!)
-      || store.dirty.has(row.threadId!) || store.get(row.threadId!).executionStatus.active)).map(row => {
+    const priority = new Set(rows.slice(0, 10).map(row => row.threadId!));
+    const entries = rows.filter(row => eligible.has(row.threadId!)).map(row => {
       const id = row.threadId!, revision = store.revisions.get(id) || 0;
       return { id, revision, conversationId: row.conversationId || undefined,
-        signature: JSON.stringify([row.name, row.time, row.preview, row.session, revision]) };
-    }).filter(entry => observed.current.get(entry.id) !== entry.signature)
-      .map(entry => ({ ...entry, priority: true }));
+        signature: JSON.stringify([row.name, row.time, row.preview, row.session, revision]), priority: priority.has(id) };
+    }).filter(entry => observed.current.get(entry.id) !== entry.signature);
     for (const id of store.errors.keys()) if (!rows.some(row => row.threadId === id)) store.errors.delete(id);
     for (const [id, read] of independentReads.current) {
       if (!eligible.has(id) || !rows.some(row => row.threadId === id)) {
@@ -105,28 +105,36 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
       const publish = (results: { entry: typeof entries[number]; error: string }[]) => {
         if (!mounted.current || abort.signal.aborted || !isCurrent()) return;
         const good = new Set(results.filter(result => !result.error).map(result => result.entry.id));
+        let changed = false;
         for (const { entry } of results) pendingPriority.delete(entry.id);
         if (initial) setSyncing(pendingPriority.size > 0);
         for (const { entry, error } of results) {
           observed.current.set(entry.id, entry.signature);
           if (error) {
+            if (store.errors.get(entry.id) !== error) changed = true;
             store.finish(entry.id, error);
             console.error('[negus:conversation-sync]', { threadId: entry.id, reason: error, at: new Date().toISOString() });
-          } else store.commit(entry.id, candidate.get(entry.id)!, entry.revision);
+          } else changed = store.commit(entry.id, candidate.get(entry.id)!, entry.revision) || changed;
         }
         setShown(previous => {
           const current = live.current.conversations;
-          const sessions = new Map(previous.sessions.filter(session => current.sessions.some(item => item.threadId === session.threadId)).map(session => [session.threadId, session]));
-          for (const summary of current.sessions) if (good.has(summary.threadId)) {
+          const sessions = current.sessions.map(summary => {
+            const existing = previous.sessions.find(item => item.threadId === summary.threadId);
+            if (!good.has(summary.threadId)) return existing || summary;
             const detail = store.committed.get(summary.threadId)?.session;
             const latestMessage = latestMessagePreview(detail?.messages) || '';
             const { messages: _messages, sourceSignature: _signature, ...fields } = detail || { ...summary, messages: [], sourceSignature: undefined };
-            sessions.set(summary.threadId, { ...summary, ...fields, updatedAt: summary.updatedAt, latestMessage });
-          }
-          return { sessions: [...sessions.values()], committed: true, project: current.project,
-            projects: mergeDirectoryProjects(previous.projects, live.current.directory.projects) };
+            const next = { ...summary, ...fields, updatedAt: summary.updatedAt, latestMessage };
+            return existing && JSON.stringify(existing) === JSON.stringify(next) ? existing : next;
+          });
+          const projects = mergeDirectoryProjects(previous.projects, live.current.directory.projects);
+          if (previous.committed && JSON.stringify(previous.project) === JSON.stringify(current.project)
+            && JSON.stringify(previous.projects) === JSON.stringify(projects)
+            && sessions.length === previous.sessions.length
+            && sessions.every((session, index) => session === previous.sessions[index])) return previous;
+          return { sessions, committed: true, project: current.project, projects };
         });
-        store.notify();
+        if (changed) store.notify();
       };
       const ordered = initial ? [...batch].sort((a, b) => Number(b.id === c.selectedId) - Number(a.id === c.selectedId)) : batch;
       return readConversationBatches(ordered, async (entry, signal) => {
@@ -175,7 +183,8 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
   const model = resolveVisibleModel(c.models, readModelDefaults(), selected.contextStatus.model, session?.model || '');
   const effort = resolveVisibleEffort(c.models, readModelDefaults(), model, selected.contextStatus.reasoningEffort);
   const states = [...store.committed];
-  const display = { ...c, ...selected, session, executionStatus, goal: selected.goal || (c.goal?.status === 'complete' ? c.goal : null), visibleModel: model, visibleEffort: effort, usageModel: selected.executionStatus.active ? c.usageModel : model,
+  const display = { ...c, ...selected, session, executionStatus, goal: c.goal || selected.goal, userInputRequest: c.userInputRequest,
+    visibleModel: model, visibleEffort: effort, usageModel: selected.executionStatus.active ? c.usageModel : model,
     streamingText: executionStatus.streamingText || '', commentaryText: executionStatus.commentary || '',
     syncing,
     project: shown.project, sessions: c.sessions.map(summary => summary.threadId === c.selectedId

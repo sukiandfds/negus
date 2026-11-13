@@ -1,4 +1,4 @@
-import { createContext, useContext, Children, isValidElement, forwardRef, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createContext, useContext, Children, isValidElement, forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Download, FileText, ImageOff, X } from "lucide-react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
@@ -8,7 +8,7 @@ import { withAccessToken } from "../../../shared/api/http";
 import styles from "./ContentRenderer.module.css";
 import { CodeBlock } from "../../../shared/components/CodeBlock";
 
-import { conversationQuery } from "../../../shared/api/conversationScope";
+import { conversationQuery, currentConversationId } from "../../../shared/api/conversationScope";
 
 const FileLinkContext = createContext<{ threadId: string; messageId: string } | null>(null);
 
@@ -179,13 +179,20 @@ const expandedMarkdownComponents: Components = { ...markdownComponents, pre: ({ 
 
 export const MarkdownContent = forwardRef<HTMLDivElement, { text: string; className?: string; style?: CSSProperties; codeBlocks?: boolean; collapseCode?: boolean }>(function MarkdownContent({ text, className, style, codeBlocks = false, collapseCode = true }, ref) {
   const scope = useContext(FileLinkContext);
-  const urlTransform = (url: string, key: string) => {
-    if (key !== "href" || !scope?.threadId || /^(?:https?:|mailto:|tel:|#|\/\/|\/api\/)/i.test(url)) return defaultUrlTransform(url);
-    if (/^(?!file:|[a-z]:[\\/])[a-z][a-z0-9+.-]*:/i.test(url)) return defaultUrlTransform(url);
-    const query = new URLSearchParams({ threadId: scope.threadId, messageId: scope.messageId, href: url });
-    return withAccessToken("/api/session/file?" + query + conversationQuery());
-  };
-  return <div ref={ref} className={className} style={style}><ReactMarkdown urlTransform={urlTransform} remarkPlugins={[remarkGfm]} components={codeBlocks ? collapseCode ? conversationMarkdownComponents : expandedMarkdownComponents : markdownComponents}>{text}</ReactMarkdown></div>;
+  const threadId = scope?.threadId || "";
+  const messageId = scope?.messageId || "";
+  const conversation = conversationQuery(currentConversationId(threadId));
+  const content = useMemo(() => {
+    const urlTransform = (url: string, key: string) => {
+      if (key !== "href" || !threadId || /^(?:https?:|mailto:|tel:|#|\/\/|\/api\/)/i.test(url)) return defaultUrlTransform(url);
+      if (/^(?!file:|[a-z]:[\\/])[a-z][a-z0-9+.-]*:/i.test(url)) return defaultUrlTransform(url);
+      const query = new URLSearchParams({ threadId, messageId, href: url });
+      return withAccessToken("/api/session/file?" + query + conversation);
+    };
+    return <ReactMarkdown urlTransform={urlTransform} remarkPlugins={[remarkGfm]}
+      components={codeBlocks ? collapseCode ? conversationMarkdownComponents : expandedMarkdownComponents : markdownComponents}>{text}</ReactMarkdown>;
+  }, [text, codeBlocks, collapseCode, threadId, messageId, conversation]);
+  return <div ref={ref} className={className} style={style}>{content}</div>;
 });
 
 export function CollapsedMarkdown({ text, lines = 2, characterLimit }: { text: string; lines?: number; characterLimit?: number }) {
@@ -285,6 +292,7 @@ function Block({ block }: { block: ContentBlock }) {
 }
 
 export function ContentRenderer({ message, threadId = "" }: { message: SessionMessage; threadId?: string }) {
+  const linkContext = useMemo(() => ({ threadId, messageId: message.id }), [threadId, message.id]);
   const blocks = message.blocks?.length
     ? message.blocks
     : [{ id: `${message.id}-text`, type: "markdown" as const, text: message.text }];
@@ -318,5 +326,5 @@ export function ContentRenderer({ message, threadId = "" }: { message: SessionMe
     }
     content.push(<ImageGallery key={`gallery-${images[0].id}`} blocks={images} />);
   }
-  return <FileLinkContext.Provider value={{ threadId, messageId: message.id }}><div className={styles.content}>{content}</div></FileLinkContext.Provider>;
+  return <FileLinkContext.Provider value={linkContext}><div className={styles.content}>{content}</div></FileLinkContext.Provider>;
 }

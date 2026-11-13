@@ -611,13 +611,9 @@ export function useProjectConversations() {
   }, [execution.refreshStatus, execution.status.active, selection.selectedIdRef, selection.session?.archived]);
 
   const onSessionsChanged = useCallback((threadId?: string | string[]) => {
-    for (const id of typeof threadId === 'string' ? [threadId] : threadId || []) {
-      if (selection.store.get(id).executionStatus.active) selection.store.invalidate(id, false);
-    }
-    selection.store.notify();
     window.dispatchEvent(new Event('negus:directory-changed'));
     return catalog.refreshSessions(false, typeof threadId === 'string' ? threadId : undefined, false);
-  }, [catalog.refreshSessions, selection.store]);
+  }, [catalog.refreshSessions]);
 
   const providerOf = useCallback((model: string) => {
     const entry = modelManager.models.find((item) => item.model === model);
@@ -698,14 +694,16 @@ export function useProjectConversations() {
 
   const handleEvent = useCallback((event: ProjectEvent) => {
     if (!selection.store.acceptEvent(event)) return;
-    if (event.type === 'sessions_changed') {
-      for (const id of event.threadId ? [event.threadId] : []) {
-        if (selection.store.get(id).executionStatus.active) selection.store.freshBodies.add(id);
-      }
-    }
     if (event.type === "assistant_message_completed") selection.store.completeMessage(event.threadId, event.message);
     execution.handleEvent(event);
+    const previousStatus = event.type === 'execution_status' ? selection.store.get(event.threadId).executionStatus : null;
     if (event.type === 'execution_status' && event.threadId !== selection.selectedIdRef.current) selection.store.update(event.threadId, { executionStatus: event }, true);
+    if (event.type === 'execution_status' && event.threadId !== selection.selectedIdRef.current
+      && ['completed', 'failed', 'interrupted', 'systemError'].includes(event.phase)
+      && (previousStatus?.phase !== event.phase || previousStatus?.turnId !== event.turnId)) {
+      selection.store.freshBodies.add(event.threadId);
+      selection.store.invalidate(event.threadId, false);
+    }
     if ((event as { type: string }).type === 'employee_status' || (event as { type: string }).type === 'employee_message_completed') window.dispatchEvent(new Event('negus:directory-changed'));
     const acceptedQueueItem = followUpQueue.handleEvent(event);
     goal.handleEvent(event);
@@ -735,6 +733,7 @@ export function useProjectConversations() {
     }
     if (event.type === 'user_input_requested') {
       if (event.threadId === selection.selectedIdRef.current) setUserInputError('');
+      selection.store.invalidate(event.threadId, false);
       selection.store.update(event.threadId, { userInputRequest: event.request }, true);
     }
     if (event.type === 'user_input_resolved') selection.store.update(event.threadId, current => ({

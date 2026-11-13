@@ -1028,3 +1028,19 @@ context-management-service.mjs增加8行，补原生轮次完成/中断终态收
 - 当前决定：本次推送保留为可复现的问题版本，提交信息明确标记 `KNOWN ISSUE`；不代表延迟已修复。
 - 证据：`work/optimistic-message-latency.md`。排查时线上前端 `feishu-mwdcdbzj` 与工作区相关资源一致。
 - 生效状态：本次只提交和推送源码与记录，不自动发布前端、不重启后端。
+
+### 2026-11-13 整页响应延迟分阶段修复
+
+- 状态：已实现；各阶段及缓存 A/B 切换补修均已通过审核，前端已发布。
+- 修改范围：`usePageSnapshot.ts` 不再因 active 状态重读后台正文，按目录/正文签名读取，首批仅最近10条优先；无变化结果复用页面状态，后台终态每 turn 校准一次。`conversationStore.ts` 区分数据变化、实时状态清理和请求收尾，相同快照不通知、不保存、不替换对象。`useProjectConversations.ts` 删除 active 强刷和无条件下发。`ContentRenderer.tsx` 复用未变化 Markdown，并在线程、消息或目录补齐的 `conversationId` 变化时重新生成文件链接。`presentation.ts` 复用日期时间格式器。
+- 用户影响：后台任务运行时，当前对话继续实时更新且目录状态照常显示；后台运行本身不再反复带动正文请求和整页更新；任务结束后最终正文仍会补齐一次；发送、点击和输入的可见等待减少。文字、样式、链接、图片、附件、代码折叠和发送行为保持。
+- 阶段审核：阶段1 `PASS`（任务 `61e16fc2-3688-4120-89eb-3115d6837449`）；阶段2首次 `FAIL` 后补齐 live 实时状态清理通知并复审 `PASS`（任务 `8ea29ae6-15cf-4dea-bb9b-642529ad6a7b`）；阶段3 `PASS`（任务 `5774eca1-6c8c-4683-a054-437de832fd32`）。
+- 验证：`conversation-summary.test.mjs` 37/37、`conversation-refresh-policy-browser.test.mjs`、`conversation-priority-browser.test.mjs`（首批10条、峰值4路）、`conversation-file-link-browser.test.mjs`、`conversation-batch-browser.test.mjs` 通过；TypeScript `--noEmit`、`git diff --check` 通过。
+- 生效状态：前端已发布 `feishu-mwelg954`（2026-11-13T06:26:42.807Z），后端未重启。
+
+#### 2026-11-13 已缓存对话切换补修（本轮）
+
+- 授权：当前维护对话明确要求修复第三次门禁发现的缓存 A/B 切换重复读取；仅当前 `develop` 工作区最小修复，不提交、推送、发布或重启，不改受保护滚动及显示样式。此前阶段记录漏列的 file-link、batch 浏览器证据为 `/tmp/negus-final-file-link.log`、`/tmp/negus-final-batch.log`；本轮按当前源码复跑并通过，证据分别为 `/tmp/negus-cache-switch-file-link-20261113.log`、`/tmp/negus-cache-switch-batch-20261113.log`。
+- 修前 `conversation-store-browser` 第165行复现 A/B 两次 `/api/session?view=1&sourceRevision=r0`，预期0；证据 `/tmp/negus-cache-switch-before-20261113.log`。`usePageSnapshot.ts` 仅在正文缺失、部分缓存、dirty 或上次读取失败时让切换重读；已同步且版本不变的 A/B 切换为0次。去掉冗余读取后，页面从现有实时状态取 Goal 和提问；`useProjectConversations.ts` 收到后台提问事件时唤醒该线程权威快照读取，切入时复用结果。
+- 修后完整 `conversation-store-browser` 通过（缓存切换、确认、失败图片、历史、Goal、提问、断线及未加载对话）；证据 `/tmp/negus-cache-switch-after-20261113.log`。`conversation-summary` 37/37、refresh-policy、priority（峰值4路）、file-link、batch 浏览器测试及 TypeScript `--noEmit` 通过；证据 `/tmp/negus-cache-switch-{summary,refresh-policy,priority,file-link,batch,types}-20261113.log`。`git diff --check` 通过，受保护滚动文件相对 HEAD 零差异。
+- 生效状态：补修已随前端 `feishu-mwelg954` 发布并经 `/version.json` 核对；后端未重启。

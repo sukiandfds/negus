@@ -1,11 +1,13 @@
 import type { ProjectRuntimeStatus } from '../shared/features/project-directory/model/types';
 export { avatarColor } from '../shared/shared/presentation/avatarColor';
+const timeFormatter = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' });
+const monthDayFormatter = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' });
 export const compactTime = (value?: string | null) => {
   if (!value || !Number.isFinite(Date.parse(value))) return '';
   const date = new Date(value);
-  return date.toLocaleDateString('zh-CN') === new Date().toLocaleDateString('zh-CN')
-    ? date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-    : date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+  return date.toDateString() === new Date().toDateString()
+    ? timeFormatter.format(date)
+    : monthDayFormatter.format(date);
 };
 
 export const conversationStatus = (status?: ProjectRuntimeStatus, contextPhase?: string, projectRoot = '') =>

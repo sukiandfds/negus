@@ -200,6 +200,12 @@ export class ConversationStore {
     return promise;
   };
   commit = (id: string, snapshot: ThreadSnapshot, revision: number) => {
+    const previousCommitted = this.committed.get(id);
+    const previousPending = this.localPending.get(id);
+    const previousLive = signature(this.live.get(id), true);
+    const hadError = this.errors.has(id);
+    const wasDirty = this.dirty.has(id);
+    const wasSynced = this.synced.has(id);
     this.rememberQueue(id, snapshot.queueItems, true);
     for (const message of snapshot.session?.messages || []) if (message.role === 'user' && message.submissionId && !message.id.startsWith('optimistic-')) this.rememberAccepted(id, message.submissionId);
     snapshot = { ...snapshot, queueItems: this.visibleQueue(id, snapshot.queueItems) };
@@ -217,7 +223,6 @@ export class ConversationStore {
       snapshot = { ...snapshot, session: { ...merged, messages: merged.messages.filter(message => ids.has(message.id)) } };
     }
     this.committed.set(id, snapshot);
-    ++this.persistVersion;
     const local = this.localPending.get(id);
     if (local && snapshot.session) {
       const remaining = mergePendingOptimisticMessages(snapshot.session, local).messages.filter(message => message.id.startsWith('optimistic-'));
@@ -233,6 +238,13 @@ export class ConversationStore {
       if (executionStatus !== snapshot.executionStatus) this.live.set(id, { executionStatus });
     }
     this.finish(id);
+    const dataChanged = signature(previousCommitted, true) !== signature(this.committed.get(id), true)
+      || signature(previousPending, true) !== signature(this.localPending.get(id), true);
+    if (!dataChanged && previousCommitted) this.committed.set(id, previousCommitted);
+    const stateChanged = hadError !== this.errors.has(id) || wasDirty !== this.dirty.has(id)
+      || wasSynced !== this.synced.has(id) || previousLive !== signature(this.live.get(id), true);
+    if (dataChanged) ++this.persistVersion;
+    return dataChanged || stateChanged;
   };
   addMessage = (id: string, message: SessionMessage) => {
     if ([...(this.committed.get(id)?.session?.messages || []), ...(this.localPending.get(id) || [])].some(item => item.id === message.id || sameSubmission(item, message))) return;
