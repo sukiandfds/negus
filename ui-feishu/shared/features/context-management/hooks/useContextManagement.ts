@@ -22,7 +22,8 @@ export function useContextManagement(threadId: string, store: ConversationStore)
   const activeThread = useRef(threadId);
   activeThread.current = threadId;
   const submittedChoices = useRef(new Map<string, { model: string; reasoningEffort: string }>());
-  const status = store.get(threadId, false).contextStatus;
+  // Before the first read, runtime events live in the remote layer so that read's saved settings replace them.
+  const status = store.get(threadId, !store.synced.has(threadId)).contextStatus;
   const setStatus = useCallback((value: ContextStatus | ((current: ContextStatus) => ContextStatus)) => {
     const next = typeof value === 'function' ? value(store.get(threadId).contextStatus) : value;
     store.update(threadId, { contextStatus: next });
@@ -34,8 +35,9 @@ export function useContextManagement(threadId: string, store: ConversationStore)
   const handleEvent = useCallback((event: ContextStatus) => {
     const current = store.get(event.threadId, false).contextStatus;
     if (current.updatedAt && event.updatedAt && Date.parse(event.updatedAt) < Date.parse(current.updatedAt)) return;
-    store.update(event.threadId, { contextStatus: current.selectedSettings || store.synced.has(event.threadId) || store.modelChoices.has(event.threadId)
-      ? { ...event, model: current.model, reasoningEffort: current.reasoningEffort, selectedSettings: current.selectedSettings } : event });
+    const keepSettings = Boolean(current.selectedSettings || store.synced.has(event.threadId) || store.modelChoices.has(event.threadId));
+    store.update(event.threadId, { contextStatus: keepSettings
+      ? { ...event, model: current.model, reasoningEffort: current.reasoningEffort, selectedSettings: current.selectedSettings } : event }, !keepSettings);
   }, [store]);
 
   const applyModelSettings = useCallback((changedThreadId: string, settings: { model: string; reasoningEffort: string; committed?: boolean }) => {

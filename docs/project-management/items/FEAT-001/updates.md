@@ -1051,3 +1051,10 @@ context-management-service.mjs增加8行，补原生轮次完成/中断终态收
 - 修改范围：`windows/server/conversation-service.mjs` 的 `findSession`。2026-11-06 起分页读取（`limit`）不再回退 JSONL，导致尚无原生 turn 的新线程（原生返回 `no persisted turns` 等线程缺失错误）即使已有 Negus 生图补充记录也直接报错。现仅在最近窗口、错误属于线程缺失且存在补充记录时返回补充会话；其他错误及无补充记录时照旧抛出。依据本条目“补充生图记录不受历史文件版本覆盖，存在补充记录时读取正文”的有效决定。
 - 用户影响：新建对话只发起过生图时，打开该对话可看到图片记录，不再显示读取失败。
 - 验证：`conversation-service-media.test.mjs` 等 `windows/tests` 全套 562 通过、1 失败（`conversation-send-state.test.mjs` 运行事件与过期读取的模型优先级，属待产品确认的既有失败，未改动）、2 跳过；TypeScript `--noEmit`、`git diff --check` 通过。
+
+### 2026-11-14 首次读取前的运行事件不再覆盖已保存模型设置
+
+- 状态：已实现，待评审（PR）；未发布、未重启。
+- 根因：`070e81e` 将 `handleEvent` 改为本地更新（为了让事件显示在不含实时层的状态中）。首次同步前到达的运行事件因此获得较新的字段版本，随后的服务器读取被视为过期，事件里的运行模型覆盖了“上次成功设置”。同步后 `handleEvent` 本就忽略事件模型，首次同步前行为不一致。
+- 修改范围：`useContextManagement.ts`。首次同步前且没有用户选择时，运行事件写入实时层，状态在首次同步前包含实时层，事件模型仍立即可见；首次读取提交时以已保存设置替换。同步后及用户显式选择模型的路径不变。未改 `conversationStore.ts`、滚动或定位逻辑。
+- 验证：`windows/tests` 563 通过、0 失败、2 跳过；TypeScript `--noEmit`、`git diff --check` 通过。`ui-feishu/validation` 非浏览器测试与修改前失败集合一致；浏览器测试依赖作者本机 Playwright 路径及测试服务，修改前后同样无法运行。
