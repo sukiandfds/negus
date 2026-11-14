@@ -19,7 +19,7 @@ test('shared fast client requests URL output and preserves image order without d
  const inputs=[path.join(dir,'persona.png'),path.join(dir,'reference.png')];await fs.writeFile(inputs[0],'persona');await fs.writeFile(inputs[1],'target');
  let calls=0;
  const client=createFastImageClient({apiKey:'test-only',fetchImpl:async(url,init)=>{
-  calls++;assert.equal(url,'https://api.happyevering.xyz/v1/images/edits');assert.equal(init.body.get('response_format'),'url');assert.equal(init.body.get('size'),'4K:2.35:1');
+  calls++;assert.equal(url,'https://api.happyevering.xyz/v1/images/edits');assert.equal(init.body.get('response_format'),'url');assert.equal(init.body.get('size'),'3840x1632');
   assert.equal(init.body.get('model'),'gpt-image-2.5-flare');assert.equal(init.body.get('quality'),null);
   const images=init.body.getAll('image');assert.equal(await images[0].text(),'persona');assert.equal(await images[1].text(),'target');
   return new Response(JSON.stringify({data:[{url:'https://example.com/result.png'}]}),{headers:{'content-type':'application/json'}});

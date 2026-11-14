@@ -1,27 +1,11 @@
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
+import fs from "node:fs/promises";
 import test from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import ts from "../../ui-feishu/node_modules/typescript/lib/typescript.js";
 
-const require = createRequire(import.meta.url);
-const esbuild = require("../../ui-feishu/node_modules/esbuild/lib/main.js");
-const entry = fileURLToPath(new URL("../../ui-feishu/shared/features/conversations/rendering/heartbeatMessage.ts", import.meta.url));
-const built = esbuild.buildSync({
-  entryPoints: [entry],
-  bundle: true,
-  format: "esm",
-  platform: "neutral",
-  write: false,
-  target: "es2022",
-});
-const directory = await mkdtemp(path.join(tmpdir(), "heartbeat-message-"));
-const outfile = path.join(directory, "heartbeat-message.mjs");
-await writeFile(outfile, built.outputFiles[0].text);
-const { parseHeartbeatUser, heartbeatAssistantText, QUIET_HEARTBEAT_TEXT } = await import(pathToFileURL(outfile).href);
-await rm(directory, { recursive: true, force: true });
+const source = await fs.readFile(new URL("../../ui-feishu/shared/features/conversations/rendering/heartbeatMessage.ts", import.meta.url), "utf8");
+const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
+const { parseHeartbeatUser, heartbeatAssistantText, QUIET_HEARTBEAT_TEXT } = await import("data:text/javascript;base64," + Buffer.from(output).toString("base64"));
 
 const instructions = "\u53ea\u6267\u884c\u56fa\u5b9a\u5de1\u68c0\u811a\u672c\u3002";
 const userText = `<heartbeat>\r\n  <automation_id>negus</automation_id>\r\n  <current_time_iso>2026-09-22T09:02:05.816Z</current_time_iso>\r\n  <instructions>\r\n${instructions}\r\n  </instructions>\r\n</heartbeat>\r\n`;

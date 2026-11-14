@@ -195,6 +195,7 @@ test("employee history uses its explicit provider without changing ordinary thre
 test("channel switching preserves the thread and sends only the next user message, including after restart", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-model-transfer-"));
   try {
+    await fs.writeFile(path.join(root, "rollout.jsonl"), `${JSON.stringify({ type: "session_meta", payload: { id: "original" } })}\n`, "utf8");
     const sessions = new Map([["original", { threadId: "original", cwd: root, title: "项目讨论", messages: [{role:"user",text:"前文"},{role:"assistant",text:"已处理"}], hasMore:false }]]);
     const calls = [];
     let counter = 0;
@@ -264,7 +265,7 @@ test("channel switching preserves the thread and sends only the next user messag
 test("sorts a switched channel by the latest assistant reply instead of the stale sidebar time", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-sidebar-sort-"));
   const rollout = path.join(root, "rollout.jsonl");
-  await fs.writeFile(rollout, `${JSON.stringify({
+  await fs.writeFile(rollout, `${JSON.stringify({ type: "session_meta", payload: { id: "original" } })}\n${JSON.stringify({
     timestamp: "2026-09-23T02:45:20.909Z",
     type: "response_item",
     payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "done" }] },

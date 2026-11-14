@@ -32,3 +32,6 @@ ui-feishu/*.tsbuildinfo
 ui-feishu/vite.config.js
 ui-feishu/vite.config.d.ts
 ui-feishu/package-lock.json
+
+# One-off local patch scripts
+.tmp-*

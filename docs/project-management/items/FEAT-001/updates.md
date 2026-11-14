@@ -1044,3 +1044,10 @@ context-management-service.mjs增加8行，补原生轮次完成/中断终态收
 - 修前 `conversation-store-browser` 第165行复现 A/B 两次 `/api/session?view=1&sourceRevision=r0`，预期0；证据 `/tmp/negus-cache-switch-before-20261113.log`。`usePageSnapshot.ts` 仅在正文缺失、部分缓存、dirty 或上次读取失败时让切换重读；已同步且版本不变的 A/B 切换为0次。去掉冗余读取后，页面从现有实时状态取 Goal 和提问；`useProjectConversations.ts` 收到后台提问事件时唤醒该线程权威快照读取，切入时复用结果。
 - 修后完整 `conversation-store-browser` 通过（缓存切换、确认、失败图片、历史、Goal、提问、断线及未加载对话）；证据 `/tmp/negus-cache-switch-after-20261113.log`。`conversation-summary` 37/37、refresh-policy、priority（峰值4路）、file-link、batch 浏览器测试及 TypeScript `--noEmit` 通过；证据 `/tmp/negus-cache-switch-{summary,refresh-policy,priority,file-link,batch,types}-20261113.log`。`git diff --check` 通过，受保护滚动文件相对 HEAD 零差异。
 - 生效状态：补修已随前端 `feishu-mwelg954` 发布并经 `/version.json` 核对；后端未重启。
+
+### 2026-11-14 仅含生图补充记录的新线程分页读取修复
+
+- 状态：已实现，待评审（PR）；未发布、未重启。
+- 修改范围：`windows/server/conversation-service.mjs` 的 `findSession`。2026-11-06 起分页读取（`limit`）不再回退 JSONL，导致尚无原生 turn 的新线程（原生返回 `no persisted turns` 等线程缺失错误）即使已有 Negus 生图补充记录也直接报错。现仅在最近窗口、错误属于线程缺失且存在补充记录时返回补充会话；其他错误及无补充记录时照旧抛出。依据本条目“补充生图记录不受历史文件版本覆盖，存在补充记录时读取正文”的有效决定。
+- 用户影响：新建对话只发起过生图时，打开该对话可看到图片记录，不再显示读取失败。
+- 验证：`conversation-service-media.test.mjs` 等 `windows/tests` 全套 562 通过、1 失败（`conversation-send-state.test.mjs` 运行事件与过期读取的模型优先级，属待产品确认的既有失败，未改动）、2 跳过；TypeScript `--noEmit`、`git diff --check` 通过。

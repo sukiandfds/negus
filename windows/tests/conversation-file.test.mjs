@@ -53,7 +53,7 @@ test('remote file links: resolve references, reject unrelated files and serve sa
 test('failed file navigation never receives cached Negus desktop; app offline fallback remains', async () => {
   const handlers = {};
   const context = { self: { location: { href: 'https://local/sw.js', origin: 'https://local' }, addEventListener: (event, fn) => { handlers[event] = fn; } }, URL,
-    fetch: async () => ({ ok: false, status: 404 }), caches: { match: async (pathname) => pathname } };
+    fetch: async () => ({ ok: false, status: 404 }), caches: { open: async () => ({ match: async (pathname) => pathname, put: async () => {} }) } };
   vm.runInNewContext(await fs.readFile('ui-feishu/public/sw.js', 'utf8'), context);
   for (const pathname of ['/Users/me/file.md', '/docs/file.md', '/api/session/file']) {
     let intercepted = false;
@@ -61,6 +61,6 @@ test('failed file navigation never receives cached Negus desktop; app offline fa
     assert.equal(intercepted, false);
   }
   let result;
-  handlers.fetch({ request: { method: 'GET', mode: 'navigate', url: 'https://local/' }, respondWith: (value) => { result = value; } });
+  handlers.fetch({ request: { method: 'GET', mode: 'navigate', url: 'https://local/' }, respondWith: (value) => { result = value; }, waitUntil: () => {} });
   assert.equal(await result, '/index.html');
 });

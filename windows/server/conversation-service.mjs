@@ -122,12 +122,23 @@ export const createConversationService = ({ primary, fallback, contentVersionSto
     if (existing) return existing;
 
     const request = (async () => {
-      let session = await withFallback("findSession", ...args);
       const threadId = String(args[0] || "");
       const options = args[2] || {};
       const recentWindow = options.before === undefined && options.cursor === undefined;
+      let session;
+      let supplemental = null;
+      try {
+        session = await withFallback("findSession", ...args);
+      } catch (error) {
+        // A fresh Codex thread may only hold Negus image records so far; paged
+        // reads skip the JSONL fallback, so serve those records instead of failing.
+        if (!supplementalMessages || !recentWindow || !missingThreadPattern.test(String(error?.message || error))) throw error;
+        supplemental = await supplementalMessages.list(threadId);
+        if (!supplemental.length) throw error;
+        session = null;
+      }
       if (supplementalMessages && recentWindow) {
-        const supplemental = await supplementalMessages.list(threadId);
+        supplemental ??= await supplementalMessages.list(threadId);
         session = session
           ? mergeSupplementalMessages(session, supplemental)
           : supplemental.length ? sessionFromSupplementalMessages(threadId, supplemental) : null;

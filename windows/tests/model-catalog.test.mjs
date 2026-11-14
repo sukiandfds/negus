@@ -58,5 +58,19 @@ test('DeepSeek effective context follows official capacity and native 95 percent
   assert.equal(verifiedContextWindow('ccswitch_deepseek::deepseek-flash'), 996147);
   assert.equal(verifiedContextWindow('deepseek-v4-pro'), 996147);
   assert.equal(verifiedContextWindow('unknown'), null);
-  assert.ok(sharedModelCatalogArguments().length > 0);
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-catalog-home-'));
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  try {
+    process.env.HOME = process.env.USERPROFILE = home;
+    assert.deepEqual(sharedModelCatalogArguments(), []);
+    const codexHome = path.join(home, '.codex');
+    const catalog = path.join(codexHome, 'negus-models.json');
+    await fs.mkdir(codexHome, { recursive: true });
+    await fs.writeFile(path.join(codexHome, 'config.toml'), '');
+    await fs.writeFile(catalog, '{"models":[]}');
+    assert.deepEqual(sharedModelCatalogArguments(), ['-c', `model_catalog_json=${JSON.stringify(catalog)}`]);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) value === undefined ? delete process.env[key] : process.env[key] = value;
+    await fs.rm(home, { recursive: true, force: true });
+  }
 });
