@@ -319,6 +319,6 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
       }
     }); schedule(); },
     // Detach without cancelling native work: the next instance must observe its authoritative state.
-    close: async () => { closed = true; clearInterval(recoveryTimer); runtime.detach?.(); await writes; await Promise.allSettled([...notifications]); await writes; },
+    close: async () => { closed = true; clearInterval(recoveryTimer); await runtime.detach?.(); await writes; await Promise.allSettled([...notifications]); await writes; },
   };
 }

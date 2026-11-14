@@ -104,7 +104,7 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
     });
     const aborted = () => { void interrupt().catch(() => {}); };
     controls.signal.addEventListener('abort', aborted);
-    active.set(task.id, { interrupt, finish });
+    active.set(task.id, { interrupt, finish, settled: () => serial });
     let checking = false;
     const healthTimer = setInterval(() => {
       if (ended || checking || (!turnId && !recovering)) return;
@@ -147,6 +147,11 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
     execute: (task, controls) => run(task, controls, false),
     observe: (task, controls) => run(task, controls, true),
     cancel: async task => { await active.get(task.id)?.interrupt(); },
-    detach: () => { for (const run of active.values()) run.finish({ status: 'unknown', error: '服务正在关闭，执行状态将在启动时核对' }); },
+    // Resolves once handlers already in flight (e.g. turn/started room updates) settle, so close never races later writes.
+    detach: () => {
+      const runs = [...active.values()];
+      for (const run of runs) run.finish({ status: 'unknown', error: '服务正在关闭，执行状态将在启动时核对' });
+      return Promise.allSettled(runs.map(run => run.settled()));
+    },
   };
 }

@@ -106,7 +106,6 @@ test('群员工 Provider 迁移保持 thread，失败继续旧来源且多个 ag
 test('群内员工在真实下一轮先迁移后启动，同 thread 不重开', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-group-provider-migration-'));
   const stateFile = path.join(root, 'room.json');
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
   await fs.writeFile(stateFile, JSON.stringify({ agents: [{
     id: 'manager', modelProviderId: 'old-provider', model: 'old-model', reasoningEffort: 'medium', threadId: 'group-thread',
   }] }));
@@ -140,7 +139,7 @@ test('群内员工在真实下一轮先迁移后启动，同 thread 不重开', 
       assert.deepEqual(route, { modelProviderId: 'ccswitch_deepseek', model: 'deepseek-flash' });
       assert.equal(calls.some(call => call.method === 'turn/start'), false);
     } });
-  t.after(async () => { await service.close(); await room.close(); });
+  t.after(async () => { await service.close(); await room.close(); await fs.rm(root, { recursive: true, force: true }); });
   await service.receive({ requestId: 'migrate-next-turn', agentIds: [],
     message: { type: 'human', authorId: 'user', authorName: '用户', text: '继续处理', attachments: [] } });
   await until(() => turns.length === 1);

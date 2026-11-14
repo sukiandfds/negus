@@ -341,3 +341,10 @@
 - 用户原话：“2.先不修。稍后修。”
 - 用户影响：本次不增加员工恢复状态修复；最新 PR #2 合入后仍可能看到该问题，待稍后单独处理。
 - 证据：当前对话；`docs/project-management/items/FEAT-002/item.md`。
+
+### 2026-11-14 群聊任务服务关闭后不再写入房间状态
+
+- 状态：已实现，待评审（PR）；未发布、未重启。
+- 根因：`native-task-runtime.mjs` 的 `detach()` 只把运行中任务标记结束，不等待已在执行的事件处理（如 `turn/started` 后 `room.updateAgent`）。`task-kernel.mjs` 的 `close()` 也不等待，于是关闭返回后仍会写 `room.json`，与后续清理竞争，出现 ENOENT/ENOTEMPTY 和测试进程不退出。另外 `group-task-service.test.mjs` 中一个用例先登记删除目录、后登记关闭服务，清理顺序颠倒。
+- 修改范围：`detach()` 返回等待各任务在途事件处理的 Promise，`close()` 予以等待；结束后不再接收新事件，因此只等待已开始的处理。测试用例改为先关闭服务与房间再删除目录。
+- 验证：`group-task-service.test.mjs` 顺序 10 次与 8 路并发 40 次全部 0 退出、约 1 秒（修改前约每 10 次出现一次失败或挂起）；`ui-feishu/validation` 全套 5 次均约 3 秒结束，134 通过，14 失败与修改前一致（浏览器/测试服务/环境依赖）；`task-kernel`、`native-task-runtime`、`result-delivery` 37/37；`windows/tests` 563 通过、0 失败。`kernel-source-manifest.json` 中两文件哈希在修改前即与 HEAD 不符且无读取方，未更新。
