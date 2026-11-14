@@ -1,8 +1,41 @@
 # FEAT-009 更新记录
 
+### 2026-11-11 开发需求表状态校正
+
+- 状态：in_progress
+- 本次更新：根据当前运行版本和受控重启结果更新条目快照；受控重启、发布、失败回退和检查已实际使用，启动提示词缺失问题已修复，DeepSeek 不可用时的启动策略仍待用户确认。
+- 用户影响：用户可区分已工作的恢复机制和唯一待决的启动降级策略。
+- 证据：`runtime/negus-backend-result.json`、`docs/project-management/INDEX.md`。
+
+### 2026-11-11 最新提交启动验收
+
+- 状态：in_progress（启动链路本轮通过）
+- 本次更新：以当前工作区受控重启到 `develop / 55f293bb`，重启任务一次成功且未回退。
+- 运行结果：快照 `1794409080769-f1f4cefc`，PID `70262`；健康检查显示后端、前端和公网隧道均为 healthy。
+- 用户影响：新版后端已完成正式装配并可接收真实员工和群聊请求。
+- 证据：`runtime/negus-backend-result.json`、`docs/project-management/items/FEAT-002/updates.md`。
+
 ### 2026-07-28 17:43 +08:00
 
 - 状态：in_progress
 - 本次更新：完成无 UAC 的只读环境检查器；原开发电脑真实开发链路和独立紧急启动入口仍待验证。
 - 用户影响：向日葵继续作为远程恢复兜底。
-- 证据：`docs/feature-development/features/FEAT-009-remote-development-host.md`
+- 证据：`docs/negus-knowledge/features/feature-records/FEAT-009-remote-development-host.md`
+
+### 2026-09-30 09:02 +08:00
+
+- 状态：handoff_pending；版本 v0.5.0。
+- 本次更新：Mac 定时检查已安装，前后端独立脚本、退出恢复和后端收口保护已实现。
+- 用户影响：远程更新可安排独立 Worker，避免当前助手同步停掉自己；当前旧后端首次加载仍需空闲维护窗口。
+- 证据：[维护说明](../../../operations/NEGUS_SERVICE_CONTROL.md)。57 项不同定向用例通过，真实隔离构建和本地/固定域名检查通过；正式后端 PID 7782 未变化。
+- Git：基线 c8c7b66d686fb3a896c4c939fe6dec9bb2d8d8d4；未提交、未推送。
+
+- 2026-09-30 用户调整：自动检查由每 60 秒改为每 3 小时（10800 秒）；同步安装脚本和 Mac 定时任务，保留登录时检查。
+
+- 2026-09-30：按用户『部署就直接有』接入 Mac 正常启动流程；自动安装 3 小时检查、持久凭据初始化及幂等更新，失败返回明确状态。正式后端安全重启和全新用户环境仍待验收。
+
+- 2026-09-30：维护规则接入实际对话提示词（普通对话、员工及群聊）；新增 negus:rebuild 别名复用前端发布。保持 handoff_pending，未改停止条件、未启用整套版本回退，正式服务未重启。
+
+- 2026-09-30：独立管理器及运行快照接入，三次失败回退通过真实子进程隔离测试；常用重启入口与提示词同步。准备基线/新版通过隔离启动检查，正式切换按用户授权交给后台 Worker，最终结果需核对运行状态。
+
+- 2026-11-11：全新克隆无法启动后端的原因已核实——所有助手共用的基础提示词 `windows/server/AGENTS.md` 被 `.gitignore` 的通配 `AGENTS.md` 忽略，只存在于部署机；`prepare --fallback-revision` 的 git archive 快照同样缺少它。本次取消对该文件的忽略（部署机下次提交即可纳入版本管理），并让缺失时记录 `negus-base-prompt missing` 警告后继续启动，不猜测内容。隔离实例验证：基线全新克隆启动即 ENOENT 退出，修改后启动、`/api/project`、页面和 `/api/version` 均正常。另发现未处理的启动依赖：没有任何已配置渠道支持 `deepseek-flash` 时后端在启动阶段直接退出（`remote-room-demo.mjs` 顶层 `backgroundTaskRoute`），此时设置页也无法打开去修配置；因涉及 PM-004“不得回退其他模型”的决定，本次未改，待用户决定启动失败还是带明确报错降级启动。未提交、未发布、未重启。

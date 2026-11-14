@@ -1,6 +1,36 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { createAppServerConversationStore } from "../server/app-server-conversation-store.mjs";
+
+test("existing and switched threads receive current GitHub instructions through thread/resume before sending", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "negus-resume-instructions-"));
+  const calls = [];
+  const thread = { id: "existing", cwd: root };
+  const store = createAppServerConversationStore({
+    projectRoot: root, registerMedia: () => null, autoTitleEnabled: false,
+    client: {
+      subscribe: () => () => {}, close: () => {},
+      request: async (method, params) => {
+        calls.push({ method, params });
+        if (method === 'thread/read' || method === 'thread/resume') return { thread };
+        if (method === 'turn/start') {
+          const resume = calls.findLast((call) => call.method === 'thread/resume');
+          assert.match(resume.params.developerInstructions, /gh api user\/repos/);
+          return { turn: { id: 'turn' } };
+        }
+        throw new Error(`Unexpected request: ${method}`);
+      },
+    },
+  });
+  try {
+    await store.sendMessage(thread.id, '查询私有仓库');
+    await store.resumeProviderSession(thread.id, { cwd: root, path: path.join(root, 'rollout.jsonl'), model: 'test' });
+    assert.match(calls.at(-1).params.developerInstructions, /gh api user\/repos/);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
 
 test("creates a persisted project thread and exposes the real model catalog", async () => {
   const calls = [];
@@ -56,9 +86,129 @@ test("creates a persisted project thread and exposes the real model catalog", as
   assert.deepEqual(models.map((entry) => entry.model), ["gpt-5.6-sol", "gpt-5.6-terra"]);
   assert.deepEqual(calls[0], {
     method: "thread/start",
-    params: { cwd: "D:\\project", model: "gpt-5.6-sol" },
+    params: { cwd: "D:\\project", model: "gpt-5.6-sol", sandbox: "danger-full-access", approvalPolicy: "never", developerInstructions: calls[0].params.developerInstructions },
   });
   assert.equal(calls.filter((call) => call.method === "model/list").length, 2);
+});
+
+test("keeps automatic titles local to Negus without renaming the Codex thread", async () => {
+  const calls = [];
+  let protocolHandler = () => {};
+  let resolveTitleChanged;
+  const titleChanged = new Promise((resolve) => { resolveTitleChanged = resolve; });
+  const sourceThread = { id: "source-thread", cwd: "D:\\project", source: "appServer", name: "", updatedAt: 100 };
+  let startCount = 0;
+  const client = {
+    subscribe: (handler) => { protocolHandler = handler; return () => {}; },
+    close: () => {},
+    request: async (method, params) => {
+      calls.push({ method, params });
+      if (method === "thread/start") {
+        startCount += 1;
+        return { thread: startCount === 1 ? sourceThread : { id: "title-thread", cwd: "D:\\project" } };
+      }
+      if (method === "turn/start" && params.threadId === "source-thread") return { turn: { id: "source-turn" } };
+      if (method === "turn/start" && params.threadId === "title-thread") {
+        queueMicrotask(() => {
+          protocolHandler({ method: "item/completed", params: { threadId: "title-thread", item: { type: "agentMessage", text: '{"title":"自动标题"}' } } });
+          protocolHandler({ method: "turn/completed", params: { threadId: "title-thread", turn: { id: "title-turn", status: "completed" } } });
+        });
+        return { turn: { id: "title-turn" } };
+      }
+      if (method === "thread/read") return { thread: sourceThread };
+      if (method === "thread/list") return { data: [sourceThread], nextCursor: null };
+      if (method === "thread/unsubscribe") return {};
+      throw new Error(`Unexpected request: ${method}`);
+    },
+  };
+  const store = createAppServerConversationStore({
+    projectRoot: "D:\\project",
+    registerMedia: () => null,
+    client,
+    onAutoTitleChanged: resolveTitleChanged,
+  });
+
+  await store.createSession();
+  await store.sendMessage("source-thread", "请排查自动标题问题");
+  await titleChanged;
+  const [session] = await store.listSessions();
+  store.close();
+
+  assert.equal(session.title, "自动标题");
+  assert.equal(calls.some((call) => call.method === "thread/name/set"), false);
+});
+
+test("historical unnamed threads use previews without model calls and preserve manual names", async () => {
+  const threads = [
+    { id: "history", name: "", preview: "讨论手机端标题生成和失败恢复" },
+    { id: "manual", name: "我的项目", preview: "不要覆盖" },
+    { id: "empty-123456", name: "", preview: "" },
+  ];
+  const store = createAppServerConversationStore({
+    projectRoot: "D:\\project",
+    client: {
+      subscribe: () => () => {},
+      close: () => {},
+      request: async (method) => {
+        assert.equal(method, "thread/list");
+        return { data: threads, nextCursor: null };
+      },
+    },
+  });
+  try {
+    assert.deepEqual((await store.listSessions()).map((item) => item.title), [
+      "讨论手机端标题生成和失败恢复", "我的项目", "新对话 · 123456",
+    ]);
+  } finally { store.close(); }
+});
+
+test("creates a thread in a registered business project and rejects unknown folders", async () => {
+  const calls = [];
+  const projectRoots = ["D:\\main", "D:\\finance"];
+  const client = {
+    subscribe: () => () => {},
+    close: () => {},
+    request: async (method, params) => {
+      calls.push({ method, params });
+      return { thread: { id: "finance-thread", cwd: params.cwd, source: "appServer", updatedAt: 100 } };
+    },
+  };
+  const store = createAppServerConversationStore({
+    projectRoot: "D:\\main",
+    projectRoots,
+    registerMedia: () => null,
+    client,
+  });
+
+  await store.createSession("gpt-5.6-sol", "D:\\finance");
+  assert.equal(calls[0].params.cwd, path.resolve("D:\\finance"));
+  await assert.rejects(() => store.createSession("", "D:\\unknown"), /not registered/iu);
+  projectRoots.push("D:\\new-project");
+  await store.createSession("gpt-5.6-sol", "D:\\new-project");
+  assert.equal(calls.at(-1).params.cwd, path.resolve("D:\\new-project"));
+  store.close();
+});
+
+test("rejects a new thread when Codex creates it outside the selected project", async () => {
+  const client = {
+    subscribe: () => () => {},
+    close: () => {},
+    request: async () => ({
+      thread: { id: "wrong-project-thread", cwd: "D:\\main", source: "appServer", updatedAt: 100 },
+    }),
+  };
+  const store = createAppServerConversationStore({
+    projectRoot: "D:\\main",
+    projectRoots: ["D:\\main", "D:\\finance"],
+    registerMedia: () => null,
+    client,
+  });
+
+  await assert.rejects(
+    () => store.createSession("gpt-5.6-sol", "D:\\finance"),
+    /未创建在所选项目/u,
+  );
+  store.close();
 });
 
 test("updates a fresh thread before its first turn without trying to resume it", async () => {
@@ -92,6 +242,9 @@ test("updates a fresh thread before its first turn without trying to resume it",
   });
 
   await store.createSession("gpt-5.6-sol");
+  const empty = await store.findSession("thread-new");
+  assert.equal(empty.messageCount, 0);
+  assert.deepEqual(empty.messages, []);
   const modelResult = await store.updateModel("thread-new", "gpt-5.6-terra");
   const effortResult = await store.updateReasoningEffort("thread-new", "high");
 
@@ -151,12 +304,11 @@ test("updates the model only after resuming the selected project thread", async 
     "thread/read",
     "thread/resume",
     "thread/settings/update",
-    "thread/resume",
   ]);
 
   const effortResult = await store.updateReasoningEffort("thread-1", "high");
   assert.equal(effortResult.reasoningEffort, "high");
-  assert.deepEqual(calls.at(-2), {
+  assert.deepEqual(calls.at(-1), {
     method: "thread/settings/update",
     params: { threadId: "thread-1", effort: "high" },
   });
@@ -169,7 +321,7 @@ test("reads the authoritative status from the service-owned app-server", async (
     request: async (method, params) => {
       assert.equal(method, "thread/read");
       assert.deepEqual(params, { threadId: "thread-1", includeTurns: false });
-      return { thread: { id: "thread-1", status: { type: "idle" } } };
+      return { thread: { id: "thread-1", cwd: "D:\\project", status: { type: "idle" } } };
     },
   };
   const store = createAppServerConversationStore({
@@ -490,7 +642,7 @@ test("forks, archives, and restores a project thread through app-server actions"
   assert.equal(forked.forkedFromId, "thread-source");
   assert.deepEqual(calls[1], {
     method: "thread/fork",
-    params: { threadId: "thread-source", lastTurnId: "turn-1", cwd: "D:\\project" },
+    params: { threadId: "thread-source", lastTurnId: "turn-1", cwd: "D:\\project", sandbox: "danger-full-access", approvalPolicy: "never" },
   });
 
   assert.deepEqual(await store.archiveSession("thread-source"), { threadId: "thread-source", archived: true });
@@ -504,8 +656,13 @@ test("forks, archives, and restores a project thread through app-server actions"
     latestAssistant: "",
     archived: false,
     forkedFromId: null,
+    parentThreadId: null,
+    nativeSubagent: false,
+    cwd: "D:\\project",
   });
-  assert.deepEqual(calls.slice(-2).map((call) => call.method), ["thread/archive", "thread/unarchive"]);
+  // Restoring reads the thread first: an archived thread is not cached, and it
+  // must be proven to belong to this project before it is changed.
+  assert.deepEqual(calls.slice(-3).map((call) => call.method), ["thread/archive", "thread/read", "thread/unarchive"]);
   store.close();
 });
 
@@ -562,6 +719,43 @@ test("supervises an active turn without depending on a browser request", async (
   assert.equal(healthEvents.some((event) => event.phase === "authoritative" && event.status.type === "idle"), true);
 });
 
+test("supervises an unscoped active status so a missed terminal event can recover", async () => {
+  let protocolListener = () => {};
+  const healthEvents = [];
+  const client = {
+    subscribe: (listener) => {
+      protocolListener = listener;
+      return () => {};
+    },
+    subscribeHealth: () => () => {},
+    close: () => {},
+    probe: async () => ({ thread: { id: "thread-1", status: { type: "idle" } } }),
+    request: async () => { throw new Error("Unexpected request"); },
+  };
+  const store = createAppServerConversationStore({
+    projectRoot: "D:\\project",
+    registerMedia: () => null,
+    client,
+    onHealthState: (event) => healthEvents.push(event),
+    supervision: {
+      intervalMs: 5,
+      staleAfterMs: 20,
+      finalizingAfterMs: 5,
+      retryAfterMs: 5,
+    },
+  });
+
+  protocolListener({
+    method: "thread/status/changed",
+    params: { threadId: "thread-1", status: { type: "active" } },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  store.close();
+
+  assert.equal(healthEvents.some((event) =>
+    event.phase === "authoritative" && event.threadId === "thread-1" && event.status.type === "idle"), true);
+});
+
 test("keeps newer turn supervision after an older turn completes late", async () => {
   let protocolListener = () => {};
   const probeCalls = [];
@@ -606,4 +800,545 @@ test("keeps newer turn supervision after an older turn completes late", async ()
   store.close();
 
   assert.equal(probeCalls.length >= 1, true);
+});
+
+test("uses the native Codex thread goal protocol", async () => {
+  const calls = [];
+  const thread = { id: "thread-1", cwd: "D:\\project" };
+  const goal = { threadId: thread.id, objective: "Ship the Goal control", status: "active" };
+  const client = {
+    subscribe: () => () => {},
+    close: () => {},
+    request: async (method, params) => {
+      calls.push({ method, params });
+      if (method === "thread/read" || method === "thread/resume") return { thread };
+      if (method === "thread/goal/set") return { goal };
+      if (method === "thread/goal/get") return { goal };
+      if (method === "thread/goal/clear") return {};
+      throw new Error(`Unexpected request: ${method}`);
+    },
+  };
+  const store = createAppServerConversationStore({
+    projectRoot: "D:\\project",
+    registerMedia: () => null,
+    client,
+  });
+
+  assert.deepEqual(await store.setGoal(thread.id, {
+    objective: goal.objective,
+    status: "active",
+    tokenBudget: 1000,
+  }), { goal });
+  assert.deepEqual(await store.getGoal(thread.id), { goal });
+  assert.deepEqual(await store.clearGoal(thread.id), {});
+  store.close();
+
+  assert.deepEqual(calls, [
+    { method: "thread/read", params: { threadId: thread.id, includeTurns: false } },
+    { method: "thread/resume", params: { threadId: thread.id, persistExtendedHistory: true, sandbox: "danger-full-access", approvalPolicy: "never", developerInstructions: calls[1].params.developerInstructions } },
+    {
+      method: "thread/goal/set",
+      params: { threadId: thread.id, objective: goal.objective, status: "active", tokenBudget: 1000 },
+    },
+    { method: "thread/goal/get", params: { threadId: thread.id } },
+    { method: "thread/goal/clear", params: { threadId: thread.id } },
+  ]);
+});
+
+test("sorts the sidebar by the latest assistant reply instead of stale thread metadata", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "negus-assistant-time-"));
+  const olderReply = path.join(root, "older.jsonl");
+  const newerReply = path.join(root, "newer.jsonl");
+  const writeRollout = (file, timestamp) => writeFile(file, `${JSON.stringify({
+    timestamp,
+    type: "response_item",
+    payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "done" }] },
+  })}\n`, "utf8");
+  await writeRollout(olderReply, "2026-09-22T05:47:00.000Z");
+  await writeRollout(newerReply, "2026-09-22T09:25:00.000Z");
+  const store = createAppServerConversationStore({
+    projectRoot: "D:\\project",
+    client: {
+      subscribe: () => () => {},
+      close: () => {},
+      request: async (method) => {
+        assert.equal(method, "thread/list");
+        return {
+          data: [
+            { id: "stale-newer-meta", cwd: "D:\\project", name: "元数据较新", updatedAt: 1_800_000_000, path: olderReply },
+            { id: "stale-older-meta", cwd: "D:\\project", name: "元数据较旧", updatedAt: 1_700_000_000, path: newerReply },
+          ],
+          nextCursor: null,
+        };
+      },
+    },
+  });
+  try {
+    const sessions = await store.listSessions();
+    assert.deepEqual(sessions.map((item) => item.title), ["元数据较旧", "元数据较新"]);
+    assert.equal(sessions[0].updatedAt, "2026-09-22T09:25:00.000Z");
+    assert.equal(sessions[1].updatedAt, "2026-09-22T05:47:00.000Z");
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("reads channel resume info from a listed thread without requiring it to be loaded", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "negus-channel-"));
+  const rollout = path.join(root, "rollout.jsonl");
+  await writeFile(rollout, "{}\n");
+  const calls = [];
+  const thread = {
+    id: "thread-1",
+    cwd: root,
+    path: rollout,
+    source: "appServer",
+    model: "gpt-6-astra",
+    updatedAt: 100,
+  };
+  const store = createAppServerConversationStore({
+    projectRoot: root,
+    autoTitleEnabled: false,
+    registerMedia: () => null,
+    client: {
+      subscribe: () => () => {},
+      close: () => {},
+      request: async (method) => {
+        calls.push(method);
+        if (method === "thread/list") return { data: [thread], nextCursor: null };
+        if (method === "thread/read") throw new Error("thread not loaded: thread-1");
+        throw new Error(`Unexpected request: ${method}`);
+      },
+    },
+  });
+  try {
+    await store.listSessions();
+    const info = await store.getSessionResumeInfo("thread-1");
+    assert.equal(info.path, rollout);
+    assert.equal(info.cwd, root);
+    assert.equal(info.model, "gpt-6-astra");
+    assert.equal(calls.includes("thread/read"), false);
+    assert.equal(calls.includes("thread/resume"), false);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("resumes an unloaded thread before collecting channel-switch resume info", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "negus-channel-"));
+  const rollout = path.join(root, "rollout.jsonl");
+  await writeFile(rollout, "{}\n");
+  const calls = [];
+  const thread = {
+    id: "thread-1",
+    cwd: root,
+    path: rollout,
+    source: "appServer",
+    model: "gpt-6-astra",
+    updatedAt: 100,
+  };
+  const store = createAppServerConversationStore({
+    projectRoot: root,
+    autoTitleEnabled: false,
+    registerMedia: () => null,
+    client: {
+      subscribe: () => () => {},
+      close: () => {},
+      request: async (method, params) => {
+        calls.push({ method, params });
+        if (method === "thread/read") throw new Error("thread not loaded: thread-1");
+        if (method === "thread/resume") return { thread };
+        throw new Error(`Unexpected request: ${method}`);
+      },
+    },
+  });
+  try {
+    const info = await store.getSessionResumeInfo("thread-1");
+    assert.equal(info.path, rollout);
+    assert.equal(info.model, "gpt-6-astra");
+    const resume = calls.find((call) => call.method === "thread/resume");
+    assert.equal(resume.params.threadId, "thread-1");
+    assert.equal(resume.params.excludeTurns, true);
+    assert.equal(calls.some((call) => call.method === "thread/read"), true);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("explains when a channel switch has no persisted thread", async () => {
+  const store = createAppServerConversationStore({
+    projectRoot: "D:\\project",
+    autoTitleEnabled: false,
+    registerMedia: () => null,
+    client: {
+      subscribe: () => () => {},
+      close: () => {},
+      request: async (method) => {
+        if (method === "thread/read") throw new Error("thread not loaded: missing");
+        if (method === "thread/resume") throw new Error("no rollout found for thread id");
+        throw new Error(`Unexpected request: ${method}`);
+      },
+    },
+  });
+  try {
+    await assert.rejects(() => store.getSessionResumeInfo("missing"), (error) => (
+      error.statusCode === 409 && /尚未持久化/.test(error.message)
+    ));
+  } finally {
+    store.close();
+  }
+});
+
+test("releases an unloaded thread without unsubscribing", async () => {
+  const calls = [];
+  const store = createAppServerConversationStore({
+    projectRoot: "D:\\project",
+    autoTitleEnabled: false,
+    registerMedia: () => null,
+    client: {
+      subscribe: () => () => {},
+      close: () => {},
+      request: async (method) => {
+        calls.push(method);
+        if (method === "thread/read") throw new Error("thread not loaded: thread-1");
+        throw new Error(`Unexpected request: ${method}`);
+      },
+    },
+  });
+  try {
+    await store.releaseSession("thread-1");
+    assert.equal(calls.includes("thread/unsubscribe"), false);
+  } finally {
+    store.close();
+  }
+});
+
+test("an empty native body falls back only to the current store history", async () => {
+  const thread = { id: "empty-native", cwd: process.cwd(), source: "appServer", updatedAt: 100 };
+  const history = { threadId: thread.id, source: "codex", title: "已有历史", updatedAt: "2026-10-31T08:23:18.153Z",
+    messageCount: 1, latestUser: "问题", latestAssistant: "回答", archived: false,
+    messages: [{ id: "history-message", role: "user", text: "问题", createdAt: "2026-10-31T08:23:18.153Z" }] };
+  const calls = [];
+  const client = {
+    subscribe: () => () => {},
+    close() {},
+    request: async (method) => {
+      calls.push(method);
+      if (method === "thread/read") return { thread: { ...thread, turns: [] } };
+      if (method === "thread/turns/list") return { data: [], nextCursor: null };
+      throw new Error(`Unexpected request: ${method}`);
+    },
+  };
+  const store = createAppServerConversationStore({ projectRoot: process.cwd(), registerMedia: () => null,
+    autoTitleEnabled: false, client, historyFallback: async (...args) => { calls.push(["fallback", ...args]); return history; } });
+  try {
+    const session = await store.findSession(thread.id, "all", { limit: 60 });
+    assert.equal(session.title, "已有历史");
+    assert.deepEqual(session.messages.map((message) => message.text), ["问题"]);
+    assert.deepEqual(calls.at(-1).slice(0, 3), ["fallback", thread.id, "all"]);
+  } finally {
+    store.close();
+  }
+});
+
+test("an empty native body remains empty when the same store has no messages", async () => {
+  const thread = { id: "actually-empty", cwd: process.cwd(), source: "appServer", updatedAt: 100 };
+  let fallbackCalls = 0;
+  let history = null;
+  const store = createAppServerConversationStore({ projectRoot: process.cwd(), registerMedia: () => null,
+    autoTitleEnabled: false,
+    client: {
+      subscribe: () => () => {},
+      close() {},
+      request: async (method) => {
+        if (method === "thread/read") return { thread: { ...thread, turns: [] } };
+        if (method === "thread/turns/list") throw new Error("thread not loaded: actually-empty");
+        throw new Error(`Unexpected request: ${method}`);
+      },
+    },
+    historyFallback: async () => { fallbackCalls += 1; return history; },
+  });
+  try {
+    const session = await store.findSession(thread.id, "all", { limit: 60 });
+    assert.equal(session.threadId, thread.id);
+    assert.deepEqual(session.messages, []);
+    assert.equal(fallbackCalls, 1);
+    history = { messages: [] };
+    assert.deepEqual((await store.findSession(thread.id, "all", { limit: 60 })).messages, []);
+    assert.equal(fallbackCalls, 2);
+  } finally {
+    store.close();
+  }
+});
+
+test("an empty native body propagates a history read failure without retrying the fallback", async () => {
+  const thread = { id: "empty-history-error", cwd: process.cwd(), source: "appServer", updatedAt: 100 };
+  let fallbackCalls = 0;
+  const store = createAppServerConversationStore({ projectRoot: process.cwd(), registerMedia: () => null,
+    autoTitleEnabled: false,
+    client: {
+      subscribe: () => () => {}, close() {},
+      request: async (method) => {
+        if (method === "thread/read") return { thread: { ...thread, turns: [] } };
+        if (method === "thread/turns/list") throw new Error("thread not loaded");
+        throw new Error(`Unexpected request: ${method}`);
+      },
+    },
+    historyFallback: async () => { fallbackCalls++; throw new Error("history read failed"); },
+  });
+  try {
+    await assert.rejects(store.findSession(thread.id, "all", { limit: 60 }), /history read failed/);
+    assert.equal(fallbackCalls, 1);
+  } finally {
+    store.close();
+  }
+});
+
+test("native read errors still use the existing history fallback", async () => {
+  const history = { threadId: "native-error", messages: [{ id: "saved", role: "assistant", text: "saved" }] };
+  const store = createAppServerConversationStore({ projectRoot: process.cwd(), registerMedia: () => null,
+    autoTitleEnabled: false,
+    client: {
+      subscribe: () => () => {},
+      close() {},
+      request: async () => { throw new Error("thread not loaded: native-error"); },
+    },
+    historyFallback: async () => history,
+  });
+  try {
+    const session = await store.findSession("native-error", "all", {});
+    assert.equal(session.messages[0].text, "saved");
+  } finally {
+    store.close();
+  }
+});
+
+test('managed research retains read-only policy inside a registered project on first send and resume', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'negus-task-policy-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const calls = [];
+  const thread = { id: 'research-task', cwd: root };
+  const store = createAppServerConversationStore({ projectRoot: root, registerMedia: () => null, autoTitleEnabled: false,
+    threadRuntimeOptions: () => ({ resume: { sandbox: 'read-only', approvalPolicy: 'never', developerInstructions: 'Only research' },
+      turn: { sandboxPolicy: { type: 'readOnly' }, approvalPolicy: 'never' } }),
+    client: { subscribe: () => () => {}, close() {}, request: async (method, params) => {
+      calls.push({ method, params });
+      return method === 'turn/start' ? { turn: { id: 'turn' } } : { thread };
+    } },
+  });
+  t.after(() => store.close());
+  await store.createSession('model', root, { managed: true, sandbox: 'read-only', developerInstructions: 'Only research' });
+  await store.sendMessage(thread.id, 'research');
+  assert.equal(calls.some(c => c.method === 'thread/resume'), false);
+  await store.sendMessage(thread.id, 'follow up');
+  const resume = calls.find(c => c.method === 'thread/resume');
+  assert.equal(resume.params.sandbox, 'read-only');
+  assert.equal(resume.params.developerInstructions, 'Only research');
+  for (const c of calls.filter(c => c.method === 'turn/start')) assert.equal(c.params.sandboxPolicy.type, 'readOnly');
+});
+
+test('fresh and resumed ordinary threads get MCP at thread level, never turn level', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'negus-fresh-mcp-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const calls = []; const bound = [];
+  const thread = { id: 'ordinary-thread', cwd: root };
+  const store = createAppServerConversationStore({ projectRoot: root, registerMedia: () => null, autoTitleEnabled: false,
+    threadRuntimeOptions: value => value.fresh
+      ? { resume: { config: { 'mcp_servers.negus_handoffs': { command: 'test-fresh' } } }, bindThread: id => bound.push(id) }
+      : { resume: { config: { 'mcp_servers.negus_handoffs': { command: 'test-existing' } } }, turn: {} },
+    client: { subscribe: () => () => {}, close() {}, request: async (method, params) => {
+      calls.push({ method, params });
+      return method === 'turn/start' ? { turn: { id: 'turn' } } : { thread };
+    } },
+  });
+  t.after(() => store.close());
+  await store.createSession('model', root);
+  await store.sendMessage(thread.id, 'first');
+  await store.sendMessage(thread.id, 'second');
+  assert.deepEqual(bound, [thread.id]);
+  assert.equal(calls.find(call => call.method === 'thread/start').params.config['mcp_servers.negus_handoffs'].command, 'test-fresh');
+  assert.equal(calls.filter(call => call.method === 'thread/resume').length, 1);
+  assert.equal(calls.find(call => call.method === 'thread/resume').params.config['mcp_servers.negus_handoffs'].command, 'test-existing');
+  assert.ok(calls.filter(call => call.method === 'turn/start').every(call => !Object.hasOwn(call.params, 'config')));
+});
+
+test("reading runtime settings never resumes an occupied original thread", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "negus-unloaded-context-"));
+  const calls = [];
+  const thread = { id: "old-thread", cwd: root, path: path.join(root, "rollout.jsonl") };
+  const store = createAppServerConversationStore({ projectRoot: root, autoTitleEnabled: false, registerMedia: () => null,
+    client: { subscribe: () => () => {}, close() {}, request: async (method, params) => {
+      calls.push({ method, params });
+      if (method === "thread/read") return { thread: { ...thread, model: "gpt-6.1-terra", reasoningEffort: "xhigh" } };
+      if (method === "thread/resume") throw Error("already has an active writer");
+      throw Error(`Unexpected request: ${method}`);
+    } },
+  });
+  try {
+    const result = await store.getRuntimeContext("old-thread");
+    assert.equal(result.model, "gpt-6.1-terra");
+    assert.equal(result.reasoningEffort, "xhigh");
+    assert.ok(calls.every(call => call.params.threadId === "old-thread"));
+    assert.equal(calls.some(call => /start|fork|resume/.test(call.method)), false);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('new goal sessions read persisted messages instead of returning an empty draft', async () => {
+  const thread = { id: 'goal-new', cwd: process.cwd(), turns: [{ id: 'turn', status: 'completed', items: [{ type: 'agentMessage', id: 'reply', text: '已开始检查', phase: 'commentary' }] }] };
+  const client = { subscribe: () => () => {}, close() {}, request: async method => {
+    if (['thread/start', 'thread/read', 'thread/resume'].includes(method)) return { thread };
+    if (method === 'thread/goal/set') return { goal: { status: 'active' } };
+    throw Error(method);
+  } };
+  const store = createAppServerConversationStore({ projectRoot: process.cwd(), client, registerMedia: () => null, autoTitleEnabled: false });
+  try {
+    await store.createSession();
+    assert.equal((await store.findSession(thread.id)).messages.length, 0);
+    await store.setGoal(thread.id, { objective: '检查页面', status: 'active' });
+    assert.equal((await store.findSession(thread.id)).messages[0].text, '已开始检查');
+  } finally { store.close(); }
+});
+
+test('migrated archived conversation resumes by ID when native storage reports a stale path', async () => {
+  const calls = [];
+  const thread = { id: 'archived', cwd: process.cwd() };
+  const client = { subscribe: () => () => {}, close() {}, request: async (method, params) => {
+    calls.push(params);
+    if (params.path) throw Error('cannot resume paginated thread archived with stale path: requested old, current archived; omit path and resume by thread id');
+    return { thread };
+  } };
+  const store = createAppServerConversationStore({ projectRoot: process.cwd(), client, registerMedia: () => null });
+  try {
+    await store.resumeProviderSession(thread.id, { path: '/tmp/negus-absent-old-rollout.jsonl', cwd: process.cwd(), model: 'deepseek-flash' });
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].path, undefined);
+    assert.equal(calls[1].threadId, thread.id);
+    assert.equal(calls[1].model, 'deepseek-flash');
+  } finally { store.close(); }
+});
+
+test('steered user messages recover actual recorded times without borrowing the turn start', async () => {
+  const thread = { id:'timestamp-thread',cwd:process.cwd(),turns:[{id:'turn',items:[
+    {type:'userMessage',id:'first',content:[{type:'text',text:'first'}]},
+    {type:'userMessage',id:'steered',content:[{type:'text',text:'追加消息'}]},
+    {type:'userMessage',id:'unknown',content:[{type:'text',text:'没有记录'}]},
+  ]}]};
+  const store = createAppServerConversationStore({projectRoot:process.cwd(),registerMedia:()=>null,
+    client:{subscribe:()=>()=>{},close(){},request:async()=>({thread})},
+    historyFallback:async()=>({userMessageEvents:[{itemId:'steered',turnId:'turn',createdAt:'2026-10-29T14:42:32.230Z'}]})});
+  try {
+    const result=await store.findSession(thread.id);
+    assert.equal(result.messages[1].createdAt,'2026-10-29T14:42:32.230Z');
+    assert.equal(result.messages[2].createdAt,undefined);
+  } finally {store.close();}
+});
+
+test('repeated steers recover timestamps from owner events without adding messages', async () => {
+  const { createJsonlConversationStore } = await import('../server/jsonl-conversation-store.mjs');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'negus-steer-time-'));
+  const thread = { id: 'thread-time', cwd: root, turns: [{ id: 'turn', items: [
+    { type: 'userMessage', id: 'native-1', clientId: 'send-1', content: [{ type: 'text', text: 'same' }] },
+    { type: 'userMessage', id: 'native-2', clientId: 'send-2', content: [{ type: 'text', text: 'same' }] },
+  ] }] };
+  const event = (id, client, time) => ({ type: 'event_msg', timestamp: time, payload: { type: 'item_completed', turn_id: 'turn', completed_at_ms: Date.parse(time), item: { type: 'UserMessage', id, client_id: client } } });
+  await writeFile(path.join(root, 'test.jsonl'), [
+    { type: 'session_meta', payload: { id: thread.id, cwd: root } },
+    event('native-1', 'send-1', '2026-11-01T15:43:23.838Z'),
+    event('native-2', 'send-2', '2026-11-01T15:43:33.799Z'),
+    event('native-2', 'send-2', '2026-11-01T15:43:33.799Z'),
+  ].map(JSON.stringify).join('\n') + '\n');
+  const history = createJsonlConversationStore({ sessionRoot: root, projectRoot: root, registerMedia: () => null, onChange: () => {} });
+  const store = createAppServerConversationStore({ projectRoot: root, registerMedia: () => null,
+    historyFallback: (...args) => history.findSession(...args),
+    client: { subscribe: () => () => {}, close() {}, request: async () => ({ thread }) } });
+  try {
+    const result = await store.findSession(thread.id);
+    assert.equal(result.messages.length, 2);
+    assert.deepEqual(result.messages.map(message => message.createdAt), ['2026-11-01T15:43:23.838Z', '2026-11-01T15:43:33.799Z']);
+    assert.equal((await history.findSession(thread.id)).messages.length, 0);
+  } finally { store.close(); history.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+
+test("reading settings without a rollout does not apply channel-switch checks", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "negus-read-settings-"));
+  const calls = [];
+  const store = createAppServerConversationStore({ projectRoot: root, registerMedia: () => null,
+    client: { subscribe: () => () => {}, close: () => {}, request: async method => {
+      calls.push(method);
+      if (method === "thread/read") return { thread: { id: "old", cwd: root, model: "saved-model" } };
+      if (method === "thread/resume") throw Error("no rollout found for thread id");
+      throw Error(`Unexpected request: ${method}`);
+    } } });
+  try {
+    assert.equal((await store.getSessionResumeInfo("old", { readOnly: true })).model, "saved-model");
+    assert.equal((await store.getRuntimeContext("old")).model, "saved-model");
+    assert.deepEqual(calls, ["thread/read"]);
+    await assert.rejects(() => store.getSessionResumeInfo("old"), error => error.statusCode === 409);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("unloaded settings reuse project history metadata without resuming a thread", async () => {
+  const { createJsonlConversationStore } = await import('../server/jsonl-conversation-store.mjs');
+  const { createProviderConversationStore } = await import('../server/provider-conversation-store.mjs');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'negus-unloaded-settings-'));
+  const { mkdir } = await import('node:fs/promises');
+  const sessions = path.join(root, 'sessions'); await mkdir(sessions);
+  const file = path.join(sessions, 'old.jsonl');
+  await writeFile(file, [
+    { type: 'session_meta', payload: { id: 'old', cwd: root } },
+    { type: 'turn_context', payload: { model: 'saved-model', effort: 'high' } },
+    { type: 'response_item', payload: { type: 'message', role: 'assistant', phase: 'final_answer' } },
+  ].map(JSON.stringify).join('\n') + '\n');
+  const history = createJsonlConversationStore({ sessionRoot: sessions, projectRoot: root, registerMedia: () => null, onChange: () => {} });
+  const calls = [];
+  const store = createAppServerConversationStore({ projectRoot: root, registerMedia: () => null,
+    historyFallback: (...args) => history.findSession(...args),
+    client: { subscribe: () => () => {}, close: () => {}, request: async method => {
+      calls.push(method); throw Error(method === 'thread/read' ? 'thread not loaded: old' : `unexpected ${method}`);
+    } } });
+  try {
+    const service = createProviderConversationStore({ current: store, providers: {}, stateFile: path.join(root, 'routes.json') });
+    const context = await service.getRuntimeContext('old');
+    assert.equal(context.model, 'saved-model');
+    assert.equal(context.reasoningEffort, 'high');
+    assert.deepEqual(context.lastSuccessfulSettings, { model: 'saved-model', reasoningEffort: 'high' });
+    assert.ok(calls.every(method => method === 'thread/read'), 'viewing must never resume or start a turn');
+    await assert.rejects(() => store.getRuntimeContext('absent'), /thread not loaded/);
+    await assert.rejects(() => store.getSessionResumeInfo('old'), /unexpected thread\/resume/);
+  } finally { store.close(); history.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("refuses to read or drive a thread from another project", async () => {
+  const calls = [];
+  const foreign = { id: "thread-foreign", cwd: "D:\\other", name: "Private", updatedAt: 1, status: { type: "idle" }, turns: [] };
+  const client = {
+    subscribe: () => () => {},
+    close: () => {},
+    request: async (method, params) => {
+      calls.push(method);
+      if (method === "thread/read") return { thread: foreign };
+      if (method === "thread/turns/list") return { data: [{ id: "turn-1", items: [{ type: "userMessage", id: "m1", content: [{ type: "text", text: "secret" }] }] }] };
+      return {};
+    },
+  };
+  const store = createAppServerConversationStore({ projectRoot: "D:\\project", registerMedia: () => null, client });
+
+  for (const operation of [
+    () => store.findSession("thread-foreign", "all", { limit: 60 }),
+    () => store.findSession("thread-foreign"),
+    () => store.steerMessage("thread-foreign", "turn-1", "hello"),
+    () => store.interrupt("thread-foreign", "turn-1"),
+    () => store.getThreadStatus("thread-foreign"),
+    () => store.unarchiveSession("thread-foreign"),
+  ]) {
+    await assert.rejects(operation, (error) => error.statusCode === 403);
+  }
+  for (const method of ["thread/turns/list", "turn/steer", "turn/interrupt", "thread/unarchive"]) {
+    assert.equal(calls.includes(method), false, `${method} must not reach the app-server`);
+  }
+  store.close();
 });

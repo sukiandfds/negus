@@ -1,0 +1,70 @@
+← Back
+Grok Bot on mobile
+
+Use Grok Bot on your phone with the same account and cloud computer as desktop. Grok Bot is available on iOS and Android.
+
+How do I set up the Grok Bot mobile app?
+
+
+Install the current Grok Bot mobile app from the App Store on iOS or Google Play on Android.
+
+Sign in on mobile with the same Cursor account you use on desktop or web.
+
+If your Cursor account doesn't already include Grok Bot, subscribe from the mobile app. See Subscribe from the mobile app.
+
+
+Do I need to buy again on mobile if my Cursor account already includes Grok Bot?
+
+No. Grok Bot access carries into mobile when you sign in with the same Cursor account. This includes:
+
+
+Cursor Ultra
+
+Cursor Pro+
+
+Cursor Pro
+
+Cursor Teams (self-serve) seats
+
+SuperGrok, SuperGrok Plus, or SuperGrok Heavy account links
+
+X Premium+ account links
+
+
+You should not purchase a second subscription through Apple or Google Play in these cases. You can still upgrade within Cursor plans, such as Pro+ to Ultra. Linking SuperGrok on top of a Cursor plan does not add usage. See Do Cursor and SuperGrok plans stack?.
+
+Can I update the Grok Bot computer from my phone?
+
+Computer updates are not available on mobile. Use desktop Grok Bot to update, recover, or reset the computer. See Grok Bot computer.
+
+How do I stop phone notifications while I work on desktop?
+
+There is no setting that stays quiet only while the desktop app is open.
+
+To stop alerts for one Bot, open that Bot and turn off Notifications. The note is Get notified when this Bot finishes or needs input. The same switch is in Bot settings on desktop. Off means that Bot does not notify you when it finishes or needs input, including on your phone.
+
+To stop phone alerts for every Bot, open Settings on the phone and turn off Notifications. If the phone says Notifications are off, choose Open Settings and allow notifications for Grok Bot there only if you want them back.
+
+How do I reconnect mobile to my Grok Bot computer?
+
+Open desktop Grok Bot and follow Grok Bot computer. If the computer still will not reconnect, contact support.
+
+Related
+
+
+Sign in to Grok Bot
+
+Subscribe from the mobile app
+
+Plans and billing
+
+Link SuperGrok for Grok Bot
+
+Grok Bot computer
+
+Routines
+
+Delete your Grok Bot account
+
+Get help
+

@@ -1,5 +1,5 @@
-import fs from "node:fs/promises";
-import path from "node:path";
+import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
+import { verifiedContextWindow } from './model-catalog.mjs';
 
 const DEFAULT_THRESHOLD = 80;
 const MIN_THRESHOLD = 50;
@@ -22,14 +22,14 @@ const emptyStatus = (threadId, threshold) => ({
 });
 
 export const createContextManagementService = async ({
-  stateFile, broadcast, getExecutionStatus, getRuntimeContext, compactContext,
+  stateFile, broadcast, getExecutionStatus, getRuntimeContext, compactContext, onError = () => {},
 }) => {
   const states = new Map();
   let settings = { version: 1, defaultThreshold: DEFAULT_THRESHOLD, threads: {} };
   let writeChain = Promise.resolve();
 
   try {
-    const stored = JSON.parse(await fs.readFile(stateFile, "utf8"));
+    const stored = await readJsonFile(stateFile, {});
     settings = {
       version: 1,
       defaultThreshold: Number.isInteger(stored.defaultThreshold) ? stored.defaultThreshold : DEFAULT_THRESHOLD,
@@ -59,12 +59,8 @@ export const createContextManagementService = async ({
   };
 
   const persistSettings = () => {
-    const snapshot = JSON.stringify(settings, null, 2);
     writeChain = writeChain.then(async () => {
-      await fs.mkdir(path.dirname(stateFile), { recursive: true });
-      const temporary = `${stateFile}.tmp`;
-      await fs.writeFile(temporary, `${snapshot}\n`, "utf8");
-      await fs.rename(temporary, stateFile);
+      await writeJsonFileAtomic(stateFile, settings);
     });
     return writeChain;
   };
@@ -81,6 +77,7 @@ export const createContextManagementService = async ({
       await compactContext(threadId);
       return publicStatus(statusFor(threadId));
     } catch (error) {
+      onError(threadId, error);
       publish(threadId, {
         phase: "failed",
         message: error instanceof Error ? error.message : String(error),
@@ -112,7 +109,12 @@ export const createContextManagementService = async ({
   const maybeAutoCompact = (threadId) => {
     const current = statusFor(threadId);
     const threshold = current.autoCompactThreshold;
-    if (threshold === null || current.percentage === null || current.percentage < threshold) {
+    const reachedThreshold = threshold !== null
+      && Number.isFinite(current.usedTokens)
+      && Number.isFinite(current.contextWindow)
+      && current.contextWindow > 0
+      && current.usedTokens >= (current.contextWindow * threshold) / 100;
+    if (!reachedThreshold) {
       if (current.lastAutoTriggerTokens !== null) states.set(threadId, { ...current, lastAutoTriggerTokens: null });
       return;
     }
@@ -123,12 +125,24 @@ export const createContextManagementService = async ({
   };
 
   const load = async (threadId) => {
+    const before = statusFor(threadId);
     const runtime = await getRuntimeContext(threadId);
+    const model = runtime.model || statusFor(threadId).model;
+    const modelChanged = Boolean(model && statusFor(threadId).model && model !== statusFor(threadId).model);
+    const verifiedWindow = verifiedContextWindow(model);
     publish(threadId, {
-      model: runtime.model || statusFor(threadId).model,
+      model,
       reasoningEffort: runtime.reasoningEffort || statusFor(threadId).reasoningEffort,
+      ...(runtime.lastSuccessfulSettings !== undefined ? { lastSuccessfulSettings: runtime.lastSuccessfulSettings } : {}),
+      ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null } : {}),
+      ...(runtime.usage && statusFor(threadId) === before ? {
+        ...runtime.usage,
+        percentage: Math.min(100, Math.round(runtime.usage.usedTokens / runtime.usage.contextWindow * 100)),
+      } : {}),
+      ...(verifiedWindow ? { contextWindow: verifiedWindow,
+        percentage: Number.isFinite(runtime.usage?.usedTokens ?? before.usedTokens)
+          ? Math.min(100, Math.round((runtime.usage?.usedTokens ?? before.usedTokens) / verifiedWindow * 100)) : null } : {}),
     });
-    maybeAutoCompact(threadId);
     return publicStatus(statusFor(threadId));
   };
 
@@ -150,9 +164,23 @@ export const createContextManagementService = async ({
     const threadId = params.threadId;
     if (!threadId) return;
 
+    if (method === "turn/completed" && statusFor(threadId).phase === "compacting"
+      && ["completed", "interrupted"].includes(params.turn?.status)) {
+      const completed = params.turn.status === "completed";
+      publish(threadId, { phase: completed ? "completed" : "failed", message: completed ? "上下文压缩完成" : "上下文压缩已中断" });
+      broadcast({ type: "sessions_changed", threadId });
+      return;
+    }
+
+    if (statusFor(threadId).phase === "compacting"
+      && ((method === "error" && !params.willRetry) || (method === "turn/completed" && params.turn?.status === "failed"))) {
+      publish(threadId, { phase: "failed", message: params.error?.message || params.turn?.error?.message || "上下文压缩失败" });
+      return;
+    }
+
     if (method === "thread/tokenUsage/updated") {
       const usedTokens = Number(params.tokenUsage?.last?.totalTokens);
-      const contextWindow = Number(params.tokenUsage?.modelContextWindow);
+      const contextWindow = verifiedContextWindow(statusFor(threadId).model) || Number(params.tokenUsage?.modelContextWindow);
       const validUsage = Number.isFinite(usedTokens) && usedTokens >= 0;
       const validWindow = Number.isFinite(contextWindow) && contextWindow > 0;
       publish(threadId, {
@@ -164,14 +192,22 @@ export const createContextManagementService = async ({
       return;
     }
     if (method === "thread/settings/updated") {
+      const model = params.threadSettings?.model || statusFor(threadId).model;
+      const modelChanged = Boolean(model && statusFor(threadId).model && model !== statusFor(threadId).model);
       publish(threadId, {
-        model: params.threadSettings?.model || statusFor(threadId).model,
+        model,
         reasoningEffort: params.threadSettings?.effort || statusFor(threadId).reasoningEffort,
+        ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null } : {}),
       });
       return;
     }
     if (method === "model/rerouted") {
-      publish(threadId, { model: params.toModel || statusFor(threadId).model });
+      const model = params.toModel || statusFor(threadId).model;
+      const modelChanged = Boolean(model && statusFor(threadId).model && model !== statusFor(threadId).model);
+      publish(threadId, {
+        model,
+        ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null } : {}),
+      });
       return;
     }
     if (method === "thread/compacted" || (method === "item/completed" && params.item?.type === "contextCompaction")) {

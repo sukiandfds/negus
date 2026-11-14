@@ -4,14 +4,14 @@
 
 | 路径 | 主职责 |
 | --- | --- |
-| `docs/feature-development/` | 功能需求、状态、过程问题和验收记录 |
+| `docs/negus-knowledge/features/` | 功能需求、状态、过程问题和验收记录 |
 | `docs/project-management/` | 项目条目、更新记录和过程模板（最新产品分支） |
 | `docs/architecture/` | 技术架构职责、依赖边界和架构审计 |
-| `docs/research/` | 日期化技术研究、证据和迁移记录 |
-| `docs/records/` | 新的开发日志、验证记录和事故复盘 |
-| `项目战略与多角色评审/` | 外部调研、竞品、Orca、组织与投资评估等研究资料 |
-| 根目录 `DEVELOPMENT_*.md` | 历史开发日志和事故记录 |
-| 根目录 `PROJECT.md`、`VISION_NOTES.md` | 项目定位、愿景和使用说明 |
+| `docs/negus-knowledge/research/` | 日期化技术研究、证据和迁移记录 |
+| `docs/negus-knowledge/records/` | 新的开发日志、验证记录和事故复盘 |
+| `docs/negus-knowledge/strategy/` | 外部调研、竞品、Orca、组织与投资评估等研究资料 |
+| `docs/negus-knowledge/records/DEVELOPMENT_*.md` | 历史开发日志和事故记录 |
+| 根目录 `PROJECT.md`、`docs/negus-knowledge/decisions/VISION_NOTES.md` | 项目定位、愿景和使用说明 |
 | `docs/images/`、`资料库/` | 截图、参考图片和研究素材 |
 
 ## 文档边界
@@ -26,4 +26,4 @@
 
 ## 当前整理判断
 
-文档数量和来源较多，但问题主要是分类边界重叠，不是缺少一张更大的总表。架构目录应只保留分域说明和例外清单，功能状态继续留在 `FEATURE_INDEX.md` 与 `docs/project-management/`。
+文档数量和来源较多，但问题主要是分类边界重叠，不是缺少一张更大的总表。架构目录应只保留分域说明和例外清单，功能状态继续留在 `FEATURE_STATUS_INDEX.md` 与 `docs/project-management/`。

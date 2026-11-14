@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 const cleanText = (value, maxLength) => String(value || "").trim().slice(0, maxLength);
 
@@ -75,7 +76,7 @@ export const createArtifactService = async ({ stateFile, allowedRoot, projectId,
 
   let stored = {};
   try {
-    stored = JSON.parse(await fs.readFile(stateFile, "utf8"));
+    stored = await readJsonFile(stateFile, {});
   } catch {}
   for (const artifact of Array.isArray(stored.artifacts) ? stored.artifacts : []) {
     if (!artifact?.id || !Array.isArray(artifact.versions) || !artifact.versions.length) continue;
@@ -88,14 +89,10 @@ export const createArtifactService = async ({ stateFile, allowedRoot, projectId,
   }
 
   const persist = () => {
-    const payload = `${JSON.stringify({ version: 1, artifacts: [...artifacts.values()] }, null, 2)}\n`;
     writeQueue = writeQueue
       .catch(() => {})
       .then(async () => {
-        await fs.mkdir(path.dirname(stateFile), { recursive: true });
-        const temporary = `${stateFile}.${process.pid}.tmp`;
-        await fs.writeFile(temporary, payload, "utf8");
-        await fs.rename(temporary, stateFile);
+        await writeJsonFileAtomic(stateFile, { version: 1, artifacts: [...artifacts.values()] });
       });
     return writeQueue;
   };

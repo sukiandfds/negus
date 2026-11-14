@@ -76,3 +76,109 @@ test("keeps archived JSONL sessions out of the active list", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("lists sessions from each configured business project and preserves cwd", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codex-jsonl-projects-"));
+  const mainRoot = path.join(root, "main");
+  const financeRoot = path.join(root, "finance");
+  const threadIds = [
+    "00000000-0000-4000-8000-000000000021",
+    "00000000-0000-4000-8000-000000000022",
+  ];
+  await mkdir(mainRoot);
+  await mkdir(financeRoot);
+  for (const [index, projectRoot] of [mainRoot, financeRoot].entries()) {
+    const lines = [
+      { type: "session_meta", payload: { id: threadIds[index], cwd: projectRoot, title: `Project ${index + 1}` } },
+      { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Hello" }] } },
+    ];
+    await writeFile(path.join(root, `rollout-${threadIds[index]}.jsonl`), `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`, "utf8");
+  }
+
+  const store = createJsonlConversationStore({
+    sessionRoot: root,
+    projectRoot: mainRoot,
+    projectRoots: [mainRoot, financeRoot],
+    registerMedia: () => null,
+    onChange: () => {},
+  });
+  try {
+    const sessions = await store.listSessions();
+    assert.deepEqual(new Set(sessions.map((session) => session.cwd)), new Set([mainRoot, financeRoot]));
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("JSONL preserves internal identity and links commentary/final to enclosing protocol turn", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'negus-turn-identity-'));
+  t.after(() => rm(root, {recursive:true,force:true}));
+  const threadId='00000000-0000-4000-8000-000000000091';
+  const turn='01a17bed-protocol';
+  const lines=[
+    {type:'session_meta',payload:{id:threadId,cwd:root}},
+    {type:'event_msg',payload:{type:'task_started',turn_id:turn}},
+    ...['commentary','final_answer'].map((phase,i)=>({timestamp:`2026-10-27T05:56:${i ? '25.045' : '00.434'}Z`,type:'response_item',payload:{type:'message',id:`reply-${i}`,role:'assistant',phase,content:[{type:'output_text',text:phase}],internal_chat_message_metadata_passthrough:{turn_id:'4840b54c-internal'}}})),
+    {type:'event_msg',payload:{type:'task_complete',turn_id:turn}},
+  ];
+  await writeFile(path.join(root,`rollout-${threadId}.jsonl`),lines.map(JSON.stringify).join('\n')+'\n');
+  const store=createJsonlConversationStore({sessionRoot:root,projectRoot:root,registerMedia:()=>null,onChange:()=>{}});
+  t.after(()=>store.close());
+  const session=await store.findSession(threadId);
+  assert.equal(session.messages.length,2);
+  for(const message of session.messages){
+    assert.equal(message.turnId,'4840b54c-internal');
+    assert.equal(message.protocolTurnId,turn);
+    assert.equal(message.turnStatus,'completed');
+  }
+});
+
+test('no-reply history evidence requires task_complete and survives reloading', async (t) => {
+  const root=await mkdtemp(path.join(os.tmpdir(),'negus-no-reply-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  const threadId='00000000-0000-4000-8000-000000000092';
+  const file=path.join(root,`rollout-${threadId}.jsonl`);
+  const lines=[{type:'session_meta',payload:{id:threadId,cwd:root}},
+    {type:'event_msg',payload:{type:'task_started',turn_id:'empty'}},
+    {type:'response_item',payload:{type:'message',role:'user',content:[{type:'input_text',text:'hello'}]}}];
+  await writeFile(file,lines.map(JSON.stringify).join('\n')+'\n');
+  const make=()=>createJsonlConversationStore({sessionRoot:root,projectRoot:root,registerMedia:()=>null,onChange:()=>{}});
+  let store=make();
+  try {
+    assert.equal((await store.findSession(threadId)).messages[0].turnHasFinalAnswer,undefined);
+    const {appendFile}=await import('node:fs/promises');
+    await appendFile(file,JSON.stringify({type:'event_msg',payload:{type:'task_complete',turn_id:'empty'}})+'\n');
+    for(let mount=0;mount<2;mount++) {
+      const message=(await store.findSession(threadId)).messages[0];
+      assert.equal(message.turnStatus,'completed');assert.equal(message.turnHasFinalAnswer,false);
+      store.close();store=make();
+    }
+  } finally {store.close();}
+});
+
+test('reads legacy roots and trusted recorded paths with thread and project validation', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'negus-history-home-'));
+  const active = path.join(root, 'active', 'sessions'), legacy = path.join(root, 'legacy', 'sessions');
+  const external = path.join(root, 'provider', 'sessions'), projectRoot = path.join(root, 'project');
+  await Promise.all([active, legacy, external].map(dir => mkdir(dir, { recursive: true })));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const write = async (dir, id, cwd = projectRoot) => {
+    const file = path.join(dir, `rollout-${id}.jsonl`);
+    await writeFile(file, [
+      { type: 'session_meta', payload: { id, cwd } },
+      { timestamp: '2026-11-03T00:00:00Z', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'retained history' }] } },
+    ].map(JSON.stringify).join('\n') + '\n');
+    return file;
+  };
+  await write(legacy, 'legacy');
+  const recorded = await write(external, 'recorded');
+  const other = await write(external, 'other', path.join(root, 'other-project'));
+  const store = createJsonlConversationStore({ sessionRoot: active, fallbackSessionRoots: [legacy], projectRoot, registerMedia: () => null, onChange: () => {} });
+  t.after(() => store.close());
+  assert.equal((await store.findSession('legacy')).messages[0].text, 'retained history');
+  assert.equal((await store.findSession('recorded', 'all', { historyFile: recorded })).messages[0].text, 'retained history');
+  assert.equal(await store.findSession('wrong-id', 'all', { historyFile: recorded }), null);
+  assert.equal(await store.findSession('other', 'all', { historyFile: other }), null);
+  assert.equal(await store.findSession('recorded'), null, 'a recorded read does not change store ownership');
+});

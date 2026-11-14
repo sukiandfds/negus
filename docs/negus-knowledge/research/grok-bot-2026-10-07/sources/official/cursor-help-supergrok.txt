@@ -1,0 +1,134 @@
+← Back
+Link SuperGrok for Grok Bot
+
+Link your Grok or X account to grant Grok Bot usage on your Cursor account. Individual SuperGrok, SuperGrok Plus, SuperGrok Heavy, and X Premium+ qualify.
+
+What do I need before linking SuperGrok?
+
+You need an active individual SuperGrok, SuperGrok Plus, SuperGrok Heavy, or X Premium+ subscription on the Grok or X account you will link, and a Cursor or Grok Bot account to receive the usage grant.
+
+Linking pairs one Cursor account with one Grok or X account. The link itself is not a Cursor payment. Sign in with the Cursor account that should hold the usage grant, because a SuperGrok or X Premium+ link can't be unlinked or moved to a different Cursor account once created.
+
+What do I get after linking SuperGrok?
+
+Linking is a usage grant, not a Cursor plan. It grants Grok Bot usage on the linked Cursor account while your SuperGrok or X Premium+ subscription stays active.
+
+
+SuperGrok Heavy grants the highest linked Grok Bot usage.
+
+SuperGrok Plus grants generous linked Grok Bot usage, below the Heavy tier.
+
+SuperGrok grants linked Grok Bot usage, below the Plus tier.
+
+X Premium+ grants linked Grok Bot usage, below SuperGrok Plus.
+
+
+Cursor re-checks your SuperGrok or X Premium+ status at each renewal.
+
+Upgrading or downgrading SuperGrok after you have already linked can take up to 24 hours to show on Weekly usage. You do not need to link again. See What if I upgrade SuperGrok after I already linked?.
+
+The grant does not stack with a Cursor plan. If you are on Pro+, linking SuperGrok Plus does not add usage. Linking SuperGrok, SuperGrok Plus, SuperGrok Heavy, or X Premium+ on top of Pro, Pro+, Ultra, or a self-serve Teams plan does not add usage either. You can still upgrade within Cursor plans, such as Pro+ to Ultra. See Do Cursor and SuperGrok plans stack?.
+
+Does linking SuperGrok change my Cursor plan?
+
+No. Your existing Cursor plan stays in place. Linking SuperGrok or X Premium+ doesn't cancel a Pro, Pro+, Ultra, or Teams subscription, and it doesn't replace them with another Cursor plan. If you had no Cursor plan before linking, you still don't, and Grok Bot usage comes from the SuperGrok or X Premium+ grant alone.
+
+If you have both a paid Cursor plan that includes Grok Bot and a SuperGrok or X Premium+ link, both stay on the same Cursor account, but they do not stack. Linking SuperGrok Plus while you are on Pro+ does not add Grok Bot usage. Purchasing Cursor Ultra while SuperGrok Heavy is linked does not grant more included usage either. You can still move from Pro+ to Ultra on the Cursor plan itself. That upgrade changes the Cursor grant. It does not combine with SuperGrok.
+
+Your Cursor plan continues to bill and renew independently of the link. Neither subscription cancels the other. Linking SuperGrok or X Premium+ does not swap you to Ultra, cancel a Cursor plan, or add a second Grok Bot meter.
+
+If you need more usage after the included grant runs out, enable on-demand usage. That is the path for extra usage. Linking SuperGrok or X Premium+ on top of a Cursor plan is not. You can still upgrade the Cursor plan, such as Pro+ to Ultra.
+
+How do I link my Grok account?
+
+
+On the Grok Bot plan screen, click Link Grok Account.
+
+Sign into the Grok account with individual SuperGrok, SuperGrok Plus, or SuperGrok Heavy.
+
+Return to Grok Bot and confirm you have access.
+
+
+How do I link my X Premium+ account?
+
+
+On the Grok Bot plan screen, click Link X Account.
+
+Sign into the X account with X Premium+.
+
+Return to Grok Bot and confirm you have access.
+
+
+Which SuperGrok tiers grant Grok Bot?
+
+Individual SuperGrok, individual SuperGrok Plus, individual SuperGrok Heavy, and X Premium+ grant Grok Bot usage. SuperGrok Team and SuperGrok Enterprise plans are not supported.
+
+These do not qualify:
+
+
+SuperGrok Lite
+
+SuperGrok Team
+
+SuperGrok Enterprise
+
+
+Can I unlink or move a SuperGrok link to a different Cursor account?
+
+No. A SuperGrok or X Premium+ link is permanent once created. You can't unlink a Grok or X account from a Cursor account, and you can't move a link to a different Cursor account. Support can't unlink or move it either.
+
+Sign in with the correct Cursor account before you select Link Grok Account or Link X Account. To use the grant, sign into Grok Bot with the Cursor account that holds the link.
+
+Why am I still on the plan screen after linking?
+
+Confirm you're signed in with the same Cursor account you linked.
+
+Why don't I see a Link Grok Account option after I've already logged in?
+
+The Link Grok Account and Link X Account options appear on the Get Started paywall screen before you sign in. Once you're past the paywall and inside the main app, Settings does not show a Grok, X, or xAI account link option.
+
+To return to the paywall screen:
+
+
+Fully quit Grok Bot (on Mac, choose Quit from the menu bar).
+
+Relaunch the app.
+
+
+If you still don't see Link Grok Account or Link X Account, confirm you're not already signed in through another path.
+
+What if my SuperGrok access, email, or usage looks wrong after linking?
+
+If linking didn't grant Grok Bot usage, applied to the wrong account, or your usage didn't reset, work through these checks.
+
+Confirm the basics:
+
+
+You linked the Grok account with an active SuperGrok, SuperGrok Plus, or SuperGrok Heavy subscription, or the X account with X Premium+. The grant is tied to that specific account.
+
+You're signed into Grok Bot with the same Cursor account you linked.
+
+Your SuperGrok, SuperGrok Plus, SuperGrok Heavy, or X Premium+ subscription is still active at renewal.
+
+
+Common failure modes:
+
+What you're seeingWhat to try
+Linking fails partway through sign-inFully quit Grok Bot (on Mac, choose Quit from the menu bar), reopen, and link again from the Get Started screen.
+Access applied to the wrong Cursor accountA SuperGrok or X Premium+ link is permanent. Neither you nor support can unlink it or move it to a different Cursor account. Sign into Grok Bot with the Cursor account that holds the link.
+Usage didn't reset after linkingConfirm your SuperGrok, SuperGrok Plus, SuperGrok Heavy, or X Premium+ subscription is active, then allow up to 24 hours after a successful link for usage to refresh.
+Still on the old SuperGrok tier after upgradingAllow up to 24 hours for Weekly usage to move to the new tier. Do not link again.
+
+Related
+
+
+Plans and billing
+
+Usage-based charges
+
+Sign in to Grok Bot
+
+Grok Bot on mobile
+
+Get help
+

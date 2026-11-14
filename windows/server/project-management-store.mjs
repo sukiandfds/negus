@@ -1,5 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 const STATUS_LABELS = {
   planned: "待处理",
@@ -10,13 +12,22 @@ const STATUS_LABELS = {
   waiting_approval: "等待确认",
   implemented_uncommitted: "已实现，未提交",
   implemented_pending_review: "待体验",
+  implemented: "已实现",
+  implementation_in_progress: "进行中",
+  code_ready_pending_user_review: "待体验",
+  direction_updated: "方向已更新",
+  ready_for_technical_handoff: "待技术交接",
   accepted: "已确认",
   completed: "已完成",
   active: "正常",
   blocked: "已阻塞",
   paused: "已暂停",
+  paused_experiment: "试验暂停",
   cancelled: "已取消",
   retired: "已替代",
+  pending_review: "待体验",
+  handoff_pending: "待交接",
+  docs_synced: "已完成",
 };
 
 const TYPE_LABELS = {
@@ -34,6 +45,7 @@ const CATEGORY_LABELS = {
   maintenance: "Bug 与维护",
   decision: "产品决策",
   delivery: "验证与交付",
+  platform: "平台能力",
   documentation: "项目资料与历史记录",
 };
 
@@ -43,6 +55,7 @@ const CATEGORY_ORDER = [
   "Bug 与维护",
   "产品决策",
   "验证与交付",
+  "平台能力",
   "项目资料与历史记录",
 ];
 
@@ -130,6 +143,14 @@ const timestamp = (value) => {
   return parsed === null ? String(value || "").trim() || null : new Date(parsed).toISOString();
 };
 
+const timestampFromHeading = (heading) => {
+  const match = String(heading || "").match(/^(\d{4}-\d{2}-\d{2})(?:\s+(\d{2}:\d{2}(?::\d{2})?))?(?:\s*([+-]\d{2}:?\d{2}))?/u);
+  if (!match) return null;
+  const time = match[2] || "00:00";
+  const value = `${match[1]}T${time}${match[3] || "+08:00"}`;
+  return normalizeDate(value) === null ? null : new Date(Date.parse(value)).toISOString();
+};
+
 const idsFrom = (value) => [...String(value || "").matchAll(/\b([A-Z][A-Z0-9]+-\d{3})\b/gu)].map((match) => match[1]);
 
 const statusLabel = (status) => STATUS_LABELS[status] || status || "未记录";
@@ -142,6 +163,106 @@ const within = (root, target) => {
   return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}${path.sep}`);
 };
 
+const pageDraftStateFile = (projectRoot) => path.resolve(projectRoot, "runtime", "project-page-drafts.json");
+
+const readPageDraftState = async (projectRoot) => {
+  try {
+    const parsed = await readJsonFile(pageDraftStateFile(projectRoot));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const writePageDraftState = async (projectRoot, drafts) => {
+  await writeJsonFileAtomic(pageDraftStateFile(projectRoot), drafts);
+};
+
+const inferPageComponents = (request) => {
+  const text = String(request || "").toLowerCase();
+  const components = [{ type: "heading", label: "页面标题", description: "用于说明这个工作页面的目的" }];
+  if (/上传|附件|发票|文件|图片|upload|file/u.test(text)) {
+    components.push({ type: "file-upload", label: "文件上传", description: "选择文件并保留待处理记录" });
+  }
+  if (/表格|列表|记录|进度|table|list|status/u.test(text)) {
+    components.push({ type: "table", label: "记录列表", description: "展示后续接入的数据记录" });
+  }
+  if (/预约|会议|日期|时间|calendar|schedule/u.test(text)) {
+    components.push({ type: "date-time", label: "日期与时间", description: "为预约或排期预留输入" });
+  }
+  if (/按钮|提交|申请|审批|button|submit/u.test(text)) {
+    components.push({ type: "action", label: "提交操作", description: "提交前需要接入真实业务处理" });
+  }
+  if (components.length === 1) components.push({ type: "content", label: "说明内容", description: "根据需求补充的工作说明区域" });
+  components.push({ type: "empty-state", label: "空状态", description: "暂无真实数据时显示清晰提示" });
+  return components.map((component, index) => ({ id: `component-${index + 1}`, ...component }));
+};
+
+const pageDraft = ({ id, request, location, createdAt, updatedAt }) => {
+  const cleanRequest = String(request || "").trim();
+  const cleanLocation = String(location || "").trim();
+  const title = cleanRequest.split(/[。.!！?？\n]/u)[0].slice(0, 80) || "未命名工作页面";
+  return {
+    id,
+    type: "page_draft",
+    title,
+    request: cleanRequest,
+    location: cleanLocation,
+    status: "draft",
+    statusLabel: "待发布",
+    createdAt,
+    updatedAt,
+    components: inferPageComponents(cleanRequest),
+    dataBinding: {
+      status: "not_connected",
+      statusLabel: "未连接真实业务数据",
+      message: "这是结构化页面草稿；发布前需要确认数据来源、权限和业务动作。",
+    },
+    publication: { status: "draft", statusLabel: "待确认发布", canPublish: false },
+    source: "runtime/project-page-drafts.json",
+  };
+};
+
+export const readProjectPageDrafts = async ({ projectRoot }) => (await readPageDraftState(projectRoot))
+  .filter((draft) => draft && typeof draft === "object" && draft.id)
+  .sort((left, right) => String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")));
+
+export const readProjectPageDraft = async ({ projectRoot, draftId }) => {
+  const draft = (await readProjectPageDrafts({ projectRoot })).find((candidate) => candidate.id === draftId);
+  if (!draft) {
+    const error = new Error("页面草稿不存在");
+    error.statusCode = 404;
+    throw error;
+  }
+  return draft;
+};
+
+export const createProjectPageDraft = async ({ projectRoot, request, location }) => {
+  const cleanRequest = String(request || "").trim();
+  const cleanLocation = String(location || "").trim();
+  if (cleanRequest.length < 4) {
+    const error = new Error("请至少描述需要什么页面或功能");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (cleanRequest.length > 2000 || cleanLocation.length > 300) {
+    const error = new Error("页面需求或位置描述过长");
+    error.statusCode = 413;
+    throw error;
+  }
+  const now = new Date().toISOString();
+  const draft = pageDraft({
+    id: `PAGE-${now.replace(/\D/g, "").slice(0, 14)}-${randomUUID().slice(0, 8).toUpperCase()}`,
+    request: cleanRequest,
+    location: cleanLocation || "项目工作区",
+    createdAt: now,
+    updatedAt: now,
+  });
+  const drafts = await readPageDraftState(projectRoot);
+  await writePageDraftState(projectRoot, [draft, ...drafts].slice(0, 200));
+  return draft;
+};
+
 const readText = async (file) => {
   try {
     return await fs.readFile(file, "utf8");
@@ -151,7 +272,7 @@ const readText = async (file) => {
 };
 
 const parseUpdates = (markdown, fallback) => {
-  const headings = [...markdown.matchAll(/^###\s+(.+?)\s*$/gmu)];
+  const headings = [...markdown.matchAll(/^#{2,3}\s+(.+?)\s*$/gmu)];
   const updates = headings.map((heading, index) => {
     const bodyStart = heading.index + heading[0].length;
     const bodyEnd = headings[index + 1]?.index ?? markdown.length;
@@ -159,13 +280,17 @@ const parseUpdates = (markdown, fallback) => {
     const fields = {};
     for (const line of body.split(/\r?\n/u)) {
       const match = line.match(/^[-*]\s*([^：:]+)[：:]\s*(.*)$/u);
-      if (match) fields[match[1].trim()] = cleanMarkdown(match[2]);
+      if (match) {
+        const key = match[1].trim();
+        fields[key] = key === "状态" ? String(match[2] || "").trim() : cleanMarkdown(match[2]);
+      }
     }
     const change = fields["本次更新"] || firstUsefulLine(body) || "未记录本次更新";
+    const recordedStatus = String(fields["状态"] || "").match(/^[a-z][a-z_]*/iu)?.[0]?.toLowerCase() || fallback.status || "";
     return {
-      at: timestamp(heading[1]),
-      status: fields["状态"] || fallback.status || "",
-      statusLabel: statusLabel(fields["状态"] || fallback.status),
+      at: timestampFromHeading(heading[1]),
+      status: recordedStatus,
+      statusLabel: statusLabel(recordedStatus),
       change,
       userImpact: fields["用户影响"] || "未记录用户影响",
       evidence: fields["证据"] || "",
@@ -279,11 +404,12 @@ export const readProjectManagement = async ({ project, projectRoot }) => {
   const dataRoot = path.resolve(projectRoot, "docs", "project-management");
   const projectPath = path.join(dataRoot, "PROJECT.md");
   const indexPath = path.join(dataRoot, "INDEX.md");
-  const [projectMarkdown, indexMarkdown, projectStat, indexStat] = await Promise.all([
+  const [projectMarkdown, indexMarkdown, projectStat, indexStat, pageDrafts] = await Promise.all([
     fs.readFile(projectPath, "utf8"),
     fs.readFile(indexPath, "utf8"),
     fs.stat(projectPath),
     fs.stat(indexPath),
+    readProjectPageDrafts({ projectRoot }),
   ]);
   const indexRows = parseTable(sectionByHeading(indexMarkdown, ["条目目录", "项目条目", "工作项目录"]));
   const entries = (await Promise.all(indexRows.map((row) => readEntry({ dataRoot, row })))).filter(Boolean);
@@ -323,6 +449,7 @@ export const readProjectManagement = async ({ project, projectRoot }) => {
       blocked: entries.filter((entry) => entry.status === "blocked").length,
       completed: entries.filter((entry) => ["completed", "accepted"].includes(entry.status)).length,
     },
+    pageDrafts,
     updatedAt: updatedAt === undefined ? indexStat.mtime.toISOString() : new Date(updatedAt).toISOString(),
     source: "docs/project-management",
   };

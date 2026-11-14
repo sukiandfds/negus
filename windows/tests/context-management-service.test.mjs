@@ -18,6 +18,31 @@ const createService = async ({ active = false } = {}) => {
   return { service, events, compacted, setExecutionActive: (value) => { executionActive = value; } };
 };
 
+test("accepted compaction reports asynchronous quota failure without treating retry as completion", async () => {
+  const { service, events } = await createService();
+  await service.requestCompaction("thread-1");
+  const error = { message: "unexpected status 403 Forbidden: 预扣费额度失败，用户剩余额度不足" };
+  service.handleProtocolMessage({ method: "error", params: { threadId: "thread-1", error, willRetry: true } });
+  assert.equal(service.getStatus("thread-1").phase, "compacting");
+  service.handleProtocolMessage({ method: "error", params: { threadId: "thread-1", error, willRetry: false } });
+  assert.equal(service.getStatus("thread-1").phase, "failed");
+  assert.equal(events.at(-1).message, error.message);
+  await service.requestCompaction("thread-1");
+  service.handleProtocolMessage({ method: "turn/completed", params: { threadId: "thread-1", turn: { status: "failed", error } } });
+  assert.equal(service.getStatus("thread-1").message, error.message);
+  await service.close();
+});
+
+test("compaction settles on native turn completion or interruption without a compaction item", async () => {
+  const { service } = await createService();
+  for (const status of ["completed", "interrupted"]) {
+    await service.requestCompaction("thread-1");
+    service.handleProtocolMessage({ method: "turn/completed", params: { threadId: "thread-1", turn: { status } } });
+    assert.equal(service.getStatus("thread-1").phase, status === "completed" ? "completed" : "failed");
+  }
+  await service.close();
+});
+
 test("reports the real model and current context percentage", async () => {
   const { service } = await createService();
   await service.load("thread-1");
@@ -48,6 +73,44 @@ test("tracks the protocol effort field after thread settings change", async () =
   assert.equal(service.getStatus("thread-1").reasoningEffort, "high");
 });
 
+test("clears stale usage when the runtime model changes", async () => {
+  const { service } = await createService();
+  await service.load("thread-1");
+  service.handleProtocolMessage({
+    method: "thread/tokenUsage/updated",
+    params: {
+      threadId: "thread-1",
+      tokenUsage: { last: { totalTokens: 120000 }, modelContextWindow: 240000 },
+    },
+  });
+  service.handleProtocolMessage({
+    method: "thread/settings/updated",
+    params: { threadId: "thread-1", threadSettings: { model: "gpt-6-astra", effort: "high" } },
+  });
+
+  const status = service.getStatus("thread-1");
+  assert.equal(status.model, "gpt-6-astra");
+  assert.equal(status.usedTokens, null);
+  assert.equal(status.contextWindow, null);
+  assert.equal(status.percentage, null);
+});
+
+test("does not auto compact from a rounded-up display percentage", async () => {
+  const { service, compacted } = await createService();
+  await service.load("thread-1");
+  service.handleProtocolMessage({
+    method: "thread/tokenUsage/updated",
+    params: {
+      threadId: "thread-1",
+      tokenUsage: { last: { totalTokens: 190800 }, modelContextWindow: 240000 },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(service.getStatus("thread-1").percentage, 80);
+  assert.deepEqual(compacted, []);
+});
+
 test("queues auto compaction until the active turn completes", async () => {
   const { service, compacted, setExecutionActive } = await createService({ active: true });
   await service.load("thread-1");
@@ -67,4 +130,14 @@ test("queues auto compaction until the active turn completes", async () => {
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(compacted, ["thread-1"]);
   assert.equal(service.getStatus("thread-1").phase, "compacting");
+});
+
+test('DeepSeek replaces legacy fallback capacity while preserving measured token usage', async () => {
+  const { service } = await createService();
+  service.handleProtocolMessage({ method: 'thread/settings/updated', params: { threadId: 'deepseek', threadSettings: { model: 'deepseek-flash' } } });
+  service.handleProtocolMessage({ method: 'thread/tokenUsage/updated', params: { threadId: 'deepseek', tokenUsage: { last: { totalTokens: 20896 }, modelContextWindow: 258400 } } });
+  assert.equal(service.getStatus('deepseek').usedTokens, 20896);
+  assert.equal(service.getStatus('deepseek').contextWindow, 996147);
+  assert.equal(service.getStatus('deepseek').percentage, 2);
+  await service.close();
 });

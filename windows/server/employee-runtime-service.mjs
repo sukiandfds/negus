@@ -1,0 +1,1061 @@
+import { transferEmployeeThread } from "../../ui-feishu/server/employee-provider-integration.mjs";
+import { communicationInstructions } from "./base-prompt.mjs";
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+import os from "node:os";
+import { materializeGoalObjective, expandGoalObjective, readThreadGoal } from "./thread-goal-objective.mjs";
+import { createAppServerClient } from "./app-server-client.mjs";
+import { inputFromAttachments } from "./app-server-conversation-store.mjs";
+import { messagesFromTurns } from "./codex-thread-history.mjs";
+import { employeeTurnInstructions } from "./employee-definitions.mjs";
+import { CURRENT_MODEL_PROVIDER_ID } from "./model-provider-service.mjs";
+
+const clean = (value, maxLength = 200) => String(value || "").trim().slice(0, maxLength);
+const statusError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
+const isOccupiedError = (error) => error?.statusCode === 409 || /already active|already running|in progress|busy|occupied/iu.test(String(error?.message || error));
+
+const textFromContent = (value) => {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(textFromContent).filter(Boolean).join("\n");
+  if (!value || typeof value !== "object") return "";
+  if (typeof value.text === "string") return value.text;
+  if (typeof value.message === "string") return value.message;
+  return textFromContent(value.content);
+};
+
+const textFromItem = (item) => item?.type === "agentMessage"
+  ? String(item.text || "")
+  : textFromContent(item?.content);
+
+// Every employee exposed to the user shares the main agent's project access.
+// Approval remains disabled because Negus is the already-authorized host.
+const policyFor = () => ({ sandbox: "danger-full-access", approvalPolicy: "never" });
+const turnPolicyFor = () => ({ sandboxPolicy: { type: "dangerFullAccess" }, approvalPolicy: "never" });
+
+const publicMessage = ({ id, role, text, blocks, turnId, itemId, createdAt }) => ({
+  id: clean(id, 240),
+  role: role === "user" ? "user" : "assistant",
+  text: String(text || ""),
+  ...(Array.isArray(blocks) && blocks.length ? { blocks } : {}),
+  ...(turnId ? { turnId: clean(turnId, 160) } : {}),
+  ...(itemId ? { itemId: clean(itemId, 160) } : {}),
+  createdAt: createdAt || new Date().toISOString(),
+});
+
+export const createEmployeeRuntimeService = ({
+  registry,
+  conversationStore,
+  readHistory,
+  readRevision,
+  projectRoot,
+  broadcast = () => {},
+  growthService = null,
+  contextProvider = null,
+  attachmentContent = null,
+  taskService = null,
+  execution = null,
+  onTurnCompleted = null,
+  client = null,
+  modelProviders = null,
+  registerSession,
+  registerMedia = () => null,
+}) => {
+  const defaultClient = client || createAppServerClient();
+  const ownsDefaultClient = !client;
+  const threadEmployees = new Map();
+  const threadClients = new Map();
+  const freshThreads = new Map();
+  const taskConfiguredClients = new Map();
+  const clientSubscriptions = new Map();
+  const statuses = new Map();
+  const openPromises = new Map();
+  const sendLocks = new Map();
+  const modelChanges = new Map();
+  let closed = false;
+
+  // A dead app-server never sends turn/completed for the turns it was
+  // running, so every active employee on that client is ended here.
+  const handleClientExit = (runtimeClient) => {
+    for (const [employeeId, status] of statuses) {
+      if (!status.active) continue;
+      const threadId = clean(registry.get(employeeId)?.mainThreadId, 120);
+      if ((threadClients.get(threadId) || defaultClient) !== runtimeClient) continue;
+      publishTurnCompletion({
+        employeeId, threadId, turnId: clean(status.turnId, 160), status: "interrupted", error: "Codex 进程已退出",
+      });
+    }
+  };
+
+  const subscribeClient = (runtimeClient) => {
+    if (!runtimeClient || clientSubscriptions.has(runtimeClient)) return;
+    const unsubscribeProtocol = runtimeClient.subscribe(handleProtocolMessage);
+    const unsubscribeHealth = runtimeClient.subscribeHealth?.((event) => {
+      if (event?.phase === "exited") handleClientExit(runtimeClient);
+    });
+    clientSubscriptions.set(runtimeClient, () => {
+      unsubscribeProtocol?.();
+      unsubscribeHealth?.();
+    });
+  };
+
+  // Let getClient() refresh shared ccswitch providers before validating the
+  // saved route. A synchronous resolve here made every employee fail after a
+  // restart with “Model provider is not registered”.
+  const routeForEmployee = (employee) => ({
+    modelProviderId: CURRENT_MODEL_PROVIDER_ID,
+    model: clean(employee?.model, 120),
+    ...(employee?.modelProviderId ? { modelProviderId: clean(employee.modelProviderId, 80) } : {}),
+  });
+
+  const clientForEmployee = async (employee) => {
+    if (!modelProviders) return defaultClient;
+    const runtimeClient = await modelProviders.getClient(routeForEmployee(employee));
+    subscribeClient(runtimeClient);
+    return runtimeClient;
+  };
+
+  const clientForThread = async (threadId, employee) => {
+    const existing = threadClients.get(threadId);
+    if (existing) return existing;
+    const runtimeClient = await clientForEmployee(employee);
+    threadClients.set(threadId, runtimeClient);
+    return runtimeClient;
+  };
+
+  for (const employee of registry.list()) {
+    rememberInitialThread(employee);
+    statuses.set(employee.id, {
+      phase: "idle",
+      label: "等待任务",
+      detail: "",
+      active: false,
+      turnId: "",
+      updatedAt: employee.updatedAt || null,
+    });
+  }
+
+  function rememberInitialThread(employee) {
+    const threadId = clean(employee?.mainThreadId, 120);
+    if (threadId) threadEmployees.set(threadId, employee.id);
+  }
+
+  const statusFor = (employeeId) => statuses.get(employeeId) || {
+    phase: "idle",
+    label: "等待任务",
+    detail: "",
+    active: false,
+    turnId: "",
+    updatedAt: null,
+  };
+
+  const turnIdFromMessage = (message) => clean(
+    message?.params?.turnId || message?.params?.turn?.id || message?.params?.item?.turnId,
+    160,
+  );
+
+  const clearEarlyEvents = (submission) => {
+    if (!submission) return;
+    submission.earlyEvents.length = 0;
+    submission.earlyCompletionWithoutTurnId = null;
+  };
+
+  const acceptsProtocolMessage = (message) => {
+    const threadId = clean(message?.params?.threadId, 120);
+    const employeeId = threadEmployees.get(threadId);
+    if (!employeeId) return true;
+    if (clean(registry.get(employeeId)?.mainThreadId, 120) !== threadId) return false;
+    const method = message?.method || "";
+    const turnId = turnIdFromMessage(message);
+    const current = statusFor(employeeId);
+    const submission = sendLocks.get(employeeId);
+    if (method === "turn/started") {
+      return Boolean(turnId && current.active && current.turnId === turnId);
+    }
+    if (method === "turn/completed") {
+      if (!turnId) return submission?.requestMethod !== "turn/start" || Boolean(submission?.boundTurnId);
+      return current.turnId === turnId;
+    }
+    if (method === "item/agentMessage/delta") {
+      return Boolean(turnId && current.active && current.turnId === turnId);
+    }
+    if (method === "item/completed") {
+      if (message?.params?.item?.type !== "agentMessage") return true;
+      return Boolean(turnId && current.active && current.turnId === turnId);
+    }
+    if (turnId && (method.startsWith("item/") || method === "error")) {
+      return Boolean(current.active && current.turnId === turnId);
+    }
+    return true;
+  };
+
+  const normalizeExecutionProtocolMessage = (message) => {
+    const threadId = clean(message?.params?.threadId, 120);
+    const employeeId = threadEmployees.get(threadId);
+    if (!employeeId) return message;
+    if (!acceptsProtocolMessage(message)) return null;
+    if (message?.method !== "turn/completed" || turnIdFromMessage(message)) return message;
+    const current = statusFor(employeeId);
+    const confirmedTurnId = current.active ? clean(current.turnId, 160) : "";
+    if (!confirmedTurnId) return null;
+    const normalized = structuredClone(message);
+    normalized.params = {
+      ...(normalized.params || {}),
+      turnId: confirmedTurnId,
+      turn: { ...(normalized.params?.turn || {}), id: confirmedTurnId },
+    };
+    return normalized;
+  };
+
+  const publishStatus = (employeeId, patch = {}, syncExecution = true) => {
+    const current = statusFor(employeeId);
+    const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
+    statuses.set(employeeId, next);
+    broadcast({
+      type: "employee_status",
+      employeeId,
+      status: next,
+      modificationConfirmed: Boolean(registry.get(employeeId)?.modificationConfirmed),
+    });
+    const threadId = clean(registry.get(employeeId)?.mainThreadId, 120);
+    if (syncExecution && threadId && execution?.publishStatus) {
+      execution.publishStatus(threadId, {
+        phase: next.phase,
+        label: next.label,
+        detail: next.detail,
+        active: next.active,
+        turnId: next.turnId,
+      });
+    }
+    return next;
+  };
+
+  const publishTurnCompletion = ({ employeeId, threadId, turnId, status, error }, syncExecution = true) => {
+    publishStatus(employeeId, {
+      phase: status === "failed" ? "failed" : status === "interrupted" ? "interrupted" : "idle",
+      label: status === "failed" ? "执行失败" : status === "interrupted" ? "已中断" : "等待任务",
+      detail: error,
+      active: false,
+      turnId: "",
+    }, syncExecution);
+    const completion = { employeeId, threadId, turnId, status, error };
+    broadcast({ type: "employee_turn_completed", ...completion });
+    if (typeof onTurnCompleted === "function") {
+      void Promise.resolve(sendLocks.get(employeeId)?.promise).catch(() => {}).then(() => onTurnCompleted(completion))
+        .catch((cause) => console.warn(`[employee-runtime] completion listener failed: ${String(cause?.message || cause)}`));
+    }
+  };
+
+  const rememberThread = (employeeId, threadId) => {
+    const cleanThreadId = clean(threadId, 120);
+    if (cleanThreadId) threadEmployees.set(cleanThreadId, employeeId);
+    return cleanThreadId;
+  };
+
+  const bindConversation = async (employee, threadId) => {
+    const current = conversationStore.findByAgentKind?.(employee.id, "direct");
+    if (current?.runtimeKind === "codex" && current.runtimeSessionId === threadId) {
+      if (employee.mainThreadId !== threadId) await registry.bindMainThread(employee.id, threadId);
+      if (current.conversationId !== employee.conversationId) {
+        await registry.bindConversation(employee.id, current.conversationId);
+      }
+      return current;
+    }
+    const binding = await conversationStore.bindRuntime({
+      conversationId: employee.conversationId || "",
+      agentId: employee.id,
+      runtimeKind: "codex",
+      runtimeSessionId: threadId,
+      conversationKind: "direct",
+    });
+    await registry.bindMainThread(employee.id, threadId);
+    if (binding.conversationId !== employee.conversationId) {
+      await registry.bindConversation(employee.id, binding.conversationId);
+    }
+    return binding;
+  };
+
+  const resumeThread = async (threadId, employee) => {
+    const runtimeClient = await clientForThread(threadId, employee);
+    if (freshThreads.has(threadId)) return freshThreads.get(threadId);
+    const config = taskService?.leaderConfig(employee.id);
+    if (Object.keys(config || {}).length && taskConfiguredClients.get(threadId) !== runtimeClient) {
+      // Reapply the current employee tools without requiring a separate
+      // status probe. A transient thread/read failure must never become a
+      // product-level "employee unavailable" gate.
+      await runtimeClient.request("thread/unsubscribe", { threadId }).catch(() => {});
+    }
+    const result = await runtimeClient.request("thread/resume", {
+      threadId,
+      persistExtendedHistory: true,
+      ...(Object.keys(config || {}).length ? { config,
+        developerInstructions: employeeTurnInstructions(employee.instructions, taskService?.leaderInstructions(employee.id)),
+      } : {}),
+      ...policyFor(employee),
+    });
+    taskConfiguredClients.set(threadId, runtimeClient);
+    return result;
+  };
+
+  const readAuthoritativeStatus = async (threadId, employee) => {
+    try {
+      const runtimeClient = await clientForThread(threadId, employee);
+      const result = await runtimeClient.request("thread/read", { threadId, includeTurns: true });
+      const thread = result?.thread || result || {};
+      const rawStatus = thread.status || thread.state;
+      const active = thread.active === true
+        || rawStatus === "active"
+        || rawStatus === "inProgress"
+        || rawStatus?.type === "active"
+        || (Array.isArray(thread.activeFlags) && thread.activeFlags.length > 0)
+        || (thread.activeFlags && typeof thread.activeFlags === "object" && Object.keys(thread.activeFlags).length > 0);
+      const unfinished = [...(Array.isArray(thread.turns) ? thread.turns : [])].reverse().find((turn) => {
+        const value = turn?.status || turn?.state;
+        return ["active", "inProgress"].includes(String(value?.type || value));
+      });
+      return {
+        known: Boolean(rawStatus || thread.active !== undefined || thread.activeFlags),
+        active,
+        turnId: clean(unfinished?.id || thread.turnId || rawStatus?.turnId, 160),
+      };
+    } catch {
+      return { known: false, active: false, turnId: "" };
+    }
+  };
+
+  const reconcileEmployeeIdle = async (employeeId) => {
+    const status = statusFor(employeeId);
+    const employee = registry.require(employeeId);
+    if (!status.active || !employee.mainThreadId || sendLocks.has(employeeId)) return;
+    const native = await readAuthoritativeStatus(employee.mainThreadId, employee);
+    if (native.known && !native.active && statusFor(employeeId) === status) {
+      publishStatus(employeeId, { phase: "idle", label: "等待任务", active: false, turnId: "", detail: "" });
+    }
+  };
+  const startThread = async (employee) => {
+    const runtimeClient = await clientForEmployee(employee);
+    const route = routeForEmployee(employee);
+    const result = await runtimeClient.request("thread/start", {
+      cwd: clean(employee.projectRoot, 400) || projectRoot,
+      developerInstructions: employeeTurnInstructions(employee.instructions, taskService?.leaderInstructions(employee.id)),
+      config: taskService?.leaderConfig(employee.id),
+      ephemeral: false,
+      serviceName: `negus-${employee.projectKey}`,
+      ...(route.model ? { model: route.model } : {}),
+      ...policyFor(employee),
+    });
+    const threadId = clean(result?.thread?.id, 120);
+    if (!threadId) throw new Error("Codex 未返回员工主对话");
+    rememberThread(employee.id, threadId);
+    threadClients.set(threadId, runtimeClient);
+    freshThreads.set(threadId, result);
+    taskConfiguredClients.set(threadId, runtimeClient);
+    try {
+      await runtimeClient.request("thread/name/set", {
+        threadId,
+        name: `${employee.name} · 长期主对话`,
+      });
+    } catch {
+      // Naming is helpful in Codex, but it is not the Negus identity binding.
+    }
+    return threadId;
+  };
+
+  const ensureOpen = async (employeeId) => {
+    await modelChanges.get(employeeId);
+    if (closed) throw new Error("员工运行时已关闭");
+    const employee = registry.require(employeeId);
+    const existing = openPromises.get(employee.id);
+    if (existing) return existing;
+    const opening = (async () => {
+      let threadId = clean(employee.mainThreadId, 120);
+      const hadExistingThread = Boolean(threadId);
+      if (threadId) {
+        rememberThread(employee.id, threadId);
+        try {
+          if (!employee.conversationArchived) await resumeThread(threadId, employee);
+        } catch (error) {
+          if (!/thread.*not found|not found.*thread|会话不存在/iu.test(String(error?.message || error))) throw error;
+          threadId = "";
+          await registry.bindMainThread(employee.id, "");
+        }
+      }
+      if (!threadId) {
+        threadId = await startThread(employee);
+      }
+      const latest = registry.require(employee.id);
+      const binding = await bindConversation(latest, threadId);
+      if (!statusFor(employee.id).active) publishStatus(employee.id, {
+        phase: "idle",
+        label: "等待任务",
+        detail: "",
+        active: false,
+        turnId: "",
+      });
+      if (hadExistingThread) {
+        const beforeRead = statusFor(employee.id);
+        const authoritative = await readAuthoritativeStatus(threadId, registry.require(employee.id));
+        if (authoritative.known && authoritative.active && statusFor(employee.id) === beforeRead) {
+          const turnId = authoritative.turnId || clean(statusFor(employee.id).turnId, 160);
+          publishStatus(employee.id, turnId
+            ? { phase: "working", label: "正在处理", detail: "", active: true, turnId }
+            : {
+              phase: "interrupted",
+              label: "已中断",
+              detail: "无法取得正在运行的任务编号，请重新发送",
+              active: false,
+              turnId: "",
+            });
+        }
+      }
+      return { employee: registry.require(employee.id), binding, threadId };
+    })();
+    openPromises.set(employee.id, opening);
+    try {
+      return await opening;
+    } finally {
+      if (openPromises.get(employee.id) === opening) openPromises.delete(employee.id);
+    }
+  };
+
+  const readNativeMessages = async (threadId, employee) => {
+    const runtimeClient = await clientForThread(threadId, employee);
+    const result = await runtimeClient.request("thread/read", { threadId, includeTurns: true });
+    return messagesFromTurns(result?.thread?.turns, registerMedia)
+      .filter((message) => message.role === "user" || message.role === "assistant")
+      .map((message) => publicMessage(message));
+  };
+
+  const sessionFor = async (employeeId) => {
+    const { employee, binding, threadId } = await ensureOpen(employeeId);
+    let messages = await conversationStore.readMessages(binding.conversationId);
+    if (!messages.length) {
+      try {
+        messages = await readNativeMessages(threadId, registry.require(employeeId));
+      } catch {
+        messages = [];
+      }
+    }
+    return {
+      employee: registry.get(employee.id),
+      project: {
+        key: employee.projectKey,
+        root: employee.projectRoot,
+        runtime: employee.runtimeKind,
+      },
+      conversation: {
+        id: binding.conversationId,
+        kind: "main",
+        runtimeKind: binding.runtimeKind,
+        runtimeSessionId: binding.runtimeSessionId,
+        threadId: binding.runtimeKind === "codex" ? binding.runtimeSessionId : null,
+      },
+      status: statusFor(employee.id),
+      messages: messages.map(publicMessage),
+    };
+  };
+
+  const readSession = async (employeeId, pagination = {}) => {
+    const { readOnly, ...page } = pagination;
+    const opened = readOnly ? null : await ensureOpen(employeeId);
+    const employee = opened?.employee || registry.require(employeeId);
+    const binding = opened?.binding || conversationStore.findByAgentKind?.(employee.id, "direct");
+    const threadId = readOnly ? clean(employee.mainThreadId, 120) : binding?.runtimeSessionId;
+    if (!threadId || binding?.runtimeSessionId !== threadId) throw statusError("员工对话记录不存在", 404);
+    const session = await readHistory(routeForEmployee(employee).modelProviderId, threadId, "all", page);
+    if (!session) throw statusError("员工对话记录不存在", 404);
+    return {
+      ...session,
+      title: employee.conversationTitle || session.title || `${employee.name} · 主对话`,
+      archived: employee.conversationArchived === true,
+      conversationKind: "direct",
+      conversationId: binding.conversationId,
+    };
+  };
+
+  const withEmployeeThread = async (employeeId, operation) => {
+    const { threadId, employee } = await ensureOpen(employeeId);
+    return operation({ threadId, employee, runtimeClient: await clientForThread(threadId, employee) });
+  };
+  const requestThread = (employeeId, method, params = {}) => withEmployeeThread(
+    employeeId,
+    ({ threadId, runtimeClient }) => runtimeClient.request(method, { threadId, ...params }),
+  );
+
+  const renameSession = async (employeeId, name) => {
+    const normalized = clean(name, 240);
+    if (!normalized) throw statusError("对话名称不能为空", 400);
+    await requestThread(employeeId, "thread/name/set", { name: normalized });
+    await registry.setConversationTitle(employeeId, normalized);
+    return readSession(employeeId, { limit: 0 });
+  };
+
+  const unarchiveSession = async (employeeId) => {
+    await requestThread(employeeId, "thread/unarchive");
+    await registry.setConversationArchived(employeeId, false);
+    return readSession(employeeId, { limit: 0 });
+  };
+
+  const reviewSession = (employeeId) => requestThread(employeeId, "review/start");
+
+  const forkSession = async (employeeId, lastTurnId) => {
+    if (!clean(lastTurnId, 160)) throw statusError("请选择一个已完成的对话位置再继续", 400);
+    if (!registerSession) throw statusError("分支登记服务未连接", 503);
+    return withEmployeeThread(employeeId, async ({ threadId, employee, runtimeClient }) => {
+      const result = await runtimeClient.request("thread/fork", {
+        threadId,
+        lastTurnId: clean(lastTurnId, 160),
+        cwd: clean(employee.projectRoot, 400) || projectRoot,
+      });
+      const fork = result?.thread;
+      if (!fork?.id) throw new Error("Codex 未返回新的分支会话");
+      const route = routeForEmployee(employee);
+      const model = fork.model || route.model;
+      return registerSession({
+        threadId: clean(fork.id, 120),
+        source: "codex",
+        title: clean(fork.name, 240) || `${employee.name} · 分支`,
+        updatedAt: new Date().toISOString(),
+        messageCount: null,
+        latestUser: "",
+        latestAssistant: "",
+        archived: false,
+        archivable: true,
+        conversationKind: "standard",
+        readOnly: false,
+        forkedFromId: threadId,
+        cwd: fork.cwd || employee.projectRoot,
+      }, route.modelProviderId, route.modelProviderId !== 'current' && model && !model.includes('::')
+        ? `${route.modelProviderId}::${model}` : model);
+    });
+  };
+
+  const handleProtocolMessage = (message) => {
+    const threadId = clean(message?.params?.threadId, 120);
+    const employeeId = threadEmployees.get(threadId);
+    if (!employeeId) return;
+    const executionMessage = normalizeExecutionProtocolMessage(message);
+    if (executionMessage) execution?.handleProtocolMessage?.(executionMessage);
+    const publishNativeStatus = patch => publishStatus(employeeId, patch, false);
+    if (clean(registry.get(employeeId)?.mainThreadId, 120) !== threadId) return;
+    const params = message.params || {};
+    const method = message.method || "";
+    const initialStatus = statusFor(employeeId);
+    const initialSubmission = sendLocks.get(employeeId);
+    const bufferingStart = initialStatus.active
+      && initialStatus.phase === "submitted"
+      && !initialStatus.turnId
+      && initialSubmission?.threadId === threadId
+      && initialSubmission.requestMethod === "turn/start"
+      && !initialSubmission.boundTurnId
+      && !initialSubmission.replaying;
+    if (bufferingStart) {
+      const turnId = turnIdFromMessage(message);
+      if (method === "turn/started") {
+        if (!turnId) return;
+        if (!initialSubmission.candidateTurnId) initialSubmission.candidateTurnId = turnId;
+        initialSubmission.earlyEvents.push(structuredClone(message));
+        return;
+      }
+      if (method === "item/agentMessage/delta") {
+        if (!turnId) return;
+        initialSubmission.earlyEvents.push(structuredClone(message));
+        return;
+      }
+      if (method === "item/completed") {
+        const item = params.item;
+        if (item?.type === "agentMessage" && (!item.phase || item.phase === "final_answer")) {
+          if (!turnId) return;
+          initialSubmission.earlyEvents.push(structuredClone(message));
+          return;
+        }
+      }
+      if (method === "turn/completed") {
+        if (turnId) {
+          initialSubmission.earlyEvents.push(structuredClone(message));
+        } else if (!initialSubmission.earlyCompletionWithoutTurnId) {
+          initialSubmission.earlyCompletionWithoutTurnId = structuredClone(message);
+        }
+        return;
+      }
+    }
+    if (method === "thread/goal/updated" || method === "thread/goal/cleared") {
+      execution?.publishThreadEvent?.(threadId, { type: "goal_status", threadId, conversationId: registry.require(employeeId).conversationId, goal: params.goal || null });
+      return;
+    }
+
+    if (method === "turn/started") {
+      const turnId = turnIdFromMessage(message);
+      const current = statusFor(employeeId);
+      if (!turnId || !current.active) return;
+      if (current.phase === "submitted" && !current.turnId) {
+        const submission = sendLocks.get(employeeId);
+        if (submission?.threadId === threadId && !submission.candidateTurnId) submission.candidateTurnId = turnId;
+        return;
+      }
+      if (current.turnId && current.turnId !== turnId) return;
+      if (current.turnId === turnId) freshThreads.delete(threadId);
+      return;
+    }
+    if (method === "turn/completed") {
+      const status = String(params.turn?.status || "completed");
+      const eventTurnId = turnIdFromMessage(message);
+      const turnId = eventTurnId || clean(statusFor(employeeId).turnId, 160);
+      const current = statusFor(employeeId);
+      const error = String(params.turn?.error?.message || "");
+      const submission = sendLocks.get(employeeId);
+      if (!eventTurnId && submission?.requestMethod === "turn/start" && !submission.boundTurnId) return;
+      if (!eventTurnId && !current.active) return;
+      if (eventTurnId && current.turnId !== eventTurnId) {
+        return;
+      }
+      publishTurnCompletion({ employeeId, threadId, turnId, status, error }, false);
+      return;
+    }
+    if (method === "item/agentMessage/delta") {
+      const turnId = turnIdFromMessage(message);
+      const current = statusFor(employeeId);
+      if (!turnId || !current.active || current.turnId !== turnId) return;
+      const deltaEvent = {
+        type: "employee_assistant_delta",
+        employeeId,
+        threadId,
+        turnId,
+        itemId: clean(params.itemId || params.item?.id, 160),
+        delta: String(params.delta || params.text || ""),
+      };
+      broadcast(deltaEvent);
+      return;
+    }
+    if (method === "item/completed") {
+      const item = params.item;
+      if (!item || !["userMessage", "agentMessage"].includes(item.type)) return;
+      if (item.type === "agentMessage" && item.phase && item.phase !== "final_answer") return;
+      const turnId = turnIdFromMessage(message);
+      const current = statusFor(employeeId);
+      if (item.type === "agentMessage" && (!turnId || !current.active || current.turnId !== turnId)) return;
+      void conversationStore.recordRuntimeEvent(message).catch(() => {});
+      const text = textFromItem(item);
+      if (!text.trim()) return;
+      const role = item.type === "agentMessage" ? "assistant" : "user";
+      broadcast({
+        type: "employee_message_completed",
+        employeeId,
+        threadId,
+        message: publicMessage({
+          id: item.id || `${params.turnId || "turn"}:${role}:${text}`,
+          role,
+          text,
+          turnId,
+          itemId: item.id,
+        }),
+      });
+      execution?.publishThreadEvent?.(threadId, { type: "sessions_changed", threadId });
+      return;
+    }
+    if (method.endsWith("/requestApproval")) {
+      publishNativeStatus({
+        phase: "waitingOnApproval",
+        label: "等待原生审批",
+        detail: "",
+        active: true,
+      });
+      return;
+    }
+    if (method === "item/tool/requestUserInput" || method === "mcpServer/elicitation/request") {
+      publishNativeStatus({
+        phase: "waitingOnUserInput",
+        label: "等待补充信息",
+        detail: "",
+        active: true,
+      });
+    }
+  };
+
+  const replayEarlyEvents = (employeeId, submission, confirmedTurnId) => {
+    if (!submission) return;
+    const earlyEvents = submission.earlyEvents;
+    const compatibleCompletion = submission.earlyCompletionWithoutTurnId;
+    let completionReplayed = false;
+    submission.replaying = true;
+    try {
+      for (const event of earlyEvents) {
+        if (turnIdFromMessage(event) !== confirmedTurnId) continue;
+        if (event.method === "turn/completed") {
+          if (completionReplayed) continue;
+          completionReplayed = true;
+        }
+        handleProtocolMessage(event);
+      }
+      if (!completionReplayed && compatibleCompletion) handleProtocolMessage(compatibleCompletion);
+    } finally {
+      submission.replaying = false;
+      clearEarlyEvents(submission);
+    }
+  };
+
+  subscribeClient(defaultClient);
+
+  const sendMessage = async ({ employeeId, text, attachments = [], requestId = "" }) => {
+    await modelChanges.get(employeeId);
+    await reconcileEmployeeIdle(employeeId);
+    const pending = registry.require(employeeId).pendingModelSettings;
+    if (pending) await applyModelSettings(employeeId, pending, { source: pending.modelSelectionSource || "default" });
+    const employee = registry.require(employeeId);
+    const cleanText = String(text || "").trim();
+    if (!cleanText && !attachments.length) throw statusError("消息不能为空", 400);
+    if (cleanText.length > 32000) throw statusError("消息过长", 413);
+    const cleanRequestId = clean(requestId, 120) || randomUUID();
+    if (sendLocks.has(employee.id)) throw statusError("员工消息正在提交", 409);
+    const submission = {
+      threadId: "",
+      promise: null,
+      requestMethod: "",
+      candidateTurnId: "",
+      earlyEvents: [],
+      earlyCompletionWithoutTurnId: null,
+      replaying: false,
+    };
+    sendLocks.set(employee.id, submission);
+    const sending = (async () => {
+      const { binding, threadId } = await ensureOpen(employee.id);
+      submission.threadId = threadId;
+      if (registry.require(employee.id).conversationArchived) await unarchiveSession(employee.id);
+      const current = statusFor(employee.id);
+      const requestMethod = current.active && current.turnId ? "turn/steer" : "turn/start";
+      submission.requestMethod = requestMethod;
+      publishStatus(employee.id, {
+        phase: "submitted",
+        label: "已提交",
+        detail: "",
+        active: true,
+        turnId: requestMethod === "turn/steer" ? current.turnId : "",
+      });
+      try {
+        await resumeThread(threadId, registry.require(employee.id));
+        const context = await contextProvider?.(employee.id);
+        const runtimeClient = await clientForThread(threadId, registry.require(employee.id));
+        const input = await inputFromAttachments(cleanText, attachments, attachmentContent);
+        const result = await runtimeClient.request(requestMethod, {
+          threadId,
+          input,
+          clientUserMessageId: cleanRequestId,
+          ...(requestMethod === "turn/steer" ? { expectedTurnId: current.turnId } : {
+            cwd: clean(employee.projectRoot, 400) || projectRoot,
+            ...turnPolicyFor(),
+          }),
+          ...(requestMethod === "turn/start" ? {
+            ...(employee.model ? { model: employee.model } : {}),
+            ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}),
+            additionalContext: { 'negus.model': { kind: 'application', value: `本轮调用模型：${employee.model || '未取得'}。回答模型身份时以本轮请求为准，不以历史回复或全局默认配置推断。此标识不证明供应商内部实际模型。` }, 'negus.employee': { kind: 'application', value: '以下是本员工当前生效的职责和工作要求，替代对话中旧的员工身份及派工说明。\n' + [
+              communicationInstructions, employee.instructions,
+              [context, taskService?.leaderInstructions(employee.id)].filter(Boolean).join("\n"),
+            ].filter(Boolean).join('\n') } },
+          } : {}),
+        });
+        if (growthService?.suggestFromMessage) void Promise.resolve().then(() => growthService.suggestFromMessage(employee.id, cleanText, cleanRequestId))
+          .catch(error => console.warn(`[employee-runtime] memory suggestion failed: ${String(error?.message || error)}`));
+        freshThreads.delete(threadId);
+        const currentStatus = statusFor(employee.id);
+        const completedTurnId = clean(result?.turn?.id || result?.turnId || (requestMethod === "turn/steer" ? current.turnId : ""), 160);
+        if (requestMethod === "turn/start" && !completedTurnId) {
+          throw statusError("Codex 未返回当前任务编号，无法确认执行状态", 502);
+        }
+        submission.boundTurnId = completedTurnId;
+        if (currentStatus.active && ["submitted", "working"].includes(currentStatus.phase)) {
+          publishStatus(employee.id, {
+            phase: "working",
+            label: "正在处理",
+            active: true,
+            turnId: completedTurnId,
+          });
+        }
+        replayEarlyEvents(employee.id, submission, completedTurnId);
+        return {
+          requestId: cleanRequestId,
+          employeeId: employee.id,
+          conversationId: binding.conversationId,
+          threadId,
+          status: requestMethod === "turn/steer" ? "steered" : "inProgress",
+          turnId: completedTurnId,
+        };
+      } catch (error) {
+        publishStatus(employee.id, {
+          phase: isOccupiedError(error) ? "occupied" : "failed",
+          label: isOccupiedError(error) ? "被占用中" : "提交失败",
+          detail: String(error?.message || error),
+          active: isOccupiedError(error),
+          turnId: requestMethod === "turn/steer" ? current.turnId : "",
+        });
+        throw error;
+      }
+    })();
+    submission.promise = sending;
+    try {
+      return await sending;
+    } finally {
+      if (sendLocks.get(employee.id) === submission) sendLocks.delete(employee.id);
+      clearEarlyEvents(submission);
+    }
+  };
+
+  const confirmModification = async (employeeId) => {
+    const employee = registry.require(employeeId);
+    const { threadId } = await ensureOpen(employee.id);
+    const runtimeClient = await clientForThread(threadId, employee);
+    await runtimeClient.request("thread/resume", {
+      threadId,
+      persistExtendedHistory: true,
+      ...policyFor(),
+    });
+    // Keep this legacy endpoint idempotent for older clients. Confirmation
+    // never changes the execution policy or gates access anymore.
+    const confirmed = await registry.setModificationConfirmed(employee.id, true);
+    publishStatus(employee.id, { phase: "idle", label: "等待任务", detail: "", active: false, turnId: "" });
+    broadcast({ type: "employee_confirmation_changed", employeeId: employee.id, modificationConfirmed: true });
+    return { employee: confirmed, status: statusFor(employee.id) };
+  };
+
+  const getStatus = async (employeeId) => {
+    const employee = registry.require(employeeId);
+    return {
+      employee: registry.get(employee.id),
+      status: statusFor(employee.id),
+      modificationConfirmed: Boolean(employee.modificationConfirmed),
+      threadId: clean(employee.mainThreadId, 120) || null,
+      conversationId: clean(employee.conversationId, 120) || null,
+    };
+  };
+
+  const updateModelSettings = (employeeId, settings = {}) => {
+    const previous = modelChanges.get(employeeId);
+    const task = (async () => {
+      await previous?.catch(() => {});
+      await openPromises.get(employeeId);
+      if (sendLocks.has(employeeId)) throw statusError("员工正在处理消息，不能修改配置", 409);
+      await reconcileEmployeeIdle(employeeId);
+      if (statusFor(employeeId).active) throw statusError("员工正在处理消息，不能修改模型", 409);
+      const employee = registry.require(employeeId);
+      const selected = { ...employee, ...employee.pendingModelSettings, ...settings };
+      const route = modelProviders.resolveRoute({ model: selected.model, modelProviderId: Object.hasOwn(settings, "model") ? settings.modelProviderId || "" : selected.modelProviderId });
+      const pending = { modelProviderId: route.modelProviderId, model: route.model, reasoningEffort: selected.reasoningEffort, modelSelectionSource: "explicit" };
+      if (!employee.mainThreadId) return applyModelSettings(employeeId, pending);
+      await registry.setPendingModelSettings(employeeId, pending);
+      return { employee: { ...employee, ...pending }, status: statusFor(employeeId) };
+    })();
+    modelChanges.set(employeeId, task);
+    return task.finally(() => { if (modelChanges.get(employeeId) === task) modelChanges.delete(employeeId); });
+  };
+  const applyModelSettings = async (employeeId, settings = {}, options = {}) => {
+    const employee = registry.require(employeeId);
+    if (statusFor(employee.id).active) throw statusError("员工正在处理消息，不能修改模型", 409);
+    const requestedModel = Object.prototype.hasOwnProperty.call(settings, "model")
+      ? clean(settings.model, 120)
+      : clean(employee.model, 120);
+    const explicitProviderId = clean(settings.modelProviderId, 80);
+    const requestedProviderId = Object.hasOwn(settings, "model") && requestedModel && modelProviders && !explicitProviderId
+      ? ""
+      : explicitProviderId || clean(employee.modelProviderId, 80) || CURRENT_MODEL_PROVIDER_ID;
+    if (!modelProviders && requestedProviderId !== CURRENT_MODEL_PROVIDER_ID) {
+      throw statusError("当前员工运行时未启用外部模型供应商", 503);
+    }
+    const requestedRoute = modelProviders && !requestedProviderId
+      ? modelProviders.resolveRoute({ modelProviderId: "", model: requestedModel })
+      : modelProviders ? {
+        modelProviderId: requestedProviderId,
+        model: requestedModel,
+      } : {
+      modelProviderId: CURRENT_MODEL_PROVIDER_ID,
+      model: clean(settings.model, 120),
+    };
+    const currentRoute = routeForEmployee(employee);
+    const switchingProvider = currentRoute.modelProviderId !== requestedRoute.modelProviderId;
+    const runtimeClient = modelProviders
+      ? await modelProviders.getClient(requestedRoute)
+      : defaultClient;
+    subscribeClient(runtimeClient);
+    const reasoningEffort = Object.prototype.hasOwnProperty.call(settings, "reasoningEffort")
+      ? clean(settings.reasoningEffort, 40)
+      : clean(employee.reasoningEffort, 40);
+    const nextSettings = { modelProviderId: requestedRoute.modelProviderId, model: requestedRoute.model, reasoningEffort };
+    const threadId = employee.mainThreadId;
+    let originalClient;
+    try {
+      if (threadId) {
+        originalClient = await clientForThread(threadId, employee);
+        if (switchingProvider) {
+          await transferEmployeeThread({ source: originalClient, target: runtimeClient, providers: modelProviders,
+            threadId, route: requestedRoute, reasoningEffort,
+            config: { ...taskService?.leaderConfig(employee.id), ...(reasoningEffort ? { model_reasoning_effort: reasoningEffort } : {}) },
+            instructions: employeeTurnInstructions(employee.instructions, taskService?.leaderInstructions(employee.id)),
+            policy: policyFor(employee),
+          });
+          threadClients.set(threadId, runtimeClient);
+          freshThreads.delete(threadId);
+          taskConfiguredClients.set(threadId, runtimeClient);
+        } else {
+          await resumeThread(threadId, employee);
+          if (requestedRoute.model && requestedRoute.model !== currentRoute.model) {
+            await runtimeClient.request("thread/settings/update", { threadId, model: requestedRoute.model });
+          }
+          if (reasoningEffort && reasoningEffort !== clean(employee.reasoningEffort, 40)) {
+            await runtimeClient.request("thread/settings/update", { threadId, effort: reasoningEffort });
+          }
+          freshThreads.delete(threadId);
+        }
+      }
+      const updated = await registry.setModelSettings(employee.id, nextSettings, { source: options.source || "explicit" });
+      return { employee: updated, status: statusFor(employee.id) };
+    } catch (error) {
+      if (switchingProvider && threadId && originalClient) {
+        await runtimeClient.request("thread/unsubscribe", { threadId }).catch(() => {});
+        threadClients.set(threadId, originalClient);
+        freshThreads.delete(threadId);
+        taskConfiguredClients.delete(threadId);
+        await resumeThread(threadId, employee).catch(() => {});
+      }
+      throw error;
+    }
+
+  };
+
+  const runtimeContextForThread = async (threadId) => {
+    const cleanThreadId = clean(threadId, 120);
+    const employeeId = threadEmployees.get(cleanThreadId);
+    if (!employeeId) throw statusError("员工 Thread 不存在", 404);
+    const saved = registry.require(employeeId);
+    const employee = saved.pendingModelSettings || saved;
+    return {
+      model: employee.modelProviderId?.startsWith("ccswitch_") ? employee.modelProviderId + "::" + employee.model : employee.model || "",
+      modelProvider: employee.modelProviderId || CURRENT_MODEL_PROVIDER_ID,
+      reasoningEffort: employee.reasoningEffort || "",
+    };
+  };
+
+  const threadStatus = async (threadId) => {
+    const cleanThreadId = clean(threadId, 120);
+    const employeeId = threadEmployees.get(cleanThreadId);
+    if (!employeeId) throw statusError("员工 Thread 不存在", 404);
+    const runtimeClient = await clientForThread(cleanThreadId, registry.require(employeeId));
+    const request = runtimeClient.probe?.bind(runtimeClient) || runtimeClient.request.bind(runtimeClient);
+    const result = await request("thread/read", { threadId: cleanThreadId, includeTurns: false }, {
+      timeoutMs: 5000,
+      threadId: cleanThreadId,
+    });
+    return result?.thread?.status || null;
+  };
+
+  const compactContext = async (threadId) => {
+    const cleanThreadId = clean(threadId, 120);
+    const employeeId = threadEmployees.get(cleanThreadId);
+    if (!employeeId) throw statusError("员工 Thread 不存在", 404);
+    const runtimeClient = await clientForThread(cleanThreadId, registry.require(employeeId));
+    await resumeThread(cleanThreadId, registry.require(employeeId));
+    return runtimeClient.request("thread/compact/start", { threadId: cleanThreadId });
+  };
+
+
+  const interrupt = async (employeeId, expectedTurnId = "") => {
+    const employee = registry.require(employeeId);
+    const current = statusFor(employee.id);
+    const expected = clean(expectedTurnId, 160);
+    if (expected && (!current.active || !current.turnId)) {
+      throw statusError("Goal 对应任务已不在运行，请刷新后重试", 409);
+    }
+    if (expected && current.turnId !== expected) {
+      throw statusError("员工当前任务不属于这个 Goal，已拒绝中断", 409);
+    }
+    if (!current.active || !current.turnId) return { employeeId: employee.id, status: "idle" };
+    const { threadId } = await ensureOpen(employee.id);
+    const runtimeClient = await clientForThread(threadId, employee);
+    await runtimeClient.request("turn/interrupt", { threadId, turnId: current.turnId });
+    publishStatus(employee.id, {
+      phase: "interrupted",
+      label: "已中断",
+      detail: "Goal 已暂停或停止当前执行",
+      active: false,
+      turnId: current.turnId,
+    });
+    return { employeeId: employee.id, threadId, turnId: current.turnId, status: "interrupted" };
+  };
+
+  const goalRequest = async (threadId, method, patch = {}, options = {}) => {
+    const employeeId = threadEmployees.get(threadId);
+    if (!employeeId) throw statusError("员工 Thread 不存在", 404);
+    const employee = registry.require(employeeId);
+    const runtimeClient = await clientForThread(threadId, employee);
+    const providerId = routeForEmployee(employee).modelProviderId;
+    const attachmentRoot = providerId && providerId !== CURRENT_MODEL_PROVIDER_ID
+      ? path.join(projectRoot, "runtime", "model-providers", providerId, "codex-home", "attachments")
+      : path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "attachments");
+    if (patch.objective !== undefined || patch.status === "active") await resumeThread(threadId, employee);
+    const materialized = patch.objective !== undefined ? await materializeGoalObjective(patch.objective, attachmentRoot) : null;
+    const result = method === 'thread/goal/get' ? await readThreadGoal(runtimeClient, threadId, attachmentRoot, options) : await runtimeClient.request(method, {
+      threadId, ...patch, ...(materialized ? { objective: materialized.objective } : {}),
+    }, options);
+    return Object.hasOwn(result, "goal") ? { ...result, goal: await expandGoalObjective(result.goal, attachmentRoot) } : result;
+  };
+
+  const pendingUserInput = async (threadId) => {
+    const cleanThreadId = clean(threadId, 120);
+    const employeeId = threadEmployees.get(cleanThreadId);
+    if (!employeeId) throw statusError("员工 Thread 不存在", 404);
+    const runtimeClient = await clientForThread(cleanThreadId, registry.require(employeeId));
+    return runtimeClient.getPendingUserInput?.(cleanThreadId) || null;
+  };
+
+  const respondToUserInput = async (threadId, requestId, answers) => {
+    const cleanThreadId = clean(threadId, 120);
+    const employeeId = threadEmployees.get(cleanThreadId);
+    if (!employeeId) throw statusError("员工 Thread 不存在", 404);
+    const runtimeClient = await clientForThread(cleanThreadId, registry.require(employeeId));
+    return runtimeClient.respondToUserInput?.(cleanThreadId, requestId, answers);
+  };
+
+  const close = () => {
+    closed = true;
+    for (const submission of sendLocks.values()) clearEarlyEvents(submission);
+    for (const unsubscribe of clientSubscriptions.values()) unsubscribe?.();
+    clientSubscriptions.clear();
+    if (ownsDefaultClient) defaultClient.close();
+  };
+
+  return {
+    hasPendingWork: () => openPromises.size > 0 || sendLocks.size > 0 || [...statuses.values()].some((status) => status.active),
+    open: sessionFor,
+    readSession,
+    getSourceRevision: (threadId) => {
+      const employee = registry.require(threadEmployees.get(threadId));
+      return readRevision(routeForEmployee(employee).modelProviderId, threadId);
+    },
+    renameSession,
+    forkSession,
+    revertSession: (employeeId, beforeTurnId) => requestThread(employeeId, "thread/revert", { beforeTurnId }),
+    unarchiveSession,
+    reviewSession,
+    sendMessage,
+    confirmModification,
+    getStatus,
+    acceptsProtocolMessage,
+    updateModelSettings,
+    getRuntimeContext: runtimeContextForThread,
+    getThreadStatus: threadStatus,
+    compactContext,
+    interrupt,
+    getGoal: (threadId, options) => goalRequest(threadId, "thread/goal/get", {}, options),
+    setGoal: (threadId, patch, options) => goalRequest(threadId, "thread/goal/set", patch, options),
+    clearGoal: (threadId) => goalRequest(threadId, "thread/goal/clear"),
+    getPendingUserInput: pendingUserInput,
+    respondToUserInput,
+    supportsEmployee: (employeeId) => Boolean(registry.get(employeeId)),
+    ownsConversation: (binding) => {
+      const employee = registry.get(binding?.agentId);
+      return Boolean(
+        employee
+          && clean(employee.conversationId, 120) === clean(binding?.conversationId, 120)
+          && clean(employee.mainThreadId, 120) === clean(binding?.runtimeSessionId, 120),
+      );
+    },
+    ownsThread: (threadId) => threadEmployees.has(clean(threadId, 120)),
+    close,
+  };
+};

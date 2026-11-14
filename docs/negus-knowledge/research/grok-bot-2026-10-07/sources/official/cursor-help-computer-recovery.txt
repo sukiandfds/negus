@@ -1,0 +1,118 @@
+← Back
+Grok Bot computer
+
+The Grok Bot computer is shared by your bots. Files, logins, installed apps, and the browser live there. Chats are stored separately, so a computer problem does not delete conversation history by itself.
+
+Open computer controls from Settings > Updates. You can also get Recover from the reconnect screen when the app offers it.
+
+What do Update, Recover, and Reset each do?
+
+ActionWhat it doesWhat it keepsWhat it removes
+UpdateMoves the computer to the latest version. Some updates only refresh Grok Bot's software. Others replace the whole computer, and you may be able to schedule those for later. The text under Update in Settings > Updates tells you which kind is waiting.Software update: everything, including installed apps. Computer update: Bots, files, and logins.Software update: nothing. Computer update: installed apps and packages.
+RecoverSaves what it can, then builds a new computer on the latest version from your saved data. Running work is interrupted.Bots, files, and logins that were savedInstalled apps and packages. Very recent changes, if the computer could not be reached to save them.
+ResetBuilds a new computer on the latest version from your last saved data. Running work is interrupted.Bots, files, and logins that were savedInstalled apps and packages. Very recent changes, if the computer could not be reached to save them.
+
+Recover and Reset both rebuild from your last saved data. If the computer can't be reached to save first, very recent changes may be lost. If Bots recently disappeared, or saving failed, contact support before you use either one.
+
+Which should I try first?
+
+
+Wait, then choose Retry if the computer says Reconnecting or Couldn't Reach Grok Bot's Computer. Bots, files, and logins are safe while it reconnects. Do not Reset during this.
+
+Fully quit Grok Bot and reopen it. On Mac, choose Quit from the menu bar, not just close the window.
+
+Update the computer from Settings > Updates if an update is offered.
+
+Recover if it still cannot reconnect, or if an update looks stuck and Recover computer is shown. On a slow update, Keep waiting is the safe default.
+
+Reset only after those steps. Like Recover, it can lose very recent changes if the computer can't be reached to save them.
+
+
+Do not start a second Update or Reset while one is already running. Repeated resets can interrupt a restore that is still finishing.
+
+How long should I wait?
+
+
+Reconnecting and Recover usually take a few minutes. You can choose Continue in Background.
+
+An Update can also take a few minutes when it is downloading a large image or transferring data. If it says Update still running, keep waiting.
+
+Choose Recover only if the update appears stuck and the app offers Recover computer. If recovery is not available, keep waiting.
+
+If Recover or Reset fails, use Retry Recovery or Retry Reset once. Then stop and contact support.
+
+
+Why does Update say Backup not ready?
+
+The computer's data is not safely backed up yet. Grok Bot will offer the update again after a backup completes. Wait for that. Do not Reset to force the update.
+
+Agent busy means a bot could not pause in time, so the computer was not updated. Let that bot finish, then update again.
+
+Why did a bot fail to respond?
+
+Check the computer first. A bot cannot finish a turn while the computer says Reconnecting or Couldn't Reach Grok Bot's Computer. Follow Which should I try first?, then send the message again.
+
+If the computer is connected and the same prompt still fails, contact support. Include the error title, such as Bot failed to respond, and a screenshot of the computer status.
+
+What happens if I delete files inside the computer?
+
+Conversation history is stored outside the computer, so deleting files inside it, including rm -rf, does not delete chats.
+
+Grok Bot keeps a durable copy of synced computer data. Reopening the computer restores from that copy, so synced files usually come back. If the computer is still empty after Recover, stop making changes inside it and contact support.
+
+Files that exist only on your Mac or Windows machine are not covered. Keep your own backups for those.
+
+Data typeRecoverable?
+Agent conversation historyYes. Stored outside the computer.
+Bots, files, and logins already savedYes. Restored after Update, Recover, and Reset.
+Recent bots and files not yet savedUpdate saves first, and does not run if it can't. Recover and Reset save first when they can reach the computer. If they can't, very recent changes may be lost.
+Installed apps and packagesKept by a software update. Removed by a computer update, Recover, and Reset.
+Files on your Mac or Windows machineNo. Use your own backups.
+
+Project folders such as node_modules or a Python virtual environment are not saved. Reinstall them after a computer update, Recover, or Reset.
+
+My chats or bots look missing. Were they deleted?
+
+Often no. Chats are stored separately from the computer, so a computer problem does not delete conversation history by itself. Check before you Reset.
+
+
+Fully quit Grok Bot and reopen it. On Mac, choose Quit from the menu bar, not just close the window.
+
+Open the same account on another device, including the iPhone app. Bots and conversations are shared across devices signed into that account.
+
+In the sidebar, open Hidden Bots on desktop or Show Hidden Bots on the phone. Hide from sidebar removes a Bot from the list only. Hidden Bots stay active and keep their history. To show one again, choose Show in sidebar on desktop or Unhide on the phone.
+
+Confirm you are in the same Cursor account, not a different login.
+
+
+A disk warning is not data loss. Computer is low on disk space or Computer is critically low on disk space means Disk Saver is auditing usage and will propose safe cleanup. Nothing is deleted without confirmation. Disk Saver is a Bot in the sidebar. Choose Go to Disk Saver to review what it proposes. Declining leaves those files in place. Cleanup applies only to computer files you confirm, not to chats.
+
+Recover and Reset are different. Both can lose very recent changes if the computer can't be reached to save them. Don't use either one to look for chats that seem missing. If they are still missing on every device after the checks above, contact support. Include your account email, the Bot name, and a screenshot of the sidebar.
+
+When should I contact support?
+
+Contact support instead of trying another Reset if:
+
+
+Bots or chats still look missing on every device after the checks in My chats or bots look missing, or saving failed
+
+Backup not ready does not clear
+
+Recover or Reset fails after one retry
+
+The computer is still empty after Recover
+
+
+Include your Cursor account email, Grok Bot version, which action you already tried, the agent name, and a screenshot of the computer status.
+
+Related
+
+
+Grok Bot How Tos
+
+Grok Bot on mobile
+
+Store secrets securely
+
+Get help
+

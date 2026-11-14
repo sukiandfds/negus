@@ -1,0 +1,85 @@
+{
+  "audit": [
+    {
+      "kind": "group",
+      "viewport": 1920,
+      "workspace": 1367,
+      "scrollWidth": 1367,
+      "composer": {
+        "width": 1327,
+        "borderRadius": "8px",
+        "background": "rgb(25, 26, 30)"
+      },
+      "header": 100
+    },
+    {
+      "kind": "group",
+      "viewport": 675,
+      "workspace": 675,
+      "scrollWidth": 675,
+      "composer": {
+        "width": 655,
+        "borderRadius": "8px",
+        "background": "rgb(25, 26, 30)"
+      },
+      "header": 96
+    },
+    {
+      "kind": "group",
+      "viewport": 390,
+      "workspace": 390,
+      "scrollWidth": 390,
+      "composer": {
+        "width": 370,
+        "borderRadius": "8px",
+        "background": "rgb(25, 26, 30)"
+      },
+      "header": 96
+    },
+    {
+      "kind": "single",
+      "viewport": 1920,
+      "workspace": 1367,
+      "scrollWidth": 1367,
+      "composer": {
+        "width": 1327,
+        "borderRadius": "8px",
+        "background": "rgb(25, 26, 30)"
+      },
+      "header": 100
+    },
+    {
+      "kind": "single",
+      "viewport": 675,
+      "workspace": 675,
+      "scrollWidth": 675,
+      "composer": {
+        "width": 655,
+        "borderRadius": "8px",
+        "background": "rgb(25, 26, 30)"
+      },
+      "header": 96
+    },
+    {
+      "kind": "single",
+      "viewport": 390,
+      "workspace": 390,
+      "scrollWidth": 390,
+      "composer": {
+        "width": 370,
+        "borderRadius": "8px",
+        "background": "rgb(25, 26, 30)"
+      },
+      "header": 96
+    }
+  ],
+  "errors": [],
+  "checks": [
+    "mention picker",
+    "roster mention",
+    "quote and cancel",
+    "member profile",
+    "real send and reply",
+    "single chat files tab"
+  ]
+}

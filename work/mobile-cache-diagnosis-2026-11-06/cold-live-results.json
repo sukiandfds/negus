@@ -1,0 +1,11 @@
+{
+  "scope": "Actual local service; brand-new mobile Chrome profile, token-bearing link; not Android Edge/public tunnel",
+  "firstMs": 1373,
+  "visibleMessages": 48,
+  "persisted": {
+    "bodyMessages": 50,
+    "sameSelected": true
+  },
+  "hasAuthCookie": true,
+  "failures": []
+}

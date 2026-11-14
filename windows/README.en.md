@@ -65,7 +65,7 @@ The verification script confirms:
 - The decorative skin layer does not intercept pointer events.
 - When the current route is home, the themed home structure has loaded.
 
-Next, use the generated screenshot to check horizontal overflow and text contrast. On both the home and normal task routes, manually check the project menu and composer interaction. See [`references/qa-inventory.md`](./references/qa-inventory.md) for the complete visual checklist.
+Next, use the generated screenshot to check horizontal overflow and text contrast. On both the home and normal task routes, manually check the project menu and composer interaction. See [`references/qa-inventory.md`](references/qa-inventory.md) for the complete visual checklist.
 
 ## Change and save themes
 
@@ -157,4 +157,4 @@ Open the repository's [new issue page](https://github.com/Fei-Away/Codex-Dream-S
 - It does not write API keys, Base URLs, or model provider settings.
 - Restore controls only Codex processes that pass package identity, executable path, and recorded session checks.
 
-Maintainer and agent constraints live in [`SKILL.md`](./SKILL.md). See [`references/runtime-notes.md`](./references/runtime-notes.md) for deeper runtime troubleshooting.
+Maintainer and agent constraints live in [`SKILL.md`](SKILL.md). See [`references/runtime-notes.md`](references/runtime-notes.md) for deeper runtime troubleshooting.

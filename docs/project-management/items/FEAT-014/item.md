@@ -4,9 +4,9 @@ type: feature
 title: 项目对话归档与恢复
 category: development
 priority: P2
-status: implemented_uncommitted
-updated_at: 2026-08-03 14:47 +08:00
-source: docs/feature-development/features/FEAT-014-conversation-archive.md
+status: pending_review
+updated_at: 2026-11-07
+source: docs/negus-knowledge/features/feature-records/FEAT-014-conversation-archive.md
 related: [FEAT-001]
 ---
 
@@ -40,10 +40,18 @@ related: [FEAT-001]
 
 ## 当前状态
 
-已实现但未提交；旧版 Codex 运行时兼容性和手机体验待确认。
+已实现并已进入提交历史；旧版 Codex 运行时兼容性和手机体验仍待确认。
 
 ## 当前证据
 
-- `docs/feature-development/features/FEAT-014-conversation-archive.md`
+- `docs/negus-knowledge/features/feature-records/FEAT-014-conversation-archive.md`
 - `windows/server/jsonl-conversation-store.mjs`
 - `web-ui/src/features/conversations/hooks/useConversationCatalog.ts`
+
+### 2026-11-07 员工主对话禁止归档
+
+用户原话：
+
+> 我的员工目录没有员工了。可能是之前归档对话时归档了。请你先帮我恢复。然后，禁止员工对话被归档。
+
+有效决定：员工主对话不参与活动/已归档切换，前端不提供“归档”操作，按时间归档也排除员工主对话；服务端拒绝直接调用归档接口。已归档的旧员工主对话仍允许“恢复”，现有普通对话、任务对话和群聊归档行为保持不变。

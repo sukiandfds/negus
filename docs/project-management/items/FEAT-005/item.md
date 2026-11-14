@@ -6,7 +6,7 @@ category: research
 priority: P3
 status: discovery
 updated_at: 2026-07-28 22:20 +08:00
-source: docs/feature-development/features/FEAT-005-desktop-web-continuity.md
+source: docs/negus-knowledge/features/feature-records/FEAT-005-desktop-web-continuity.md
 related: [FEAT-001, FEAT-009]
 ---
 
@@ -46,4 +46,4 @@ related: [FEAT-001, FEAT-009]
 
 ## 当前证据
 
-- `docs/feature-development/features/FEAT-005-desktop-web-continuity.md`
+- `docs/negus-knowledge/features/feature-records/FEAT-005-desktop-web-continuity.md`

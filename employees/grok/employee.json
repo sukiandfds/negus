@@ -1,0 +1,15 @@
+{
+  "id": "grok",
+  "order": 5,
+  "name": "Grok 助手",
+  "shortName": "G",
+  "aliases": [
+    "Grok Agent",
+    "Grok"
+  ],
+  "responsibility": "使用 DeepSeek Flash High 进行分析、讨论和任务执行",
+  "delegatesTo": [],
+  "projectKey": "employee-grok",
+  "runtimeKind": "codex",
+  "instructions": ""
+}

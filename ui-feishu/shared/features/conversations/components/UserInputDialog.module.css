@@ -1,0 +1,129 @@
+.backdrop {
+  position: fixed;
+  z-index: 60;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 68%);
+}
+
+.dialog {
+  display: grid;
+  width: min(520px, 100%);
+  max-height: min(760px, calc(100dvh - 40px));
+  overflow: hidden;
+  border: 1px solid var(--color-border-strong, #444);
+  border-radius: 8px;
+  background: var(--color-bg, #151515);
+  color: var(--color-text, #ededed);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 55%);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 20px 15px;
+  border-bottom: 1px solid var(--color-border, #333);
+}
+
+.icon {
+  display: grid;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--color-border-strong, #444);
+  border-radius: 7px;
+  background: var(--color-surface, #222);
+}
+
+.icon svg { width: 18px; height: 18px; }
+.header h2 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: 0; }
+.header p { margin: 4px 0 0; color: var(--color-text-muted, #929292); font-size: 12px; }
+.form { display: grid; min-height: 0; }
+.questions { overflow-y: auto; padding: 6px 20px 2px; }
+
+.question {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 16px 0;
+}
+
+.question + .question { border-top: 1px solid var(--color-border, #333); }
+.question legend { display: flex; align-items: center; gap: 7px; padding: 0; font-size: 13px; font-weight: 650; }
+.question legend span { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 50%; background: var(--color-surface, #272727); color: var(--color-text-muted, #aaa); font-size: 11px; }
+.question > p { margin: 8px 0 12px; color: var(--color-text-secondary, #c6c6c6); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.options { display: grid; gap: 8px; }
+
+.option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-height: 46px;
+  box-sizing: border-box;
+  border: 1px solid var(--color-border, #383838);
+  border-radius: 7px;
+  padding: 10px 12px;
+  background: var(--color-surface, #202020);
+  cursor: pointer;
+}
+
+.option:has(input[type="radio"]:checked) { border-color: var(--color-text-secondary, #bdbdbd); background: var(--color-surface-raised, #292929); }
+.option input[type="radio"] { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--color-text, #ededed); }
+.option strong { display: block; font-size: 13px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.option small { display: block; margin-top: 3px; color: var(--color-text-muted, #929292); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.other { cursor: default; }
+
+.otherInput,
+.textInput {
+  box-sizing: border-box;
+  width: 100%;
+  height: 40px;
+  border: 1px solid var(--color-border-strong, #494949);
+  border-radius: 6px;
+  outline: 0;
+  padding: 0 10px;
+  background: var(--color-bg, #151515);
+  color: inherit;
+  font: inherit;
+  font-size: 16px;
+}
+
+.otherInput { margin-top: 8px; }
+.otherInput:focus, .textInput:focus { border-color: var(--color-text-secondary, #bdbdbd); }
+.error { margin: 0; padding: 8px 20px 0; color: #e79a91; font-size: 12px; line-height: 1.45; }
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 14px 20px 18px;
+  border-top: 1px solid var(--color-border, #333);
+}
+
+.footer button {
+  min-width: 116px;
+  height: 38px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 16px;
+  background: var(--color-text, #ededed);
+  color: var(--color-bg, #151515);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.footer button:disabled { cursor: default; opacity: .42; }
+
+@media (max-width: 600px) {
+  .backdrop { align-items: end; padding: 0; }
+  .dialog { width: 100%; max-height: min(84dvh, 720px); border-width: 1px 0 0; border-radius: 8px 8px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  .header { padding: 16px; }
+  .questions { padding-right: 16px; padding-left: 16px; }
+  .footer { padding: 12px 16px 14px; }
+  .footer button { width: 100%; }
+}

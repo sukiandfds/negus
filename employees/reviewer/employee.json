@@ -1,0 +1,15 @@
+{
+  "id": "reviewer",
+  "order": 4,
+  "name": "风控质量",
+  "shortName": "审",
+  "aliases": [
+    "审查 Agent",
+    "审查"
+  ],
+  "responsibility": "检查缺陷、回归风险、安全问题和遗漏",
+  "delegatesTo": [],
+  "projectKey": "employee-reviewer",
+  "runtimeKind": "codex",
+  "instructions": ""
+}

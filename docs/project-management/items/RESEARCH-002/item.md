@@ -6,7 +6,7 @@ category: research
 priority: P1
 status: completed
 updated_at: 2026-08-03
-source: docs/research/RUNTIME_CALL_GRAPH_AND_PROJECT_DATA_RESEARCH_2026-08-03.md
+source: docs/negus-knowledge/research/RUNTIME_CALL_GRAPH_AND_PROJECT_DATA_RESEARCH_2026-08-03.md
 related: [RESEARCH-001, PM-001, FEAT-001, FEAT-005]
 product_base_commit: 5f817f0143368c98619011f0b1eaf050baf0efea
 product_commit: 5f817f0143368c98619011f0b1eaf050baf0efea
@@ -33,7 +33,7 @@ last_user_visible_change: 新增一份可按编号定位的核心运行链路与
 
 ## 具体内容
 
-- 研究正文：docs/research/RUNTIME_CALL_GRAPH_AND_PROJECT_DATA_RESEARCH_2026-08-03.md
+- 研究正文：docs/negus-knowledge/research/RUNTIME_CALL_GRAPH_AND_PROJECT_DATA_RESEARCH_2026-08-03.md
 - 调研产品提交：5f817f0143368c98619011f0b1eaf050baf0efea
 - 内容范围：服务端组装、单人会话读写、实时事件、SSE 恢复、标识字段、测试覆盖、项目数据源和页面入口。
 - 本轮未修改生产代码、UI、服务启动配置或测试文件。
@@ -55,7 +55,7 @@ last_user_visible_change: 新增一份可按编号定位的核心运行链路与
 
 ## 当前证据
 
-- docs/research/RUNTIME_CALL_GRAPH_AND_PROJECT_DATA_RESEARCH_2026-08-03.md
+- docs/negus-knowledge/research/RUNTIME_CALL_GRAPH_AND_PROJECT_DATA_RESEARCH_2026-08-03.md
 - windows/server/app-server-conversation-store.mjs
 - windows/server/execution-tracker.mjs
 - windows/server/realtime-hub.mjs

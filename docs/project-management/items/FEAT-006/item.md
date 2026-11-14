@@ -5,8 +5,8 @@ title: 固定公网入口与正式访问控制
 category: maintenance
 priority: null
 status: in_progress
-updated_at: 2026-07-28 23:19 +08:00
-source: docs/feature-development/features/FEAT-006-stable-remote-access.md
+updated_at: 2026-11-12 17:45 +08:00
+source: docs/negus-knowledge/features/feature-records/FEAT-006-stable-remote-access.md
 related: [FEAT-004, FEAT-009]
 ---
 
@@ -15,6 +15,12 @@ related: [FEAT-004, FEAT-009]
 ## 用户原话
 
 历史功能文档未保存原始用户原话，待补录；不能根据文件内容倒推原话。
+
+2026-11-12，来源：当前对话。用户原话：“3.写入需求表，表明这个功能暂不需要。”对应上一轮讨论中的“错误令牌限速”。
+
+## 当前有效决定
+
+错误令牌限速不纳入 Negus 访问控制需求。不因同一地址累计错误访问令牌次数而返回 429，不为此保留可信代理接线；访问控制只校验 query token 和 Cookie，错误凭证始终返回 401。
 
 ## 助手初步理解
 
@@ -28,7 +34,7 @@ related: [FEAT-004, FEAT-009]
 
 使用场景：用户在手机或外部网络打开面板并继续操作本机项目。
 
-当前体验：固定域名可以通过 VPN 路由访问，但线路仍依赖人工保持 VPN，活动任务期间切换线路会中断。
+当前体验：固定域名可以访问，纯文字和已有图片读取正常；但公网发送图片明显缓慢，同一张约 120 KB 图片本机上传约 0.1 秒，公网约 10-16 秒。VPN 可能改善线路，但不稳定，不能作为长期依赖。
 
 交互变化：继续验证稳定线路、访问控制和恢复边界，不在本轮扩大基础设施改动。
 
@@ -46,4 +52,4 @@ related: [FEAT-004, FEAT-009]
 
 ## 当前证据
 
-- `docs/feature-development/features/FEAT-006-stable-remote-access.md`
+- `docs/negus-knowledge/features/feature-records/FEAT-006-stable-remote-access.md`

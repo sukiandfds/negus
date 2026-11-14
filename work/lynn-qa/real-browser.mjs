@@ -1,0 +1,37 @@
+import { chromium } from '/Users/hans/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs';
+import fs from 'node:fs/promises';
+import assert from 'node:assert/strict';
+const root='/Users/hans/myproject/negus',app='/Users/hans/myproject/lynn-photo-workbench';
+const {token,origin}=JSON.parse(await fs.readFile(root+'/work/lynn-qa/access.json','utf8'));
+const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+await context.addCookies([{name:'codex_demo_token',value:token,url:origin}]);
+const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+let postCount=0,acceptedAt,urlAt,jobId;
+page.on('request',r=>{if(r.method()==='POST'&&new URL(r.url()).pathname.endsWith('/api/jobs'))postCount++;});
+page.on('response',async r=>{if(new URL(r.url()).pathname.includes('/api/jobs')){try{const d=await r.json();if(d.id)jobId=d.id;if(d.state==='ready'&&!urlAt)urlAt=Date.now();}catch{}}});
+try {
+ await page.goto(origin+'/api/apps/lynn/');
+ await page.getByLabel('上传人设图',{exact:true}).setInputFiles(app+'/charactertest/夏沐人设图/persona-01-夏日校园.png');
+ await page.getByRole('img',{name:'人设预览'}).waitFor();
+ await page.getByLabel('上传仿拍参考图',{exact:true}).setInputFiles(app+'/charactertest/2026-07-06-韩系街头白裙/ref-01-35fb6bf08282c6da05404ce7.jpg');
+ await page.getByRole('img',{name:'仿拍参考预览'}).waitFor();
+ await page.getByLabel('分辨率',{exact:true}).selectOption('1K');
+ const acceptance=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname.endsWith('/api/jobs'));
+ const startedAt=Date.now();await page.getByRole('button',{name:'生成仿拍',exact:true}).click();
+ const response=await acceptance;const submitted=await response.json();acceptedAt=Date.now();
+ if(!response.ok())throw Error('Submission rejected: '+JSON.stringify(submitted));
+ jobId=submitted.id;console.log(JSON.stringify({event:'accepted',jobId,resolution:'1K',ratio:'3:4',postCount}));
+ await page.getByText('成片已展示',{exact:false}).waitFor({timeout:330000});
+ const displayedAt=Date.now();
+ const image=page.getByRole('img',{name:'仿拍成片',exact:true});
+ const dimensions=await image.evaluate(img=>({width:img.naturalWidth,height:img.naturalHeight,complete:img.complete}));
+ assert.ok(dimensions.width>0);
+ await page.screenshot({path:root+'/work/lynn-qa/screenshots/real-mobile-result.png',fullPage:true});
+ await page.reload();await page.getByText('成片已展示',{exact:false}).waitFor();
+ await page.getByRole('link',{name:'Negus',exact:true}).click();await page.getByRole('link',{name:'仿拍生图'}).waitFor();
+ await page.getByRole('link',{name:'仿拍生图'}).click();await page.getByText('成片已展示',{exact:false}).waitFor();
+ const job=await page.evaluate(async id=>(await fetch('/api/apps/lynn/api/jobs/'+id)).json(),jobId);
+ const result={realProvider:true,jobId,model:job.model,resolution:job.resolution,ratio:job.ratio,postCount,dimensions,requestToAcceptanceMs:acceptedAt-startedAt,requestToUrlMs:urlAt-startedAt,requestToDisplayMs:displayedAt-startedAt,upstreamResponseMs:job.timings?.provider_response_ms,saveState:job.saveState,materializeMs:job.materialize_ms,reloadAndReturn:true,browserErrors:errors};
+ await fs.writeFile(root+'/work/lynn-qa/real-result.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
+} catch(e){console.log(JSON.stringify({jobId,postCount,pageText:await page.locator('body').innerText(),error:e.message}));throw e;} finally {await browser.close();}

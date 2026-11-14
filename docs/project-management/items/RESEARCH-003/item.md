@@ -6,7 +6,7 @@ category: research
 priority: P1
 status: completed
 updated_at: 2026-08-03
-source: docs/research/DOCUMENTATION_BRANCH_MIGRATION_RESEARCH_2026-08-03.md
+source: docs/negus-knowledge/research/DOCUMENTATION_BRANCH_MIGRATION_RESEARCH_2026-08-03.md
 related: [PM-001, RESEARCH-001, RESEARCH-002, FEAT-010]
 product_base_commit: d382a469d9670743f82142b3b0408f2b9f0471b4
 product_commit: d382a469d9670743f82142b3b0408f2b9f0471b4
@@ -37,4 +37,4 @@ last_user_visible_change: 文档分支内容已按架构、功能、项目管理
 - 来源提交：`12155fca55aea45436656713c065a21c5cdef8ca`
 - 目标分支：`codex/publish-current-panel`
 - 目标基线：`d382a469d9670743f82142b3b0408f2b9f0471b4`
-- 迁移记录：`docs/research/DOCUMENTATION_BRANCH_MIGRATION_RESEARCH_2026-08-03.md`
+- 迁移记录：`docs/negus-knowledge/research/DOCUMENTATION_BRANCH_MIGRATION_RESEARCH_2026-08-03.md`

@@ -1,0 +1,13 @@
+{
+  "count": 95,
+  "last": {
+    "id": "m94",
+    "role": "assistant",
+    "text": "最新正文",
+    "createdAt": "2026-11-06T00:00:00Z"
+  },
+  "revision": "r2",
+  "cursor": "before-oldest-cached",
+  "unique": 95,
+  "title": "新页"
+}

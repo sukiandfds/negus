@@ -17,14 +17,21 @@ summary-*.log
 # local agent context
 AGENTS.md
 TASK_PROGRESS.md
+# The base prompt every agent starts from is product source, not local context.
+!windows/server/AGENTS.md
 
 # Local frontend dependencies, caches, and generated output
 .pnpm-store/
 node_modules/
 .playwright-mcp/
-web-ui/node_modules/
-web-ui/dist/
-web-ui/*.tsbuildinfo
-web-ui/vite.config.js
-web-ui/vite.config.d.ts
-web-ui/package-lock.json
+.playwright-cli/
+output/playwright/
+ui-feishu/node_modules/
+ui-feishu/dist/
+ui-feishu/*.tsbuildinfo
+ui-feishu/vite.config.js
+ui-feishu/vite.config.d.ts
+ui-feishu/package-lock.json
+
+# One-off local patch scripts
+.tmp-*

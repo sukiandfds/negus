@@ -1,0 +1,362 @@
+[
+  {
+    "url": "https://docs.x.ai/llms.txt",
+    "finalUrl": "https://docs.x.ai/llms.txt",
+    "status": 200,
+    "file": "sources/official/llms.txt",
+    "sha256": "b54d603eeef6e09af18a83ade62df78d8402bd04158e6a2721ab1c5eaef15fe6",
+    "bytes": 17101,
+    "collectedAt": "2026-10-06T17:45:35.457324+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/approvals-security-and-privacy.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/approvals-security-and-privacy.md",
+    "status": 200,
+    "file": "sources/official/approvals-security-and-privacy.md",
+    "sha256": "37a876b1ff2f73367634adc569ca8bf1b9c50f9c2d914358627850ab02a580f9",
+    "bytes": 7844,
+    "collectedAt": "2026-10-06T17:45:42.264300+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/bots.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/bots.md",
+    "status": 200,
+    "file": "sources/official/bots.md",
+    "sha256": "c21b84c5083b9f85a9c732e90dd237eaf227e8afd201af9904dcb42ceae6d62d",
+    "bytes": 5418,
+    "collectedAt": "2026-10-06T17:45:41.685008+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/chat-and-collaboration.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/chat-and-collaboration.md",
+    "status": 200,
+    "file": "sources/official/chat-and-collaboration.md",
+    "sha256": "13cfa782b8e5fb3915cbcb410db2fe3cb5d25cd5ed7223907aff75979889c292",
+    "bytes": 6708,
+    "collectedAt": "2026-10-06T17:45:41.672259+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/computer-and-apps.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/computer-and-apps.md",
+    "status": 200,
+    "file": "sources/official/computer-and-apps.md",
+    "sha256": "a854c8afee4338d3d88dca622fa29d992d0418deb6d1723d2d181929eece604b",
+    "bytes": 4310,
+    "collectedAt": "2026-10-06T17:45:41.525827+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/computers.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/computers.md",
+    "status": 200,
+    "file": "sources/official/computers.md",
+    "sha256": "9a83b85aefebeeeb3f4d18e0abb2f3e58cd5f20c2234921c16d42660cf68fd28",
+    "bytes": 9288,
+    "collectedAt": "2026-10-06T17:45:47.573055+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/faq.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/faq.md",
+    "status": 200,
+    "file": "sources/official/faq.md",
+    "sha256": "6dbd3940a0e403c2d09b828269476235e9942c248f5d3cbe4b0e3112afd4cb9e",
+    "bytes": 6877,
+    "collectedAt": "2026-10-06T17:45:47.564721+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/files-and-results.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/files-and-results.md",
+    "status": 200,
+    "file": "sources/official/files-and-results.md",
+    "sha256": "861cd7542dbb1c036069cc398cdcab9af2e3410619576ff4943fc2384ae6e5ca",
+    "bytes": 3999,
+    "collectedAt": "2026-10-06T17:45:47.746676+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/get-started.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/get-started.md",
+    "status": 200,
+    "file": "sources/official/get-started.md",
+    "sha256": "f5d0122116d3e8ab09a0cd85aa798e8a03866a77eddf3bf75fa5e9d6bf30940a",
+    "bytes": 6516,
+    "collectedAt": "2026-10-06T17:45:47.578208+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/identity-and-access.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/identity-and-access.md",
+    "status": 200,
+    "file": "sources/official/identity-and-access.md",
+    "sha256": "81118c243e543e40cabbb5c2de6660a0c8a0d5bbd6a8eddbebae008aeb6d5ffd",
+    "bytes": 10697,
+    "collectedAt": "2026-10-06T17:45:52.956643+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/mobile.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/mobile.md",
+    "status": 200,
+    "file": "sources/official/mobile.md",
+    "sha256": "fedd9fde278767c34fb496368f9c72dcdaab1484abd82dff0eb0610f7f38e740",
+    "bytes": 4541,
+    "collectedAt": "2026-10-06T17:45:52.674952+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/overview.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/overview.md",
+    "status": 200,
+    "file": "sources/official/overview.md",
+    "sha256": "776db67333b62277f8d4bb4685dbcf42b8bf79c71e3607fc9affa671e0da518c",
+    "bytes": 5404,
+    "collectedAt": "2026-10-06T17:45:52.664729+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/private-networks.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/private-networks.md",
+    "status": 200,
+    "file": "sources/official/private-networks.md",
+    "sha256": "037e8a41fbd1405c02ffd59f58d5413a4bec09b975eb4967a8c424086c0324be",
+    "bytes": 18186,
+    "collectedAt": "2026-10-06T17:45:52.740141+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/proxies.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/proxies.md",
+    "status": 200,
+    "file": "sources/official/proxies.md",
+    "sha256": "011b86e9a52dc01d6523bca4e719dddf8277b35fd0ebc3a41b5374e4041ee2c5",
+    "bytes": 8825,
+    "collectedAt": "2026-10-06T17:45:57.684204+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/security-faq.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/security-faq.md",
+    "status": 200,
+    "file": "sources/official/security-faq.md",
+    "sha256": "47bb17a93a871e282652c6f289e5e40532807b3694cf7b2cd2a27e0b2dc4a065",
+    "bytes": 8696,
+    "collectedAt": "2026-10-06T17:45:57.932529+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/security.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/security.md",
+    "status": 200,
+    "file": "sources/official/security.md",
+    "sha256": "917b179235c240ae2250fcafc8666a59cd0eb7666a251e0d882b13cf9c134494",
+    "bytes": 17874,
+    "collectedAt": "2026-10-06T17:45:57.743028+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/settings-and-notifications.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/settings-and-notifications.md",
+    "status": 200,
+    "file": "sources/official/settings-and-notifications.md",
+    "sha256": "e17fe02042abe58a36364acd09778dbae69256ba851922a5af551c03959fbe6f",
+    "bytes": 7371,
+    "collectedAt": "2026-10-06T17:45:57.691411+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/skills-routines-and-automations.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/skills-routines-and-automations.md",
+    "status": 200,
+    "file": "sources/official/skills-routines-and-automations.md",
+    "sha256": "303b49492614b4519d933e287dab630c673bba9958bdcaaa3a641b46e588eef9",
+    "bytes": 5439,
+    "collectedAt": "2026-10-06T17:46:02.690000+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/team-bots.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/team-bots.md",
+    "status": 200,
+    "file": "sources/official/team-bots.md",
+    "sha256": "1d06833fdc48f86ee791897e85431ddfbf7a95da931c86909dca9c67ec212f40",
+    "bytes": 18894,
+    "collectedAt": "2026-10-06T17:46:02.958964+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/teams-and-enterprises.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/teams-and-enterprises.md",
+    "status": 200,
+    "file": "sources/official/teams-and-enterprises.md",
+    "sha256": "9aae8115ed7660a4709910149a4bb954ce5f609b7dce86df54730e31c9bc497a",
+    "bytes": 29125,
+    "collectedAt": "2026-10-06T17:46:02.794307+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/troubleshooting.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/troubleshooting.md",
+    "status": 200,
+    "file": "sources/official/troubleshooting.md",
+    "sha256": "03f94a9aefc822b5c5feb9689fb379468838f63036f6d327e9469e5123f9de69",
+    "bytes": 6464,
+    "collectedAt": "2026-10-06T17:46:03.000202+00:00"
+  },
+  {
+    "url": "https://docs.x.ai/grok-bot/use-cases.md",
+    "finalUrl": "https://docs.x.ai/grok-bot/use-cases.md",
+    "status": 200,
+    "file": "sources/official/use-cases.md",
+    "sha256": "8e31da97d549b9b7c5bd9fec80f93c73be878468b350643571e0fe22c28df316",
+    "bytes": 5489,
+    "collectedAt": "2026-10-06T17:46:08.238340+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/plans",
+    "finalUrl": "https://cursor.com/help/grok-bot/plans",
+    "status": 200,
+    "file": "sources/official/cursor-help-plans.md",
+    "sha256": "612ed31fc98877df8e36fc3b4dd2feac9cd48e3f5710225cc6ca6699f6127bf3",
+    "bytes": 266799,
+    "collectedAt": "2026-10-06T17:50:26.333088+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/secrets",
+    "finalUrl": "https://cursor.com/help/grok-bot/secrets",
+    "status": 200,
+    "file": "sources/official/cursor-help-secrets.md",
+    "sha256": "9d6af988cfb5be0b741f97351676428e66419aff64e6c01f897371572020453c",
+    "bytes": 129011,
+    "collectedAt": "2026-10-06T17:50:26.149960+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/computer-recovery",
+    "finalUrl": "https://cursor.com/help/grok-bot/computer-recovery",
+    "status": 200,
+    "file": "sources/official/cursor-help-computer-recovery.md",
+    "sha256": "1f6022ac69b08d80a13acc29de7639239149bab44108e4bd5ae51379556512ec",
+    "bytes": 180807,
+    "collectedAt": "2026-10-06T17:50:26.390911+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/get-help",
+    "finalUrl": "https://cursor.com/help/grok-bot/get-help",
+    "status": 200,
+    "file": "sources/official/cursor-help-get-help.md",
+    "sha256": "030f0f47a3e2bc80bdc2d823e4d40b4b58858ad983a46bd8140581ce9593d293",
+    "bytes": 119526,
+    "collectedAt": "2026-10-06T17:50:26.186629+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/connect-plugins",
+    "finalUrl": "https://cursor.com/help/grok-bot/connect-plugins",
+    "status": 200,
+    "file": "sources/official/cursor-help-connect-plugins.md",
+    "sha256": "217570d0ec863799497b7cfefa6446ecd5cde38d5abd36145217f9cb84c7fa2e",
+    "bytes": 158171,
+    "collectedAt": "2026-10-06T17:51:29.877653+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/delete-account",
+    "finalUrl": "https://cursor.com/help/grok-bot/delete-account",
+    "status": 200,
+    "file": "sources/official/cursor-help-delete-account.md",
+    "sha256": "59b432bd593015a416c6efe5c254f32669199b75d596dbca721d8c1638dc1c7f",
+    "bytes": 140998,
+    "collectedAt": "2026-10-06T17:51:29.465673+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/faqs",
+    "finalUrl": "https://cursor.com/help/grok-bot/faqs",
+    "status": 200,
+    "file": "sources/official/cursor-help-faqs.md",
+    "sha256": "c0a2c294e7b1edaa39360a7b01fffbfb464d73628e1b9590bfd2acefd4034d41",
+    "bytes": 268338,
+    "collectedAt": "2026-10-06T17:51:29.543620+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/how-to",
+    "finalUrl": "https://cursor.com/help/grok-bot/how-to",
+    "status": 200,
+    "file": "sources/official/cursor-help-how-to.md",
+    "sha256": "b9186c14acecb9f147eab3aca7655ad4805c1fd397aba791beaaa4b89e1f3761",
+    "bytes": 311511,
+    "collectedAt": "2026-10-06T17:51:29.616522+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/mobile",
+    "finalUrl": "https://cursor.com/help/grok-bot/mobile",
+    "status": 200,
+    "file": "sources/official/cursor-help-mobile.md",
+    "sha256": "000d086956fdd58b91494ca7fe81964a27f9fde37459490a2e667e237859eb64",
+    "bytes": 136631,
+    "collectedAt": "2026-10-06T17:51:36.397814+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/mobile-purchase",
+    "finalUrl": "https://cursor.com/help/grok-bot/mobile-purchase",
+    "status": 200,
+    "file": "sources/official/cursor-help-mobile-purchase.md",
+    "sha256": "c2056161f8e0fbef5df43f10f7fa9c0fd5bfb5aafe0df7b02622837ec0597161",
+    "bytes": 135793,
+    "collectedAt": "2026-10-06T17:51:36.173802+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/sign-in",
+    "finalUrl": "https://cursor.com/help/grok-bot/sign-in",
+    "status": 200,
+    "file": "sources/official/cursor-help-sign-in.md",
+    "sha256": "5abfb6013212ed3022390a371aada8c282fff885e8c89db643ef531a931b1200",
+    "bytes": 143000,
+    "collectedAt": "2026-10-06T17:51:36.430819+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/supergrok",
+    "finalUrl": "https://cursor.com/help/grok-bot/supergrok",
+    "status": 200,
+    "file": "sources/official/cursor-help-supergrok.md",
+    "sha256": "633c779a4823cccafd8adb4c499eecf10e211d552a542fe523c9d99d775a8455",
+    "bytes": 179042,
+    "collectedAt": "2026-10-06T17:51:36.397669+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/team-bots",
+    "finalUrl": "https://cursor.com/help/grok-bot/team-bots",
+    "status": 200,
+    "file": "sources/official/cursor-help-team-bots.md",
+    "sha256": "3c6614f31752fe61aa64a5c9e6520268e1091c75856667d3436286ff7a5e3e11",
+    "bytes": 219049,
+    "collectedAt": "2026-10-06T17:51:41.815735+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/edit-bot",
+    "finalUrl": "https://cursor.com/help/grok-bot/edit-bot",
+    "status": 200,
+    "file": "sources/official/cursor-help-edit-bot.md",
+    "sha256": "20bea61543a3ad5dfac8385ebb2113d301905957cd1f56abaeed82af0faed94c",
+    "bytes": 164482,
+    "collectedAt": "2026-10-06T17:52:31.623818+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/group-chats",
+    "finalUrl": "https://cursor.com/help/grok-bot/group-chats",
+    "status": 200,
+    "file": "sources/official/cursor-help-group-chats.md",
+    "sha256": "f3d81f62629bc2dabc262d400f55deac7a709d0afc03720df0b6375179bd1e0f",
+    "bytes": 137039,
+    "collectedAt": "2026-10-06T17:52:31.459885+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/onboarding",
+    "finalUrl": "https://cursor.com/help/grok-bot/onboarding",
+    "status": 200,
+    "file": "sources/official/cursor-help-onboarding.md",
+    "sha256": "8f05df976902f3bb2c289ab89ac5bb893d06da2dfdecc3644380c5080b16f6cd",
+    "bytes": 158604,
+    "collectedAt": "2026-10-06T17:52:31.338938+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/routines",
+    "finalUrl": "https://cursor.com/help/grok-bot/routines",
+    "status": 200,
+    "file": "sources/official/cursor-help-routines.md",
+    "sha256": "6d4af18aad77fdde56caf5adb97d72cebb84b3eaa4b8148bed6ecf39da45e2bb",
+    "bytes": 182917,
+    "collectedAt": "2026-10-06T17:52:31.368597+00:00"
+  },
+  {
+    "url": "https://cursor.com/help/grok-bot/voice-chat",
+    "finalUrl": "https://cursor.com/help/grok-bot/voice-chat",
+    "status": 200,
+    "file": "sources/official/cursor-help-voice-chat.md",
+    "sha256": "80dda7e55a5ce3987a6964c965216abed7602e65b6b3606783af3a7eb3ed3a21",
+    "bytes": 141799,
+    "collectedAt": "2026-10-06T17:52:36.176136+00:00"
+  }
+]

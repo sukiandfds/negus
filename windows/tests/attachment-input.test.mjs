@@ -17,23 +17,38 @@ const pngHeader = (width, height) => {
   return buffer;
 };
 
-test("maps uploaded files to Codex native input types", () => {
-  const input = inputFromAttachments("检查附件", [
+test("maps uploaded files to Codex native input types", async () => {
+  const input = await inputFromAttachments("检查附件", [
     { name: "screen.png", mimeType: "image/png", path: "C:\\uploads\\screen.png" },
     { name: "voice.m4a", mimeType: "audio/mp4", path: "C:\\uploads\\voice.m4a" },
     { name: "notes.pdf", mimeType: "application/pdf", path: "C:\\uploads\\notes.pdf" },
   ]);
 
-  assert.deepEqual(input, [
-    { type: "text", text: "检查附件", text_elements: [] },
-    { type: "localImage", path: "C:\\uploads\\screen.png" },
-    { type: "localAudio", path: "C:\\uploads\\voice.m4a" },
-    { type: "mention", name: "notes.pdf", path: "C:\\uploads\\notes.pdf" },
-  ]);
+  assert.deepEqual(input.map((item) => item.type), ["text", "localImage", "localAudio"]);
+  assert.match(input[0].text, /^# Files mentioned by the user:/u);
+  assert.match(input[0].text, /## notes\.pdf: C:\\uploads\\notes\.pdf/u);
+  assert.match(input[0].text, /## My request for Codex:\n\n检查附件$/u);
+});
+
+test("passes text attachments as local files without injecting their content", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-readable-attachment-"));
+  try {
+    const file = path.join(root, "notes.md");
+    await fs.writeFile(file, "可读取的附件正文", "utf8");
+    const input = await inputFromAttachments("检查附件", [
+      { name: "notes.md", mimeType: "text/markdown", path: file },
+    ]);
+
+    assert.deepEqual(input.map((item) => item.type), ["text"]);
+    assert.match(input[0].text, new RegExp(`## notes\\.md: ${file.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`, "u"));
+    assert.doesNotMatch(input[0].text, /可读取的附件正文/u);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });
 
 test("stores uploads inside the configured runtime directory and restores them", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "codex-collab-upload-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-upload-"));
   try {
     const media = createMediaService({ uploadRoot: root });
     const uploaded = await media.upload(Readable.from([Buffer.from("hello")]), { name: "notes.txt", mimeType: "text/plain" });
@@ -50,7 +65,7 @@ test("stores uploads inside the configured runtime directory and restores them",
 });
 
 test("reuses the same stored upload for identical retry content", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "codex-collab-upload-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-upload-"));
   try {
     const media = createMediaService({ uploadRoot: root });
     const first = await media.upload(Readable.from([Buffer.from("same content")]), { name: "notes.txt", mimeType: "text/plain" });
@@ -65,7 +80,7 @@ test("reuses the same stored upload for identical retry content", async () => {
 });
 
 test("returns stable dimensions for uploaded and restored images", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "codex-collab-image-size-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-image-size-"));
   try {
     const media = createMediaService({ uploadRoot: root });
     const uploaded = await media.upload(Readable.from([pngHeader(1200, 800)]), { name: "photo.png", mimeType: "image/png" });
@@ -85,7 +100,7 @@ test("returns stable dimensions for uploaded and restored images", async () => {
 });
 
 test("drops a media entry after its uploaded file is removed", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "codex-collab-upload-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-upload-"));
   try {
     const media = createMediaService({ uploadRoot: root });
     const uploaded = await media.upload(Readable.from([Buffer.from("temporary")]), { name: "temp.txt", mimeType: "text/plain" });

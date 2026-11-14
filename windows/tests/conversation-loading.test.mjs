@@ -1,0 +1,279 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import { ConversationStore, mergeOlderMessages } from "./frontend-conversation-store.mjs";
+import ts from "../../ui-feishu/node_modules/typescript/lib/typescript.js";
+
+const compile = (source) => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
+const moduleUrl = (source) => `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
+const mergeUrl = moduleUrl(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/conversations/state/conversationMerge.ts", import.meta.url), "utf8")));
+const source = compile(await fs.readFile(new URL("../../ui-feishu/shared/features/conversations/hooks/useConversationSession.ts", import.meta.url), "utf8"));
+const detail = (threadId) => ({ threadId, messages: [{ id: `${threadId}-message`, role: "user", text: threadId }], contentVersion: 1 });
+
+async function harness(cachedSessions = [], partialSessionIds = []) {
+  const slots = []; let cursor = 0; const pending = [];
+  const hooks = {
+    useState(value) { const index = cursor++; if (!(index in slots)) slots[index] = typeof value === "function" ? value() : value; return [slots[index], (next) => { slots[index] = typeof next === "function" ? next(slots[index]) : next; }]; },
+    useRef(value) { const index = cursor++; return slots[index] ||= { current: value }; },
+    useCallback(fn) { return fn; }, useEffect() {}, useSyncExternalStore() {},
+  };
+  const api = { session(id, options, signal) { return new Promise((resolve, reject) => pending.push({ id, options, signal, resolve, reject })); } };
+  const key = `__loadingTest${Math.random().toString(36).slice(2)}`;
+  globalThis[key] = { ...hooks, conversationApi: api, ConversationStore, mergeOlderMessages, isPendingThread: id => id.startsWith("pending:") };
+  const rewritten = source.replace(/^import\s+\{([^}]+)\}\s+from\s+[^;]+;/gm, (_, names) => `const {${names}}=globalThis.${key};`);
+  const { useConversationSession } = await import(moduleUrl(rewritten));
+  delete globalThis[key];
+  globalThis.window = { location: { search: "", pathname: "/" }, history: { replaceState() {} }, setTimeout, clearTimeout };
+  const initial = { selectedId: "a", session: cachedSessions.find((s) => s.threadId === "a") || null, cachedSessions, partialSessionIds, sessionIsPartial: false };
+  const render = () => { cursor = 0; return useConversationSession(initial); };
+  return { render, pending, publish(id, session) {
+    const store = render().store;
+    store.commit(id, { ...store.empty(id), session }, store.revisions.get(id) || 0); store.notify();
+  }, fail(id, error) { render().store.finish(id, error); } };
+}
+
+test("batch prefetch warms the action store; opening it does not read details again", async () => {
+  const h = await harness([detail("a")]);
+  const loading = h.render().loadSession("b", { prefetch: true });
+  assert.equal(h.render().session.threadId, "a");
+  h.publish("b", detail("b")); await loading;
+  h.render().selectSession("b");
+  assert.equal(h.render().loadingSession, false);
+  assert.equal(h.pending.length, 0);
+});
+
+test("late batch response for previous selection cannot replace the new selection", async () => {
+  const h = await harness([detail("a")]);
+  const first = h.render().loadSession("a");
+  h.render().selectSession("b");
+  h.publish("a", detail("a")); await first;
+  assert.equal(h.render().selectedId, "b");
+  assert.equal(h.render().loadingSession, true);
+  assert.deepEqual(h.render().session.messages, []);
+  h.publish("b", detail("b"));
+  assert.equal(h.render().session.messages[0].text, "b");
+});
+
+test("adopting a partial cache displays it immediately; recovery forces a complete body", async () => {
+  const h = await harness([detail("a"), detail("b")], ["b"]);
+  await h.render().adoptSelection("b");
+  assert.equal(h.render().session.threadId, "b");
+  assert.equal(h.render().contentSyncState, "recovering");
+  assert.equal(h.render().store.freshBodies.has("b"), true, "partial startup cache must recover a complete body even at the same source version");
+  const loading = h.render().loadSession("b", { recovery: true });
+  assert.equal(h.render().store.freshBodies.has("b"), true);
+  h.publish("b", detail("b")); await loading;
+  assert.equal(h.render().contentSyncState, "stable");
+});
+
+test("failed background read leaves the selected conversation and error unchanged", async () => {
+  const h = await harness([detail("a")]);
+  const loading = h.render().loadSession("b");
+  h.fail("b", "offline"); assert.equal(await loading, false);
+  assert.equal(h.render().session.threadId, "a");
+  assert.equal(h.render().sessionError, "");
+});
+
+test("switching during a read clears the prior error and keeps the destination editable", async () => {
+  const h = await harness([detail("a")]);
+  h.render().setSessionError("previous conversation offline");
+  const loading = h.render().loadSession("b");
+  h.render().selectSession("b");
+  assert.equal(h.render().loadingSession, true);
+  assert.equal(h.render().sessionError, "");
+  h.render().clearSelection();
+  h.publish("b", detail("b")); await loading;
+  assert.equal(h.render().selectedId, "");
+});
+
+const groupSource = compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/hooks/useGroupRoom.ts", import.meta.url), "utf8"));
+const groupMessageUrl = moduleUrl(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/data/groupMessageState.ts", import.meta.url), "utf8")));
+const mentionsUrl = moduleUrl(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/model/agentMentions.ts", import.meta.url), "utf8")));
+const storageUrl = moduleUrl(compile(await fs.readFile(new URL("../../ui-feishu/shared/shared/state/storage.ts", import.meta.url), "utf8")));
+const groupSnapshotUrl = moduleUrl(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/data/groupSnapshot.ts", import.meta.url), "utf8"))
+  .replace('"./groupMessageState"', JSON.stringify(groupMessageUrl)).replace('"../../../shared/state/storage"', JSON.stringify(storageUrl)));
+const groupSnapshot = (id, text = id) => ({ room: { id }, messages: [{ id: `${id}-message`, text, sequence: 1 }], agents: [], members: [] });
+const groupPage = (text) => ({ messages: [{ id: text, text, sequence: 1 }], found: true, hasOlder: false, hasNewer: false, oldestSequence: 1, newestSequence: 1 });
+
+async function groupHarness() {
+  const slots = []; let cursor = 0; const pending = [];
+  const hooks = {
+    useState(value) { const index = cursor++; if (!(index in slots)) slots[index] = typeof value === "function" ? value() : value; return [slots[index], (next) => { slots[index] = typeof next === "function" ? next(slots[index]) : next; }]; },
+    useRef(value) { const index = cursor++; return slots[index] ||= { current: value }; },
+    useCallback(fn) { return fn; }, useEffect() {},
+  };
+  const api = Object.fromEntries(["snapshot", "messages"].map((kind) => [kind, (id, ...args) => new Promise((resolve, reject) => pending.push({ kind, id, args, resolve, reject }))]));
+  const key = `__groupLoadingTest${Math.random().toString(36).slice(2)}`;
+  globalThis[key] = { hooks, api };
+  const rewritten = groupSource.replace(/import .* from "react";/, `const {useState,useRef,useCallback,useEffect}=globalThis.${key}.hooks;`)
+    .replace(/import .* from ".*clientId";/, 'const createClientId=()=>"test";')
+    .replace(/import .* from ".*groupMemberStorage";/, 'const readStoredMember=()=>null,writeStoredMember=()=>{},createMemberId=()=>"test",getOrCreateMember=()=>({id:"test",name:"我"});')
+    .replace(/import .* from ".*groupApi";/, `const groupApi=globalThis.${key}.api;`)
+    .replace('"../model/agentMentions"', JSON.stringify(mentionsUrl))
+    .replace('"../data/groupMessageState"', JSON.stringify(groupMessageUrl))
+    .replace('"../data/groupSnapshot"', JSON.stringify(groupSnapshotUrl))
+    .replace(/import .* from ".*useGroupEvents";/, 'const useGroupEvents=()=>({});');
+  const { useGroupRoom } = await import(moduleUrl(rewritten));
+  delete globalThis[key];
+  const storage = new Map([["negus-group-snapshot-v1", JSON.stringify(groupSnapshot("current-project"))]]);
+  globalThis.window = { localStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) }, setTimeout, clearTimeout };
+  const render = () => { cursor = 0; return useGroupRoom(); };
+  return { render, pending };
+}
+
+test("late group history cannot replace the new room or finish its history request", async () => {
+  const h = await groupHarness();
+  const old = h.render().jumpToDate("2026-09-01");
+  h.render().selectRoom("b");
+  const version = h.render().historyNavigation.version;
+  const current = h.render().loadOlder();
+  assert.equal(h.pending[0].args[1].aborted, true);
+  h.pending[0].resolve(groupPage("old-room")); await old;
+  assert.equal(h.render().snapshot, null);
+  assert.equal(h.render().historyLoading, true);
+  assert.equal(h.render().historyNavigation.version, version);
+  h.pending[1].resolve(groupPage("new-room")); await current;
+  assert.equal(h.render().historyLoading, false);
+});
+
+test("group refresh response stays obsolete after switching away and back", async () => {
+  const h = await groupHarness();
+  const old = h.render().refresh();
+  h.render().selectRoom("b"); h.render().selectRoom("current-project");
+  h.pending[0].resolve(groupSnapshot("current-project", "stale")); await old;
+  assert.equal(h.render().snapshot.messages[0].text, "current-project");
+  const first = h.render().refresh(); const second = h.render().refresh();
+  h.pending[2].resolve(groupSnapshot("current-project", "newest")); await second;
+  h.pending[1].resolve(groupSnapshot("current-project", "older")); await first;
+  assert.equal(h.render().snapshot.messages[0].text, "newest");
+});
+
+test("failed old group history does not leak an error into the selected room", async () => {
+  const h = await groupHarness();
+  const old = h.render().loadOlder();
+  h.render().selectRoom("b"); h.render();
+  h.pending[0].reject(new Error("old room offline")); await old;
+  assert.equal(h.render().error, "");
+  assert.equal(h.render().historyLoading, false);
+});
+
+test("quick group switches preserve a just-loaded snapshot before debounce persistence", async () => {
+  const h = await groupHarness();
+  const update = h.render().refresh();
+  h.pending[0].resolve(groupSnapshot("current-project", "updated")); await update;
+  h.render().selectRoom("b"); h.render().selectRoom("current-project");
+  assert.equal(h.render().snapshot.messages[0].text, "updated");
+  assert.equal(h.render().loading, false);
+});
+
+test("group switch cancels the old frame and new-room deltas still paint; closed sources cannot mutate state", async () => {
+  const source = compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/realtime/useGroupEvents.ts", import.meta.url), "utf8"));
+  const slots = []; let cursor = 0; let effect; let cleanup; let frameId = 0;
+  const frames = new Map(); const sources = [];
+  const hooks = {
+    useState(value) { const index = cursor++; if (!(index in slots)) slots[index] = value; return [slots[index], (next) => { slots[index] = typeof next === "function" ? next(slots[index]) : next; }]; },
+    useRef(value) { const index = cursor++; return slots[index] ||= { current: value }; },
+    useEffect(fn) { effect = fn; },
+  };
+  const key = `__groupEventsTest${Math.random().toString(36).slice(2)}`;
+  globalThis[key] = { hooks };
+  const rewritten = source.replace(/import .* from "react";/, `const {useState,useRef,useEffect}=globalThis.${key}.hooks;`)
+    .replace(/import .* from ".*groupApi";/, 'const groupApi={eventsUrl:()=>"/events"};')
+    .replace('"../model/agentMentions"', JSON.stringify(mentionsUrl))
+    .replace('"../data/groupMessageState"', JSON.stringify(groupMessageUrl))
+    .replace('"../data/groupSnapshot"', JSON.stringify(groupSnapshotUrl));
+  const { useGroupEvents } = await import(moduleUrl(rewritten));
+  delete globalThis[key];
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousEventSource = globalThis.EventSource;
+  globalThis.EventSource = class { constructor() { sources.push(this); } close() {} };
+  globalThis.window = {
+    addEventListener() {}, removeEventListener() {}, setTimeout, clearTimeout,
+    requestAnimationFrame(fn) { frames.set(++frameId, fn); return frameId; },
+    cancelAnimationFrame(id) { frames.delete(id); },
+  };
+  globalThis.document = { addEventListener() {}, removeEventListener() {} };
+  let snapshot = groupSnapshot("a");
+  const setSnapshot = (next) => { snapshot = typeof next === "function" ? next(snapshot) : next; };
+  const render = (room) => { cursor = 0; return useGroupEvents(setSnapshot, room); };
+  const delta = (room, text) => ({ data: JSON.stringify({ type: "group_agent_delta", roomId: room, workId: `${room}-work`, agentId: "agent", itemId: "item", delta: text }) });
+  try {
+    render("a"); cleanup = effect();
+    sources[0].onmessage(delta("a", "old"));
+    assert.equal(frames.size, 1);
+    cleanup();
+    assert.equal(frames.size, 0);
+    snapshot = groupSnapshot("b");
+    render("b"); cleanup = effect();
+    sources[1].onopen();
+    sources[0].onerror();
+    sources[0].onmessage(delta("a", "must be ignored"));
+    assert.equal(render("b").connected, true);
+    assert.equal(snapshot.messages.some((message) => message.workId === "a-work"), false);
+    sources[1].onmessage(delta("b", "new"));
+    assert.equal(frames.size, 1);
+    for (const fn of frames.values()) fn(); frames.clear();
+    assert.equal(render("b").streaming["b-work"].text, "new");
+  } finally {
+    cleanup?.();
+    globalThis.window = previousWindow;
+    globalThis.document = previousDocument;
+    globalThis.EventSource = previousEventSource;
+  }
+});
+
+
+test("first send preserves draft content and composer while adopting the real thread", async () => {
+  const h = await harness([detail("a")]);
+  h.render().setCreatedSession({ ...detail("pending:draft"), messages: [] });
+  h.render().addOptimisticMessage("pending:draft", { id: "optimistic-send", role: "user", text: "hello", submissionId: "send", deliveryState: "sending" });
+  h.render().setCreatedSession({ ...detail("real"), messages: [] }, true);
+  assert.equal(h.render().selectedId, "real");
+  assert.equal(h.render().composerKey, "pending:draft");
+  assert.equal(h.render().session.messages[0].text, "hello");
+});
+
+test("background receipt updates survive before the destination session is loaded", async () => {
+  const h = await harness([detail("a")]);
+  h.render().addOptimisticMessage("b", { id: "optimistic-send", role: "user", text: "hello", submissionId: "send" });
+  h.render().updateOptimisticMessage("b", "optimistic-send", { deliveryState: "failed" });
+  const load = h.render().loadSession("b");
+  h.publish("b", { ...detail("b"), messages: [] });
+  await load;
+  h.render().selectSession("b");
+  assert.equal(h.render().session.messages[0].deliveryState, "failed");
+});
+
+test('inserted message keeps its position when acceptance adds the active turn id', async () => {
+  const { mergeMessageList } = await import(mergeUrl);
+  const time = seconds => new Date(1700000000000 + seconds * 1000).toISOString();
+  const history = [
+    { id: 'start', role: 'user', text: 'start', turnId: 't', turnItemIndex: 0, turnStartedAtMs: 1700000000000, createdAt: time(0) },
+    { id: 'progress', role: 'assistant', text: 'working', turnId: 't', turnItemIndex: 1, turnStartedAtMs: 1700000000000, createdAt: time(10) },
+  ];
+  const local = { id: 'optimistic-send', role: 'user', text: 'insert', submissionId: 'send', createdAt: time(20) };
+  const ids = list => list.map(item => item.id);
+  assert.deepEqual(ids(mergeMessageList([local], history)), ['start', 'progress', local.id]);
+  assert.deepEqual(ids(mergeMessageList([{ ...local, turnId: 't' }], history)), ['start', 'progress', local.id]);
+  const native = { ...local, id: 'native', turnId: 't', turnItemIndex: 2, turnStartedAtMs: 1700000000000 };
+  assert.deepEqual(ids(mergeMessageList([{ ...local, turnId: 't' }], [...history, native])), ['start', 'progress', 'native']);
+});
+
+test('group cache retains loaded history and restores state together', async () => {
+  const storage = new Map();
+  const previousWindow = globalThis.window;
+  globalThis.window = { localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) } };
+  try {
+    const { writeGroupSnapshot, readGroupSnapshot } = await import(groupSnapshotUrl);
+    const snapshot = { ...groupSnapshot('cache-check'), messages: Array.from({ length: 120 }, (_, i) => ({ id: `m${i}`, sequence: i + 1, text: `${i}`, type: 'human' })),
+      agents: [{ id: 'manager', active: true }], activeWorks: [{ workId: 'work', agentId: 'manager', startedAt: '2026-11-04T12:00:00Z' }] };
+    writeGroupSnapshot(snapshot);
+    writeGroupSnapshot({ ...snapshot, messages: snapshot.messages.slice(-60) });
+    const saved = readGroupSnapshot('cache-check');
+    assert.equal(saved.messages.filter(message => message.type === 'human').length, 120);
+    assert.equal(saved.agents[0].active, true);
+    assert.equal(saved.activeWorks.length, 1);
+    assert.equal(readGroupSnapshot('other'), null);
+  } finally { globalThis.window = previousWindow; }
+});

@@ -1,0 +1,140 @@
+[
+  {
+    "delay": 0,
+    "selected": "a",
+    "apiRequestsAborted": 8,
+    "errors": [],
+    "events": [
+      {
+        "kind": "empty-root",
+        "ms": 0,
+        "chars": 0
+      },
+      {
+        "kind": "current-cache-complete",
+        "ms": 54
+      },
+      {
+        "kind": "cached-content",
+        "ms": 72,
+        "chars": 94
+      },
+      {
+        "kind": "all-cache-read",
+        "ms": 81
+      },
+      {
+        "kind": "all-cache-native-complete",
+        "ms": 81
+      },
+      {
+        "kind": "all-cache-delivered",
+        "ms": 81
+      },
+      {
+        "kind": "current-cache-complete",
+        "ms": 89
+      },
+      {
+        "kind": "current-cache-complete",
+        "ms": 90
+      },
+      {
+        "kind": "current-cache-complete",
+        "ms": 90
+      }
+    ]
+  },
+  {
+    "delay": 1200,
+    "selected": "a",
+    "apiRequestsAborted": 8,
+    "errors": [],
+    "events": [
+      {
+        "kind": "empty-root",
+        "ms": 0,
+        "chars": 0
+      },
+      {
+        "kind": "current-cache-complete",
+        "ms": 47
+      },
+      {
+        "kind": "cached-content",
+        "ms": 65,
+        "chars": 94
+      },
+      {
+        "kind": "all-cache-read",
+        "ms": 74
+      },
+      {
+        "kind": "all-cache-native-complete",
+        "ms": 74
+      },
+      {
+        "kind": "current-cache-complete",
+        "ms": 74
+      },
+      {
+        "kind": "current-cache-complete",
+        "ms": 82
+      },
+      {
+        "kind": "all-cache-delivered",
+        "ms": 1275
+      },
+      {
+        "kind": "current-cache-complete",
+        "ms": 1281
+      }
+    ]
+  },
+  {
+    "delay": 1200,
+    "selected": "b",
+    "apiRequestsAborted": 8,
+    "errors": [],
+    "events": [
+      {
+        "kind": "empty-root",
+        "ms": 0,
+        "chars": 0
+      },
+      {
+        "kind": "current-cache-complete",
+        "ms": 47
+      },
+      {
+        "kind": "cached-content",
+        "ms": 65,
+        "chars": 92
+      },
+      {
+        "kind": "all-cache-read",
+        "ms": 73
+      },
+      {
+        "kind": "all-cache-native-complete",
+        "ms": 73
+      },
+      {
+        "kind": "current-cache-complete",
+        "ms": 74
+      },
+      {
+        "kind": "current-cache-complete",
+        "ms": 80
+      },
+      {
+        "kind": "all-cache-delivered",
+        "ms": 1277
+      },
+      {
+        "kind": "current-cache-complete",
+        "ms": 1286
+      }
+    ]
+  }
+]

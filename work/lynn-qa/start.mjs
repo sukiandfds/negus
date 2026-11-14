@@ -1,0 +1,11 @@
+import { spawn } from 'node:child_process';
+import fs from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+const root='/Users/hans/myproject/negus';
+await fs.cp(root+'/employees',root+'/work/lynn-qa/project/employees',{recursive:true,filter:source=>!source.includes('/runtime/')});
+const token=randomBytes(24).toString('hex');
+await fs.writeFile(root+'/work/lynn-qa/access.json',JSON.stringify({token,origin:'http://127.0.0.1:9371'}),{mode:0o600});
+const child=spawn(process.execPath,[root+'/windows/scripts/remote-room-demo.mjs','--project-root',root+'/work/lynn-qa/project','--web-root',root+'/work/lynn-negus-preview','--port','9371','--token',token],{cwd:root,env:{...process.env,NEGUS_INSTALL_ROOT:root,CODEX_HOME:root+'/work/lynn-qa/codex',CODEX_SESSION_DIR:root+'/work/lynn-qa/sessions'},stdio:['ignore','pipe','pipe']});
+for(const stream of [child.stdout,child.stderr])stream.on('data',data=>process.stdout.write(data.toString().replaceAll(token,'[redacted]')));
+child.on('exit',code=>process.exit(code||0));
+process.on('SIGTERM',()=>child.kill('SIGTERM'));

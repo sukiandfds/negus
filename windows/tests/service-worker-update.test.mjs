@@ -6,7 +6,7 @@ import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 
 const testRoot = path.dirname(fileURLToPath(import.meta.url));
-const serviceWorkerFile = path.resolve(testRoot, "..", "..", "web-ui", "public", "sw.js");
+const serviceWorkerFile = path.resolve(testRoot, "..", "..", "ui-feishu", "public", "sw.js");
 
 const loadWorker = async () => {
   const listeners = new Map();
@@ -41,7 +41,7 @@ test("uses a build-specific cache without activating during install", async () =
   worker.listeners.get("install")({ waitUntil: (promise) => { installWork = promise; } });
   await installWork;
 
-  assert.deepEqual(worker.openedCaches, ["codex-collab-shell-web-test"]);
+  assert.deepEqual(worker.openedCaches, ["negus-shell-web-test"]);
   assert.equal(worker.getSkipWaitingCalls(), 0);
 });
 

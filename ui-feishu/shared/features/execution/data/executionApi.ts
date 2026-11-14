@@ -1,0 +1,61 @@
+import { fetchJson, postJson } from "../../../shared/api/http";
+import { conversationQuery, withConversation, currentConversationId } from "../../../shared/api/conversationScope";
+
+export interface SendMessageResult {
+  threadId: string;
+  turnId: string;
+  status: string;
+  migratedFromThreadId?: string;
+}
+
+export interface SubmissionStatusResult {
+  threadId: string;
+  submissionId: string;
+  status: "accepted" | "pending" | "failed" | "unknown";
+  turnId?: string;
+  messageId?: string;
+  error?: string;
+}
+
+export type SendMessageAttempt =
+  | { outcome: "accepted"; result: SendMessageResult }
+  | { outcome: "uncertain"; result: null }
+  | { outcome: "failed"; result: null; error?: string };
+
+interface InterruptResult {
+  threadId: string;
+  turnId: string;
+  status: string;
+}
+
+export const executionApi = {
+  sendMessage: (threadId: string, text: string, attachmentIds: string[] = [], submissionId = "", signal?: AbortSignal, conversationId = currentConversationId()) => postJson<SendMessageResult>(
+    "/api/session/message",
+    withConversation({ threadId, text, attachmentIds, submissionId }, conversationId),
+    signal,
+  ),
+  submissionStatus: (threadId: string, submissionId: string, signal?: AbortSignal, conversationId = currentConversationId()) => fetchJson<SubmissionStatusResult>(
+    `/api/session/submission?threadId=${encodeURIComponent(threadId)}&submissionId=${encodeURIComponent(submissionId)}${conversationQuery(conversationId)}`,
+    signal,
+  ),
+  interrupt: (threadId: string, signal?: AbortSignal) => postJson<InterruptResult>(
+    "/api/session/interrupt",
+    withConversation({ threadId }),
+    signal,
+  ),
+  review: (threadId: string, signal?: AbortSignal) => postJson<{ threadId: string; status: string }>(
+    "/api/session/review",
+    withConversation({ threadId }),
+    signal,
+  ),
+  answerUserInput: (
+    threadId: string,
+    requestId: string | number,
+    answers: Record<string, { answers: string[] }>,
+    signal?: AbortSignal,
+  ) => postJson<{ threadId: string; requestId: string | number; status: string }>(
+    "/api/session/user-input",
+    withConversation({ threadId, requestId, answers }),
+    signal,
+  ),
+};

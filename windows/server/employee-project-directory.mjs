@@ -1,0 +1,341 @@
+import { previewText } from "./content-blocks.mjs";
+
+const clean = (value, maxLength = 240) => String(value || "").trim().slice(0, maxLength);
+
+const idleStatus = () => ({
+  phase: "idle",
+  label: "idle",
+  active: false,
+  turnId: "",
+  updatedAt: null,
+  indicator: null,
+});
+
+const publicStatus = (value) => {
+  const phase = clean(value?.phase, 64) || "idle";
+  const label = clean(value?.label, 120) || "idle";
+  const occupied = /occupied|busy|locked|占用|锁定/iu.test(`${phase} ${label}`);
+  const active = value?.active === true;
+  return {
+    phase,
+    label,
+    active,
+    ...(value?.turnId ? { turnId: clean(value.turnId, 160) } : { turnId: "" }),
+    ...(value?.updatedAt ? { updatedAt: value.updatedAt } : { updatedAt: null }),
+    indicator: occupied ? "red" : active ? "green" : null,
+  };
+};
+
+const employeeWorkStatus = (mainStatus, groups, tasks) => {
+  const groupCount = groups.filter((item) => item.status?.active).length;
+  const taskCount = tasks.filter((item) => item.status?.active).length;
+  const activeCount = (mainStatus?.active ? 1 : 0) + groupCount + taskCount;
+  if (!activeCount) return mainStatus;
+  const label = groupCount || taskCount
+    ? activeCount > 1
+      ? `正在进行 ${activeCount} 项工作`
+      : groupCount
+        ? "正在群聊工作"
+        : "正在处理后台任务"
+    : "正在主对话工作";
+  const indicators = [mainStatus?.indicator, ...groups.map((item) => item.status?.indicator), ...tasks.map((item) => item.status?.indicator)];
+  return {
+    ...mainStatus,
+    phase: "running",
+    label,
+    active: true,
+    indicator: indicators.includes("red") ? "red" : "green",
+  };
+};
+
+const latestTimestamp = (values) => values
+  .filter(Boolean)
+  .map((value) => ({ value, time: Date.parse(value) }))
+  .filter((entry) => Number.isFinite(entry.time))
+  .sort((left, right) => right.time - left.time)[0]?.value || null;
+
+/**
+ * Aggregates the personal project and long-lived employee projects for the
+ * sidebar. It intentionally exposes no runtime instructions or internal files.
+ */
+export const createEmployeeProjectDirectory = ({
+  project,
+  projectRoot,
+  registry,
+  projectIdentity,
+  employeeRuntime,
+  conversations,
+  execution,
+  employeeConversations,
+  roomDirectory,
+  personalStatus,
+  agentTasks,
+  taskSessionSummaries,
+}) => {
+  const readEmployeeStatus = async (employeeId) => {
+    try {
+      const value = await employeeRuntime?.getStatus?.(employeeId);
+      return publicStatus(value?.status);
+    } catch {
+      return idleStatus();
+    }
+  };
+
+  const employeeSummary = async (employee) => {
+    const conversationId = clean(employee.conversationId, 120);
+    const threadId = clean(employee.mainThreadId, 120);
+    const timestamps = [];
+    const messages = [];
+    try {
+      const saved = conversationId
+        ? await employeeConversations?.readMessages?.(conversationId) || []
+        : [];
+      messages.push(...saved.filter((message) => message?.role === "user" || message?.role === "assistant"));
+      timestamps.push(...messages.map((message) => message.createdAt));
+    } catch {}
+    if (threadId) {
+      try {
+        const nativeSession = await conversations?.findSession?.(threadId, "all", { limit: 1 });
+        timestamps.push(nativeSession?.updatedAt);
+        messages.push(...(nativeSession?.messages || []));
+        if (!nativeSession?.messages?.length) messages.push({
+          text: nativeSession?.latestMessage || nativeSession?.latestAssistant || nativeSession?.latestUser,
+          createdAt: nativeSession?.updatedAt,
+        });
+      } catch {}
+    }
+    const latest = messages.filter((message) => String(message.text || "").trim())
+      .sort((left, right) => (Date.parse(right.createdAt || "") || 0) - (Date.parse(left.createdAt || "") || 0))[0];
+    return { lastActivityAt: latestTimestamp(timestamps), latestMessage: previewText(latest?.text || "", 260), latestMessageAt: latest?.createdAt || null };
+  };
+
+  const groupConversationsFor = async (employee, identity, conversationStatuses) => {
+    const rooms = roomDirectory?.listForAgent?.(employee.id) || [];
+    const entries = await Promise.all(rooms.map(async (room) => {
+      const roomStore = roomDirectory?.get?.(room.id);
+      const agent = roomStore?.getAgent?.(employee.id);
+      const threadId = clean(agent?.threadId, 120);
+      if (!roomStore || !threadId) return null;
+      const binding = employeeConversations?.findByAgentRoom?.(employee.id, room.id);
+      if (!binding) return null;
+      const messages = roomStore.snapshot().messages
+        .filter((message) => message?.type === "agent"
+          && (message.agentId === employee.id || message.authorId === employee.id)
+          && String(message.text || "").trim());
+      const lastActivityAt = latestTimestamp(messages.map((message) => message.createdAt));
+      const status = publicStatus(agent);
+      const statusKey = clean(binding.runtimeSessionId, 120);
+      if (statusKey) conversationStatuses[statusKey] = status;
+      return {
+        id: binding.conversationId,
+        threadId: binding.runtimeSessionId,
+        conversationId: binding.conversationId,
+        projectId: clean(identity?.projectId, 200) || clean(employee.projectKey, 120) || `employee-${employee.id}`,
+        targetProjectId: clean(binding.targetProjectId || room.projectId, 200) || null,
+        executionRoot: clean(binding.executionRoot, 800) || null,
+        role: "project",
+        runtimeKind: binding.runtimeKind,
+        runtimeSessionId: binding.runtimeSessionId,
+        title: binding.title || `${clean(room.name, 200) || "项目群"} · 员工回复`,
+        main: false,
+        lastActivityAt,
+        status,
+      };
+    }));
+    return entries.filter(Boolean);
+  };
+
+  const list = async () => {
+    const employees = registry?.list?.() || [];
+    try { await projectIdentity?.sync?.(); } catch {}
+    const projectIdentities = projectIdentity?.list?.() || [];
+    const personalIdentity = projectIdentities.find((item) => item.kind === "personal") || null;
+    const businessIdentities = projectIdentities.filter((item) => item.kind === "personal" || item.kind === "business");
+    if (!businessIdentities.some((item) => item.kind === "personal")) {
+      businessIdentities.unshift({
+        projectId: clean(project, 200) || "project",
+        key: clean(project, 120) || "project",
+        name: clean(project, 160) || "My project",
+        kind: "personal",
+        root: projectRoot,
+        roots: { project: projectRoot },
+        provider: "codex",
+        runtime: { provider: "codex" },
+      });
+    }
+    const conversationStatuses = {};
+    const entriesByEmployee = new Map(employees.map(employee => [employee.id, agentTasks?.directoryEntries(employee.id) || []]));
+    const taskEntries = [...entriesByEmployee.values()].flat();
+    const providerIds = [...new Set(taskEntries.map(entry => agentTasks?.providerForThread?.(entry.threadId) || "current"))];
+    const summaries = new Map((await Promise.all(providerIds.map(async providerId => {
+      try { return await taskSessionSummaries?.(providerId, "all", false) || []; } catch { return []; }
+    }))).flat().map(session => [session.threadId, session]));
+    const employeeProjects = await Promise.all(employees.map(async (employee) => {
+      const identity = projectIdentity?.getByKey?.("employee", employee.projectKey)
+        || projectIdentity?.getForEmployee?.(employee.id)
+        || null;
+      const boundConversation = identity?.conversation || null;
+      const mainConversationId = clean(employee.conversationId || boundConversation?.conversationId, 120) || null;
+      const mainThreadId = clean(employee.mainThreadId || boundConversation?.threadId || boundConversation?.runtimeSessionId, 120) || null;
+      const status = await readEmployeeStatus(employee.id);
+      const statusKey = clean(mainThreadId || mainConversationId, 120);
+      const mainSummary = await employeeSummary({ ...employee, conversationId: mainConversationId, mainThreadId });
+      const groupConversations = await groupConversationsFor(employee, identity, conversationStatuses);
+      const tasksByThread = new Map();
+      for (const entry of entriesByEmployee.get(employee.id) || []) {
+        const previous = tasksByThread.get(entry.threadId);
+        if (!previous || (!previous.status?.active && (entry.status?.active || (Date.parse(entry.lastActivityAt || "") || 0) >= (Date.parse(previous.lastActivityAt || "") || 0)))) tasksByThread.set(entry.threadId, entry);
+      }
+      const taskConversations = [...tasksByThread.values()].map(entry => {
+        const summary = summaries.get(entry.threadId);
+        return { ...entry, lastActivityAt: summary?.latestMessageAt || null,
+          latestMessageAt: summary?.latestMessageAt || null, latestMessage: summary?.latestMessage || "" };
+      });
+      for (const entry of taskConversations) conversationStatuses[entry.threadId] = entry.status;
+      const lastActivityAt = latestTimestamp([
+        ...taskConversations.map(entry => entry.lastActivityAt),
+        mainSummary.lastActivityAt,
+        ...groupConversations.map((conversation) => conversation.lastActivityAt),
+      ]);
+      const workStatus = employeeWorkStatus(status, groupConversations, taskConversations);
+      if (statusKey) conversationStatuses[statusKey] = status;
+      const employeeConversationEntries = [
+        ...(mainThreadId || mainConversationId ? [{
+          id: clean(mainThreadId || mainConversationId, 120),
+          threadId: mainThreadId,
+          conversationId: mainConversationId,
+          projectId: clean(identity?.projectId, 200) || clean(employee.projectKey, 120) || `employee-${employee.id}`,
+          role: "main",
+          runtimeKind: clean(boundConversation?.runtimeKind || employee.runtimeKind, 80) || "codex",
+          runtimeSessionId: clean(boundConversation?.runtimeSessionId || mainThreadId, 200) || null,
+          title: clean(employee.conversationTitle, 240) || "主对话",
+          main: true,
+          ...mainSummary,
+          archived: employee.conversationArchived === true,
+          status,
+        }] : []),
+        ...taskConversations,
+        ...groupConversations,
+      ];
+      return {
+        id: clean(employee.projectKey, 120) || `employee-${employee.id}`,
+        projectId: clean(identity?.projectId, 200) || clean(employee.projectKey, 120) || `employee-${employee.id}`,
+        name: clean(employee.name, 160) || employee.id,
+        kind: "employee",
+        root: clean(identity?.root, 400) || clean(employee.projectRoot, 400) || projectRoot,
+        roots: identity?.roots || {
+          project: clean(employee.projectRoot, 400) || projectRoot,
+          context: clean(employee.contextRoot, 400) || null,
+        },
+        provider: clean(identity?.provider || employee.runtimeKind, 80) || "codex",
+        runtime: identity?.runtime || { provider: clean(employee.runtimeKind, 80) || "codex" },
+        capabilities: identity?.capabilities || {},
+        memberEmployeeIds: identity?.memberEmployeeIds || [clean(employee.id, 80)],
+        agentIds: identity?.agentIds || [clean(employee.id, 80)],
+        employeeId: clean(employee.id, 80),
+        mainConversationId,
+        mainThreadId,
+        status: workStatus,
+        lastActivityAt,
+        conversations: employeeConversationEntries,
+      };
+    }));
+    let sessions = [];
+    try { sessions = await conversations?.listSessions?.("all", false) || []; } catch {}
+    sessions = await Promise.all(sessions.map(async (session) => {
+      if (clean(session?.title, 240) && session.title !== "未命名会话") return session;
+      try {
+        const detail = await conversations?.findSession?.(session.threadId, "all", { limit: 1 });
+        return detail?.title ? { ...session, title: detail.title } : session;
+      } catch {
+        return session;
+      }
+    }));
+    const employeeThreadIds = new Set([
+      ...employees.map((employee) => clean(employee.mainThreadId, 120)),
+      ...(roomDirectory?.threadIds?.() || []),
+    ].filter(Boolean));
+    sessions = sessions.filter((session) => {
+      const threadId = clean(session?.threadId, 120);
+      if (!threadId || employeeThreadIds.has(threadId)) return false;
+      if (employeeRuntime?.ownsThread?.(threadId)) return false;
+      return !employeeConversations?.findByRuntimeSession?.("codex", threadId);
+    });
+    const sessionStatuses = sessions.map((session) => {
+      const threadId = clean(session?.threadId, 120);
+      let status = idleStatus();
+      try { status = publicStatus(execution?.getStatus?.(threadId)); } catch {}
+      if (threadId) conversationStatuses[threadId] = status;
+      return status;
+    });
+    const activeSessionStatus = sessionStatuses.find((status) => status.indicator === "red")
+      || sessionStatuses.find((status) => status.indicator === "green");
+    const sameRoot = (left, right) => {
+      try { return clean(left, 800).toLowerCase() === clean(right, 800).toLowerCase(); } catch { return false; }
+    };
+    const businessProjects = businessIdentities.map((identity) => {
+      const projectSessions = sessions.filter((session) => sameRoot(session?.cwd, identity.root));
+      const isPersonal = identity.kind === "personal";
+      return {
+        id: clean(identity.projectId, 200) || clean(identity.key, 120),
+        projectId: clean(identity.projectId, 200) || clean(identity.key, 120),
+        name: clean(identity.name, 160) || (isPersonal ? clean(project, 160) : "Business project"),
+        kind: identity.kind,
+        root: clean(identity.root, 400) || (isPersonal ? projectRoot : ""),
+        roots: identity.roots || { project: identity.root },
+        provider: clean(identity.provider, 80) || "codex",
+        runtime: identity.runtime || { provider: "codex" },
+        capabilities: identity.capabilities || {},
+        memberEmployeeIds: identity.memberEmployeeIds || [],
+        agentIds: identity.agentIds || [],
+        status: (isPersonal ? activeSessionStatus : null)
+          || publicStatus(typeof personalStatus === "function" ? personalStatus() : personalStatus),
+        lastActivityAt: latestTimestamp(projectSessions.map((session) => session?.updatedAt)),
+        conversations: projectSessions.map((session) => ({
+          id: clean(session?.threadId, 120),
+          threadId: clean(session?.threadId, 120),
+          projectId: clean(identity.projectId, 200) || clean(identity.key, 120),
+          role: "standard",
+          runtimeKind: "codex",
+          runtimeSessionId: clean(session?.threadId, 120),
+          title: clean(session?.title, 240) || "未命名会话",
+          updatedAt: session?.updatedAt || null,
+          lastActivityAt: session?.updatedAt || null,
+          messageCount: Number.isSafeInteger(session?.messageCount) ? session.messageCount : null,
+          archived: session?.archived === true,
+          nativeSubagent: session?.nativeSubagent === true,
+          parentThreadId: session?.parentThreadId || null,
+          status: conversationStatuses[clean(session?.threadId, 120)] || idleStatus(),
+        })).filter((conversation) => conversation.threadId),
+      };
+    });
+    const projects = [...businessProjects, ...employeeProjects].sort((left, right) => {
+      const leftTime = Date.parse(left.lastActivityAt || "");
+      const rightTime = Date.parse(right.lastActivityAt || "");
+      if (!Number.isFinite(leftTime) && !Number.isFinite(rightTime)) return 0;
+      if (!Number.isFinite(leftTime)) return 1;
+      if (!Number.isFinite(rightTime)) return -1;
+      return rightTime - leftTime;
+    });
+    return {
+      version: 1,
+      projects,
+      conversationStatuses,
+      generatedAt: new Date().toISOString(),
+    };
+  };
+
+  // Share only ongoing reads. A later refresh must still see current activity.
+  let pendingList = null;
+  return {
+    list: () => {
+      if (pendingList) return pendingList;
+      const request = list();
+      pendingList = request;
+      void request.finally(() => {
+        if (pendingList === request) pendingList = null;
+      }).catch(() => {});
+      return request;
+    },
+  };
+};

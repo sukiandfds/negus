@@ -1,0 +1,132 @@
+import type { MediaFile } from "../../../shared/model/media";
+
+export interface GroupMember {
+  id: string;
+  name: string;
+  lastSeenAt: string;
+}
+
+export interface GroupAgent {
+  id: string;
+  name: string;
+  shortName: string;
+  aliases?: string[];
+  responsibility: string;
+  modelProviderId?: string;
+  model?: string;
+  reasoningEffort?: string;
+  threadId: string | null;
+  phase: string;
+  label: string;
+  detail: string;
+  active: boolean;
+  updatedAt: string | null;
+}
+
+export interface GroupMessage {
+  id: string;
+  clientMessageId?: string | null;
+  workId?: string | null;
+  sequence?: number;
+  pending?: boolean;
+  type: "human" | "agent" | "system";
+  authorId: string;
+  authorName: string;
+  agentId: string | null;
+  targetAgentIds?: string[];
+  replyTo?: { id: string; authorName: string; text: string; sequence?: number } | null;
+  failure?: boolean;
+  text: string;
+  attachments?: MediaFile[];
+  artifactIds?: string[];
+  createdAt: string;
+}
+
+export interface GroupStreamingMessage {
+  workId: string;
+  agentId: string;
+  itemId: string;
+  text: string;
+  startedAt: string;
+}
+
+export interface GroupActiveWork {
+  workId: string;
+  agentId: string;
+  agentName: string;
+  startedAt: string;
+  phase: "working";
+}
+
+export interface GroupRoom {
+  id: string;
+  name: string;
+  projectId: string;
+  archived?: boolean;
+}
+
+export interface GroupSnapshot {
+  project: string;
+  projectId: string;
+  room: GroupRoom;
+  messages: GroupMessage[];
+  agents: GroupAgent[];
+  members: GroupMember[];
+  activeWorks?: GroupActiveWork[];
+  history?: GroupMessageHistory;
+}
+
+export interface GroupMessagePage {
+  messages: GroupMessage[];
+  date: string;
+  found: boolean;
+  hasOlder: boolean;
+  hasNewer: boolean;
+  oldestSequence: number;
+  newestSequence: number;
+}
+
+export type GroupMessageHistory = Omit<GroupMessagePage, "messages">;
+
+export interface GroupRoomListResponse {
+  rooms: GroupRoom[];
+}
+
+export interface StoredMember {
+  id: string;
+  name: string;
+}
+
+export interface GroupSendResponse {
+  message: GroupMessage;
+  execution: {
+    jobId: string;
+    agentIds: string[];
+    agentNames?: string[];
+    status: string;
+    queuedBehind?: number;
+    mode?: "broadcast" | "targeted";
+    assignmentId?: string;
+    targets?: Array<{ id: string; state: string }>;
+  } | null;
+  deduplicated?: boolean;
+  listening?: boolean;
+  mode?: "broadcast" | "targeted" | "listening";
+  notice?: string;
+}
+
+export interface GroupInterruptResponse {
+  status: "interrupting" | "interrupted";
+  unresolvedCount?: number;
+  interruptedAgentIds: string[];
+  cancelledDiscussionCount: number;
+}
+
+export type GroupEvent =
+  | { type: "connected"; roomId?: string }
+  | { type: "group_message_created"; roomId?: string; message: GroupMessage }
+  | { type: "group_message_updated"; roomId?: string; message: GroupMessage }
+  | { type: "group_agent_updated"; roomId?: string; agent: GroupAgent }
+  | { type: "group_members_changed"; roomId?: string; members: GroupMember[] }
+  | { type: "group_agent_started"; roomId?: string; agentId: string; agentName: string; workId: string; startedAt: string }
+  | { type: "group_agent_delta"; roomId?: string; agentId: string; workId?: string; itemId: string; delta: string };

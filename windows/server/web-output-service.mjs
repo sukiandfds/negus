@@ -54,19 +54,36 @@ export const validatePdfFile = async (file) => {
   return { size: stat.size };
 };
 
-export const findEdgeBinary = async (configured = process.env.EDGE_BIN) => {
-  const candidates = [
-    configured,
-    "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-    "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-  ].filter(Boolean);
-  for (const candidate of candidates) {
+// Any Chromium-based browser can print to PDF with the same flags. Edge is
+// always present on Windows; other systems use whichever browser is installed.
+const browserCandidates = () => {
+  if (process.platform === "win32") {
+    return [
+      "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+      "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    ];
+  }
+  if (process.platform === "darwin") {
+    return [
+      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    ];
+  }
+  const names = ["microsoft-edge", "google-chrome", "google-chrome-stable", "chromium", "chromium-browser"];
+  return String(process.env.PATH || "").split(path.delimiter).filter(Boolean)
+    .flatMap((directory) => names.map((name) => path.join(directory, name)));
+};
+
+export const findEdgeBinary = async (configured = process.env.EDGE_BIN || process.env.CHROME_BIN) => {
+  for (const candidate of [configured, ...browserCandidates()].filter(Boolean)) {
     try {
       const stat = await fs.stat(candidate);
       if (stat.isFile()) return candidate;
     } catch {}
   }
-  throw statusError("未找到 Microsoft Edge，无法生成 PDF", 503);
+  throw statusError("未找到 Microsoft Edge 或其他 Chromium 浏览器，无法生成 PDF", 503);
 };
 
 export const renderPdfWithEdge = async ({ url, outputFile, edgeBin, timeoutMs = 60_000, spawnProcess = spawn }) => {
@@ -74,6 +91,8 @@ export const renderPdfWithEdge = async ({ url, outputFile, edgeBin, timeoutMs = 
   const profile = await fs.mkdtemp(path.join(os.tmpdir(), "codex-web-output-"));
   await fs.rm(outputFile, { force: true });
   const args = [
+    // Chromium refuses to start its sandbox as root (containers, CI).
+    ...(process.getuid?.() === 0 ? ["--no-sandbox"] : []),
     "--headless=new",
     "--disable-gpu",
     "--disable-extensions",

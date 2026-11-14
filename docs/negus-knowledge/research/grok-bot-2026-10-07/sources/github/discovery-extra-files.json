@@ -1,0 +1,37 @@
+[
+  {
+    "repo": "microsoft/agent-framework",
+    "commit": "41e785fb9a3c853272ce0fbd2eb93364e9d1de13",
+    "file": "sources/github/microsoft--agent-framework/README.md",
+    "sha256": "4a0de0b6ad49995f281af34153c07d42c14801eb05ac39be5602d462c5eff690",
+    "url": "https://raw.githubusercontent.com/microsoft/agent-framework/41e785fb9a3c853272ce0fbd2eb93364e9d1de13/README.md"
+  },
+  {
+    "repo": "opensquad-ai/opensquad",
+    "commit": "dd9739910560d40b9c43f1670e0f4a8b749e09c9",
+    "file": "sources/github/opensquad-ai--opensquad/README.md",
+    "sha256": "bf10669dac5e15bdc6ca262b97ae9675712531cb6c45cc31e1bbb0a41d81d7a4",
+    "url": "https://raw.githubusercontent.com/opensquad-ai/opensquad/dd9739910560d40b9c43f1670e0f4a8b749e09c9/README.md"
+  },
+  {
+    "repo": "cpp285/Piko",
+    "commit": "66ec8902112976f554edac3fc86456dca83e8fe2",
+    "file": "sources/github/cpp285--Piko/README.md",
+    "sha256": "702861548ab7e4091c834e93661c99dec1b88ab25135664fb2f5b0dc3bd422cc",
+    "url": "https://raw.githubusercontent.com/cpp285/Piko/66ec8902112976f554edac3fc86456dca83e8fe2/README.md"
+  },
+  {
+    "repo": "Qumge/marlo",
+    "commit": "5b18ba51ee6bf55ee1ebdaa570e39c3c97b0bd0d",
+    "file": "sources/github/Qumge--marlo/README.md",
+    "sha256": "f69f3b0a45e4b9db4f103919765810447c169b7977db86498592abf0c1376a39",
+    "url": "https://raw.githubusercontent.com/Qumge/marlo/5b18ba51ee6bf55ee1ebdaa570e39c3c97b0bd0d/README.md"
+  },
+  {
+    "repo": "microsoft/autogen",
+    "commit": "027ecf0a379bcc1d09956d46d12d44a3ad9cee14",
+    "file": "sources/github/microsoft--autogen/LICENSE-CODE",
+    "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+    "url": "https://raw.githubusercontent.com/microsoft/autogen/027ecf0a379bcc1d09956d46d12d44a3ad9cee14/LICENSE-CODE"
+  }
+]

@@ -26,9 +26,14 @@ jobs:
         with:
           node-version: "22"
           cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            ui-feishu/pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir ui-feishu install --frozen-lockfile --ignore-workspace
 
       - name: Check shell syntax
         shell: bash

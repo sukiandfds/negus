@@ -8,21 +8,21 @@
 
 ## 与其他资料的边界
 
-- 当前功能状态、目标体验和版本记录：看 `docs/feature-development/`。
+- 当前功能状态、目标体验和版本记录：看 `docs/negus-knowledge/features/`。
 - 项目管理面板状态、里程碑和过程记录：看 `docs/project-management/`。
-- 技术调研和证据记录：看 `docs/research/`；产品、竞品和战略资料看 `项目战略与多角色评审/`。
+- 技术调研和证据记录：看 `docs/negus-knowledge/research/`；产品、竞品和战略资料看 `docs/negus-knowledge/strategy/`。
 - 本目录中的架构文档不单独改变需求状态，也不替代项目管理条目。
 
 ## 阅读顺序
 
 1. 先看本文件，了解分层原则和当前代码基线。
 2. 再看对应领域：
-   - [前端](./domains/frontend.md)
-   - [后端业务](./domains/backend.md)
-   - [运行时与平台](./domains/runtime-platform.md)
-   - [工具链与测试](./domains/tooling-tests.md)
-   - [文档与产品资料](./domains/documentation.md)
-3. 最后看[跨领域与待拆分文件](./exceptions/cross-domain-files.md)。
+   - [前端](domains/frontend.md)
+   - [后端业务](domains/backend.md)
+   - [运行时与平台](domains/runtime-platform.md)
+   - [工具链与测试](domains/tooling-tests.md)
+   - [文档与产品资料](domains/documentation.md)
+3. 最后看[跨领域与待拆分文件](exceptions/cross-domain-files.md)。
 
 `README.md` 是本目录的主入口；`MODULE_BOUNDARIES.md` 是较早的详细边界说明，二者冲突时以本索引和当前源码核对结果为准。
 

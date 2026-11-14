@@ -1,0 +1,2246 @@
+{
+  "sha": "43499fa27f36807f6ac93b56365b3cae5200bc1e",
+  "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/43499fa27f36807f6ac93b56365b3cae5200bc1e",
+  "tree": [
+    {
+      "path": ".agents",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "19f8034bd04364b7097a19cd028e0a78cba7f8f3",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/19f8034bd04364b7097a19cd028e0a78cba7f8f3"
+    },
+    {
+      "path": ".agents/plugins",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "c4905c37b7c086c836e1ef4029745ee9a1be0c0c",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/c4905c37b7c086c836e1ef4029745ee9a1be0c0c"
+    },
+    {
+      "path": ".agents/plugins/marketplace.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "2d1fe756eeea4c8d0ba08fef4d26595b712786a2",
+      "size": 233,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/2d1fe756eeea4c8d0ba08fef4d26595b712786a2"
+    },
+    {
+      "path": ".changeset",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "b1baf3548d094cc753b6164055bba4c86e5e94ce",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/b1baf3548d094cc753b6164055bba4c86e5e94ce"
+    },
+    {
+      "path": ".changeset/README.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "654c6d4750dca19541bd9803371735943bb3fe4e",
+      "size": 512,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/654c6d4750dca19541bd9803371735943bb3fe4e"
+    },
+    {
+      "path": ".changeset/config.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "eead04fe6c273bf786a3cd7c47c4c8ae7f6fd1e9",
+      "size": 439,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/eead04fe6c273bf786a3cd7c47c4c8ae7f6fd1e9"
+    },
+    {
+      "path": ".changeset/mcp-server-patch.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "6eb928a52c363029e11765b50bc1d31420bf5824",
+      "size": 82,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/6eb928a52c363029e11765b50bc1d31420bf5824"
+    },
+    {
+      "path": ".claude-plugin",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "5a9f62872940793255be5e4b36505bb0080c4dd4",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/5a9f62872940793255be5e4b36505bb0080c4dd4"
+    },
+    {
+      "path": ".claude-plugin/marketplace.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "27c384be29835dcca1c8a96eeb55f7f6999e20eb",
+      "size": 934,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/27c384be29835dcca1c8a96eeb55f7f6999e20eb"
+    },
+    {
+      "path": ".cursor-plugin",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "a3b137af3bb1249c82526bd11fb6bd0906c59fdd",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/a3b137af3bb1249c82526bd11fb6bd0906c59fdd"
+    },
+    {
+      "path": ".cursor-plugin/marketplace.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "18d43d49358a05e7b12362c9a0e89a1783f8d899",
+      "size": 340,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/18d43d49358a05e7b12362c9a0e89a1783f8d899"
+    },
+    {
+      "path": ".github",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "d9118dfb25dd01ce1143eb234b708949cc82ffac",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/d9118dfb25dd01ce1143eb234b708949cc82ffac"
+    },
+    {
+      "path": ".github/workflows",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "44df02adcf14d174aec6d14cdfbfaca0d5d7f4c1",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/44df02adcf14d174aec6d14cdfbfaca0d5d7f4c1"
+    },
+    {
+      "path": ".github/workflows/changeset.yml",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "deeea19f79b204b3c33fa5385a71065cce24994d",
+      "size": 2203,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/deeea19f79b204b3c33fa5385a71065cce24994d"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "591bab132d5e30cd09ed27a30fe7ac812723ac40",
+      "size": 1616,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/591bab132d5e30cd09ed27a30fe7ac812723ac40"
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "cf717232cbbf8875fa9771b263661427134f0bbc",
+      "size": 3826,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/cf717232cbbf8875fa9771b263661427134f0bbc"
+    },
+    {
+      "path": ".gitignore",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "94e82da339645d82287855746cc44d33ff66e86d",
+      "size": 179,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/94e82da339645d82287855746cc44d33ff66e86d"
+    },
+    {
+      "path": ".npmrc",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "b95ef263997620f94e6a91ca1324ca5b284e8b36",
+      "size": 412,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/b95ef263997620f94e6a91ca1324ca5b284e8b36"
+    },
+    {
+      "path": "AGENTS.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "bfe0706dd35686dea95bf3ffc9086bbf9760c9ca",
+      "size": 656,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/bfe0706dd35686dea95bf3ffc9086bbf9760c9ca"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "77e78b9574278d6e2478b477b8b76fd3852343de",
+      "size": 20447,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/77e78b9574278d6e2478b477b8b76fd3852343de"
+    },
+    {
+      "path": "LICENSE",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7ad86e49abb17fa7a5c9edd7aac8dad0dc847e8d",
+      "size": 1072,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/7ad86e49abb17fa7a5c9edd7aac8dad0dc847e8d"
+    },
+    {
+      "path": "README.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "be617070307d2c3a3433903a6c288b252337f0da",
+      "size": 37257,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/be617070307d2c3a3433903a6c288b252337f0da"
+    },
+    {
+      "path": "agent-bundle.config.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "88a68e156e1e326e47b67a0bf544d9842aafe1f9",
+      "size": 808,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/88a68e156e1e326e47b67a0bf544d9842aafe1f9"
+    },
+    {
+      "path": "artifact",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "b813e190f713079ada42620a9e35f3c0c4bd2694",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/b813e190f713079ada42620a9e35f3c0c4bd2694"
+    },
+    {
+      "path": "artifact/.agents",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "5b1246d595bfcefc9aa7d9068a7e8b60250b159f",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/5b1246d595bfcefc9aa7d9068a7e8b60250b159f"
+    },
+    {
+      "path": "artifact/.agents/plugins",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "89efb833912d23cc6a18dc68e9c292f5cea1cf7b",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/89efb833912d23cc6a18dc68e9c292f5cea1cf7b"
+    },
+    {
+      "path": "artifact/.agents/plugins/marketplace.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "644a007cd5b1868f6c8a451ec36c4230d0b8cf5e",
+      "size": 225,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/644a007cd5b1868f6c8a451ec36c4230d0b8cf5e"
+    },
+    {
+      "path": "artifact/.claude-plugin",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "257627a972d05363d22aeb874c86ea3edb9139fb",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/257627a972d05363d22aeb874c86ea3edb9139fb"
+    },
+    {
+      "path": "artifact/.claude-plugin/marketplace.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "f3930758ce8516cf68115336cfc7ab6c3b3e15c5",
+      "size": 926,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/f3930758ce8516cf68115336cfc7ab6c3b3e15c5"
+    },
+    {
+      "path": "artifact/.claude-plugin/plugin.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e41fdfd4a419ca12b16abd21967303a441e93d05",
+      "size": 339,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/e41fdfd4a419ca12b16abd21967303a441e93d05"
+    },
+    {
+      "path": "artifact/.codex-plugin",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "7eeb060822254598a29484d76af8c209a5ca30dc",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/7eeb060822254598a29484d76af8c209a5ca30dc"
+    },
+    {
+      "path": "artifact/.codex-plugin/mcp.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "18bb5a3bc9b82f860055d59f4c17f16fe127c2b6",
+      "size": 156,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/18bb5a3bc9b82f860055d59f4c17f16fe127c2b6"
+    },
+    {
+      "path": "artifact/.codex-plugin/plugin.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "abe3de363b5646fe1b23a6498b0fab7eeea4c413",
+      "size": 1310,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/abe3de363b5646fe1b23a6498b0fab7eeea4c413"
+    },
+    {
+      "path": "artifact/.cursor-plugin",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "488a33778b3447d6b2a0ee1ba40b73110a84afc1",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/488a33778b3447d6b2a0ee1ba40b73110a84afc1"
+    },
+    {
+      "path": "artifact/.cursor-plugin/marketplace.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "898634563a5a24c60e9656adc48b5693c7ac14f2",
+      "size": 332,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/898634563a5a24c60e9656adc48b5693c7ac14f2"
+    },
+    {
+      "path": "artifact/.cursor-plugin/mcp.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "f4975377dadb6529cd64ab55cdc9792cb636619b",
+      "size": 169,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/f4975377dadb6529cd64ab55cdc9792cb636619b"
+    },
+    {
+      "path": "artifact/.cursor-plugin/plugin.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "8bb75bb2213b56fe8478449af689544788e7540c",
+      "size": 694,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/8bb75bb2213b56fe8478449af689544788e7540c"
+    },
+    {
+      "path": "artifact/.mcp.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "aa45fe022bf774bd729c82b487e202860adf67b2",
+      "size": 363,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/aa45fe022bf774bd729c82b487e202860adf67b2"
+    },
+    {
+      "path": "artifact/INSTALL.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "bb3b3e761f21b21b765a058c7e58d8d177f37d38",
+      "size": 22762,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/bb3b3e761f21b21b765a058c7e58d8d177f37d38"
+    },
+    {
+      "path": "artifact/agent-bundle.compile-evidence.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "c458485c42db39ccf4320f54bb6bdc2bb235a560",
+      "size": 22732,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/c458485c42db39ccf4320f54bb6bdc2bb235a560"
+    },
+    {
+      "path": "artifact/agent-bundle.manifest.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "1b6729d0161c9047364d7d9b0eea0e00ae5e6f16",
+      "size": 179239,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/1b6729d0161c9047364d7d9b0eea0e00ae5e6f16"
+    },
+    {
+      "path": "artifact/bin",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "25f30c79149234893ee047e8ec47464aba52b462",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/25f30c79149234893ee047e8ec47464aba52b462"
+    },
+    {
+      "path": "artifact/bin/gbot-flight.mjs",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "4b51e37e43a14343a6f846683e62fc117737053c",
+      "size": 1608688,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/4b51e37e43a14343a6f846683e62fc117737053c"
+    },
+    {
+      "path": "artifact/bin/gbot.mjs",
+      "mode": "100755",
+      "type": "blob",
+      "sha": "959a57e4cd2e2633c13d4bbd634d8dbaa5955404",
+      "size": 2483352,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/959a57e4cd2e2633c13d4bbd634d8dbaa5955404"
+    },
+    {
+      "path": "artifact/commands",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "44b1b8ef8f1cf22de47bfa1672d570e25a8c378f",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/44b1b8ef8f1cf22de47bfa1672d570e25a8c378f"
+    },
+    {
+      "path": "artifact/commands/codex-send.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "1a20493907e85a9731cd5c94c604d3372336d183",
+      "size": 375,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/1a20493907e85a9731cd5c94c604d3372336d183"
+    },
+    {
+      "path": "artifact/commands/codex-threads.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "53bdb76e6b5c775d8558ab8e5dac2e54957baa3b",
+      "size": 250,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/53bdb76e6b5c775d8558ab8e5dac2e54957baa3b"
+    },
+    {
+      "path": "artifact/commands/codex-wait.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d7e81cbcacf51dbca064b68d849248d896ff9f70",
+      "size": 267,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/d7e81cbcacf51dbca064b68d849248d896ff9f70"
+    },
+    {
+      "path": "artifact/install.mjs",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "ba037b65eede9b19dbeb43dd9b16c11ec47cfb41",
+      "size": 78609,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/ba037b65eede9b19dbeb43dd9b16c11ec47cfb41"
+    },
+    {
+      "path": "artifact/mcp.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "941b77e7b5607a64db813baf88c4ed693d85e5c4",
+      "size": 246,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/941b77e7b5607a64db813baf88c4ed693d85e5c4"
+    },
+    {
+      "path": "artifact/mcp",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "5912423fafe0d2d56f374f735e0f4b8e88f3bf30",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/5912423fafe0d2d56f374f735e0f4b8e88f3bf30"
+    },
+    {
+      "path": "artifact/mcp/mcp-claude-channel-8029413c.mjs",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "ca01bc06ed23fff1adc0b6df9ffa882f928ca1e6",
+      "size": 2275669,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/ca01bc06ed23fff1adc0b6df9ffa882f928ca1e6"
+    },
+    {
+      "path": "artifact/mcp/mcp-grok-bot-b8c2461e-flight.mjs",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "03b77df53a8395c64118b7551581d66117f1a914",
+      "size": 1550171,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/03b77df53a8395c64118b7551581d66117f1a914"
+    },
+    {
+      "path": "artifact/mcp/mcp-grok-bot-b8c2461e.mjs",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "3e696387e431c02c7993d8250022d9e30553338e",
+      "size": 3378016,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/3e696387e431c02c7993d8250022d9e30553338e"
+    },
+    {
+      "path": "artifact/plugin.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "a4f00243eff81e737d7813fe423af269be7b0e9a",
+      "size": 681,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/a4f00243eff81e737d7813fe423af269be7b0e9a"
+    },
+    {
+      "path": "artifact/rules",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "4d8c183ef6084d82b5a48b7171c2301adf313a5a",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/4d8c183ef6084d82b5a48b7171c2301adf313a5a"
+    },
+    {
+      "path": "artifact/rules/codex-claude-on-user-machines.mdc",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7570788672c29607fb03564da7f4733e2084a954",
+      "size": 953,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/7570788672c29607fb03564da7f4733e2084a954"
+    },
+    {
+      "path": "artifact/scripts",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "ab3438586e771d66fc510b99cdf21aff667c02ed",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/ab3438586e771d66fc510b99cdf21aff667c02ed"
+    },
+    {
+      "path": "artifact/scripts/gbot-relay.mjs",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "26a519a1cf7502e5fffb5f81a5daa41a43d3cd23",
+      "size": 1317307,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/26a519a1cf7502e5fffb5f81a5daa41a43d3cd23"
+    },
+    {
+      "path": "artifact/skills",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "d8cf969240ad94ce262db5a567cedb6f5219b695",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/d8cf969240ad94ce262db5a567cedb6f5219b695"
+    },
+    {
+      "path": "artifact/skills/chatgpt-desktop",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "a30aa48fb00de487392cb41127d5a12320daf1bd",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/a30aa48fb00de487392cb41127d5a12320daf1bd"
+    },
+    {
+      "path": "artifact/skills/chatgpt-desktop/SKILL.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "13060131706bae8c76b0b05bc328caac495ea406",
+      "size": 4856,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/13060131706bae8c76b0b05bc328caac495ea406"
+    },
+    {
+      "path": "artifact/skills/codex-dot",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "49cc3dbbd9b82d924380cd994a5806efc3a2e0fa",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/49cc3dbbd9b82d924380cd994a5806efc3a2e0fa"
+    },
+    {
+      "path": "artifact/skills/codex-dot/SKILL.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "0a8a821be35f0450a078954764522d21961e1c76",
+      "size": 2134,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/0a8a821be35f0450a078954764522d21961e1c76"
+    },
+    {
+      "path": "artifact/skills/talk-to-grok-bot",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "57e59cff3b23cff5790eee60bb88c9de888c4b2c",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/57e59cff3b23cff5790eee60bb88c9de888c4b2c"
+    },
+    {
+      "path": "artifact/skills/talk-to-grok-bot/SKILL.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "a6b49114c3d2ed56e0c1d168b3e36192731ff66a",
+      "size": 5679,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/a6b49114c3d2ed56e0c1d168b3e36192731ff66a"
+    },
+    {
+      "path": "artifact/skills/talk-to-grok-bot/references",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "84328f71e033c55b537dd000976065f92df447ea",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/84328f71e033c55b537dd000976065f92df447ea"
+    },
+    {
+      "path": "artifact/skills/talk-to-grok-bot/references/bridge-administration.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "ee0cc1abd603133c4eefd1602731ab701af8ed2c",
+      "size": 6620,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/ee0cc1abd603133c4eefd1602731ab701af8ed2c"
+    },
+    {
+      "path": "demo",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "3394ca3b4c0ac0e529553f561d5d721a1c359457",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/3394ca3b4c0ac0e529553f561d5d721a1c359457"
+    },
+    {
+      "path": "demo/grok-bot-cli-demo.gif",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d48cff9cd95084b6962e55ec5935433f799eec0f",
+      "size": 1052411,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/d48cff9cd95084b6962e55ec5935433f799eec0f"
+    },
+    {
+      "path": "demo/grok-bot-cli-demo.mp4",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "abf300fd9f6d304e970b027bbec5c15637688788",
+      "size": 737272,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/abf300fd9f6d304e970b027bbec5c15637688788"
+    },
+    {
+      "path": "docs",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "88f4c42186a145c63f894c67813cce9f5204eb12",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/88f4c42186a145c63f894c67813cce9f5204eb12"
+    },
+    {
+      "path": "docs/chatgpt-desktop-cdp.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "dc58eca83f12a42d6b845615c8108d4b85b81d68",
+      "size": 13793,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/dc58eca83f12a42d6b845615c8108d4b85b81d68"
+    },
+    {
+      "path": "docs/codex-busy-threads.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e8a1f2a05e390f0eaeec35484f96d1cba0f42387",
+      "size": 6377,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/e8a1f2a05e390f0eaeec35484f96d1cba0f42387"
+    },
+    {
+      "path": "docs/codex-duplex-architecture.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "ef3d51adff2e0aaa63988f9c7d7eaaab36f57845",
+      "size": 33553,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/ef3d51adff2e0aaa63988f9c7d7eaaab36f57845"
+    },
+    {
+      "path": "docs/verification",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "cb8a8fd221fbf2c60e1ac8349a69e6ab7b62603d",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/cb8a8fd221fbf2c60e1ac8349a69e6ab7b62603d"
+    },
+    {
+      "path": "docs/verification/2026-09-15-duplex.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "2a7c309837acb7971e09109b2d2a38ec4cbc8195",
+      "size": 12377,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/2a7c309837acb7971e09109b2d2a38ec4cbc8195"
+    },
+    {
+      "path": "package-lock.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "83371f5b6941afa8a4c57e3c05983f3253693f94",
+      "size": 94501,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/83371f5b6941afa8a4c57e3c05983f3253693f94"
+    },
+    {
+      "path": "package.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d11950d136908f403a910a1af5337aab1fe96f44",
+      "size": 2298,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/d11950d136908f403a910a1af5337aab1fe96f44"
+    },
+    {
+      "path": "renovate.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "5db72dd6a94fc07d18b0e6c0cf76e67ce982f1f9",
+      "size": 114,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/5db72dd6a94fc07d18b0e6c0cf76e67ce982f1f9"
+    },
+    {
+      "path": "rstest.route-unit.config.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "4b0c4d50c61a6040cc5d23feb03011103d140388",
+      "size": 286,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/4b0c4d50c61a6040cc5d23feb03011103d140388"
+    },
+    {
+      "path": "scripts",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "72143c224ce7e521155de6f2380383f133c760b6",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/72143c224ce7e521155de6f2380383f133c760b6"
+    },
+    {
+      "path": "scripts/run-unit-tests.mjs",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "dc5f8231ea79e3f735f2edda9c660eae0d849316",
+      "size": 1670,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/dc5f8231ea79e3f735f2edda9c660eae0d849316"
+    },
+    {
+      "path": "src",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "1ee43e230430ef701f0fa50d92fdc06fb3e85629",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/1ee43e230430ef701f0fa50d92fdc06fb3e85629"
+    },
+    {
+      "path": "src/cli",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "781166807cb6b4b194726b2a292a4a83a7cfb7a1",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/781166807cb6b4b194726b2a292a4a83a7cfb7a1"
+    },
+    {
+      "path": "src/cli/_shared.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "6404a30cdb31be7e60b1a242cc58657913453bc8",
+      "size": 4246,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/6404a30cdb31be7e60b1a242cc58657913453bc8"
+    },
+    {
+      "path": "src/cli/approvals",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "50147f53ae19b9d127970a182b185b47e4cdeed8",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/50147f53ae19b9d127970a182b185b47e4cdeed8"
+    },
+    {
+      "path": "src/cli/approvals/list.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "8e0151748d3076d2479073c5362240cdb5a5ee6a",
+      "size": 771,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/8e0151748d3076d2479073c5362240cdb5a5ee6a"
+    },
+    {
+      "path": "src/cli/approvals/respond.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7add22cfa0285f8b0388d8e2293788bc3d20e636",
+      "size": 978,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/7add22cfa0285f8b0388d8e2293788bc3d20e636"
+    },
+    {
+      "path": "src/cli/bots",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "e7d3096ccef25ddcfb1e74fc81b73f7c45218bbe",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/e7d3096ccef25ddcfb1e74fc81b73f7c45218bbe"
+    },
+    {
+      "path": "src/cli/bots/create.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "c315e5fef46af64fec81383b1eb81651e51f0349",
+      "size": 1569,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/c315e5fef46af64fec81383b1eb81651e51f0349"
+    },
+    {
+      "path": "src/cli/bots/delete.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7521893c34d4a8e08e3e87e8be4177eac6a4dc1e",
+      "size": 1366,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/7521893c34d4a8e08e3e87e8be4177eac6a4dc1e"
+    },
+    {
+      "path": "src/cli/bots/get.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "a0da841d91cb6f96973b7e041d3b3fde2b6e5262",
+      "size": 1365,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/a0da841d91cb6f96973b7e041d3b3fde2b6e5262"
+    },
+    {
+      "path": "src/cli/bots/list.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "cb8469408e23fe709f8ce41bce3a0460fd535fc6",
+      "size": 1374,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/cb8469408e23fe709f8ce41bce3a0460fd535fc6"
+    },
+    {
+      "path": "src/cli/bots/update.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "dab74dbbe8366591b616bcb54648eeafdc5010ce",
+      "size": 1768,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/dab74dbbe8366591b616bcb54648eeafdc5010ce"
+    },
+    {
+      "path": "src/cli/chatgpt-desktop",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "0c080e7739f98a10268c42ea3cfac59e1d22b4e2",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/0c080e7739f98a10268c42ea3cfac59e1d22b4e2"
+    },
+    {
+      "path": "src/cli/chatgpt-desktop/hosts.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "030e14b99895029199024ba50304426a8e3771e4",
+      "size": 1947,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/030e14b99895029199024ba50304426a8e3771e4"
+    },
+    {
+      "path": "src/cli/chatgpt-desktop/read.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "6b60cb4aa7141c6422095c42659717ee7198df47",
+      "size": 2569,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/6b60cb4aa7141c6422095c42659717ee7198df47"
+    },
+    {
+      "path": "src/cli/chatgpt-desktop/search.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "c5ff7283af7b2a2b7490166954b10507ce870bee",
+      "size": 2300,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/c5ff7283af7b2a2b7490166954b10507ce870bee"
+    },
+    {
+      "path": "src/cli/chatgpt-desktop/send.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "2be574185012d54354c74ac8e393d1a21eaf726d",
+      "size": 1825,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/2be574185012d54354c74ac8e393d1a21eaf726d"
+    },
+    {
+      "path": "src/cli/chatgpt-desktop/status.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "1eb595437d7cd30ad46f945de5a0a5dfc406d6ca",
+      "size": 1031,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/1eb595437d7cd30ad46f945de5a0a5dfc406d6ca"
+    },
+    {
+      "path": "src/cli/chatgpt-desktop/threads.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "0a9201a5163cb4045c68813c25e1b3f5290983b3",
+      "size": 3292,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/0a9201a5163cb4045c68813c25e1b3f5290983b3"
+    },
+    {
+      "path": "src/cli/claude",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "929a793aa1fe0fd4bae9673b32c119165a97da32",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/929a793aa1fe0fd4bae9673b32c119165a97da32"
+    },
+    {
+      "path": "src/cli/claude/send.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "135f14e4b1602bd54c19d3d2e797819b59c91545",
+      "size": 941,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/135f14e4b1602bd54c19d3d2e797819b59c91545"
+    },
+    {
+      "path": "src/cli/codex",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "faacd657094e4711b67b4aa37453f466bddeb363",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/faacd657094e4711b67b4aa37453f466bddeb363"
+    },
+    {
+      "path": "src/cli/codex/bridge",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "d1653f937b22c7b96c25d7b8dd54c26330bc0278",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/d1653f937b22c7b96c25d7b8dd54c26330bc0278"
+    },
+    {
+      "path": "src/cli/codex/bridge/respond.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "268c883668834672782f7c1604745f423fa9e4d9",
+      "size": 1651,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/268c883668834672782f7c1604745f423fa9e4d9"
+    },
+    {
+      "path": "src/cli/codex/bridge/run.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "4317ab0aa80d3576f6f5fad721812622cb685c91",
+      "size": 2228,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/4317ab0aa80d3576f6f5fad721812622cb685c91"
+    },
+    {
+      "path": "src/cli/codex/bridge/start.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "8264bcf915956973cdbae032e041ec12ab5fcad9",
+      "size": 1358,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/8264bcf915956973cdbae032e041ec12ab5fcad9"
+    },
+    {
+      "path": "src/cli/codex/bridge/status.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d83aa2cddf29f748ea979e31e96da5d1197bb560",
+      "size": 1090,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/d83aa2cddf29f748ea979e31e96da5d1197bb560"
+    },
+    {
+      "path": "src/cli/codex/bridge/stop.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "524e79ae4269f1123fb264101b879bda835675b3",
+      "size": 1133,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/524e79ae4269f1123fb264101b879bda835675b3"
+    },
+    {
+      "path": "src/cli/codex/desktop-shim.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9d55be8a4c273dfd7678e668b3abb017f4b49f3d",
+      "size": 3717,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/9d55be8a4c273dfd7678e668b3abb017f4b49f3d"
+    },
+    {
+      "path": "src/cli/codex/list-threads.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "72d5eda2aed584b7ffcb0935f97078fe9bd60ce1",
+      "size": 3347,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/72d5eda2aed584b7ffcb0935f97078fe9bd60ce1"
+    },
+    {
+      "path": "src/cli/codex/new.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "2619d00e8c37cdcb7b9a9ba624afaf1d63ed57f4",
+      "size": 1685,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/2619d00e8c37cdcb7b9a9ba624afaf1d63ed57f4"
+    },
+    {
+      "path": "src/cli/codex/queue.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "8a3d3397eac97fab070747b6e61c7f8b473340d4",
+      "size": 1662,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/8a3d3397eac97fab070747b6e61c7f8b473340d4"
+    },
+    {
+      "path": "src/cli/codex/send.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "4ae69b80e2daceda097668c649a6dc07f8584e17",
+      "size": 3377,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/4ae69b80e2daceda097668c649a6dc07f8584e17"
+    },
+    {
+      "path": "src/cli/codex/status.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "52235bd2b3e11b2a56796923604c99869f7e86e1",
+      "size": 934,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/52235bd2b3e11b2a56796923604c99869f7e86e1"
+    },
+    {
+      "path": "src/cli/codex/wait.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "8eaca498a6fe86e33fcffe4802faf8d5016976df",
+      "size": 1413,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/8eaca498a6fe86e33fcffe4802faf8d5016976df"
+    },
+    {
+      "path": "src/cli/codex/watch.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "099cc9ffd0eef2de598cd7a93085ac1b986c3300",
+      "size": 1283,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/099cc9ffd0eef2de598cd7a93085ac1b986c3300"
+    },
+    {
+      "path": "src/cli/doctor.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7ce69680cedeb89af1cdcf5a341444a7774c6182",
+      "size": 2912,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/7ce69680cedeb89af1cdcf5a341444a7774c6182"
+    },
+    {
+      "path": "src/cli/groups",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "d8d36823db25a453f654550e85e0ca649124f7e4",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/d8d36823db25a453f654550e85e0ca649124f7e4"
+    },
+    {
+      "path": "src/cli/groups/add.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d17615256d7e442bea13dd5607db7098b9e1c052",
+      "size": 1398,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/d17615256d7e442bea13dd5607db7098b9e1c052"
+    },
+    {
+      "path": "src/cli/groups/create.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e5552a1e6f5341ae08c77076fefc79d24d6f8805",
+      "size": 1779,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/e5552a1e6f5341ae08c77076fefc79d24d6f8805"
+    },
+    {
+      "path": "src/cli/groups/delete.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "a46a6082b0023a8e5e3b11c9f8d8f7da39da7c27",
+      "size": 1485,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/a46a6082b0023a8e5e3b11c9f8d8f7da39da7c27"
+    },
+    {
+      "path": "src/cli/groups/get.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7d1ae7c9d758f736efee441d35f8f02c28c1c651",
+      "size": 1430,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/7d1ae7c9d758f736efee441d35f8f02c28c1c651"
+    },
+    {
+      "path": "src/cli/groups/list.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d940ba71d49f4cb8abf729abf910332a84730f1c",
+      "size": 1370,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/d940ba71d49f4cb8abf729abf910332a84730f1c"
+    },
+    {
+      "path": "src/cli/groups/members.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "1aeb81a6a5879c18446b664282271b9990ae0be0",
+      "size": 1458,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/1aeb81a6a5879c18446b664282271b9990ae0be0"
+    },
+    {
+      "path": "src/cli/groups/remove.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e0e318cb5094eee0c4a2a89836e8ad1f8cdc7b75",
+      "size": 1413,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/e0e318cb5094eee0c4a2a89836e8ad1f8cdc7b75"
+    },
+    {
+      "path": "src/cli/groups/set.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "06140b526449d6c5f4c0ed9ee70557671b377ba5",
+      "size": 1505,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/06140b526449d6c5f4c0ed9ee70557671b377ba5"
+    },
+    {
+      "path": "src/cli/groups/update.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "45ce6e175c1df15999ed592d450e298a0b4b9591",
+      "size": 1916,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/45ce6e175c1df15999ed592d450e298a0b4b9591"
+    },
+    {
+      "path": "src/cli/history.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "ad9225fb8708be0787922f20ed91cf9a747b76a6",
+      "size": 2459,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/ad9225fb8708be0787922f20ed91cf9a747b76a6"
+    },
+    {
+      "path": "src/cli/send.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "83a0cd822a22c56336e62d68ee72c4e802730725",
+      "size": 6242,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/83a0cd822a22c56336e62d68ee72c4e802730725"
+    },
+    {
+      "path": "src/cli/skills",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "8b926fe8f1c7ee78976d76309c179d5d6e79f2ed",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/8b926fe8f1c7ee78976d76309c179d5d6e79f2ed"
+    },
+    {
+      "path": "src/cli/skills/add.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "089e00f886bbee2919d3daf91a8644812c27b0be",
+      "size": 1700,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/089e00f886bbee2919d3daf91a8644812c27b0be"
+    },
+    {
+      "path": "src/cli/skills/list.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "98562bccb4c9a2301aa27ab449f43a4ece717765",
+      "size": 1271,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/98562bccb4c9a2301aa27ab449f43a4ece717765"
+    },
+    {
+      "path": "src/cli/skills/remove.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "85f6d4517e1788b184dd53cc73bf95c8e2d28c81",
+      "size": 1342,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/85f6d4517e1788b184dd53cc73bf95c8e2d28c81"
+    },
+    {
+      "path": "src/cli/thread.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "13ed64b603cf53b8bab16ce7a26a1c139c93927f",
+      "size": 3619,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/13ed64b603cf53b8bab16ce7a26a1c139c93927f"
+    },
+    {
+      "path": "src/commands",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "7e8d34c2c2e1d5b97cc2fd84ac7ba5dbd5ee653c",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/7e8d34c2c2e1d5b97cc2fd84ac7ba5dbd5ee653c"
+    },
+    {
+      "path": "src/commands/codex-send.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "39c98161bfe17a288c559fac06eead1bfbdc243c",
+      "size": 409,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/39c98161bfe17a288c559fac06eead1bfbdc243c"
+    },
+    {
+      "path": "src/commands/codex-threads.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "8f684a27d72930157535acbf034bbf44b0d5a8bb",
+      "size": 284,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/8f684a27d72930157535acbf034bbf44b0d5a8bb"
+    },
+    {
+      "path": "src/commands/codex-wait.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "82db0f5345cde47a7659f698e8880f953a9ffbdc",
+      "size": 301,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/82db0f5345cde47a7659f698e8880f953a9ffbdc"
+    },
+    {
+      "path": "src/core",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "4a0a939bf5189e8311d2d672674639dd3f40bdfc",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/4a0a939bf5189e8311d2d672674639dd3f40bdfc"
+    },
+    {
+      "path": "src/core/app-session.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9cdde1dc57d961b5df52260632d2e34f296085c9",
+      "size": 8546,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/9cdde1dc57d961b5df52260632d2e34f296085c9"
+    },
+    {
+      "path": "src/core/chatgpt-desktop",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "8f1e35b1b52b3b2168a478dc86afc9035990ff90",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/8f1e35b1b52b3b2168a478dc86afc9035990ff90"
+    },
+    {
+      "path": "src/core/chatgpt-desktop/adapter.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "dd0b4b0c92a5e3887c14f765e4df6149b3c94126",
+      "size": 2452,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/dd0b4b0c92a5e3887c14f765e4df6149b3c94126"
+    },
+    {
+      "path": "src/core/chatgpt-desktop/app-server-fallback.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "0460afb6b6888fc7aad12f23f4a8eaedfbebb0f5",
+      "size": 27038,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/0460afb6b6888fc7aad12f23f4a8eaedfbebb0f5"
+    },
+    {
+      "path": "src/core/chatgpt-desktop/cdp-adapter.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "4b88fc871a7a6f91c6615a243e9dd59683c46c39",
+      "size": 11734,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/4b88fc871a7a6f91c6615a243e9dd59683c46c39"
+    },
+    {
+      "path": "src/core/chatgpt-desktop/cdp-dom.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "a0961a81dc45fc01734cbce49a1da8b3a75a991a",
+      "size": 34345,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/a0961a81dc45fc01734cbce49a1da8b3a75a991a"
+    },
+    {
+      "path": "src/core/chatgpt-desktop/cdp-session.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "3b47bd41015c6e5fc486bb671be62bb7288cf94b",
+      "size": 7282,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/3b47bd41015c6e5fc486bb671be62bb7288cf94b"
+    },
+    {
+      "path": "src/core/chatgpt-desktop/errors.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e4118ff24499b72fbebcb5387f43b088a3293638",
+      "size": 3417,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/e4118ff24499b72fbebcb5387f43b088a3293638"
+    },
+    {
+      "path": "src/core/chatgpt-desktop/facade.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7dd5830ba3db2ac0f512a8005603db1a30c0789b",
+      "size": 33566,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/7dd5830ba3db2ac0f512a8005603db1a30c0789b"
+    },
+    {
+      "path": "src/core/chatgpt-desktop/index.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "fd787b102e055af40a0c17547c17eb4657b974f8",
+      "size": 2756,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/fd787b102e055af40a0c17547c17eb4657b974f8"
+    },
+    {
+      "path": "src/core/chatgpt-desktop/loopback.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "b2b8f4182dc932432545823a37bd62f0ccf3dd3c",
+      "size": 2209,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/b2b8f4182dc932432545823a37bd62f0ccf3dd3c"
+    },
+    {
+      "path": "src/core/chatgpt-desktop/payload-budget.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "f4f4cff4dd61ea74ff1959c67ecc7882c9e803e7",
+      "size": 2954,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/f4f4cff4dd61ea74ff1959c67ecc7882c9e803e7"
+    },
+    {
+      "path": "src/core/chatgpt-desktop/project-state.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "912db38de94d4849bd1bdb11f486369010f5ddd5",
+      "size": 4533,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/912db38de94d4849bd1bdb11f486369010f5ddd5"
+    },
+    {
+      "path": "src/core/chatgpt-desktop/relaunch.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "fda4fbee001600af27e8e16bec8fea4330427889",
+      "size": 2456,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/fda4fbee001600af27e8e16bec8fea4330427889"
+    },
+    {
+      "path": "src/core/chatgpt-desktop/remote-threads.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "5022ecb78f320b921ed6e6c5663b186d8e5fe73f",
+      "size": 12468,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/5022ecb78f320b921ed6e6c5663b186d8e5fe73f"
+    },
+    {
+      "path": "src/core/chatgpt-desktop/routes.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d87d75a47d2a027c9ab8de210378736717252f34",
+      "size": 11481,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/d87d75a47d2a027c9ab8de210378736717252f34"
+    },
+    {
+      "path": "src/core/chatgpt-desktop/thread-ids.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "bcaf8802f0b6195e5d23968e4083f5d148153c55",
+      "size": 3248,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/bcaf8802f0b6195e5d23968e4083f5d148153c55"
+    },
+    {
+      "path": "src/core/chatgpt-desktop/types.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e807c4b52e77aef09e81b1a6f89212f315160f7f",
+      "size": 6493,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/e807c4b52e77aef09e81b1a6f89212f315160f7f"
+    },
+    {
+      "path": "src/core/claude-channel.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "8cc1dc823349f7c040314632fa2e4e40eb22f46d",
+      "size": 6879,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/8cc1dc823349f7c040314632fa2e4e40eb22f46d"
+    },
+    {
+      "path": "src/core/claude-routes.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "bed27fa5ec6c6b17bbcec461775e2bd6a26717b4",
+      "size": 1027,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/bed27fa5ec6c6b17bbcec461775e2bd6a26717b4"
+    },
+    {
+      "path": "src/core/codex-bridge.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "4f1c7313fc032f98cbff52e13087dbef63801f0a",
+      "size": 70930,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/4f1c7313fc032f98cbff52e13087dbef63801f0a"
+    },
+    {
+      "path": "src/core/codex",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "9673c857ca6ac7b9cb16ef4e5ac032f2ef6d0d3e",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/9673c857ca6ac7b9cb16ef4e5ac032f2ef6d0d3e"
+    },
+    {
+      "path": "src/core/codex/contract.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "af8f0b9158b9cee3a764803e809a0c287afd11b5",
+      "size": 3577,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/af8f0b9158b9cee3a764803e809a0c287afd11b5"
+    },
+    {
+      "path": "src/core/codex/conversation.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "c7d36010a11eaf978bbb7a22e51e992e5e99bad2",
+      "size": 15722,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/c7d36010a11eaf978bbb7a22e51e992e5e99bad2"
+    },
+    {
+      "path": "src/core/codex/remote-control.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "2ccabbec68463eac614caea4ead2e332c8c3f0f6",
+      "size": 8416,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/2ccabbec68463eac614caea4ead2e332c8c3f0f6"
+    },
+    {
+      "path": "src/core/codex/routes.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "b0752a3715a8abd4571c07dd9ad8d7109d869189",
+      "size": 8646,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/b0752a3715a8abd4571c07dd9ad8d7109d869189"
+    },
+    {
+      "path": "src/core/codex/thread-id.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9dfe6be6ad95771908b9b283599ade8029abc38f",
+      "size": 1382,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/9dfe6be6ad95771908b9b283599ade8029abc38f"
+    },
+    {
+      "path": "src/core/commands.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7ff81a16eb510fed5d4d9e4e8a1ac2d86049ce7c",
+      "size": 2898,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/7ff81a16eb510fed5d4d9e4e8a1ac2d86049ce7c"
+    },
+    {
+      "path": "src/core/desktop-shim-bridge.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7b3481ecb51718a6f4e566ca7bb83b5c8ea8ab50",
+      "size": 20313,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/7b3481ecb51718a6f4e566ca7bb83b5c8ea8ab50"
+    },
+    {
+      "path": "src/core/desktop-shim.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "8136b3168d27e1278d80cad6e7eeee7b31bf88f3",
+      "size": 18550,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/8136b3168d27e1278d80cad6e7eeee7b31bf88f3"
+    },
+    {
+      "path": "src/core/format.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "a9d1c1432626b5d7c13404481ce799bad18aaab6",
+      "size": 8922,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/a9d1c1432626b5d7c13404481ce799bad18aaab6"
+    },
+    {
+      "path": "src/core/gateway.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "dcc9721442fa1dcb5a79690820db4516b46ad352",
+      "size": 20664,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/dcc9721442fa1dcb5a79690820db4516b46ad352"
+    },
+    {
+      "path": "src/core/grok-approval-routes.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7b3f29cf304735ac2f5d114850911eb61bce0925",
+      "size": 850,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/7b3f29cf304735ac2f5d114850911eb61bce0925"
+    },
+    {
+      "path": "src/core/grok-approvals.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "0e1cb65c67e6b3b66270db6e41d7933c7d4abe92",
+      "size": 1618,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/0e1cb65c67e6b3b66270db6e41d7933c7d4abe92"
+    },
+    {
+      "path": "src/core/headers.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "477c9ce1986974447f7512935f673b4374272382",
+      "size": 1834,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/477c9ce1986974447f7512935f673b4374272382"
+    },
+    {
+      "path": "src/core/history.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "5ce0327960978cd51f60a412c210bb7f687778dc",
+      "size": 3848,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/5ce0327960978cd51f60a412c210bb7f687778dc"
+    },
+    {
+      "path": "src/core/relay",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "7df77f1cf19c7ba45d7ed449f9c4656f24e95266",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/7df77f1cf19c7ba45d7ed449f9c4656f24e95266"
+    },
+    {
+      "path": "src/core/relay/codex.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d82d9216433f841a90c69479ffe71eea8fb56273",
+      "size": 7006,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/d82d9216433f841a90c69479ffe71eea8fb56273"
+    },
+    {
+      "path": "src/core/relay/completion.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "cb398bc2254caaddff6dfc28327f07c527c66d45",
+      "size": 4983,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/cb398bc2254caaddff6dfc28327f07c527c66d45"
+    },
+    {
+      "path": "src/core/relay/control.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "b05608152ac8c2283fa1d0982282a94035e9d585",
+      "size": 2597,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/b05608152ac8c2283fa1d0982282a94035e9d585"
+    },
+    {
+      "path": "src/core/relay/detail.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "b1047f43f6c5fffc04126cd49975e4956c35bacc",
+      "size": 390,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/b1047f43f6c5fffc04126cd49975e4956c35bacc"
+    },
+    {
+      "path": "src/core/relay/engine.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "36e4339af3667563a4484f70e241d2d539820dcb",
+      "size": 13724,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/36e4339af3667563a4484f70e241d2d539820dcb"
+    },
+    {
+      "path": "src/core/relay/intake.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "63d2834911f449dc9168aef093ec9b9a5d47e822",
+      "size": 7543,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/63d2834911f449dc9168aef093ec9b9a5d47e822"
+    },
+    {
+      "path": "src/core/relay/interactions.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "0ab7d5170ae069f7f469ca95e9237656fdf2e3b4",
+      "size": 5272,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/0ab7d5170ae069f7f469ca95e9237656fdf2e3b4"
+    },
+    {
+      "path": "src/core/relay/managed.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "4463c02ff23225b57e978a4ff6cbaa5659db00d8",
+      "size": 3967,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/4463c02ff23225b57e978a4ff6cbaa5659db00d8"
+    },
+    {
+      "path": "src/core/relay/ownership.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "10a1b0daa8e100dbf153fe37b7e087772a9675c0",
+      "size": 3203,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/10a1b0daa8e100dbf153fe37b7e087772a9675c0"
+    },
+    {
+      "path": "src/core/relay/profile.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9b2070d94c164f0dff6f7c6e0b4395ccc945045b",
+      "size": 2203,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/9b2070d94c164f0dff6f7c6e0b4395ccc945045b"
+    },
+    {
+      "path": "src/core/relay/records.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "06cb96b40053040ac2609d7186f4c13090420843",
+      "size": 3761,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/06cb96b40053040ac2609d7186f4c13090420843"
+    },
+    {
+      "path": "src/core/relay/routes.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "84ebcd9d7b22091e0869bb886c259b068907229a",
+      "size": 8351,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/84ebcd9d7b22091e0869bb886c259b068907229a"
+    },
+    {
+      "path": "src/core/relay/state.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "6665e0a09b49ef79d7a6ba3be31f15ab880b226e",
+      "size": 7960,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/6665e0a09b49ef79d7a6ba3be31f15ab880b226e"
+    },
+    {
+      "path": "src/core/relay/worker.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "692e126c9bbf74a7eddbf01c89478f461393d86a",
+      "size": 6586,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/692e126c9bbf74a7eddbf01c89478f461393d86a"
+    },
+    {
+      "path": "src/core/sender-prefix.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9aa4127c523718ec401e1c69929c99e618026bd9",
+      "size": 1919,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/9aa4127c523718ec401e1c69929c99e618026bd9"
+    },
+    {
+      "path": "src/core/store.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "909cfbcdac426ffc8b8b0d35b7bd090cbe14d195",
+      "size": 10654,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/909cfbcdac426ffc8b8b0d35b7bd090cbe14d195"
+    },
+    {
+      "path": "src/core/transcript.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "76a44e715483dd83aa14723e1940b00da00a5163",
+      "size": 3257,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/76a44e715483dd83aa14723e1940b00da00a5163"
+    },
+    {
+      "path": "src/core/url-policy.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "23def4f8b5ea1dced848ec641c4df2dafb336dfe",
+      "size": 5927,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/23def4f8b5ea1dced848ec641c4df2dafb336dfe"
+    },
+    {
+      "path": "src/core/user-machine-guidance.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "714500e3e986864f5d2ea26420e35c49ce18e21b",
+      "size": 1459,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/714500e3e986864f5d2ea26420e35c49ce18e21b"
+    },
+    {
+      "path": "src/gbot-install.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "6f1ba9339a32c9c5f5537b1f44d8fa7a37f60dae",
+      "size": 450,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/6f1ba9339a32c9c5f5537b1f44d8fa7a37f60dae"
+    },
+    {
+      "path": "src/gbot.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "06e67a4679402813592bbf9268b785de1e6f508b",
+      "size": 3488,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/06e67a4679402813592bbf9268b785de1e6f508b"
+    },
+    {
+      "path": "src/mcp",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "eb942a895813c1d0041887bc9d2a3c8cb3725072",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/eb942a895813c1d0041887bc9d2a3c8cb3725072"
+    },
+    {
+      "path": "src/mcp/claude-channel.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "dc42848e8f74a1bc1166bf39017e611d30843a91",
+      "size": 1982,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/dc42848e8f74a1bc1166bf39017e611d30843a91"
+    },
+    {
+      "path": "src/mcp/grok-bot",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "75aceba020909505b47e8017dd0315e7d6d9e01f",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/75aceba020909505b47e8017dd0315e7d6d9e01f"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "af57b21de9fd0496e9ed3a3c9bfc3e1307cbf307",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/af57b21de9fd0496e9ed3a3c9bfc3e1307cbf307"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/chatgpt_desktop_list_hosts.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "ff0869f770b7dffba599d1b3fef7db329fb2f67f",
+      "size": 1107,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/ff0869f770b7dffba599d1b3fef7db329fb2f67f"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/chatgpt_desktop_list_threads.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "a19eead0f6e5eb95abdd85f05bdddae23d687245",
+      "size": 2559,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/a19eead0f6e5eb95abdd85f05bdddae23d687245"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/chatgpt_desktop_open_thread.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "8cfb196f115920c9baa301b8a72b64d8f48e09b5",
+      "size": 1596,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/8cfb196f115920c9baa301b8a72b64d8f48e09b5"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/chatgpt_desktop_read_thread.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "91310958b65be465bbba57946557e1de13a6bb1d",
+      "size": 2198,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/91310958b65be465bbba57946557e1de13a6bb1d"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/chatgpt_desktop_search_threads.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "528a895b1c6eeb06cac584f9acdeda963b4afc34",
+      "size": 2397,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/528a895b1c6eeb06cac584f9acdeda963b4afc34"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/chatgpt_desktop_send.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "a9804d7a37825be78d60d3890c7971dbf314dc5c",
+      "size": 2272,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/a9804d7a37825be78d60d3890c7971dbf314dc5c"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/chatgpt_desktop_status.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "427b9c8dd9ba1346ff50f78bb448571d163057ab",
+      "size": 1151,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/427b9c8dd9ba1346ff50f78bb448571d163057ab"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/chatgpt_desktop_wait_reply.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "002600519cf85d08c198f544280a679629f53ce4",
+      "size": 1483,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/002600519cf85d08c198f544280a679629f53ce4"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/claude_send.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "2ea2121dc55d319327737d4963b5239b1965c0b6",
+      "size": 1150,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/2ea2121dc55d319327737d4963b5239b1965c0b6"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/codex_new.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "cd2c4c2c58bccc8719502feba7fe64361e54e5c9",
+      "size": 1590,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/cd2c4c2c58bccc8719502feba7fe64361e54e5c9"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/codex_send.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "247e079a46a0aea756c39285bdbd13ccc89a903d",
+      "size": 3317,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/247e079a46a0aea756c39285bdbd13ccc89a903d"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/codex_threads.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "3b1c515d6ddeb2d43e57b5d1067539b2554f3dd5",
+      "size": 2758,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/3b1c515d6ddeb2d43e57b5d1067539b2554f3dd5"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/codex_wait.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e681ced32092f0e3068df94c528b053fe4b27794",
+      "size": 1639,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/e681ced32092f0e3068df94c528b053fe4b27794"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/codex_watch.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "226be1cb4483d5cf83376213e53aec84891b0769",
+      "size": 1488,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/226be1cb4483d5cf83376213e53aec84891b0769"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/gbot_bridge_start.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7f9cb7148e93142f116074f99547384129b5da5d",
+      "size": 1286,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/7f9cb7148e93142f116074f99547384129b5da5d"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/gbot_bridge_status.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "35c3f2a3fcb9ccddf451955ee4a397a002d000d7",
+      "size": 997,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/35c3f2a3fcb9ccddf451955ee4a397a002d000d7"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/gbot_bridge_stop.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "fa670343c42b9df7d2e566274c05568ada98828c",
+      "size": 1078,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/fa670343c42b9df7d2e566274c05568ada98828c"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/gbot_codex_respond.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "25b9b14cf4643aa59d17f54ce2e4c826b9d68c6d",
+      "size": 1696,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/25b9b14cf4643aa59d17f54ce2e4c826b9d68c6d"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/gbot_grok_approvals.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "509c2952469e2f77651528d82cae8a165053818b",
+      "size": 886,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/509c2952469e2f77651528d82cae8a165053818b"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/gbot_grok_respond.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9394bb55d911d4d50cc4b45394f4ed058932e1f0",
+      "size": 1175,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/9394bb55d911d4d50cc4b45394f4ed058932e1f0"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/gbot_send.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "106ee36accdb1da5c3d38c23e2272b8b677acd11",
+      "size": 2056,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/106ee36accdb1da5c3d38c23e2272b8b677acd11"
+    },
+    {
+      "path": "src/mcp/grok-bot/tools/gbot_thread.tsx",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "98ee2475ac5506d9043050eba7086c4b80d683d8",
+      "size": 3258,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/98ee2475ac5506d9043050eba7086c4b80d683d8"
+    },
+    {
+      "path": "src/rules",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "4d8c183ef6084d82b5a48b7171c2301adf313a5a",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/4d8c183ef6084d82b5a48b7171c2301adf313a5a"
+    },
+    {
+      "path": "src/rules/codex-claude-on-user-machines.mdc",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7570788672c29607fb03564da7f4733e2084a954",
+      "size": 953,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/7570788672c29607fb03564da7f4733e2084a954"
+    },
+    {
+      "path": "src/scripts",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "26c4fb810773640cd3d92ca1d26fc364e0422f23",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/26c4fb810773640cd3d92ca1d26fc364e0422f23"
+    },
+    {
+      "path": "src/scripts/gbot-relay.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "bb7b3d197e435c989b9ae82a2a5c36f076c2d07f",
+      "size": 1360,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/bb7b3d197e435c989b9ae82a2a5c36f076c2d07f"
+    },
+    {
+      "path": "src/skills",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "d8cf969240ad94ce262db5a567cedb6f5219b695",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/d8cf969240ad94ce262db5a567cedb6f5219b695"
+    },
+    {
+      "path": "src/skills/chatgpt-desktop",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "a30aa48fb00de487392cb41127d5a12320daf1bd",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/a30aa48fb00de487392cb41127d5a12320daf1bd"
+    },
+    {
+      "path": "src/skills/chatgpt-desktop/SKILL.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "13060131706bae8c76b0b05bc328caac495ea406",
+      "size": 4856,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/13060131706bae8c76b0b05bc328caac495ea406"
+    },
+    {
+      "path": "src/skills/codex-dot",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "49cc3dbbd9b82d924380cd994a5806efc3a2e0fa",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/49cc3dbbd9b82d924380cd994a5806efc3a2e0fa"
+    },
+    {
+      "path": "src/skills/codex-dot/SKILL.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "0a8a821be35f0450a078954764522d21961e1c76",
+      "size": 2134,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/0a8a821be35f0450a078954764522d21961e1c76"
+    },
+    {
+      "path": "src/skills/talk-to-grok-bot",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "57e59cff3b23cff5790eee60bb88c9de888c4b2c",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/57e59cff3b23cff5790eee60bb88c9de888c4b2c"
+    },
+    {
+      "path": "src/skills/talk-to-grok-bot/SKILL.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "a6b49114c3d2ed56e0c1d168b3e36192731ff66a",
+      "size": 5679,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/a6b49114c3d2ed56e0c1d168b3e36192731ff66a"
+    },
+    {
+      "path": "src/skills/talk-to-grok-bot/references",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "84328f71e033c55b537dd000976065f92df447ea",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/84328f71e033c55b537dd000976065f92df447ea"
+    },
+    {
+      "path": "src/skills/talk-to-grok-bot/references/bridge-administration.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "ee0cc1abd603133c4eefd1602731ab701af8ed2c",
+      "size": 6620,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/ee0cc1abd603133c4eefd1602731ab701af8ed2c"
+    },
+    {
+      "path": "test",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "5edd96b4c2bb8f187a918902d38be64130668167",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/5edd96b4c2bb8f187a918902d38be64130668167"
+    },
+    {
+      "path": "test/app-session.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "ab50d2d3c05ea00a99360d7e91268121974fd046",
+      "size": 12279,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/ab50d2d3c05ea00a99360d7e91268121974fd046"
+    },
+    {
+      "path": "test/claude-channel.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "1811577ddb7e8f8879b94beae8a1b05866aefbcf",
+      "size": 4772,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/1811577ddb7e8f8879b94beae8a1b05866aefbcf"
+    },
+    {
+      "path": "test/codex-bridge.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e013c834de5c12c1c6ce032a36274a86bf4e22b3",
+      "size": 85802,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/e013c834de5c12c1c6ce032a36274a86bf4e22b3"
+    },
+    {
+      "path": "test/codex-commands.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "c891a610f1bf8538e997f4af3d308cbbdedf09ab",
+      "size": 1393,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/c891a610f1bf8538e997f4af3d308cbbdedf09ab"
+    },
+    {
+      "path": "test/codex-contract.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "cab3c8838302c1f0d78c0b6793deed4e396084ef",
+      "size": 3636,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/cab3c8838302c1f0d78c0b6793deed4e396084ef"
+    },
+    {
+      "path": "test/codex-conversation.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "00bf0f807eeccb5d9bc1f3d1e950bdd3c99b64f2",
+      "size": 21321,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/00bf0f807eeccb5d9bc1f3d1e950bdd3c99b64f2"
+    },
+    {
+      "path": "test/codex-session.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "17c8b82f479749a70c6329636edcec4fa7353dc7",
+      "size": 15124,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/17c8b82f479749a70c6329636edcec4fa7353dc7"
+    },
+    {
+      "path": "test/codex-surfaces.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "a801e03eeefc48635dcbc5e0619158e50b2b7db0",
+      "size": 4307,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/a801e03eeefc48635dcbc5e0619158e50b2b7db0"
+    },
+    {
+      "path": "test/connect-gateway.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "31a998bb10250b309e2a29ddaecd9345cd3eeb04",
+      "size": 4156,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/31a998bb10250b309e2a29ddaecd9345cd3eeb04"
+    },
+    {
+      "path": "test/desktop-shim.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "4d3ec83395b188a9b015fc0fda88e11c5de06ac8",
+      "size": 49041,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/4d3ec83395b188a9b015fc0fda88e11c5de06ac8"
+    },
+    {
+      "path": "test/doctor.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "66d827e9794cab7669b8d8ecc57e7fdcae101031",
+      "size": 1530,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/66d827e9794cab7669b8d8ecc57e7fdcae101031"
+    },
+    {
+      "path": "test/gateway-groups.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "932ef8f5fa2c928f9493f9fd812a196c3d440b0a",
+      "size": 4834,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/932ef8f5fa2c928f9493f9fd812a196c3d440b0a"
+    },
+    {
+      "path": "test/gateway-send.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "fc0a0c905662216e98bd426108da17d5e1f8942f",
+      "size": 4730,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/fc0a0c905662216e98bd426108da17d5e1f8942f"
+    },
+    {
+      "path": "test/gateway-skills.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "1a49c33b632353d0bcd9e38ab65199b9c62fff31",
+      "size": 5352,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/1a49c33b632353d0bcd9e38ab65199b9c62fff31"
+    },
+    {
+      "path": "test/gateway.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "ae3e15d1b1317dfae5774236162647ec2a7a7815",
+      "size": 1529,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/ae3e15d1b1317dfae5774236162647ec2a7a7815"
+    },
+    {
+      "path": "test/grok-approvals.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "6543aa437cd3a0501d95192f526df3c5aff2e3a2",
+      "size": 3281,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/6543aa437cd3a0501d95192f526df3c5aff2e3a2"
+    },
+    {
+      "path": "test/helpers",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "be2a5ee15f1faef5b21dbbd8441f2617e386a18f",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/be2a5ee15f1faef5b21dbbd8441f2617e386a18f"
+    },
+    {
+      "path": "test/helpers/codex-server.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "ed659e262f1fa43c89eee605698ddcce91d999c9",
+      "size": 2951,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/ed659e262f1fa43c89eee605698ddcce91d999c9"
+    },
+    {
+      "path": "test/history.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "1800414c7a31d5e9f5986e6db0c8b4bb7b81d028",
+      "size": 12891,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/1800414c7a31d5e9f5986e6db0c8b4bb7b81d028"
+    },
+    {
+      "path": "test/host-tool-inventory.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "8824daa9271ef1bd547628e7be77efaa2ae49ad5",
+      "size": 3852,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/8824daa9271ef1bd547628e7be77efaa2ae49ad5"
+    },
+    {
+      "path": "test/pr69-integration.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "8de9bf0823edd803e97979d1c15a2d592a24457f",
+      "size": 4119,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/8de9bf0823edd803e97979d1c15a2d592a24457f"
+    },
+    {
+      "path": "test/relay-auth-recovery.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "916d4501f14ac005d1a1ef9436adaaa42680da05",
+      "size": 8064,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/916d4501f14ac005d1a1ef9436adaaa42680da05"
+    },
+    {
+      "path": "test/relay-codex.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9572ead45ffc10373a0f63eb588ce5ccb3c8febb",
+      "size": 2038,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/9572ead45ffc10373a0f63eb588ce5ccb3c8febb"
+    },
+    {
+      "path": "test/relay-completion.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "3b5ea10e65a82d071ef8d8bfea09786110335a3f",
+      "size": 1497,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/3b5ea10e65a82d071ef8d8bfea09786110335a3f"
+    },
+    {
+      "path": "test/relay-engine.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "6ba5ded53c597641ca0e76ec4e8f2065a1be2e31",
+      "size": 22880,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/6ba5ded53c597641ca0e76ec4e8f2065a1be2e31"
+    },
+    {
+      "path": "test/relay-failure-detail.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "5c4c0bb0275bf229f3a0fb28b5372a161a3fb513",
+      "size": 3620,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/5c4c0bb0275bf229f3a0fb28b5372a161a3fb513"
+    },
+    {
+      "path": "test/relay-gateway-lifecycle.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "8ecedab06a8a125b59bf3d61ea0c3a3be2d3e658",
+      "size": 7938,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/8ecedab06a8a125b59bf3d61ea0c3a3be2d3e658"
+    },
+    {
+      "path": "test/relay-interactions.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "8f7bc0f7f2917ec6ea7a999f268bcefefca7d4f9",
+      "size": 4508,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/8f7bc0f7f2917ec6ea7a999f268bcefefca7d4f9"
+    },
+    {
+      "path": "test/relay-lifecycle.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "b44e7ba720996a171bb812d539ac31e82a6b3478",
+      "size": 7329,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/b44e7ba720996a171bb812d539ac31e82a6b3478"
+    },
+    {
+      "path": "test/relay-state.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "8a010a21c3ee6a616b77e5ac0014d4e14e48dc95",
+      "size": 3569,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/8a010a21c3ee6a616b77e5ac0014d4e14e48dc95"
+    },
+    {
+      "path": "test/relay-surfaces.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "c1c7299790badc813c9b76dc7e26bf13bd52d71b",
+      "size": 38837,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/c1c7299790badc813c9b76dc7e26bf13bd52d71b"
+    },
+    {
+      "path": "test/relay-worker.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "3a3f172aa6f0895a1a4485a4e768fa5424048778",
+      "size": 7179,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/3a3f172aa6f0895a1a4485a4e768fa5424048778"
+    },
+    {
+      "path": "test/release-config.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "508f7214a8a8f9fee49b9dc1ac7eb7a8a17db410",
+      "size": 1899,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/508f7214a8a8f9fee49b9dc1ac7eb7a8a17db410"
+    },
+    {
+      "path": "test/store.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "3b9fad0562342b5f2d122d55fe3be54e524b9232",
+      "size": 5485,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/3b9fad0562342b5f2d122d55fe3be54e524b9232"
+    },
+    {
+      "path": "test/test-runner.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "05763320047356b0d8a44ee629b6b84720886931",
+      "size": 2142,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/05763320047356b0d8a44ee629b6b84720886931"
+    },
+    {
+      "path": "test/transcript.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "4716a2046dd88e8a614c5531251c89247db6c566",
+      "size": 4161,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/4716a2046dd88e8a614c5531251c89247db6c566"
+    },
+    {
+      "path": "test/url-policy.test.js",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d55363b0be8d2ac7a3c21156b12706fefae568e0",
+      "size": 5672,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/d55363b0be8d2ac7a3c21156b12706fefae568e0"
+    },
+    {
+      "path": "tests",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "60cbee26b42d21864bf3b16175488e76fa78173c",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/60cbee26b42d21864bf3b16175488e76fa78173c"
+    },
+    {
+      "path": "tests/fixtures",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "ed0b68bfe78c8cbbe0290d5d2b2074666e5cef95",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/ed0b68bfe78c8cbbe0290d5d2b2074666e5cef95"
+    },
+    {
+      "path": "tests/fixtures/codex-global-state-remote.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "61843826fc3a43a653ce878df205315510a6942d",
+      "size": 1333,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/61843826fc3a43a653ce878df205315510a6942d"
+    },
+    {
+      "path": "tests/route-unit",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "d67eb7538479601f7aaedff2a0b913d3a06cc0fc",
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/trees/d67eb7538479601f7aaedff2a0b913d3a06cc0fc"
+    },
+    {
+      "path": "tests/route-unit/chatgpt-desktop-e2e-regressions.test.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9ede74782b32fcffc53ad7c00c55026185d548dd",
+      "size": 30456,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/9ede74782b32fcffc53ad7c00c55026185d548dd"
+    },
+    {
+      "path": "tests/route-unit/chatgpt-desktop-mcp-followup.test.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "5ccae37cb316eaa2a676fd6be4efdb9460c57234",
+      "size": 11174,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/5ccae37cb316eaa2a676fd6be4efdb9460c57234"
+    },
+    {
+      "path": "tests/route-unit/chatgpt-desktop-review.test.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "f68bdabea16b95b7c695ace8a1d173b19dd7d9be",
+      "size": 15558,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/f68bdabea16b95b7c695ace8a1d173b19dd7d9be"
+    },
+    {
+      "path": "tests/route-unit/chatgpt-desktop.test.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "1bfce30fb002cda23964c0e1970aa39406eecda2",
+      "size": 44766,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/1bfce30fb002cda23964c0e1970aa39406eecda2"
+    },
+    {
+      "path": "tests/route-unit/tools.test.ts",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "4d4cdd52daa4182a2e47e1faf7b8986bd23bc56b",
+      "size": 22683,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/4d4cdd52daa4182a2e47e1faf7b8986bd23bc56b"
+    },
+    {
+      "path": "tsconfig.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "8529ee78f97f400e6636b4badda1a9a8eb579a5d",
+      "size": 553,
+      "url": "https://api.github.com/repos/ScriptedAlchemy/grok-bot-cli/git/blobs/8529ee78f97f400e6636b4badda1a9a8eb579a5d"
+    }
+  ],
+  "truncated": false
+}
