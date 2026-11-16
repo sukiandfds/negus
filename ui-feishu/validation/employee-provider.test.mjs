@@ -231,6 +231,10 @@ test('all subscribed providers reach employee runtime; only the current turn can
   f.client('current').emit({ method: 'turn/started', params: {
     threadId: 'original-thread', turn: { id: 'old-provider-turn' },
   } });
+  const oldDeltaCount = f.events.filter(event => event.type === 'employee_assistant_delta').length;
+  f.client('current').emit({ method: 'item/agentMessage/delta', params: {
+    threadId: 'original-thread', turnId: 'old-provider-turn', itemId: 'old-delta', delta: 'old provider delta',
+  } });
   const messagesBefore = f.events.filter(event => event.type === 'employee_message_completed').length;
   f.client('current').emit({ method: 'item/completed', params: {
     threadId: 'original-thread', turnId: 'old-provider-turn',
@@ -239,7 +243,17 @@ test('all subscribed providers reach employee runtime; only the current turn can
   let status = (await f.service.getStatus('researcher')).status;
   assert.equal(status.active, true);
   assert.equal(status.turnId, sent.turnId);
+  assert.equal(f.events.filter(event => event.type === 'employee_assistant_delta').length, oldDeltaCount);
   assert.equal(f.events.filter(event => event.type === 'employee_message_completed').length, messagesBefore);
+
+  f.client('ccswitch_vip').emit({ method: 'item/completed', params: {
+    threadId: 'original-thread', turnId: sent.turnId,
+    item: { id: 'current-final', type: 'agentMessage', phase: 'final_answer', text: 'current answer' },
+  } });
+  status = (await f.service.getStatus('researcher')).status;
+  assert.equal(status.active, true);
+  assert.equal(status.turnId, sent.turnId);
+  assert.equal(f.events.filter(event => event.type === 'employee_message_completed').length, messagesBefore + 1);
 
   f.client('ccswitch_vip').emit({ method: 'turn/completed', params: {
     threadId: 'original-thread', turn: { id: sent.turnId, status: 'completed' },

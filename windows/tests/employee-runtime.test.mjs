@@ -8,7 +8,7 @@ import { createEmployeeProjectRegistry } from "../server/employee-project-regist
 import { createEmployeeRuntimeService } from "../server/employee-runtime-service.mjs";
 import { createEmployeeProjectDirectoryRoutes } from "../server/routes/employee-project-directory-routes.mjs";
 
-const fixture = async (t, { execution = null, onTurnCompleted = null, taskService = null, growthService = null, readHistory, registerSession } = {}) => {
+const fixture = async (t, { execution = null, onTurnCompleted = null, taskService = null, growthService = null, readHistory, readRuntimeContext, registerSession } = {}) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-employee-runtime-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const registry = await createEmployeeProjectRegistry({
@@ -43,6 +43,7 @@ const fixture = async (t, { execution = null, onTurnCompleted = null, taskServic
     registry,
     conversationStore,
     readHistory,
+    readRuntimeContext,
     registerSession,
     projectRoot: "D:\\project",
     client,
@@ -774,6 +775,111 @@ test("employee steering preserves submission identity and current turn when resp
   }
 });
 
+test("a follow-up prepared before the current turn ends uses one turn/start", async (t) => {
+  const f = await fixture(t);
+  await f.runtime.sendMessage({ employeeId: "developer", text: "first", requestId: "first" });
+  let reads = 0;
+  let reachedRead;
+  let releaseRead;
+  const readReached = new Promise(resolve => { reachedRead = resolve; });
+  const readGate = new Promise(resolve => { releaseRead = resolve; });
+  const request = f.client.request.bind(f.client);
+  f.client.request = async (method, params) => {
+    if (method !== "thread/read") return request(method, params);
+    reads += 1;
+    if (reads !== 2) return request(method, params);
+    reachedRead();
+    await readGate;
+    return { thread: { id: params.threadId, status: { type: "idle" }, turns: [] } };
+  };
+
+  const second = f.runtime.sendMessage({ employeeId: "developer", text: "follow up", requestId: "fast-follow-up" });
+  await readReached;
+  f.listener({ method: "turn/completed", params: {
+    threadId: "employee-thread",
+    turn: { id: "employee-turn", status: "completed" },
+  } });
+  releaseRead();
+  const result = await second;
+
+  assert.equal(result.requestId, "fast-follow-up");
+  assert.equal(f.calls.filter(call => call.method === "turn/steer").length, 0);
+  const starts = f.calls.filter(call => call.method === "turn/start");
+  assert.equal(starts.length, 2);
+  assert.equal(starts[1].params.clientUserMessageId, "fast-follow-up");
+  assert.equal((await f.runtime.getStatus("developer")).status.phase, "working");
+});
+
+test("an ended steer returns to turn/start once with the same request identity", async (t) => {
+  const f = await fixture(t);
+  await f.runtime.sendMessage({ employeeId: "developer", text: "first", requestId: "first" });
+  let reads = 0;
+  const methods = [];
+  const requests = [];
+  const request = f.client.request.bind(f.client);
+  f.client.request = async (method, params) => {
+    methods.push(method);
+    requests.push({ method, params });
+    if (method === "thread/read") {
+      reads += 1;
+      if (reads < 4) return request(method, params);
+      return { thread: { id: params.threadId, status: { type: "idle" }, turns: [] } };
+    }
+    if (method === "turn/steer") {
+      throw Object.assign(new Error("turn ended and is no longer active"), { statusCode: 409 });
+    }
+    return request(method, params);
+  };
+
+  const result = await f.runtime.sendMessage({ employeeId: "developer", text: "after finish", requestId: "ended-steer" });
+  assert.equal(result.status, "inProgress");
+  assert.equal(methods.filter(method => method === "turn/steer").length, 1);
+  assert.equal(f.calls.filter(call => call.method === "turn/start").length, 2);
+  const steer = requests.find(call => call.method === "turn/steer");
+  const start = requests.find(call => call.method === "turn/start");
+  assert.equal(start.params.clientUserMessageId, "ended-steer");
+  assert.equal(start.params.clientUserMessageId, steer.params.clientUserMessageId);
+  assert.deepEqual(start.params.input, steer.params.input);
+  assert.equal((await f.runtime.getStatus("developer")).status.phase, "working");
+});
+
+test("an ended steer does not replay into a different active turn", async (t) => {
+  const f = await fixture(t);
+  await f.runtime.sendMessage({ employeeId: "developer", text: "first", requestId: "first" });
+  let reads = 0;
+  const methods = [];
+  const request = f.client.request.bind(f.client);
+  f.client.request = async (method, params) => {
+    methods.push(method);
+    if (method === "thread/read") {
+      reads += 1;
+      if (reads < 4) return request(method, params);
+      return { thread: { id: params.threadId, status: { type: "inProgress" }, turns: [
+        { id: "other-turn", status: "inProgress", items: [] },
+      ] } };
+    }
+    if (method === "turn/steer") {
+      throw Object.assign(new Error("turn ended and is no longer active"), { statusCode: 409 });
+    }
+    return request(method, params);
+  };
+
+  let failure;
+  try {
+    await f.runtime.sendMessage({ employeeId: "developer", text: "must not duplicate", requestId: "busy-other" });
+  } catch (error) {
+    failure = error;
+  }
+  assert.ok(failure, JSON.stringify(methods));
+  assert.match(failure?.message || "", /no longer active/);
+  assert.deepEqual(methods.filter(method => method === "turn/steer"), ["turn/steer"]);
+  assert.equal(f.calls.filter(call => call.method === "turn/start").length, 1);
+  const status = (await f.runtime.getStatus("developer")).status;
+  assert.equal(status.phase, "occupied");
+  assert.equal(status.active, true);
+  assert.equal(status.turnId, "other-turn");
+});
+
 
 test('employee fork registers as ordinary user conversation without replacing the employee', async t => {
   const registrations = [];
@@ -827,4 +933,45 @@ test("a repeated app-server exit does not complete the same employee turn twice"
   f.healthListener({ phase: "exited" });
   const completions = f.events.filter((event) => event.type === "employee_turn_completed");
   assert.equal(completions.length, 1);
+});
+
+test('employee directory invalidation follows durable final-message storage', async t => {
+  const threadEvents = [];
+  const f = await fixture(t, { execution: { publishThreadEvent: (id, event) => threadEvents.push(event) } });
+  await f.runtime.sendMessage({ employeeId: 'developer', text: 'fixture', requestId: 'persist-before-directory' });
+  let finish;
+  f.conversationStore.recordRuntimeEvent = () => new Promise(resolve => { finish = resolve; });
+  threadEvents.length = 0;
+  f.listener({ method: 'item/completed', params: { threadId: 'employee-thread', turnId: 'employee-turn',
+    item: { id: 'final-stored', type: 'agentMessage', phase: 'final_answer', text: 'saved final' } } });
+  f.listener({ method: 'turn/completed', params: { threadId: 'employee-thread', turn: { id: 'employee-turn', status: 'completed' } } });
+  assert.equal(f.events.at(-1).type, 'employee_turn_completed');
+  assert.equal(threadEvents.filter(e => e.type === 'sessions_changed').length, 0);
+  finish();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(threadEvents.filter(e => e.type === 'sessions_changed'), [{ type: 'sessions_changed', threadId: 'employee-thread' }]);
+});
+
+
+test('employee context restores provider history usage without opening or sending, and does not reuse another model', async t => {
+  const reads = [];
+  const f = await fixture(t, { readRuntimeContext: async (...args) => {
+    reads.push(args); return { model: 'history-model', usage: { usedTokens: 321, contextWindow: 1000 } };
+  } });
+  await f.registry.bindMainThread('developer', 'employee-thread');
+  await f.registry.setModelSettings('developer', { model: 'history-model', modelProviderId: 'current', reasoningEffort: 'high' });
+  f.runtime.close();
+  const restored = createEmployeeRuntimeService({ registry: f.registry, conversationStore: f.conversationStore, client: f.client,
+    projectRoot: 'D:\\project', readRuntimeContext: async (...args) => {
+      reads.push(args); return { model: 'history-model', usage: { usedTokens: 321, contextWindow: 1000 } };
+    } });
+  t.after(() => restored.close());
+  assert.equal(restored.ownsThread('employee-thread'), true);
+  const context = await restored.getRuntimeContext('employee-thread');
+  assert.deepEqual(context.usage, { usedTokens: 321, contextWindow: 1000 });
+  assert.deepEqual(reads, [['current', 'employee-thread']]);
+  assert.deepEqual(f.calls, []);
+  await f.registry.setModelSettings('developer', { model: 'other-model', modelProviderId: 'current' });
+  assert.equal((await restored.getRuntimeContext('employee-thread')).usage, undefined);
+  assert.deepEqual(f.calls, []);
 });

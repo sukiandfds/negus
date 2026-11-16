@@ -9,7 +9,14 @@ const { createEmployeeRuntimeService } = await import('../../windows/server/empl
 const { createEmployeeProjectRegistry } = await import('../../windows/server/employee-project-registry.mjs');
 const { createExecutionTracker } = await import('../../windows/server/execution-tracker.mjs');
 
-async function employeeAdapterFixture(t, { gateStart = false, startResult = () => ({ turn: { id: 'current-turn', status: 'inProgress' } }) } = {}) {
+async function employeeAdapterFixture(t, {
+  gateStart = false,
+  gateSteer = false,
+  startResult = () => ({ turn: { id: 'current-turn', status: 'inProgress' } }),
+  steerResult = params => ({ turn: { id: params.expectedTurnId, status: 'inProgress' } }),
+  steerFailure = '',
+  authoritativeAfterSteerFailure = 'same',
+} = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-employee-adapter-'));
   const registry = await createEmployeeProjectRegistry({ stateFile: path.join(root, 'employees.json'), workspaceRoot: root });
   await registry.bindMainThread('developer', 'employee-thread');
@@ -20,15 +27,46 @@ async function employeeAdapterFixture(t, { gateStart = false, startResult = () =
   let reachedStart = () => {};
   const startReached = gateStart ? new Promise(resolve => { reachedStart = resolve; }) : Promise.resolve();
   const startGate = gateStart ? new Promise(resolve => { releaseStart = resolve; }) : Promise.resolve();
+  let releaseSteer = () => {};
+  let reachedSteer = () => {};
+  const steerReached = gateSteer ? new Promise(resolve => { reachedSteer = resolve; }) : Promise.resolve();
+  const steerGate = gateSteer ? new Promise(resolve => { releaseSteer = resolve; }) : Promise.resolve();
+  let nativeStarts = 0;
+  let steerAttempts = 0;
   const client = {
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     async request(method, params) {
-      if (method === 'thread/read') return { thread: { id: params.threadId, status: { type: 'idle' }, turns: [] } };
+      if (method === 'thread/read') {
+        if (gateSteer && nativeStarts > 0 && steerAttempts > 0) {
+          if (authoritativeAfterSteerFailure === 'unknown') throw Error('authoritative state unavailable');
+          if (authoritativeAfterSteerFailure === 'inactive') {
+            return { thread: { id: params.threadId, status: { type: 'idle' }, turns: [] } };
+          }
+          const turnId = authoritativeAfterSteerFailure === 'other' ? 'other-turn' : 'current-turn';
+          return { thread: { id: params.threadId, status: { type: 'inProgress' }, turns: [
+            { id: turnId, status: 'inProgress', items: [] },
+          ] } };
+        }
+        return gateSteer && nativeStarts > 0
+          ? { thread: { id: params.threadId, status: { type: 'inProgress' }, turns: [
+            { id: 'current-turn', status: 'inProgress', items: [] },
+          ] } }
+          : { thread: { id: params.threadId, status: { type: 'idle' }, turns: [] } };
+      }
       if (method === 'thread/resume') return { thread: { id: params.threadId } };
       if (method === 'turn/start') {
+        nativeStarts += 1;
         reachedStart();
         await startGate;
         return await startResult();
+      }
+      if (method === 'turn/steer') {
+        steerAttempts += 1;
+        reachedSteer();
+        await steerGate;
+        if (steerFailure === 'network') throw new TypeError('fetch failed');
+        if (steerFailure === 'ordinary') throw Error('steer request failed');
+        return steerResult(params);
       }
       return {};
     },
@@ -63,10 +101,15 @@ async function employeeAdapterFixture(t, { gateStart = false, startResult = () =
     events,
     startReached,
     releaseStart,
-    emit(method, params) {
-      const message = { method, params: { threadId: 'employee-thread', ...params } };
+    steerReached,
+    releaseSteer,
+    emitOn(threadId, method, params) {
+      const message = { method, params: { threadId, ...params } };
       for (const listener of listeners) listener(message);
       return message;
+    },
+    emit(method, params) {
+      return this.emitOn('employee-thread', method, params);
     },
   };
 }
@@ -342,6 +385,430 @@ test('an early untagged completion synchronizes both statuses after turn confirm
   assert.equal(executionStatus.phase, 'completed');
   assert.equal(executionStatus.active, false);
   assert.equal(f.events.filter(event => event.type === 'employee_turn_completed').length, 1);
+});
+
+test('an approval arriving before turn/start returns keeps the final answer on the current turn', async t => {
+  const f = await employeeAdapterFixture(t, { gateStart: true });
+  const sending = f.runtime.sendMessage({ employeeId: 'developer', text: 'approval first', requestId: 'approval-first' });
+  await f.startReached;
+  f.emit('item/commandExecution/requestApproval', {
+    turnId: 'current-turn', itemId: 'approval-before-response', requestId: 'approval-before-response',
+  });
+  f.emit('item/completed', {
+    turnId: 'current-turn',
+    item: { id: 'approval-answer', type: 'agentMessage', phase: 'final_answer', text: 'approval answer' },
+  });
+  f.emit('turn/completed', { turn: { id: 'current-turn', status: 'completed' } });
+  assert.equal((await f.runtime.getStatus('developer')).status.phase, 'submitted');
+  assert.equal(f.events.filter(event => event.type === 'employee_message_completed').length, 0);
+  assert.equal(f.execution.getStatus('employee-thread').phase, 'submitted');
+
+  f.releaseStart();
+  await sending;
+  const status = (await f.runtime.getStatus('developer')).status;
+  assert.equal(status.phase, 'idle');
+  assert.equal(status.active, false);
+  assert.equal(f.events.filter(event => event.type === 'employee_message_completed').length, 1);
+  assert.equal(f.events.filter(event => event.type === 'assistant_message_completed').length, 1);
+  const execution = f.execution.getStatus('employee-thread');
+  assert.equal(execution.phase, 'completed');
+  assert.equal(execution.active, false);
+  assert.equal(execution.turnId, 'current-turn');
+});
+
+test('a user-input request arriving before turn/start returns keeps the final answer on the current turn', async t => {
+  const f = await employeeAdapterFixture(t, { gateStart: true });
+  const sending = f.runtime.sendMessage({ employeeId: 'developer', text: 'input first', requestId: 'input-first' });
+  await f.startReached;
+  f.emit('item/tool/requestUserInput', {
+    turnId: 'current-turn', itemId: 'input-before-response', requestId: 'input-before-response',
+  });
+  f.emit('item/completed', {
+    turnId: 'current-turn',
+    item: { id: 'input-answer', type: 'agentMessage', phase: 'final_answer', text: 'input answer' },
+  });
+  f.emit('turn/completed', { turn: { id: 'current-turn', status: 'completed' } });
+  assert.equal((await f.runtime.getStatus('developer')).status.phase, 'submitted');
+  assert.equal(f.events.filter(event => event.type === 'employee_message_completed').length, 0);
+
+  f.releaseStart();
+  await sending;
+  const status = (await f.runtime.getStatus('developer')).status;
+  assert.equal(status.phase, 'idle');
+  assert.equal(status.active, false);
+  assert.equal(f.events.filter(event => event.type === 'employee_message_completed').length, 1);
+  assert.equal(f.execution.getStatus('employee-thread').phase, 'completed');
+});
+
+test('an old-turn approval arriving before turn/start returns is not replayed', async t => {
+  const f = await employeeAdapterFixture(t, { gateStart: true });
+  const sending = f.runtime.sendMessage({ employeeId: 'developer', text: 'old approval', requestId: 'old-approval' });
+  await f.startReached;
+  f.emit('item/commandExecution/requestApproval', {
+    turnId: 'old-turn', itemId: 'old-approval', requestId: 'old-approval',
+  });
+  f.emitOn('replacement-thread', 'item/commandExecution/requestApproval', {
+    turnId: 'current-turn', itemId: 'old-thread-approval', requestId: 'old-thread-approval',
+  });
+  f.releaseStart();
+  await sending;
+  const status = (await f.runtime.getStatus('developer')).status;
+  assert.equal(status.phase, 'working');
+  assert.equal(status.turnId, 'current-turn');
+  assert.equal(f.events.some(event => event.type === 'employee_status' && event.status.phase === 'waitingOnApproval'), false);
+});
+
+test('old or untagged waiting events cannot change an active current turn', async t => {
+  const f = await employeeAdapterFixture(t);
+  await f.runtime.sendMessage({ employeeId: 'developer', text: 'active current', requestId: 'active-current' });
+  const before = (await f.runtime.getStatus('developer')).status;
+  const executionBefore = f.execution.getStatus('employee-thread');
+  for (const method of ['item/commandExecution/requestApproval', 'mcpServer/elicitation/request']) {
+    f.emit(method, { turnId: 'old-turn', itemId: 'old-wait', requestId: 'old-wait' });
+    f.emit(method, { itemId: 'untagged-wait', requestId: 'untagged-wait' });
+  }
+  assert.deepEqual((await f.runtime.getStatus('developer')).status, before);
+  assert.deepEqual(f.execution.getStatus('employee-thread'), executionBefore);
+  f.emit('item/tool/requestUserInput', {
+    turnId: 'current-turn', itemId: 'current-input', requestId: 'current-input',
+  });
+  const waiting = (await f.runtime.getStatus('developer')).status;
+  const waitingExecution = f.execution.getStatus('employee-thread');
+  assert.equal(waiting.phase, 'waitingOnUserInput');
+  f.emit('item/commandExecution/requestApproval', {
+    turnId: 'current-turn', itemId: 'late-current-approval', requestId: 'late-current-approval',
+  });
+  assert.deepEqual((await f.runtime.getStatus('developer')).status, waiting);
+  assert.deepEqual(f.execution.getStatus('employee-thread'), waitingExecution);
+});
+
+test('an old approval cannot relight an idle-completed employee or execution', async t => {
+  const f = await employeeAdapterFixture(t);
+  await f.runtime.sendMessage({ employeeId: 'developer', text: 'finish current', requestId: 'finish-current' });
+  f.emit('turn/completed', { turn: { id: 'current-turn', status: 'completed' } });
+  const idle = (await f.runtime.getStatus('developer')).status;
+  const completed = f.execution.getStatus('employee-thread');
+  assert.equal(idle.phase, 'idle');
+  assert.equal(idle.active, false);
+  assert.equal(completed.phase, 'completed');
+  f.emit('item/commandExecution/requestApproval', {
+    turnId: 'old-turn', itemId: 'late-approval', requestId: 'late-approval',
+  });
+  assert.deepEqual((await f.runtime.getStatus('developer')).status, idle);
+  assert.deepEqual(f.execution.getStatus('employee-thread'), completed);
+});
+
+test('an untagged approval buffered before turn/start replays once with the confirmed turn ID', async t => {
+  const f = await employeeAdapterFixture(t, { gateStart: true });
+  const sending = f.runtime.sendMessage({ employeeId: 'developer', text: 'untagged approval', requestId: 'untagged-approval' });
+  await f.startReached;
+  f.emit('item/commandExecution/requestApproval', {
+    itemId: 'untagged-approval', requestId: 'untagged-approval',
+  });
+  assert.equal((await f.runtime.getStatus('developer')).status.phase, 'submitted');
+  assert.equal(f.execution.getStatus('employee-thread').phase, 'submitted');
+  f.releaseStart();
+  await sending;
+  const waiting = (await f.runtime.getStatus('developer')).status;
+  assert.equal(waiting.phase, 'waitingOnApproval');
+  assert.equal(waiting.label, '等待原生审批');
+  assert.equal(waiting.turnId, 'current-turn');
+  assert.equal(f.execution.getStatus('employee-thread').phase, 'waitingOnApproval');
+  f.emit('item/completed', {
+    turnId: 'current-turn',
+    item: { id: 'untagged-approval-answer', type: 'agentMessage', phase: 'final_answer', text: 'approval complete' },
+  });
+  f.emit('turn/completed', { turn: { id: 'current-turn', status: 'completed' } });
+  assert.equal((await f.runtime.getStatus('developer')).status.phase, 'idle');
+  assert.equal(f.execution.getStatus('employee-thread').phase, 'completed');
+});
+
+test('a steer response preserves user-input waiting and later completes the current turn', async t => {
+  const f = await employeeAdapterFixture(t, { gateSteer: true });
+  await f.runtime.sendMessage({ employeeId: 'developer', text: 'first turn', requestId: 'first-turn' });
+  const steering = f.runtime.sendMessage({ employeeId: 'developer', text: 'steer input', requestId: 'steer-input' });
+  await f.steerReached;
+  f.emit('item/tool/requestUserInput', {
+    turnId: 'current-turn', itemId: 'steer-user-input', requestId: 'steer-user-input',
+  });
+  assert.equal((await f.runtime.getStatus('developer')).status.phase, 'waitingOnUserInput');
+  f.releaseSteer();
+  await steering;
+  const waiting = (await f.runtime.getStatus('developer')).status;
+  assert.equal(waiting.phase, 'waitingOnUserInput');
+  assert.equal(waiting.label, '等待补充信息');
+  assert.equal(waiting.active, true);
+  assert.equal(waiting.turnId, 'current-turn');
+  f.emit('item/completed', {
+    turnId: 'current-turn',
+    item: { id: 'steer-input-answer', type: 'agentMessage', phase: 'final_answer', text: 'steer input answer' },
+  });
+  f.emit('turn/completed', { turn: { id: 'current-turn', status: 'completed' } });
+  assert.equal((await f.runtime.getStatus('developer')).status.phase, 'idle');
+  assert.equal(f.events.filter(event => event.type === 'employee_message_completed').length, 1);
+  assert.equal(f.execution.getStatus('employee-thread').phase, 'completed');
+});
+
+test('a steer response preserves approval waiting and later completes the current turn', async t => {
+  const f = await employeeAdapterFixture(t, { gateSteer: true });
+  await f.runtime.sendMessage({ employeeId: 'developer', text: 'first turn', requestId: 'first-turn' });
+  const steering = f.runtime.sendMessage({ employeeId: 'developer', text: 'steer approval', requestId: 'steer-approval' });
+  await f.steerReached;
+  f.emit('item/commandExecution/requestApproval', {
+    turnId: 'current-turn', itemId: 'steer-approval', requestId: 'steer-approval',
+  });
+  assert.equal((await f.runtime.getStatus('developer')).status.phase, 'waitingOnApproval');
+  f.releaseSteer();
+  await steering;
+  const waiting = (await f.runtime.getStatus('developer')).status;
+  assert.equal(waiting.phase, 'waitingOnApproval');
+  assert.equal(waiting.label, '等待原生审批');
+  assert.equal(waiting.active, true);
+  assert.equal(waiting.turnId, 'current-turn');
+  f.emit('item/completed', {
+    turnId: 'current-turn',
+    item: { id: 'steer-approval-answer', type: 'agentMessage', phase: 'final_answer', text: 'steer approval answer' },
+  });
+  f.emit('turn/completed', { turn: { id: 'current-turn', status: 'completed' } });
+  assert.equal((await f.runtime.getStatus('developer')).status.phase, 'idle');
+  assert.equal(f.events.filter(event => event.type === 'employee_message_completed').length, 1);
+  assert.equal(f.execution.getStatus('employee-thread').phase, 'completed');
+});
+
+for (const waiting of [
+  { method: 'item/tool/requestUserInput', phase: 'waitingOnUserInput', label: '等待补充信息' },
+  { method: 'item/commandExecution/requestApproval', phase: 'waitingOnApproval', label: '等待原生审批' },
+]) {
+  test(`a different steer response preserves ${waiting.phase} and clears continuation`, async t => {
+    const f = await employeeAdapterFixture(t, {
+      gateSteer: true,
+      steerResult: () => ({ turn: { id: 'other-turn', status: 'inProgress' } }),
+    });
+    await f.runtime.sendMessage({ employeeId: 'developer', text: 'first turn', requestId: 'first-turn' });
+    f.emit(waiting.method, { turnId: 'current-turn', itemId: 'before-steer', requestId: 'before-steer' });
+    const steering = f.runtime.sendMessage({ employeeId: 'developer', text: 'stale steer', requestId: 'stale-steer' });
+    await f.steerReached;
+    f.releaseSteer();
+    await assert.rejects(steering, /响应属于其他任务/);
+    const status = (await f.runtime.getStatus('developer')).status;
+    assert.equal(status.phase, waiting.phase);
+    assert.equal(status.label, waiting.label);
+    assert.equal(status.active, true);
+    assert.equal(status.turnId, 'current-turn');
+    const execution = f.execution.getStatus('employee-thread');
+    assert.equal(execution.phase, waiting.phase);
+    assert.equal(execution.active, true);
+    assert.equal(execution.turnId, 'current-turn');
+    assert.equal(f.events.filter(event => event.type === 'employee_message_completed').length, 0);
+  });
+}
+
+test('an ordinary steer failure keeps user-input waiting when the same turn is authoritative', async t => {
+  const f = await employeeAdapterFixture(t, { gateSteer: true, steerFailure: 'ordinary' });
+  await f.runtime.sendMessage({ employeeId: 'developer', text: 'first turn', requestId: 'first-turn' });
+  f.emit('item/tool/requestUserInput', {
+    turnId: 'current-turn', itemId: 'waiting-before-ordinary', requestId: 'waiting-before-ordinary',
+  });
+  const steering = f.runtime.sendMessage({ employeeId: 'developer', text: 'ordinary failure', requestId: 'ordinary-failure' });
+  await f.steerReached;
+  f.releaseSteer();
+  await assert.rejects(steering, /steer request failed/);
+  const status = (await f.runtime.getStatus('developer')).status;
+  assert.equal(status.phase, 'waitingOnUserInput');
+  assert.equal(status.label, '等待补充信息');
+  assert.equal(status.active, true);
+  assert.equal(status.turnId, 'current-turn');
+  assert.equal(f.execution.getStatus('employee-thread').phase, 'waitingOnUserInput');
+});
+
+test('a network steer failure keeps approval waiting when the same turn is authoritative', async t => {
+  const f = await employeeAdapterFixture(t, { gateSteer: true, steerFailure: 'network' });
+  await f.runtime.sendMessage({ employeeId: 'developer', text: 'first turn', requestId: 'first-turn' });
+  f.emit('item/commandExecution/requestApproval', {
+    turnId: 'current-turn', itemId: 'waiting-before-network', requestId: 'waiting-before-network',
+  });
+  const steering = f.runtime.sendMessage({ employeeId: 'developer', text: 'network failure', requestId: 'network-failure' });
+  await f.steerReached;
+  f.releaseSteer();
+  await assert.rejects(steering, /fetch failed/);
+  const status = (await f.runtime.getStatus('developer')).status;
+  assert.equal(status.phase, 'waitingOnApproval');
+  assert.equal(status.label, '等待原生审批');
+  assert.equal(status.active, true);
+  assert.equal(status.turnId, 'current-turn');
+  assert.equal(f.execution.getStatus('employee-thread').phase, 'waitingOnApproval');
+});
+
+test('a waiting event received after steer starts survives an ordinary failure and completes', async t => {
+  const f = await employeeAdapterFixture(t, { gateSteer: true, steerFailure: 'ordinary' });
+  await f.runtime.sendMessage({ employeeId: 'developer', text: 'first turn', requestId: 'first-turn' });
+  const steering = f.runtime.sendMessage({ employeeId: 'developer', text: 'late waiting', requestId: 'late-waiting' });
+  await f.steerReached;
+  f.emit('item/tool/requestUserInput', {
+    turnId: 'current-turn', itemId: 'waiting-after-steer', requestId: 'waiting-after-steer',
+  });
+  assert.equal((await f.runtime.getStatus('developer')).status.phase, 'waitingOnUserInput');
+  f.releaseSteer();
+  await assert.rejects(steering, /steer request failed/);
+  const waiting = (await f.runtime.getStatus('developer')).status;
+  assert.equal(waiting.phase, 'waitingOnUserInput');
+  assert.equal(waiting.label, '等待补充信息');
+  assert.equal(waiting.active, true);
+  assert.equal(waiting.turnId, 'current-turn');
+  assert.equal(f.execution.getStatus('employee-thread').phase, 'waitingOnUserInput');
+  f.emit('item/completed', {
+    turnId: 'current-turn',
+    item: { id: 'late-waiting-answer', type: 'agentMessage', phase: 'final_answer', text: 'late waiting answer' },
+  });
+  f.emit('turn/completed', { turn: { id: 'current-turn', status: 'completed' } });
+  assert.equal((await f.runtime.getStatus('developer')).status.phase, 'idle');
+  assert.equal(f.execution.getStatus('employee-thread').phase, 'completed');
+  assert.equal(f.events.filter(event => event.type === 'employee_message_completed').length, 1);
+});
+
+test('a waiting event received after steer starts survives a network failure', async t => {
+  const f = await employeeAdapterFixture(t, { gateSteer: true, steerFailure: 'network' });
+  await f.runtime.sendMessage({ employeeId: 'developer', text: 'first turn', requestId: 'first-turn' });
+  const steering = f.runtime.sendMessage({ employeeId: 'developer', text: 'network waiting', requestId: 'network-waiting' });
+  await f.steerReached;
+  f.emit('item/commandExecution/requestApproval', {
+    turnId: 'current-turn', itemId: 'approval-after-steer', requestId: 'approval-after-steer',
+  });
+  f.releaseSteer();
+  await assert.rejects(steering, /fetch failed/);
+  const waiting = (await f.runtime.getStatus('developer')).status;
+  assert.equal(waiting.phase, 'waitingOnApproval');
+  assert.equal(waiting.label, '等待原生审批');
+  assert.equal(waiting.active, true);
+  assert.equal(waiting.turnId, 'current-turn');
+  assert.equal(f.execution.getStatus('employee-thread').phase, 'waitingOnApproval');
+});
+
+test('a waiting event received after steer starts survives unknown authoritative state', async t => {
+  const f = await employeeAdapterFixture(t, {
+    gateSteer: true,
+    steerFailure: 'network',
+    authoritativeAfterSteerFailure: 'unknown',
+  });
+  await f.runtime.sendMessage({ employeeId: 'developer', text: 'first turn', requestId: 'first-turn' });
+  const steering = f.runtime.sendMessage({ employeeId: 'developer', text: 'unknown waiting', requestId: 'unknown-waiting' });
+  await f.steerReached;
+  f.emit('item/tool/requestUserInput', {
+    turnId: 'current-turn', itemId: 'unknown-waiting', requestId: 'unknown-waiting',
+  });
+  f.releaseSteer();
+  await assert.rejects(steering, /fetch failed/);
+  const waiting = (await f.runtime.getStatus('developer')).status;
+  assert.equal(waiting.phase, 'waitingOnUserInput');
+  assert.equal(waiting.label, '等待补充信息');
+  assert.equal(waiting.active, true);
+  assert.equal(waiting.turnId, 'current-turn');
+  assert.equal(f.execution.getStatus('employee-thread').phase, 'waitingOnUserInput');
+});
+
+test('a steer failure without late waiting restores the original working snapshot', async t => {
+  const f = await employeeAdapterFixture(t, { gateSteer: true, steerFailure: 'ordinary' });
+  await f.runtime.sendMessage({ employeeId: 'developer', text: 'first turn', requestId: 'first-turn' });
+  const steering = f.runtime.sendMessage({ employeeId: 'developer', text: 'working failure', requestId: 'working-failure' });
+  await f.steerReached;
+  f.releaseSteer();
+  await assert.rejects(steering, /steer request failed/);
+  const status = (await f.runtime.getStatus('developer')).status;
+  assert.equal(status.phase, 'working');
+  assert.equal(status.label, '正在处理');
+  assert.equal(status.active, true);
+  assert.equal(status.turnId, 'current-turn');
+  assert.equal(f.execution.getStatus('employee-thread').phase, 'working');
+});
+
+test('a steer failure reports authoritative different-turn occupancy', async t => {
+  const f = await employeeAdapterFixture(t, {
+    gateSteer: true,
+    steerFailure: 'network',
+    authoritativeAfterSteerFailure: 'other',
+  });
+  await f.runtime.sendMessage({ employeeId: 'developer', text: 'first turn', requestId: 'first-turn' });
+  f.emit('item/tool/requestUserInput', {
+    turnId: 'current-turn', itemId: 'waiting-before-other', requestId: 'waiting-before-other',
+  });
+  const steering = f.runtime.sendMessage({ employeeId: 'developer', text: 'other turn', requestId: 'other-turn' });
+  await f.steerReached;
+  f.releaseSteer();
+  await assert.rejects(steering, /fetch failed/);
+  const status = (await f.runtime.getStatus('developer')).status;
+  assert.equal(status.phase, 'occupied');
+  assert.equal(status.active, true);
+  assert.equal(status.turnId, 'other-turn');
+  const execution = f.execution.getStatus('employee-thread');
+  assert.equal(execution.phase, 'occupied');
+  assert.equal(execution.active, true);
+  assert.equal(execution.turnId, 'other-turn');
+});
+
+test('a steer failure becomes idle when authoritative state is inactive', async t => {
+  const f = await employeeAdapterFixture(t, {
+    gateSteer: true,
+    steerFailure: 'ordinary',
+    authoritativeAfterSteerFailure: 'inactive',
+  });
+  await f.runtime.sendMessage({ employeeId: 'developer', text: 'first turn', requestId: 'first-turn' });
+  f.emit('item/commandExecution/requestApproval', {
+    turnId: 'current-turn', itemId: 'waiting-before-inactive', requestId: 'waiting-before-inactive',
+  });
+  const steering = f.runtime.sendMessage({ employeeId: 'developer', text: 'inactive after failure', requestId: 'inactive-failure' });
+  await f.steerReached;
+  f.releaseSteer();
+  await assert.rejects(steering, /steer request failed/);
+  const status = (await f.runtime.getStatus('developer')).status;
+  assert.equal(status.phase, 'idle');
+  assert.equal(status.active, false);
+  assert.equal(status.turnId, '');
+  const execution = f.execution.getStatus('employee-thread');
+  assert.equal(execution.phase, 'idle');
+  assert.equal(execution.active, false);
+  assert.equal(execution.turnId, '');
+});
+
+test('a steer failure restores waiting when authoritative state is unknown', async t => {
+  const f = await employeeAdapterFixture(t, {
+    gateSteer: true,
+    steerFailure: 'network',
+    authoritativeAfterSteerFailure: 'unknown',
+  });
+  await f.runtime.sendMessage({ employeeId: 'developer', text: 'first turn', requestId: 'first-turn' });
+  f.emit('item/tool/requestUserInput', {
+    turnId: 'current-turn', itemId: 'waiting-before-unknown', requestId: 'waiting-before-unknown',
+  });
+  const steering = f.runtime.sendMessage({ employeeId: 'developer', text: 'unknown authority', requestId: 'unknown-authority' });
+  await f.steerReached;
+  f.releaseSteer();
+  await assert.rejects(steering, /fetch failed/);
+  const status = (await f.runtime.getStatus('developer')).status;
+  assert.equal(status.phase, 'waitingOnUserInput');
+  assert.equal(status.label, '等待补充信息');
+  assert.equal(status.active, true);
+  assert.equal(status.turnId, 'current-turn');
+  assert.equal(f.execution.getStatus('employee-thread').phase, 'waitingOnUserInput');
+});
+
+test('closing while a start response is pending suppresses status and buffered output', async t => {
+  const f = await employeeAdapterFixture(t, { gateStart: true });
+  const sending = f.runtime.sendMessage({ employeeId: 'developer', text: 'close while pending', requestId: 'close-pending' });
+  await f.startReached;
+  f.emit('item/completed', {
+    turnId: 'current-turn',
+    item: { id: 'close-buffered-answer', type: 'agentMessage', phase: 'final_answer', text: 'must not replay' },
+  });
+  f.emit('turn/completed', { turn: { id: 'current-turn', status: 'completed' } });
+  f.runtime.close();
+  const closedStatus = (await f.runtime.getStatus('developer')).status;
+  const closedExecution = f.execution.getStatus('employee-thread');
+  f.releaseStart();
+  await assert.rejects(sending, /关闭/);
+  assert.deepEqual((await f.runtime.getStatus('developer')).status, closedStatus);
+  assert.deepEqual(f.execution.getStatus('employee-thread'), closedExecution);
+  assert.equal(f.events.some(event => event.type === 'employee_message_completed'), false);
+  assert.equal(f.events.some(event => event.type === 'assistant_message_completed'), false);
 });
 
 test('an unconfirmed start cannot silently complete execution from an untagged completion', async t => {

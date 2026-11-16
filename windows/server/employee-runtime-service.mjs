@@ -13,6 +13,11 @@ import { CURRENT_MODEL_PROVIDER_ID } from "./model-provider-service.mjs";
 const clean = (value, maxLength = 200) => String(value || "").trim().slice(0, maxLength);
 const statusError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
 const isOccupiedError = (error) => error?.statusCode === 409 || /already active|already running|in progress|busy|occupied/iu.test(String(error?.message || error));
+const isEndedTurnError = (error) => error?.statusCode === 409
+  && /turn.*(?:ended|inactive|not active|no longer active|finished|completed)|(?:ended|inactive|not active|no longer active|finished|completed).*turn/iu.test(String(error?.message || error));
+const waitingPhaseFor = (method) => method?.endsWith("/requestApproval")
+  ? "waitingOnApproval"
+  : ["item/tool/requestUserInput", "mcpServer/elicitation/request"].includes(method) ? "waitingOnUserInput" : "";
 
 const textFromContent = (value) => {
   if (typeof value === "string") return value;
@@ -46,6 +51,7 @@ export const createEmployeeRuntimeService = ({
   registry,
   conversationStore,
   readHistory,
+  readRuntimeContext,
   readRevision,
   projectRoot,
   broadcast = () => {},
@@ -208,6 +214,7 @@ export const createEmployeeRuntimeService = ({
 
   const publishStatus = (employeeId, patch = {}, syncExecution = true) => {
     const current = statusFor(employeeId);
+    if (closed) return current;
     const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
     statuses.set(employeeId, next);
     broadcast({
@@ -302,16 +309,18 @@ export const createEmployeeRuntimeService = ({
       const result = await runtimeClient.request("thread/read", { threadId, includeTurns: true });
       const thread = result?.thread || result || {};
       const rawStatus = thread.status || thread.state;
-      const active = thread.active === true
-        || rawStatus === "active"
-        || rawStatus === "inProgress"
-        || rawStatus?.type === "active"
-        || (Array.isArray(thread.activeFlags) && thread.activeFlags.length > 0)
-        || (thread.activeFlags && typeof thread.activeFlags === "object" && Object.keys(thread.activeFlags).length > 0);
       const unfinished = [...(Array.isArray(thread.turns) ? thread.turns : [])].reverse().find((turn) => {
         const value = turn?.status || turn?.state;
         return ["active", "inProgress"].includes(String(value?.type || value));
       });
+      const active = thread.active === true
+        || rawStatus === "active"
+        || rawStatus === "inProgress"
+        || rawStatus?.type === "active"
+        || rawStatus?.type === "inProgress"
+        || Boolean(unfinished)
+        || (Array.isArray(thread.activeFlags) && thread.activeFlags.length > 0)
+        || (thread.activeFlags && typeof thread.activeFlags === "object" && Object.keys(thread.activeFlags).length > 0);
       return {
         known: Boolean(rawStatus || thread.active !== undefined || thread.activeFlags),
         active,
@@ -533,10 +542,6 @@ export const createEmployeeRuntimeService = ({
     const threadId = clean(message?.params?.threadId, 120);
     const employeeId = threadEmployees.get(threadId);
     if (!employeeId) return;
-    const executionMessage = normalizeExecutionProtocolMessage(message);
-    if (executionMessage) execution?.handleProtocolMessage?.(executionMessage);
-    const publishNativeStatus = patch => publishStatus(employeeId, patch, false);
-    if (clean(registry.get(employeeId)?.mainThreadId, 120) !== threadId) return;
     const params = message.params || {};
     const method = message.method || "";
     const initialStatus = statusFor(employeeId);
@@ -577,7 +582,25 @@ export const createEmployeeRuntimeService = ({
         }
         return;
       }
+      if (method.endsWith("/requestApproval")
+        || method === "item/tool/requestUserInput"
+        || method === "mcpServer/elicitation/request") {
+        initialSubmission.earlyEvents.push(structuredClone(message));
+        return;
+      }
     }
+    const waitingPhase = waitingPhaseFor(method);
+    if (waitingPhase) {
+      const turnId = turnIdFromMessage(message);
+      const current = statusFor(employeeId);
+      if (!turnId || !current.active || !current.turnId || current.turnId !== turnId) return;
+      if (current.phase !== waitingPhase
+        && ["waitingOnApproval", "waitingOnUserInput"].includes(current.phase)) return;
+    }
+    const executionMessage = normalizeExecutionProtocolMessage(message);
+    if (executionMessage) execution?.handleProtocolMessage?.(executionMessage);
+    const publishNativeStatus = patch => publishStatus(employeeId, patch, false);
+    if (clean(registry.get(employeeId)?.mainThreadId, 120) !== threadId) return;
     if (method === "thread/goal/updated" || method === "thread/goal/cleared") {
       execution?.publishThreadEvent?.(threadId, { type: "goal_status", threadId, conversationId: registry.require(employeeId).conversationId, goal: params.goal || null });
       return;
@@ -633,7 +656,9 @@ export const createEmployeeRuntimeService = ({
       const turnId = turnIdFromMessage(message);
       const current = statusFor(employeeId);
       if (item.type === "agentMessage" && (!turnId || !current.active || current.turnId !== turnId)) return;
-      void conversationStore.recordRuntimeEvent(message).catch(() => {});
+      void conversationStore.recordRuntimeEvent(message).then(() => {
+        execution?.publishThreadEvent?.(threadId, { type: "sessions_changed", threadId });
+      }).catch(() => {});
       const text = textFromItem(item);
       if (!text.trim()) return;
       const role = item.type === "agentMessage" ? "assistant" : "user";
@@ -649,22 +674,12 @@ export const createEmployeeRuntimeService = ({
           itemId: item.id,
         }),
       });
-      execution?.publishThreadEvent?.(threadId, { type: "sessions_changed", threadId });
       return;
     }
-    if (method.endsWith("/requestApproval")) {
+    if (waitingPhase) {
       publishNativeStatus({
-        phase: "waitingOnApproval",
-        label: "等待原生审批",
-        detail: "",
-        active: true,
-      });
-      return;
-    }
-    if (method === "item/tool/requestUserInput" || method === "mcpServer/elicitation/request") {
-      publishNativeStatus({
-        phase: "waitingOnUserInput",
-        label: "等待补充信息",
+        phase: waitingPhase,
+        label: waitingPhase === "waitingOnApproval" ? "等待原生审批" : "等待补充信息",
         detail: "",
         active: true,
       });
@@ -679,12 +694,22 @@ export const createEmployeeRuntimeService = ({
     submission.replaying = true;
     try {
       for (const event of earlyEvents) {
-        if (turnIdFromMessage(event) !== confirmedTurnId) continue;
+        const replayed = !turnIdFromMessage(event) && waitingPhaseFor(event.method)
+          ? {
+            ...event,
+            params: {
+              ...(event.params || {}),
+              turnId: confirmedTurnId,
+              turn: { ...(event.params?.turn || {}), id: confirmedTurnId },
+            },
+          }
+          : event;
+        if (turnIdFromMessage(replayed) !== confirmedTurnId) continue;
         if (event.method === "turn/completed") {
           if (completionReplayed) continue;
           completionReplayed = true;
         }
-        handleProtocolMessage(event);
+        handleProtocolMessage(replayed);
       }
       if (!completionReplayed && compatibleCompletion) handleProtocolMessage(compatibleCompletion);
     } finally {
@@ -706,6 +731,7 @@ export const createEmployeeRuntimeService = ({
     if (cleanText.length > 32000) throw statusError("消息过长", 413);
     const cleanRequestId = clean(requestId, 120) || randomUUID();
     if (sendLocks.has(employee.id)) throw statusError("员工消息正在提交", 409);
+    const submissionBaseline = statusFor(employee.id);
     const submission = {
       threadId: "",
       promise: null,
@@ -716,12 +742,43 @@ export const createEmployeeRuntimeService = ({
       replaying: false,
     };
     sendLocks.set(employee.id, submission);
+    const assertSubmissionOpen = () => {
+      if (!closed) return;
+      const error = statusError("员工运行时已关闭", 503);
+      error.code = "EMPLOYEE_RUNTIME_CLOSED";
+      throw error;
+    };
+    const markSubmissionHandled = (error) => {
+      if (error && typeof error === "object") error.submissionStateHandled = true;
+      return error;
+    };
+    const snapshotStatus = (status) => ({
+      phase: status.phase,
+      label: status.label,
+      detail: status.detail,
+      active: status.active,
+      turnId: status.turnId,
+    });
+    let requestSnapshot = snapshotStatus(submissionBaseline);
+    const restoreRequestSnapshot = () => {
+      assertSubmissionOpen();
+      publishStatus(employee.id, requestSnapshot);
+    };
+    const hasLiveWaitingForRequestedTurn = () => {
+      const live = statusFor(employee.id);
+      return live.active
+        && live.turnId === requestSnapshot.turnId
+        && ["waitingOnApproval", "waitingOnUserInput"].includes(live.phase);
+    };
     const sending = (async () => {
+      assertSubmissionOpen();
       const { binding, threadId } = await ensureOpen(employee.id);
+      assertSubmissionOpen();
       submission.threadId = threadId;
       if (registry.require(employee.id).conversationArchived) await unarchiveSession(employee.id);
-      const current = statusFor(employee.id);
-      const requestMethod = current.active && current.turnId ? "turn/steer" : "turn/start";
+      assertSubmissionOpen();
+      let current = statusFor(employee.id);
+      let requestMethod = current.active && current.turnId ? "turn/steer" : "turn/start";
       submission.requestMethod = requestMethod;
       publishStatus(employee.id, {
         phase: "submitted",
@@ -732,18 +789,44 @@ export const createEmployeeRuntimeService = ({
       });
       try {
         await resumeThread(threadId, registry.require(employee.id));
+        assertSubmissionOpen();
         const context = await contextProvider?.(employee.id);
+        assertSubmissionOpen();
         const runtimeClient = await clientForThread(threadId, registry.require(employee.id));
+        assertSubmissionOpen();
         const input = await inputFromAttachments(cleanText, attachments, attachmentContent);
-        const result = await runtimeClient.request(requestMethod, {
+        assertSubmissionOpen();
+        current = statusFor(employee.id);
+        if (current.turnId && current.turnId === requestSnapshot.turnId && current.phase !== "submitted") {
+          requestSnapshot = snapshotStatus(current);
+        }
+        const authoritative = await readAuthoritativeStatus(threadId, registry.require(employee.id));
+        assertSubmissionOpen();
+        let expectedTurnId = current.turnId;
+        if (authoritative.known) {
+          expectedTurnId = authoritative.active ? authoritative.turnId : "";
+          requestMethod = expectedTurnId ? "turn/steer" : "turn/start";
+        } else {
+          requestMethod = current.active && current.turnId ? "turn/steer" : "turn/start";
+        }
+        assertSubmissionOpen();
+        submission.requestMethod = requestMethod;
+        publishStatus(employee.id, {
+          phase: "submitted",
+          label: "已提交",
+          detail: "",
+          active: true,
+          turnId: requestMethod === "turn/steer" ? expectedTurnId : "",
+        });
+        const requestTurn = method => runtimeClient.request(method, {
           threadId,
           input,
           clientUserMessageId: cleanRequestId,
-          ...(requestMethod === "turn/steer" ? { expectedTurnId: current.turnId } : {
+          ...(method === "turn/steer" ? { expectedTurnId } : {
             cwd: clean(employee.projectRoot, 400) || projectRoot,
             ...turnPolicyFor(),
           }),
-          ...(requestMethod === "turn/start" ? {
+          ...(method === "turn/start" ? {
             ...(employee.model ? { model: employee.model } : {}),
             ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}),
             additionalContext: { 'negus.model': { kind: 'application', value: `本轮调用模型：${employee.model || '未取得'}。回答模型身份时以本轮请求为准，不以历史回复或全局默认配置推断。此标识不证明供应商内部实际模型。` }, 'negus.employee': { kind: 'application', value: '以下是本员工当前生效的职责和工作要求，替代对话中旧的员工身份及派工说明。\n' + [
@@ -752,7 +835,69 @@ export const createEmployeeRuntimeService = ({
             ].filter(Boolean).join('\n') } },
           } : {}),
         });
-        if (growthService?.suggestFromMessage) void Promise.resolve().then(() => growthService.suggestFromMessage(employee.id, cleanText, cleanRequestId))
+        let result;
+        try {
+          assertSubmissionOpen();
+          result = await requestTurn(requestMethod);
+          assertSubmissionOpen();
+        } catch (error) {
+          if (closed) throw error;
+          if (requestMethod !== "turn/steer") throw error;
+          const afterFailure = await readAuthoritativeStatus(threadId, registry.require(employee.id));
+          if (closed) throw error;
+          if (afterFailure.known && afterFailure.active) {
+            if (afterFailure.turnId && afterFailure.turnId !== requestSnapshot.turnId) {
+              publishStatus(employee.id, {
+                phase: "occupied",
+                label: "被占用中",
+                detail: String(error?.message || error),
+                active: true,
+                turnId: afterFailure.turnId,
+              });
+            } else if (!hasLiveWaitingForRequestedTurn()) {
+              restoreRequestSnapshot();
+            }
+            throw markSubmissionHandled(error);
+          }
+          if (afterFailure.known && !afterFailure.active) {
+            if (!isEndedTurnError(error)) {
+              publishStatus(employee.id, {
+                phase: "idle",
+                label: "等待任务",
+                detail: "",
+                active: false,
+                turnId: "",
+              });
+              throw markSubmissionHandled(error);
+            }
+            requestMethod = "turn/start";
+            expectedTurnId = "";
+            submission.requestMethod = requestMethod;
+            clearEarlyEvents(submission);
+            publishStatus(employee.id, {
+              phase: "idle",
+              label: "等待任务",
+              detail: "",
+              active: false,
+              turnId: "",
+            });
+            publishStatus(employee.id, {
+              phase: "submitted",
+              label: "已提交",
+              detail: "",
+              active: true,
+              turnId: "",
+            });
+            assertSubmissionOpen();
+            result = await requestTurn(requestMethod);
+            assertSubmissionOpen();
+          } else {
+            if (!hasLiveWaitingForRequestedTurn()) restoreRequestSnapshot();
+            throw markSubmissionHandled(error);
+          }
+        }
+        assertSubmissionOpen();
+        if (growthService?.suggestFromMessage && !closed) void Promise.resolve().then(() => growthService.suggestFromMessage(employee.id, cleanText, cleanRequestId))
           .catch(error => console.warn(`[employee-runtime] memory suggestion failed: ${String(error?.message || error)}`));
         freshThreads.delete(threadId);
         const currentStatus = statusFor(employee.id);
@@ -760,16 +905,27 @@ export const createEmployeeRuntimeService = ({
         if (requestMethod === "turn/start" && !completedTurnId) {
           throw statusError("Codex 未返回当前任务编号，无法确认执行状态", 502);
         }
-        submission.boundTurnId = completedTurnId;
-        if (currentStatus.active && ["submitted", "working"].includes(currentStatus.phase)) {
-          publishStatus(employee.id, {
-            phase: "working",
-            label: "正在处理",
-            active: true,
-            turnId: completedTurnId,
-          });
+        if (currentStatus.active && currentStatus.turnId && currentStatus.turnId !== completedTurnId) {
+          clearEarlyEvents(submission);
+          if (requestMethod === "turn/steer"
+            && currentStatus.phase === "submitted"
+            && currentStatus.turnId === requestSnapshot.turnId) {
+            restoreRequestSnapshot();
+          }
+          throw markSubmissionHandled(statusError("响应属于其他任务，已忽略", 409));
         }
-        replayEarlyEvents(employee.id, submission, completedTurnId);
+        assertSubmissionOpen();
+        submission.boundTurnId = completedTurnId;
+        if (currentStatus.active && (!currentStatus.turnId || currentStatus.turnId === completedTurnId)) {
+          const waiting = ["waitingOnApproval", "waitingOnUserInput"].includes(currentStatus.phase);
+          const processing = ["submitted", "working"].includes(currentStatus.phase);
+          publishStatus(employee.id, waiting
+            ? { active: true, turnId: completedTurnId }
+            : processing
+              ? { phase: "working", label: "正在处理", active: true, turnId: completedTurnId }
+              : { turnId: completedTurnId });
+        }
+        if (!closed) replayEarlyEvents(employee.id, submission, completedTurnId);
         return {
           requestId: cleanRequestId,
           employeeId: employee.id,
@@ -779,12 +935,23 @@ export const createEmployeeRuntimeService = ({
           turnId: completedTurnId,
         };
       } catch (error) {
+        if (closed || error?.submissionStateHandled) {
+          clearEarlyEvents(submission);
+          throw error;
+        }
+        const failure = isOccupiedError(error)
+          ? await readAuthoritativeStatus(threadId, registry.require(employee.id))
+          : { known: false };
+        if (closed) {
+          clearEarlyEvents(submission);
+          throw error;
+        }
         publishStatus(employee.id, {
-          phase: isOccupiedError(error) ? "occupied" : "failed",
-          label: isOccupiedError(error) ? "被占用中" : "提交失败",
+          phase: isOccupiedError(error) ? (failure.known && !failure.active ? "idle" : "occupied") : "failed",
+          label: isOccupiedError(error) ? (failure.known && !failure.active ? "等待任务" : "被占用中") : "提交失败",
           detail: String(error?.message || error),
-          active: isOccupiedError(error),
-          turnId: requestMethod === "turn/steer" ? current.turnId : "",
+          active: isOccupiedError(error) ? (!failure.known || failure.active) : false,
+          turnId: failure.active ? failure.turnId : "",
         });
         throw error;
       }
@@ -924,10 +1091,12 @@ export const createEmployeeRuntimeService = ({
     if (!employeeId) throw statusError("员工 Thread 不存在", 404);
     const saved = registry.require(employeeId);
     const employee = saved.pendingModelSettings || saved;
+    const runtime = await readRuntimeContext?.(saved.modelProviderId || CURRENT_MODEL_PROVIDER_ID, cleanThreadId);
     return {
       model: employee.modelProviderId?.startsWith("ccswitch_") ? employee.modelProviderId + "::" + employee.model : employee.model || "",
       modelProvider: employee.modelProviderId || CURRENT_MODEL_PROVIDER_ID,
       reasoningEffort: employee.reasoningEffort || "",
+      ...(runtime?.usage && runtime.model === employee.model && employee.modelProviderId === saved.modelProviderId ? { usage: runtime.usage } : {}),
     };
   };
 
