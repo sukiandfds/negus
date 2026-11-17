@@ -7,16 +7,31 @@ export type ChatRoom = GroupRoom & { lastActivityAt?: string };
 export function useGroupChats() {
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const requestVersion = useRef(0);
+  const observedActivity = useRef(new Map<string, string>());
+  const rememberActivity = useCallback((roomId: string, lastActivityAt: string) => {
+    if (!roomId || !lastActivityAt) return;
+    if ((observedActivity.current.get(roomId) || "") < lastActivityAt) {
+      observedActivity.current.set(roomId, lastActivityAt);
+    }
+  }, []);
   const refresh = useCallback(async (signal?: AbortSignal) => {
     const version = ++requestVersion.current;
     try {
       const data = await groupApi.rooms(signal);
-      if (!signal?.aborted && version === requestVersion.current) setRooms(data.rooms);
+      if (signal?.aborted || version !== requestVersion.current) return;
+      const next = data.rooms.map(room => {
+        const responseActivity = (room as ChatRoom).lastActivityAt || "";
+        rememberActivity(room.id, responseActivity);
+        const latest = observedActivity.current.get(room.id);
+        return latest && latest !== responseActivity ? { ...room, lastActivityAt: latest } : room;
+      });
+      setRooms(next);
     }
     catch { /* Original conversation connection handles service recovery. */ }
-  }, []);
+  }, [rememberActivity]);
   const updateActivity = useCallback((roomId: string, lastActivityAt: string) => {
     if (!roomId || !lastActivityAt) return;
+    rememberActivity(roomId, lastActivityAt);
     setRooms(current => {
       let changed = false;
       const next = current.map(room => {
@@ -26,7 +41,7 @@ export function useGroupChats() {
       });
       return changed ? next : current;
     });
-  }, []);
+  }, [rememberActivity]);
   useEffect(() => {
     const controller = new AbortController();
     void refresh(controller.signal);
@@ -65,8 +80,9 @@ export function useGroupChats() {
   const update = useCallback(async (roomId: string, patch: { name?: string; archived?: boolean }) => {
     const { room } = await groupApi.updateRoom(roomId, patch);
     ++requestVersion.current;
+    rememberActivity(room.id, (room as ChatRoom).lastActivityAt || "");
     setRooms(current => current.map(item => item.id === room.id ? { ...item, ...room } : item));
     return room;
-  }, []);
+  }, [rememberActivity]);
   return { rooms, refresh, update };
 }

@@ -55,6 +55,60 @@ try {
   await page.waitForTimeout(260);
   assert.equal(roomRequests, 2, 'room metadata changes must still refresh the room list');
   console.log(JSON.stringify({ activityRequestCount, activityA, activityB, metadataRequestCount: roomRequests }));
+
+  const racePage = await browser.newPage();
+  let raceRequests = 0;
+  let releaseStale;
+  let markStaleStarted;
+  const staleGate = new Promise(resolve => { releaseStale = resolve; });
+  const staleStarted = new Promise(resolve => { markStaleStarted = resolve; });
+  await racePage.route('**/api/group/rooms', async route => {
+    raceRequests += 1;
+    if (raceRequests === 1) return route.fulfill({ json: { rooms: [
+      { id: 'room-a', name: '群聊 A', projectId: 'p', lastActivityAt: '2026-11-18T01:00:00Z' },
+      { id: 'room-b', name: '群聊 B', projectId: 'p', lastActivityAt: '2026-11-18T01:00:00Z' },
+    ] } });
+    if (raceRequests === 2) {
+      markStaleStarted();
+      await staleGate;
+      return route.fulfill({ json: { rooms: [
+        { id: 'room-a', name: '群聊 A', projectId: 'p', lastActivityAt: '2026-11-18T01:00:00Z' },
+        { id: 'room-b', name: '群聊 B（已刷新）', projectId: 'p', lastActivityAt: '2026-11-18T01:01:00Z' },
+      ] } });
+    }
+    return route.fulfill({ json: { rooms: [
+      { id: 'room-a', name: '群聊 A', projectId: 'p', lastActivityAt: '2026-11-18T01:06:00Z' },
+      { id: 'room-b', name: '群聊 B', projectId: 'p', lastActivityAt: '2026-11-18T01:07:00Z' },
+    ] } });
+  });
+  await racePage.goto('http://127.0.0.1:5197/validation/group-room-list.html');
+  await racePage.waitForFunction(() => document.querySelector('[data-room-list]')?.textContent.includes('room-b'));
+  await racePage.evaluate(async () => {
+    const { publishProjectStream } = await import('/src/projectEvents.ts');
+    window.emit = event => publishProjectStream('message', new MessageEvent('message', { data: JSON.stringify(event) }));
+  });
+  await racePage.evaluate(() => window.emit({ type: 'sessions_changed', roomId: 'room-b' }));
+  await staleStarted;
+  await racePage.evaluate(() => window.emit({ type: 'group_message_created', roomId: 'room-a', message: {
+    id: 'race-message-a', type: 'agent', authorId: 'manager', authorName: '运营管理', agentId: 'manager',
+    text: '竞态期间的新消息', sequence: 10, createdAt: '2026-11-18T01:05:00Z', attachments: [],
+  } }));
+  await racePage.waitForTimeout(240);
+  const beforeStale = await racePage.locator('[data-room-list]').evaluate(node => JSON.parse(node.textContent || '{}'));
+  assert.equal(beforeStale.rooms.find(room => room.id === 'room-a').lastActivityAt, '2026-11-18T01:05:00Z');
+  releaseStale();
+  await racePage.waitForTimeout(120);
+  const afterStale = await racePage.locator('[data-room-list]').evaluate(node => JSON.parse(node.textContent || '{}'));
+  assert.equal(afterStale.rooms.find(room => room.id === 'room-a').lastActivityAt, '2026-11-18T01:05:00Z');
+  assert.equal(afterStale.rooms.find(room => room.id === 'room-b').name, '群聊 B（已刷新）');
+  await racePage.evaluate(() => window.emit({ type: 'sessions_changed', roomId: 'room-a' }));
+  await racePage.waitForTimeout(300);
+  const afterNewer = await racePage.locator('[data-room-list]').evaluate(node => JSON.parse(node.textContent || '{}'));
+  assert.equal(afterNewer.rooms.find(room => room.id === 'room-a').lastActivityAt, '2026-11-18T01:06:00Z');
+  console.log(JSON.stringify({ raceRequests, preservedAt: afterStale.rooms.find(room => room.id === 'room-a').lastActivityAt,
+    refreshedPeerName: afterStale.rooms.find(room => room.id === 'room-b').name,
+    newerServerTime: afterNewer.rooms.find(room => room.id === 'room-a').lastActivityAt }));
+  await racePage.close();
 } finally {
   await browser.close();
 }
