@@ -42,3 +42,26 @@ related: [FEAT-001, FEAT-002]
 - `windows/server/business-project-config.mjs`
 - `windows/server/employee-project-directory.mjs`
 - `windows/server/routes/conversation-history-routes.mjs`
+
+
+### 2026-11-17 从员工主对话新建普通项目对话
+
+来源：本轮修复任务原文；未提供原始对话消息标识。
+
+用户原话：
+> 3.现在，打开一个员工对话，然后再点击创建新对话，变成了创建这个员工的新对话，而不是这个项目的新对话。原因可能是把员工也当成项目了。
+
+有效决定：员工页点击“新建对话”离开员工上下文，进入个人项目普通对话；普通业务项目会话中新建沿用其 cwd。员工私有 root 不作个人项目 root；个人目录未就绪时沿用 /api/project 的普通项目 root。员工在项目列表的展示身份不改变既有会话归属。未发送前仍只有 pending 临时对话，不创建真实 Thread。
+
+根因：create 清除了 URL 的 agent/employee/conversation，但未清 React agentId，员工标题与员工身份推导继续残留。修改 FeishuApp 的现有新建入口：清 agentId、自动打开员工标记及旧群/详情状态；普通会话采用当前 cwd，员工会话采用 personal root，沿用原 deferred 创建和普通发送。
+
+操作变化：打开员工主对话→添加→新建对话→看到“新对话”且无员工标题；输入后发送→创建请求使用个人项目 root，无员工 conversationId，随后调用普通会话发送 API。普通业务对话→新建→临时会话保留原业务 root。
+
+隔离 Chrome 已核对 URL、标题、正文缓存身份、创建 root、延迟创建、普通发送和无员工 scope；所有 API 被夹具拦截，无真实消息。证据见 [本轮验证记录](../../../../work/four-usage-fixes-20261117/verification.md)。本轮仅源码和自测，未提交、推送、发布或重启，独立验收由来源对话安排。
+
+
+### 2026-11-17 独立审核后的保留范围与回归
+
+来源：本轮用户原话：“只补以下三个缺项”“不要重做已验证通过的四路主体”。独立审核为FAIL的缺项属于FEAT-001上下文/压缩和FEAT-002目录错误分类；员工页新建普通对话主体保持上一轮实现，本轮未改FeishuApp、项目归属或发送入口。
+
+四项浏览器仍覆盖员工→新建→个人root→普通发送、URL/标题离开员工身份，以及普通业务会话新建保留cwd；所有消息由隔离API夹具处理。对应证据见 [复审补修记录](../../../../work/four-usage-fixes-20261117/verification.md#第二轮补修独立审核-fail-后)。工作区已通过部分保留；未提交、推送、发布或重启，来源对话安排独立复审。

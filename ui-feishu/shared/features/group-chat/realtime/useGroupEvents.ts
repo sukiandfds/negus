@@ -39,7 +39,7 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
         const next = await groupApi.snapshot(roomId);
         if (disposed) return;
         const completedWorkIds = new Set(next.messages
-          .filter((message) => !message.pending && message.workId)
+          .filter((message) => !message.pending && message.workId && message.phase !== "commentary")
           .map((message) => message.workId));
         const activeWorkIds = new Set((next.activeWorks || [])
           .filter((work) => !completedWorkIds.has(work.workId))
@@ -86,7 +86,7 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
           if (reviewingHistoryRef.current) setUnseenLiveCount((count) => count + 1);
           setSnapshot((current) => {
             if (!current) return current;
-            const activeWorks = (current.activeWorks || []).filter((work) => work.workId !== event.message.workId);
+            const activeWorks = (current.activeWorks || []).filter((work) => work.workId !== event.message.workId || event.message.phase === "commentary");
             if (reviewingHistoryRef.current) return { ...current, activeWorks };
             return {
               ...current,
@@ -173,7 +173,7 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
             [workId]: value,
           };
           setSnapshot((current) => {
-            if (!current || reviewingHistoryRef.current || current.messages.some((message) => message.workId === workId)) return current;
+            if (!current || reviewingHistoryRef.current || current.messages.some((message) => message.workId === workId && message.phase !== "commentary")) return current;
             return {
               ...current,
               messages: upsertGroupMessage(current.messages, createPendingAgentMessage({

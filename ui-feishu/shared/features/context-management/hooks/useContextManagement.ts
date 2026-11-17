@@ -33,11 +33,18 @@ export function useContextManagement(threadId: string, store: ConversationStore)
     return store.get(threadId).contextStatus;
   }, [store, threadId]);
   const handleEvent = useCallback((event: ContextStatus) => {
-    const current = store.get(event.threadId, false).contextStatus;
-    if (current.updatedAt && event.updatedAt && Date.parse(event.updatedAt) < Date.parse(current.updatedAt)) return;
+    const current = store.get(event.threadId, !store.synced.has(event.threadId)).contextStatus;
+    const newerCompaction = event.compactionRevision != null && event.compactionRevision > (current.compactionRevision ?? -1);
+    if (event.compactionRevision != null && current.compactionRevision != null && event.compactionRevision < current.compactionRevision) return;
+    if (!newerCompaction && ['completed', 'failed'].includes(current.phase) && ['queued', 'compacting'].includes(event.phase)) return;
+    if (!newerCompaction && current.updatedAt && event.updatedAt && Date.parse(event.updatedAt) < Date.parse(current.updatedAt)) return;
+    event = { ...event, compactionRevision: event.compactionRevision ?? current.compactionRevision,
+      usageSourceRevision: current.usageSourceRevision };
     const keepSettings = Boolean(current.selectedSettings || store.synced.has(event.threadId) || store.modelChoices.has(event.threadId));
+    const completed = event.phase === "completed" && current.phase !== "completed";
+    if (completed) store.invalidate(event.threadId, false);
     store.update(event.threadId, { contextStatus: keepSettings
-      ? { ...event, model: current.model, reasoningEffort: current.reasoningEffort, selectedSettings: current.selectedSettings } : event }, !keepSettings);
+      ? { ...event, model: current.model, reasoningEffort: current.reasoningEffort, selectedSettings: current.selectedSettings } : event }, !keepSettings, !(completed || (event.phase === "failed" && (current.phase !== event.phase || current.message !== event.message))));
   }, [store]);
 
   const applyModelSettings = useCallback((changedThreadId: string, settings: { model: string; reasoningEffort: string; committed?: boolean }) => {
@@ -48,23 +55,29 @@ export function useContextManagement(threadId: string, store: ConversationStore)
     const modelChanged = Boolean(visible.model && current.model && visible.model !== current.model);
     store.update(changedThreadId, { contextStatus: { ...current, ...visible,
       selectedSettings: { model: visible.model, reasoningEffort: visible.reasoningEffort },
-      ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null } : {}), updatedAt: new Date().toISOString() } });
+      ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null, usageSourceRevision: undefined } : {}), updatedAt: new Date().toISOString() } });
   }, [store]);
 
   const compact = useCallback(async () => {
-    if (!threadId || status.phase === "compacting") return false;
+    if (!threadId || store.get(threadId).contextStatus.phase === "compacting") return false;
+    const previous = store.get(threadId).contextStatus;
+    const startedAt = new Date().toISOString();
+    setStatus({ ...previous, phase: "compacting", message: "正在压缩上下文", compactionUpdatedAt: startedAt });
     try {
-      setStatus(await contextApi.compact(threadId));
+      handleEvent(await contextApi.compact(threadId));
       return true;
     } catch (reason) {
+      // A late transport failure must not overwrite an authoritative SSE start/completion.
+      if (store.get(threadId).contextStatus.compactionUpdatedAt !== startedAt) return false;
       setStatus((current) => ({
         ...current,
         phase: "failed",
+        compactionUpdatedAt: previous.compactionUpdatedAt,
         message: reason instanceof Error ? reason.message : String(reason),
       }));
       return false;
     }
-  }, [status.phase, threadId]);
+  }, [store, threadId, setStatus, handleEvent]);
 
   const setThreshold = useCallback(async (threshold: number | null) => {
     if (!threadId) return false;

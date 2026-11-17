@@ -46,3 +46,36 @@ test('compacted continuation rollout supplies the latest preview and runtime usa
   assert.equal((await latestAssistantReplyAtFromRollout(original,'latest')).usage.usedTokens,212348);
  } finally {await fs.rm(root,{recursive:true,force:true});}
 });
+
+test('restarted employee context reads persisted usage through the provider history reader without a writer', async t => {
+  const { createProviderConversationStore } = await import('../server/provider-conversation-store.mjs');
+  const { createEmployeeRuntimeService } = await import('../server/employee-runtime-service.mjs');
+  const { createContextManagementService } = await import('../server/context-management-service.mjs');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-employee-usage-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, 'rollout.jsonl'), calls = [];
+  await fs.writeFile(file, [
+    { type: 'turn_context', payload: { model: 'saved-model', effort: 'high' } },
+    { type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { total_tokens: 321 }, model_context_window: 1000 } } },
+  ].map(JSON.stringify).join('\n'));
+  const client = { close() {}, subscribe: () => () => {}, request: async method => {
+    calls.push(method); assert.equal(method, 'thread/read');
+    return { thread: { id: 'saved-thread', cwd: root, path: file } };
+  } };
+  const native = createAppServerConversationStore({ projectRoot: root, client, autoTitleEnabled: false });
+  t.after(() => native.close());
+  const providers = createProviderConversationStore({ current: native, providers: { getClient: async () => client },
+    createStore: () => native, stateFile: path.join(root, 'routes.json') });
+  const employee = { id: 'test', mainThreadId: 'saved-thread', model: 'saved-model', modelProviderId: 'current', reasoningEffort: 'high' };
+  const runtime = createEmployeeRuntimeService({ registry: { list: () => [employee], require: () => employee },
+    client, conversationStore: {}, projectRoot: root, readRuntimeContext: providers.getRuntimeContextForProvider });
+  t.after(() => runtime.close());
+  const events = [];
+  const context = await createContextManagementService({ stateFile: path.join(root, 'context.json'), broadcast: event => events.push(event),
+    getExecutionStatus: () => ({ active: false }), getRuntimeContext: runtime.getRuntimeContext, compactContext: () => assert.fail('no compact') });
+  t.after(() => context.close());
+  const result = await context.load('saved-thread');
+  assert.equal(result.usedTokens, 321); assert.equal(result.percentage, 32);
+  assert.ok(result.updatedAt); assert.deepEqual(events, []);
+  assert.deepEqual(calls, ['thread/read']);
+});

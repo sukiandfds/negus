@@ -230,7 +230,10 @@ followUpQueue = createFollowUpQueueService({
 });
 
 contextManagement = await createContextManagementService({
-  onError: (threadId, error) => execution.handleProtocolMessage({ method: "error", params: { threadId, error: { message: error.message || String(error) }, willRetry: false } }),
+  onError: (threadId, error, meta) => {
+    if (meta?.current === true) execution.handleProtocolMessage({ method: "error", params: { threadId, error: { message: error.message || String(error) }, willRetry: false } });
+    else console.warn("[context-management] stale compaction request failed; execution unchanged", { threadId, compactionRevision: meta?.compactionRevision });
+  },
   stateFile: path.join(projectRoot, "runtime", "context-settings.json"),
   broadcast: realtime.broadcast,
   getExecutionStatus: execution.getStatus,
@@ -424,6 +427,7 @@ agentTasks = await extendEmployeeTasks(agentTasks, {
     });
 employeeRuntime = createEmployeeRuntimeService({
   readHistory: appServerConversations.findSessionForProvider,
+  readRuntimeContext: appServerConversations.getRuntimeContextForProvider,
   readRevision: appServerConversations.getSourceRevisionForProvider,
   registerSession: appServerConversations.registerSession,
   taskService: agentTasks,

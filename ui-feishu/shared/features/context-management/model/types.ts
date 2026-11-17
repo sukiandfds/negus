@@ -14,4 +14,7 @@ export interface ContextStatus {
   phase: ContextPhase;
   message: string;
   updatedAt: string | null;
+  compactionUpdatedAt?: string | null;
+  compactionRevision?: number;
+  usageSourceRevision?: string;
 }

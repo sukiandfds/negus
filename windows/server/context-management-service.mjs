@@ -19,6 +19,7 @@ const emptyStatus = (threadId, threshold) => ({
   phase: "idle",
   message: "",
   updatedAt: null,
+  compactionRevision: 0,
 });
 
 export const createContextManagementService = async ({
@@ -52,7 +53,12 @@ export const createContextManagementService = async ({
   };
 
   const publish = (threadId, patch = {}) => {
-    const next = { ...statusFor(threadId), ...patch, updatedAt: now() };
+    const current = statusFor(threadId);
+    const next = { ...current, ...patch, updatedAt: now() };
+    if (patch.phase && patch.phase !== current.phase) {
+      next.compactionUpdatedAt = next.updatedAt;
+      next.compactionRevision = current.compactionRevision + 1;
+    }
     states.set(threadId, next);
     broadcast(publicStatus(next));
     return next;
@@ -68,7 +74,7 @@ export const createContextManagementService = async ({
   const startCompaction = async (threadId, source) => {
     const current = statusFor(threadId);
     if (current.phase === "compacting") return publicStatus(current);
-    publish(threadId, {
+    const started = publish(threadId, {
       phase: "compacting",
       message: source === "auto" ? "已到阈值，正在自动压缩" : "正在压缩上下文",
       compactionSource: source,
@@ -77,8 +83,10 @@ export const createContextManagementService = async ({
       await compactContext(threadId);
       return publicStatus(statusFor(threadId));
     } catch (error) {
-      onError(threadId, error);
-      publish(threadId, {
+      const latest = statusFor(threadId);
+      const isCurrent = latest.phase === "compacting" && latest.compactionRevision === started.compactionRevision;
+      onError(threadId, error, { current: isCurrent, compactionRevision: started.compactionRevision });
+      if (isCurrent) publish(threadId, {
         phase: "failed",
         message: error instanceof Error ? error.message : String(error),
       });
@@ -127,10 +135,22 @@ export const createContextManagementService = async ({
   const load = async (threadId) => {
     const before = statusFor(threadId);
     const runtime = await getRuntimeContext(threadId);
+    // A read must not publish its own next invalidation or overwrite a newer runtime event.
+    if (statusFor(threadId) !== before) {
+      const current = statusFor(threadId);
+      states.set(threadId, { ...current,
+        model: current.model || runtime.model || '',
+        reasoningEffort: current.reasoningEffort || runtime.reasoningEffort || '',
+        ...(current.lastSuccessfulSettings === undefined && runtime.lastSuccessfulSettings !== undefined
+          ? { lastSuccessfulSettings: runtime.lastSuccessfulSettings } : {}),
+      });
+      return publicStatus(statusFor(threadId));
+    }
     const model = runtime.model || statusFor(threadId).model;
     const modelChanged = Boolean(model && statusFor(threadId).model && model !== statusFor(threadId).model);
     const verifiedWindow = verifiedContextWindow(model);
-    publish(threadId, {
+    states.set(threadId, { ...before,
+      updatedAt: before.updatedAt || now(),
       model,
       reasoningEffort: runtime.reasoningEffort || statusFor(threadId).reasoningEffort,
       ...(runtime.lastSuccessfulSettings !== undefined ? { lastSuccessfulSettings: runtime.lastSuccessfulSettings } : {}),

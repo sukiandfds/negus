@@ -5,7 +5,7 @@ title: 项目群聊与多 Agent 协作
 category: development
 priority: P1
 status: in_progress
-updated_at: 2026-11-12 16:52 +08:00
+updated_at: 2026-11-17 01:34 +08:00
 source: docs/negus-knowledge/features/feature-records/FEAT-002-group-multi-agent.md
 related: [FEAT-001, FEAT-003, FEAT-005, FEAT-007, FEAT-010]
 product_base_commit: b90664a750b94f88c4c08068d3550c49cfcf4bd0
@@ -634,6 +634,18 @@ taskId + artifactId
 
 本次不新增跨事件状态系统、定时器、轮询或延迟 `readAuthoritativeStatus` 兜底；不修改目录组件、消息正文或受保护的 `ConversationView.tsx`、`useReturnToBottom.ts`。若用户紧接着发送下一条消息，正常进入新的运行状态。
 
+#### 2026-11-17 重做复核与已否定理解
+
+来源：本次用户明确中断上一轮诊断并要求按 Provider 客户端事件过滤根因重做，2026-11-17；未提供消息标识。
+
+用户原话：
+
+> 上一轮任务因诊断错误被用户明确中断，未完成、无代码结果。现在按已核实的新根因重做，不再使用短延迟自动核对/轮询方案。
+
+已否定理解：回答完成后短延迟调用 `readAuthoritativeStatus` 作为兜底不属于有效修复，不增加定时器或轮询。有效路径仍为所有 Provider 客户端事件进入同一协议处理入口，再由当前主线程与 turnId 校验来源；旧 Provider 晚到事件只能通过 turnId 被拒绝，不能依赖客户端对象相等。
+
+当前源码复核：`dfe8bcf` 已包含正确链路；`1b2ac07` 删除按 `threadClients` 客户端对象身份的订阅过滤并增加 turn 校验，`55f293b` 将该运行时逻辑落到源码而非加载时改写。2026-11-17 仅补旧 Provider delta/final 与最终答案后完成事件的跨客户端回归断言，不改生产状态逻辑。
+
 ### 2026-11-10 产品分析岗位职责与沟通方式
 
 来源：本次用户对话，2026-11-10；未提供消息标识。
@@ -739,3 +751,259 @@ taskId + artifactId
 > 2.先不修。稍后修。
 
 当前有效决定：Codex 自动恢复后员工仍显示“进行中”的问题暂不修复，稍后单独处理。本项不作为合入 PR #2 的额外改动范围；先让最新合入版本运行，再根据实际效果排查。
+
+#### 2026-11-16 完成态被旧 live 状态覆盖（已定位，待修）
+
+来源：当前维护对话，2026-11-16。本条继续沿用“Codex 自动恢复后的员工状态暂缓修复”这一现有条目；用户现要求把修复列入需求表，原“暂缓”决定由本节后续状态更新。
+
+用户原话：
+
+> “你的状态还是显示‘正在处理后台任务’，这个问题怎么反反复复？？？”
+>
+> “这个明明完成了，还是显示助手正在运行”
+>
+> “把修复这个问题也列入需求表”
+
+现场一：员工 task `a3f85cd1-9d6f-4fde-be41-a2a653fb5466`，conversationId=`handoff-05bb309bd4f097df68f9f962adf8289f`，threadId=`01a1e502-3baf-7770-b262-5bbb5c3e7467`，turnId=`01a1e502-3bfb-7273-893f-a00b106cdfea`。现场二：task `21e34d04-3b2f-4655-9356-df939fc895f1` 在查询时为 external/recovering，没有 `background:true`；用户列出的最近三个 background 任务 `9aa73ede...`、`2f9c340f...`、`899f666e...` 均 completed，但界面可能显示“正在处理后台任务”。
+
+当前有效要求：完成的 turn/task 必须及时收敛为空闲；旧快照、旧事件、重连、慢读、recovering 或缓存不能复活运行状态；当前 external 员工对话不能显示成后台任务；真实仍在运行的工作不能被误清为空闲。修复完成前，这些是验收规则，不代表代码已经修改或上线。
+
+只读核实结果：
+
+- `runtime/ui-feishu/employee-tasks/tasks.json` 中，员工 task `a3f85cd1...` 现为 `completed`、`background:true`，`updatedAt=2026-11-16T15:42:09.925Z`；同文件 delivery `result:a3f85cd1...` 为 `delivered`，已送回 reviewer 主对话。
+- `runtime/employee-conversations/handoff-05bb309bd4f097df68f9f962adf8289f.jsonl` 已有 15:42:08.752Z 的最终 assistant 消息。
+- `runtime/execution-runs.json` 中该 thread 的 execution status 为 `phase=completed`、`active=false`，turnId 与 task 一致，`durationMs=238449`，`updatedAt=2026-11-16T15:42:09.922Z`，`lastProbeAt=null`。
+- 当前运行进程的 `/api/execution-status` 和 `/api/session?view=1` 同样返回 completed/inactive；`/api/employee/status?employeeId=reviewer` 返回 `idle/active=false`；`/api/project-directory` 中该任务子项为 completed，reviewer 父行为 idle。
+- `21e34d04...` 现为 `completed`，完成时间 `2026-11-16T15:40:41.781Z`，delivery 为 `delivered`，结果中明确写着当时没有正在运行的后台任务。它不属于 background task，且 `/api/tasks` 按现有 `publicTasks()` 排除了 external，未返回该 id；当前员工目录也没有把它作为后台任务子项。因此该 external 追踪记录本身不会直接产生“正在处理后台任务”。
+- 完整任务账本在同一时段还存在真实 background 任务 `63310249...` 为 running，后续诊断任务 `c506f5f0...` 也为 running。用户所看的局部 `list_tasks` 结果不能等同于全量任务；在这些任务真实执行时，员工父行显示后台工作并非误报。是否是任务结束后仍未回落，需按下条前端链路验收。
+
+已证实的完整链路：
+
+1. external 任务由 `task-kernel.mjs` 的 `newTask()` 初始化为 `recovering`，用于观察当前来源 turn；它不是 background task，任务页和员工后台工作计数继续通过 `publicTasks()`/`directoryEntries()` 排除 external。
+2. worker 完成时，execution tracker 发布 `turn/completed`，任务内核将 task 收敛为 completed，员工运行时随后将主状态收敛为 idle；本次后端持久化和当前 API 均已看到这三层完成态。
+3. 浏览器在线程运行中可能已保存 live `working/active:true`。慢读或重连期间，`/api/session?view=1` 触发的 `context_status` 会经 `useContextManagement.handleEvent()` 写入 committed 状态并增加线程 revision。
+4. `ConversationStore.commit()` 只有在返回读取的 revision 仍等于当前 revision 时才删除 live 覆盖层。若读取发起后 revision 因 `context_status` 增加，返回的 authoritative completed 快照虽然写入 committed，旧 live `working/active:true` 仍保留。
+5. `snapshotStatusByThread()` 随后无条件采用 live execution status 覆盖目录中的 completed 状态；员工父行再把该子任务当作 active work，于是已完成的 turn/task 显示“助手正在运行”或“正在处理后台任务”。
+6. 隔离内存复现已得到：同一 turn 的 authoritative snapshot 为 completed，但读取期间 revision 从 0 变为 1，commit 后 `livePresent=true`、`storedActive=true`、投影仍为 working，员工文案仍为“正在处理后台任务”。这解释了刷新、重连、慢读后旧运行态仍能复活，也与后端完整完成记录相矛盾。
+
+问题归属：本次主要是有证据的前端状态合并和目录投影 BUG，不是完成事件缺失、turnId 不匹配、旧 epoch 覆盖、任务未收尾或 UI 把 completed 文案误判为运行。持久化缓存中的旧 active 状态可以在首次同步前短暂显示，但本次持续不收敛的直接缺陷是 live 覆盖层在 revision 改变后未被完成的 authoritative 快照清除。是否还有浏览器本地缓存残留，需在修复后用真实浏览器状态快照验收。
+
+另有一个独立的恢复风险：`task-kernel.mjs` 会把仍带 threadId/turnId 的 `needs-reconciliation` 每 15 秒改回 `recovering` 并重新观察，没有次数上限。本次 `21e34d04...` 已正常 completed，不属于该无限重试现场；但任务长期无法核对时会持续 pending。修复应复用现有状态，连续核对失败达到明确上限后收敛为 `interrupted` 并保留错误，不能伪装 completed。
+
+最小修改方案（本次未实施）：
+
+- `ui-feishu/shared/features/conversations/state/conversationStore.ts`：终端 authoritative 快照提交时，按 turnId 与 eventEpoch/eventSeq（缺少序号时用现有状态证据）清除更旧的 live running；若读取期间确实收到同一 epoch 更新的事件，则保留更新的 live 状态。不能仅因正文 revision 不同就保留整个旧 live execution。
+- `ui-feishu/src/conversationDirectory.ts`：目录中的 terminal 状态必须压过无更新证据的 live active；只有当 live 事件可证明比目录状态更新时，才允许覆盖。对选中行和非选中行使用同一规则，避免“已完成目录 + 旧 live”生成后台工作。
+- `ui-feishu/kernel/task-kernel.mjs`：为 `needs-reconciliation` 增加持久化/内存重试计数和明确上限，达到上限后进入现有 `interrupted`，不新增终端状态；真实 active 证据仍保持运行。
+- 验证补在 `ui-feishu/validation/conversation-summary.test.mjs` 和 `ui-feishu/validation/conversation-store-browser.test.mjs`，恢复策略补在 `ui-feishu/validation/task-kernel.test.mjs`。保持 external 的任务页/员工任务子项过滤，不为修 UI 文案而把 external 暴露成 background。不得修改受保护的 `ConversationView.tsx`、`useReturnToBottom.ts` 或滚动逻辑。
+
+验收用例：
+
+1. 任务显示 completed 后，当前对话标题和员工行立即回落空闲；最终正文保留，不再出现“助手正在运行”或“正在处理后台任务”。
+2. 读取在 working 时发起，读取期间插入任意数量 `context_status`，随后返回 completed；最终投影仍为 completed/inactive。若读取期间确有更新的下一 turn active 事件，则保持新的 active turn，不能被旧 completed 误清。
+3. 模拟完成事件丢失，目录或 execution API 已为 completed；刷新、重连、慢读、页面恢复后旧 live/缓存不能把状态复活为 running。
+4. external 当前员工对话处于 recovering/completed 时均不出现在 `/api/tasks`、后台任务子项或“正在处理后台任务”计数中；真实 background running 仍正常出现并计数，停止或完成后移除 active 计数。
+5. 同一任务连续多次无法恢复核对后不再每 15 秒无限 recovering；显示 interrupted 和实际错误，不显示 completed，也不继续占用 active。
+
+证据路径：`runtime/ui-feishu/employee-tasks/tasks.json`、`runtime/employee-conversations/handoff-05bb309bd4f097df68f9f962adf8289f.jsonl`、`runtime/employee-conversations.json`、`runtime/execution-runs.json`、`ui-feishu/shared/features/conversations/state/conversationStore.ts`、`ui-feishu/src/conversationDirectory.ts`、`ui-feishu/shared/features/context-management/hooks/useContextManagement.ts`、`windows/server/routes/conversation-history-routes.mjs`、`ui-feishu/kernel/task-kernel.mjs`、`ui-feishu/kernel/native-task-runtime.mjs`、`ui-feishu/server/employee-task-extension.mjs`。
+
+状态：已按用户要求登记为待修复 BUG；业务代码 0 行，未发布、未重启、未提交、未发送测试消息，工作区已有改动全部保留。当前运行服务版本 `1794475480957-705e25f4` 与本次只读结论一致，代码尚未修改或上线。
+
+#### 2026-11-17 本项源码修复，独立审核通过并发布
+
+本轮用户明确授权修复上述完成态与有限恢复核对问题，替代“暂缓/仅登记”的执行状态；禁止提交、推送、发布、重启、真实测试消息和截图。保留 FEAT-001 context_status 修复及 Mermaid 等既有改动，不修改受保护滚动文件。
+
+复核：开工工作区已包含第一项正文/字段版本分离，但正文失效期间旧 live 仍可压过 completed，目录仍无条件接受 live active；隔离对照复现见 `work/terminal-live-20261117/baseline-repro.log`。现按同 epoch 序号、时间及读取期间的新 turn 证据合并运行态，目录终态与当前标题共用判断并回写现有 Store，避免显示空闲而发送仍进入旧运行队列。核对失败持久化计数连续三次后 interrupted，保留错误；真实 active 清零计数。external 现有过滤保持原样并补 API/目录测试。
+
+验证：200 项相关测试通过；终态、目录丢失事件、新 turn 慢读、刷新/重连/恢复、发送确认、附件、缓存 A/B、Goal/提问和分页浏览器夹具通过；100/1,000/10,000 context_status 均零新增正文请求；TypeScript 和 diff 检查通过。详细逐文件增减、命令及边界见 [本次验证记录](../../../../work/terminal-live-20261117/verification.md)。DeepSeek 独立审核 PASS，没有阻断、中或低风险问题；运行服务没有加载本次修改。
+
+### 2026-11-16 群聊与普通对话的协作体验差异（问题登记）
+
+来源：当前维护对话以及用户对已核实反馈的评价，2026-11-16。
+
+用户原话：
+
+> 现在群聊功能和普通对话的体验很大不同。助手中间的回复也没有显示。而且总是只有一个员工出来。roomId: project-room:project:business:phonecameradata 看看我刚才的群聊。给我用户体验的反馈
+
+核实方式：只读核对指定房间的持久化记录、任务记录、运营管理原生会话和内部子代理会话。本次证据路径：
+
+- `/Users/hans/myproject/negus/runtime/group-rooms/project%3Abusiness%3Aphonecameradata.json`
+- `/Users/hans/myproject/negus/runtime/ui-feishu/tasks/project-room:project:business:phonecameradata/tasks.json`
+- `rollout-2026-11-16T23-15-21-01a1e4ed-551a-7802-8be4-07a34e11431e.jsonl`
+- `rollout-2026-11-16T23-18-26-01a1e4f0-27a9-7871-bfc9-413e51863392.jsonl`
+
+已证实事实：
+
+- `roomId` 为 `project-room:project:business:phonecameradata`，配置 6 位员工：negus助手、运营管理、产品分析、技术研发、风控质量、Grok助手。
+- 持久化房间记录有 12 条消息：7 条用户消息、3 条助手消息、2 条停止通知；3 条助手回复全部来自运营管理。
+- 5 个任务全部属于运营管理，其他 5 位员工任务数均为 0。“只有一个员工出来”在该房间已证实，不能据此外推到所有群聊。
+- 运营管理原生会话产生了 6 条 commentary，但房间没有保存或展示这些中间回复。
+- 群聊目前只接收文字 delta 并放入折叠过程占位，没有复用普通对话“已完成 commentary 作为独立消息落库并展示”的链路。
+- 协作任务中调用 `list_tasks` / `create_background_task` 返回 `Unauthorized`，内部子代理没有执行原任务；具体 token 绑定原因尚缺 stderr 证据。
+- 用户补充消息进入了当前执行，但没有“已加入当前执行”提示；最终回复只关联初始派工消息。
+- 普通对话的共享链路可以逐条展示已完成 commentary，群聊与普通对话因此存在明显体验差异。
+
+待证据项和范围边界：
+
+- 补齐 `Unauthorized` 的 stderr、调用身份和 token 绑定证据后，再判断认证失败的具体原因。
+- 当前房间的派工集中现象只能登记为该房间的事实；其他群聊的员工选择情况仍需分别核对。
+- 本轮没有证据证明存在对话滚动问题，不能登记为滚动 bug，也不改受保护的首次定位、底部跟随和历史位置恢复逻辑。
+
+最小后续顺序（仅问题解决方向，尚未授权或实施代码）：
+
+1. 把已完成的 commentary 作为群消息落库，并复用现有 `Message` 展示，不再只放入折叠过程占位。
+2. 修复群内派工认证失败，并在失败时显式报告，不能让内部子代理未执行原任务却无可见说明。
+3. 执行中收到用户补充时显示“已加入当前执行”，并让最终回复关联这条补充及当前执行。
+
+授权状态：本节仅登记用户反馈、已核实事实、待补证据和最小后续顺序，尚未授权或实施业务代码修改。以上顺序不代表发布、重启或提交授权；实施前仍需由用户明确授权具体范围。
+
+### 2026-11-16 后台代理查询应优先使用只读命令而非 computer（问题登记）
+
+来源：当前维护对话，2026-11-16；未取得消息级标识。
+
+用户原话：
+
+> 现在，怎么一让查一点东西，negus 就喜欢用 computer 一直截图？而不是直接运行命令？明明快得多？
+
+技术研发反馈原话：
+
+> 这是代理选错了工具，不是正常设计。查文件、日志、API、Git 或运行状态，应直接执行只读命令；computer 只该用于必须操作图形界面、验证真实页面或命令无法覆盖的场景。截图慢，而且每一步都要反复识别坐标。
+>
+> 当前约束只写了“操作主机时优先 computer”，却没有明确写“能用 shell 查清的内容禁止先开 computer”，所以代理容易过度触发。
+>
+> 最小修复应加一条全局规则：“查项目文件、代码、日志、API、Git 和运行状态时直接使用命令或只读文件工具；只有必须操作图形界面，或需要视觉核验时才能使用 computer。使用前先判断是否有更直接的数据接口，禁止用截图和点击代替命令查询。”
+
+当前反馈中的用户操作与影响：用户让后台代理查询项目文件、代码、日志、API、Git 或运行状态，本应得到一次直接、可复核的只读查询结果；代理却可能先打开 computer，持续截图并反复识别坐标，用户需要等待更长链路，也增加了点错或误操作的概率。
+
+问题链路：用户提出查询 → 代理选择工具 → 若先选择 computer → 打开图形界面并截图 → 识别坐标并逐项核对 → 才取得本可由命令或只读文件工具直接返回的数据。问题在工具选择，不在 computer 能力不足；目标是减少慢路径和误操作，不新增工具。
+
+当前有效规则候选及适用场景：
+
+- 查询项目文件、代码、日志、API、Git 和运行状态时，直接使用现有 shell 或只读文件读取能力。
+- 使用 computer 前先判断是否存在更直接的数据接口；禁止用截图和点击代替命令查询。
+- computer 仅用于必须操作图形界面的步骤、真实页面的视觉验收，或只能通过界面完成的操作。
+- 需要真实浏览器或界面验证时继续允许 computer，并明确说明为何必须走图形界面；不得因为本规则禁止真实浏览器或界面测试。
+
+决定状态：本次只在 FEAT-002 登记问题、反馈原话、规则候选和验收方向。是否修改全局提示词、员工职责文件及规则的具体落点，仍待后续执行任务确认；本次没有实施这些修改，本问题未修复。后续落点确定时优先复用现有提示词与职责链路，不新增工具或平行规则系统。
+
+后续验收方向：
+
+1. 简单文件查询能直接走命令或只读文件工具，实际调用链不先打开 computer。
+2. 日志和 API 查询直接取得数据，不经过截图、坐标识别或图形界面点击。
+3. 确需界面验证时仍可使用 computer，并在执行说明中给出必须使用界面的理由。
+4. 真实浏览器和界面测试能力保持可用，不能因收紧查询路径而失效。
+
+### 2026-11-17 群聊中间回复与派工认证修复授权
+
+来源：本轮后台修复任务，基线 `develop / dfe8bcf5213992adbf97cb643d80516d64119a7e`。
+用户明确授权：“把已完成的 commentary 作为群聊消息落库，复用现有普通对话 Message/渲染/SSE 链路”；“修复运营管理调用 list_tasks/create_background_task/delegate_task 时的 Unauthorized”；“可以做内部 turn 关联数据修复，但不得新增用户未见需求的‘已加入当前执行’文案”。
+本次替代 11-16 问题登记中的未授权状态及新增补充提示的建议；不改变未点名接待、共享上下文、外部任务过滤或员工父行汇总。禁止提交、推送、发布、重启、发送真实群聊/测试消息和截图；完成后由来源对话安排 DeepSeek 审核。
+
+当前状态：源码修复、DeepSeek 独立审核和受控发布均已完成。后端重启 jobId `1794850200246-69963` 已 started，运行快照 `1794850193600-27e8db44`、pid `70019`；前端 `feishu-mwjjgqj6` 已在公网生效，watchdog 全链路 healthy。运行快照中的群聊、任务内核、上下文和工具选择代码与工作区哈希一致。
+
+### 2026-11-17 后台查询工具选择修复授权与实现
+
+来源：本轮后台修复任务；用户明确要求“在最小、现有全局提示词位置加入明确选择规则”，并要求“不要提交、推送、发布或重启，不发送真实测试消息，不截图”。本次替代 11-16 此问题的“仅登记、待确定落点”状态，保留原话与历史。
+
+有效决定：普通文件、代码、日志、API、Git、服务/运行状态查询直接使用现有 shell 或只读文件/API 工具；真实界面操作与视觉验收保留 computer，使用前说明界面必要性。Cloudflare 等业务工具及原有授权边界保留，不增加工具或 UI。
+实现：集中修改 `windows/server/computer-control/runtime.mjs`，已有前台与员工/当前后台组装自动继承；旧 `background-tasks/service.mjs` 的覆盖提示补接同一函数。验证与证据见本条 updates 的同日记录。
+
+当前状态：DeepSeek 独立审核 PASS。14 份实际生成提示覆盖前台、6 位员工和后台创建/resume/turn 链路；文件、代码、日志、API、Git、运行状态直接使用只读数据，computer 仅用于必要界面或视觉验收。没有阻断或中风险问题。受控发布已完成，公网前端 `feishu-mwjjgqj6`，运行快照 `1794850193600-27e8db44`，watchdog 全链路 healthy。
+
+
+### 2026-11-17 跨设备员工目录完成内容同步（本轮工作区修复）
+
+来源：本轮修复任务原文；未提供原始对话消息标识。
+
+用户原话：
+> 4.现在 偶尔，我在跨设备时，员工对话的内容没有同步更新在所有对话的列表中，不过我不敢肯定现在还有没有。
+
+有效决定：设备 A 员工回答完成后，设备 B 不发送消息、不刷新页面即可更新“所有对话”的员工摘要和活动时间；单次慢请求/失败应有有限恢复，保持共享资源和 SSE，不新增高频轮询。此项授权目录读取失败的一次有限补读，不恢复此前否定的员工 readAuthoritativeStatus 定时兜底或正文反复读取。
+
+根因证据：前端漏接 employee_turn_completed；目录请求仍为 10 秒且失败只保留缓存；employee_message_completed 与 sessions_changed 原先在 recordRuntimeEvent 落盘前广播，目录可能先读旧摘要。公网请求取消仅为放大证据，不认定唯一根因。
+
+最小修复：完成事件纳入现有 directory-changed；共享目录请求统一 60 秒，失败仅再读一次，持续失败保留旧值并停止，后续事件/恢复仍可重试；sessions_changed 改在记录落盘成功后发布，原实时正文事件保持。继续使用既有目录权威合并与父行状态，不新增另一份缓存。员工重启后历史上下文用量修复同时见 FEAT-001 本日条目。
+
+操作变化：设备 B 留在列表→收到 A 员工完成→更新摘要、时间及父行；首次请求超时后有限补读，恢复后不继续请求。验证含完成事件、单次 timedout、连续失败停止、保留旧值、下一次完成事件恢复、实际记录保存 gate。185 项定向单测及隔离浏览器通过，证据见 [本轮验证记录](../../../../work/four-usage-fixes-20261117/verification.md)。真实公网、手机和供应商流程按本轮边界留到发布后验收；未提交、推送、发布或重启。
+
+
+### 2026-11-17 独立审核 FAIL 后收紧目录补读
+
+来源：本轮用户转交的 DeepSeek Flash High 独立审核结果。
+
+用户原话：
+> 目录补读应只针对可恢复错误（低风险）
+> 改成只对网络错误、超时和 5xx 补读一次；401、403、404 每次失效只请求一次，保留旧目录，不循环。
+> 复用现有 fetchJson/HttpError 或最小增加 HTTP status 信息，避免扩大无关调用方行为。
+
+有效决定：替代上一轮“所有错误都补读一次”的实现。GET错误保留原文案并携带HttpError.status，POST/PATCH/DELETE错误行为不变；共享目录仅网络TypeError、超时/AbortError、500–599补读一次，401/403/404和其他不可恢复错误不补读。连续可恢复失败最多两次，旧目录保留，下一次已有事件仍可重新尝试；不新增轮询。
+
+操作变化：设备B目录更新遇到网络/服务端临时故障→一次补读后恢复；遇到权限拒绝或不存在→保留旧目录且只发一次请求。已通过的完成事件接线、落盘后失效、父行合并保持原样。
+
+定向覆盖网络、超时、500/501/503/599、401/403/404/429、连续失败停止及下次失效恢复；四项浏览器目录场景继续通过。员工分页上下文缺失的补修见FEAT-001本日同轮记录。证据见 [复审补修证据](../../../../work/four-usage-fixes-20261117/verification.md#第二轮补修独立审核-fail-后)。未提交、推送、发布或重启；独立复审由来源对话安排。
+
+### 2026-11-17 快速追加与响应前审批两个发布阻断
+
+来源：本轮后台修复任务，工作区基线 `develop / dfe8bcf`。未提供消息级标识。
+
+用户原话：
+
+> 用户已明确问题，不再澄清。只修两个发布阻断，继续 DeepSeek Flash High，最小改动；不提交、不发布、不重启，保留工作区其他改动。
+>
+> 阻断1 快速追加竞态：员工刚完成时立刻发送第二条，第二条准备期间旧 turn 结束，代码仍可能发 turn/steer，收到 409 后错误写成 occupied/active，消息未执行。发出 turn/steer 前重新读取当前员工状态与原生 thread 权威状态；原 turn 已 inactive 时，用同一输入、附件和 clientUserMessageId/requestId 走一次 turn/start。turn/steer 返回明确表示原 turn 结束的 409 后，重读权威状态；无新 active turn 时恢复 idle 并用同一输入和 requestId 安全重试一次 turn/start；已有不同当前 turn 时不重发，按真实 occupied 处理。失败状态由权威状态决定。快速完成期间追加最终只执行一次。不新增状态表、队列或轮询，复用 sendMessage 和现有 request id。
+>
+> 阻断2 响应前审批/补充输入：审批、requestUserInput 或 elicitation 早于 turn/start response 时，不再提前进入 execution tracker。submitted 且 turnId 空时按当前 submission 缓冲；confirmedTurnId 返回后先绑定，再按到达顺序回放 early started/delta/final/completion 和审批/补充输入。绑定允许 active 且 turnId 空，包括 submitted、working、waitingOnApproval、waitingOnUserInput；已有不同 turnId 时丢弃旧 response。回放审批可显示等待，后续当前 turn final/completed 必须正常到达并最终 idle；旧 turn、旧线程的审批不能回放。
+
+有效决定：只修复上述两个阻断，复用现有 `sendMessage`、请求标识和协议事件入口；不增加状态表、队列、轮询、定时器或等待缓冲。追加发送前以原生 `thread/read` 状态校准 `turn/start` 与 `turn/steer`；明确的原 turn 已结束 409 只重试一次，已有其他活动 turn 时按真实占用返回。响应前的审批和补充输入进入本次发送的既有 early-events 缓冲，确认 turnId 后才回放，旧 ID 事件丢弃。绑定不再限制在 submitted/working 两个阶段；若响应到达时已绑定不同 turnId，丢弃该旧响应和其缓冲。受保护滚动文件零修改。
+
+用户操作变化：员工刚回答完、页面仍可能短暂显示运行中时立刻发送第二条，修改前可能收到“被占用中”且第二条未执行，修改后第二条自动走一次新的 `turn/start` 并收到结果；若确实有另一条任务正在运行，仍明确显示被占用。审批或补充输入在提交响应前出现时，修改前可能卡在“等待审批/补充信息”，修改后短暂等待后继续显示本轮正文并自动回到空闲。
+
+验证与证据见 [验证记录](../../../../work/runtime-release-blockers-20261117/verification.md)。当前状态为仅工作区源码与定向测试修改；未提交、未推送、未发布、未重启，运行服务尚未加载本修复。
+
+### 2026-11-17 风控复核后的两个状态覆盖竞态
+
+来源：风控仍不通过，用户明确只补两项状态覆盖竞态；工作区基线 `develop / dfe8bcf`。
+
+用户原话：
+
+> 阻断1 迟到旧审批/补充输入：在发布 waitingOnApproval/waitingOnUserInput 前，必须确认当前 employee active 且存在 current.turnId，并校验事件 turnId；明确不同 turn 或 idle 下直接忽略。无 turnId 的 approval/requestUserInput/elicitation 只允许在 submitted 空 turnId 的一次性 buffer 中被接受；绑定 confirmedTurnId 后回放时注入该 ID。已绑定后直接到达的无 ID 等待事件拒绝。不允许迟到旧 approval/elicitation 把 idle/completed 员工重新点亮，或把 waiting 覆盖成另一状态。execution 与 employee 保持一致；被拒事件不得进入 execution。
+>
+> 阻断2 steer response 覆盖真实等待：response confirmedTurnId 时，仅在当前 phase 为 submitted 或 working 时发布 working。若当前 phase 已是 waitingOnApproval/waitingOnUserInput 且 turnId 为空或与 confirmedTurnId 相同，只补 confirmedTurnId，保留原有 waiting phase、label、active=true。若已有不同 turnId，仍按旧响应竞态丢弃。随后 final + completed 必须正常接收并最终 idle。
+
+有效决定：等待类事件在进入 execution 和员工状态前统一校验当前 active、current.turnId 与事件 turnId。无 turnId 的等待事件仅接受本次 `turn/start` submitted 空 turnId 缓冲；确认后回放时注入 confirmedTurnId。员工已进入另一 waiting 状态时不接受其他等待类事件覆盖。`turn/steer` 响应到达后只补 turnId，等待 phase、label 和 active 保持不变；只有 submitted/working 才发布 working。已有不同 turnId 仍丢弃旧响应。
+
+用户操作变化：旧审批或 elicitation 晚到时，已完成员工不会重新显示“正在处理/等待审批”，另一等待中的文案也不会被覆盖。steer 处理中已经显示“等待补充信息”或“等待原生审批”时，接口返回不会再把它改回“正在处理”；最终正文和完成事件到达后正常回到空闲。
+
+验证与证据见 [验证记录](../../../../work/runtime-release-blockers-20261117/verification.md#风控复核后的两个状态覆盖竞态)。当前状态为仅工作区源码与定向测试修改；未提交、未推送、未发布、未重启，运行服务尚未加载本修复。
+
+### 2026-11-17 失败、旧响应与 close 状态覆盖
+
+来源：风控仍不通过，用户限定只补三条状态覆盖路径；工作区基线 `develop / dfe8bcf`。
+
+用户原话：
+
+> 1. 旧响应 turnId 不同：当前已有 active turn，response confirmedTurnId 不同时，清空本次 early buffer，然后直接停止本次 continuation，不再进入通用 catch 发布 occupied/failed。可向调用方抛出明确的“响应属于其他任务”，但 employee 和 execution 现有 waiting/working 状态、turnId、文案必须保持原样。
+>
+> 2. steer 普通/网络失败：发送前保存 current status snapshot。失败后读取 authoritative：同 turn active 保留 waiting/working；不同 turn 显示真实 occupied 和该 turnId；inactive 进入 idle；unknown 保留 snapshot。turn/start 失败仍按现有安全 failed/idle 语义。
+>
+> 3. close 后 continuation：关闭后所有在途发送在异步返回、失败、catch、finally、状态发布和回放前检查 closed；只清理本次 buffer/submission，不再写员工或 execution 状态，不回放事件。
+
+有效决定：steer 请求前保存 phase、label、detail、active、turnId；失败时按原生权威状态选择恢复 snapshot、真实 occupied、idle 或保留 snapshot。不同 turnId 的旧响应清空本次 early buffer 后以明确错误退出，状态处理标记为已处理，通用 catch 不再二次覆盖。`closed` 同时作为发送异步边界和 `publishStatus` 的硬门禁，关闭后只执行本地清理。
+
+用户操作变化：等待审批或补充信息时发送追加消息，若接口返回旧任务响应或普通/网络失败，员工不会突然变成提交失败、空闲或被占用；同 turn 仍 waiting，真实另一 turn 才显示占用，inactive 才回到空闲。关闭员工运行时后，即使此前发起的请求稍后返回，也不会重新点亮状态或补写正文。
+
+验证与证据见 [验证记录](../../../../work/runtime-release-blockers-20261117/verification.md#失败旧响应与-close-状态覆盖)。当前状态为仅工作区源码与定向测试修改；未提交、未推送、未发布、未重启，运行服务尚未加载本修复。
+
+### 2026-11-17 steer 失败时保留请求后实时等待
+
+来源：风控最终剩余的时序阻断；工作区基线 `develop / dfe8bcf`。
+
+用户原话：
+
+> 风控仅剩 1 个时序阻断：turn/steer 发出后才进入 waitingOnApproval/UserInput，随后 steer 失败时又恢复旧 working snapshot。请只修这一处。
+
+有效决定：steer catch 的 same-turn-active 与 authoritative-unknown 分支先读取员工实时 status。若实时 status 仍 active、turnId 与请求前 snapshot 相同，且 phase 已是 waitingOnApproval 或 waitingOnUserInput，则保留实时等待状态、文案和 turnId，不再恢复请求前 working snapshot。实时状态仍是本次失败造成的 submitted，或未进入更新后的 waiting 时，才恢复 snapshot。另一 active turn、inactive 和 close 行为不变。
+
+用户操作变化：steer 发出后模型才开始请求审批或补充信息，随后请求发生普通/网络失败时，页面和 execution 继续保留“等待审批/等待补充信息”，不会被旧 working 快照覆盖；最终正文和 completed 到达后正常回到空闲。没有出现新等待时，失败仍恢复到操作前的工作状态。
+
+验证与证据见 [验证记录](../../../../work/runtime-release-blockers-20261117/verification.md#steer-失败时保留请求后实时等待)。当前状态为仅工作区源码与定向测试修改；未提交、未推送、未发布、未重启，运行服务尚未加载本修复。

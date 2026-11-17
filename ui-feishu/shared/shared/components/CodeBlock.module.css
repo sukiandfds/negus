@@ -3,5 +3,14 @@
 .summary span { display: inline-block; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 10px; color: var(--color-text-muted); font-size: 12px; }
 .toolbar button { border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.diagram { padding: 12px; overflow: auto; max-height: 640px; text-align: center; cursor: zoom-in; }
+.diagram:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+.viewer { position: fixed; inset: 0; width: calc(100vw - 32px); max-width: none; height: 90dvh; max-height: none; padding: 0; border: 1px solid var(--color-border, #343638); border-radius: 8px; background: #1d1f20; color: #fff; overflow: hidden; }
+.viewer::backdrop { background: rgb(0 0 0 / 88%); }
+.viewerLayout { display: flex; flex-direction: column; height: 100%; }
+.viewerActions { display: flex; flex-wrap: wrap; gap: 12px; justify-content: flex-end; }
+.viewerCanvas { flex: 1; min-height: 0; touch-action: none; overflow: hidden; }
+.viewerSvg svg { display: block; max-width: none !important; height: auto; }
+.diagram svg { display: block; max-width: none !important; height: auto; margin: auto; }
 .block pre.body { margin: 0; padding: 10px; max-height: 360px; overflow: auto; border: 0; border-radius: 0; white-space: pre; }
 .block pre.body code { display: block; padding: 0; border: 0; background: transparent; color: var(--color-text-secondary); font: 12px/1.5 var(--font-mono); white-space: pre; overflow-wrap: normal; }

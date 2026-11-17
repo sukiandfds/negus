@@ -190,7 +190,7 @@ const taskDirectory = (phase, label, hour, title, latestMessage) => {
   state.projects[0].conversations.push({
     id: taskThread, threadId: taskThread, conversationId: taskConversation, title,
     lastActivityAt: time(hour), latestMessageAt: time(hour), latestMessage,
-    status: { phase, label, active, indicator: active ? 'green' : null },
+    status: { phase, label, active, updatedAt: time(hour), indicator: active ? 'green' : null },
   });
   return state;
 };
@@ -336,7 +336,7 @@ test('optimistic confirmation remains visible work even when body content is unc
 
 test('uncommitted live task status reaches both task and employee parent through store wiring', () => {
   const store = conversationStore();
-  store.update(taskThread, { executionStatus: liveStatus('running', true) }, true);
+  store.update(taskThread, { executionStatus: { ...liveStatus('running', true), updatedAt: time('13') } }, true);
   const directoryState = taskDirectory('completed', '已完成', '10', '目录任务标题', '目录已完成');
   directoryState.projects[0].status = { phase: 'idle', label: 'idle', active: false, indicator: null };
   const statuses = snapshotStatusByThread(store, taskThread, directoryState.projects);
@@ -371,7 +371,7 @@ test('non-selected stale committed active yields to completed directory for task
   const state = taskDirectory('completed', '已完成', '12', '目录完成标题', '目录完成摘要');
   state.projects[0].status = { phase: 'running', label: '正在处理后台任务', active: true, indicator: 'green' };
   const statuses = snapshotStatusByThread(store, 'other-selected-task', state.projects);
-  assert.equal(statuses[taskThread], undefined);
+  assert.equal(statuses[taskThread].active, false);
   const rows = taskRows(state.projects, [], new Map(), statuses);
   assert.equal(rows.all.find(row => row.threadId === taskThread).active, false);
   const employee = rows.employees.find(row => row.agentId === 'A');
@@ -399,16 +399,16 @@ test('live running on selected or another task keeps task and parent active', ()
   const secondThread = '01a1c0d8-eff4-7b52-aade-e15d421a206f';
   state.projects[0].conversations.push({
     id: secondThread, threadId: secondThread, conversationId: 'handoff-second',
-    title: '另一活动任务', status: { phase: 'completed', label: '已完成', active: false },
+    title: '另一活动任务', status: { phase: 'completed', label: '已完成', active: false, updatedAt: time('12') },
   });
   const selectedStore = conversationStore();
-  selectedStore.update(taskThread, { executionStatus: liveStatus('running', true) }, true);
+  selectedStore.update(taskThread, { executionStatus: { ...liveStatus('running', true), updatedAt: time('13') } }, true);
   let rows = taskRows(state.projects, [], new Map(), snapshotStatusByThread(selectedStore, taskThread, state.projects));
   assert.equal(rows.all.find(row => row.threadId === taskThread).active, true);
   assert.equal(rows.employees.find(row => row.agentId === 'A').active, true);
 
   const backgroundStore = conversationStore();
-  backgroundStore.update(secondThread, { executionStatus: { ...liveStatus('running', true), threadId: secondThread } }, true);
+  backgroundStore.update(secondThread, { executionStatus: { ...liveStatus('running', true), threadId: secondThread, updatedAt: time('13') } }, true);
   rows = taskRows(state.projects, [], new Map(), snapshotStatusByThread(backgroundStore, taskThread, state.projects));
   assert.equal(rows.all.find(row => row.threadId === secondThread).active, true);
   assert.equal(rows.employees.find(row => row.agentId === 'A').active, true);
@@ -669,4 +669,99 @@ test('incomplete directory summaries keep cached identity at equal or newer time
       assert.match(row.preview, /已显示正文/);
     }
   }
+});
+
+test('terminal read clears old execution despite context storm and body invalidation, preserving final text', () => {
+  for (const count of [100, 1000, 10000]) {
+    const store = conversationStore();
+    const active = { ...liveStatus('working', true), eventEpoch: 'epoch', eventSeq: 1, updatedAt: time('10') };
+    store.update(taskThread, { executionStatus: active }, true);
+    const revision = store.revisions.get(taskThread);
+    for (let i = 0; i < count; i++) store.update(taskThread, { contextStatus: { ...store.get(taskThread).contextStatus, usedTokens: i } });
+    store.invalidate(taskThread);
+    store.commit(taskThread, { ...store.empty(taskThread), session: session(taskThread, '最终正文', '12'),
+      executionStatus: { ...active, phase: 'completed', active: false, eventSeq: 2, updatedAt: time('12') } }, revision);
+    assert.equal(store.get(taskThread).executionStatus.active, false);
+    assert.equal(store.get(taskThread).session.messages[0].text, '最终正文');
+    assert.equal(store.get(taskThread).contextStatus.usedTokens, count - 1);
+    assert.equal(store.dirty.has(taskThread), true, 'new body demand remains dirty');
+    store.update(taskThread, { executionStatus: active }, true);
+    assert.equal(store.get(taskThread).executionStatus.active, false, 'late old active cannot revive terminal');
+  }
+});
+
+test('slow terminal snapshot retains newer same-epoch evidence and new-turn active, including metadata-only events', () => {
+  for (const turnId of ['turn-live', 'new-turn']) {
+    const store = conversationStore();
+    const active = { ...liveStatus('working', true), eventEpoch: 'epoch', eventSeq: 1, updatedAt: time('10') };
+    store.update(taskThread, { executionStatus: active }, true);
+    const revision = store.revisions.get(taskThread);
+    store.update(taskThread, { executionStatus: { ...active, turnId, eventSeq: 3, updatedAt: time('13') } }, true);
+    store.commit(taskThread, { ...store.empty(taskThread), session: session(taskThread, '上一轮最终正文', '12'),
+      executionStatus: { ...active, phase: 'completed', active: false, eventSeq: 2, updatedAt: time('12') } }, revision);
+    assert.equal(store.get(taskThread).executionStatus.active, true);
+    assert.equal(store.get(taskThread).executionStatus.turnId, turnId);
+    assert.equal(store.get(taskThread).executionStatus.eventSeq, 3);
+  }
+});
+
+test('directory terminal defeats stale live or cached active for selected and unselected employees', () => {
+  for (const selected of [taskThread, 'other']) for (const remote of [false, true]) {
+    const store = conversationStore();
+    store.update(taskThread, { executionStatus: { ...liveStatus('working', true), updatedAt: time('10') } }, remote);
+    const state = taskDirectory('completed', '已完成', '12', '任务', '最终正文');
+    const statuses = snapshotStatusByThread(store, selected, state.projects);
+    assert.equal(statuses[taskThread].active, false);
+    assert.equal(taskRows(state.projects, [], new Map(), statuses).employees[0].active, false);
+  }
+});
+
+test('new turn observed during read survives missing event clocks, but an old turn does not', () => {
+  for (const duringRead of [false, true]) {
+    const store = conversationStore();
+    const old = { ...liveStatus('working', true), turnId: 'old' };
+    store.update(taskThread, { executionStatus: old }, true);
+    const revision = store.revisions.get(taskThread);
+    if (duringRead) store.update(taskThread, { executionStatus: { ...old, turnId: 'new' } }, true);
+    store.update(taskThread, { contextStatus: { ...store.get(taskThread).contextStatus, usedTokens: 999 } });
+    store.commit(taskThread, { ...store.empty(taskThread), executionStatus: {
+      ...old, active: false, phase: 'completed', updatedAt: time('12') } }, revision);
+    assert.equal(store.get(taskThread).executionStatus.active, duringRead);
+  }
+});
+
+test('fresh authoritative completion overrides older active directory and clears main employee work', () => {
+  const store = conversationStore();
+  const state = taskDirectory('working', '正在处理后台任务', '10', '任务', '运行');
+  store.commit(taskThread, { ...store.empty(taskThread), executionStatus: {
+    ...liveStatus('completed', false), turnId: 'turn', updatedAt: time('12') } }, 0);
+  let statuses = snapshotStatusByThread(store, taskThread, state.projects);
+  assert.equal(taskRows(state.projects, [], new Map(), statuses).employees[0].active, false);
+  state.projects[0].conversations[0].status = { active: true, phase: 'working', turnId: 'main', updatedAt: time('10') };
+  store.update('A', { executionStatus: { ...liveStatus('completed', false), threadId: 'A', turnId: 'main', updatedAt: time('12') } }, true);
+  statuses = snapshotStatusByThread(store, 'A', state.projects);
+  assert.equal(taskRows(state.projects, [], new Map(), statuses).employees[0].active, false);
+});
+
+test('directory completion during slow read is not overwritten by its older active response', () => {
+  const store = conversationStore();
+  const old = { ...liveStatus('working', true), updatedAt: time('10'), eventEpoch: 'epoch', eventSeq: 1 };
+  store.update(taskThread, { executionStatus: old }, true);
+  const revision = store.revisions.get(taskThread);
+  store.update(taskThread, { executionStatus: { ...old, active: false, phase: 'completed', updatedAt: time('12'), eventSeq: 2 } });
+  store.commit(taskThread, { ...store.empty(taskThread), executionStatus: old }, revision);
+  assert.equal(store.get(taskThread).executionStatus.active, false);
+});
+
+test('compaction lifecycle timestamps update ordinary and employee rows without altering message preview', () => {
+  const d = directory(), a = session('A', 'saved answer', '08'), b = session('ordinary', 'ordinary answer', '08');
+  d.contextTimeByThread = { A: time('10'), ordinary: time('11') };
+  let rows = buildConversationDirectory(d, [a, b], false, '', new Map([['A', a], ['ordinary', b]]));
+  assert.equal(rows.all.find(row => row.threadId === 'A').time, time('10'));
+  assert.equal(rows.employees.find(row => row.threadId === 'A').time, time('10'));
+  assert.equal(rows.all.find(row => row.threadId === 'ordinary').time, time('11'));
+  assert.equal(rows.all.find(row => row.threadId === 'A').preview, '助手：saved answer');
+  d.contextTimeByThread.A = time('09'); // authoritative server clock replaces a fast client clock
+  rows = buildConversationDirectory(d, [a], false);
+  assert.equal(rows.all.find(row => row.threadId === 'A').time, time('09'));
 });

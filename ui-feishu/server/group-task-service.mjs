@@ -134,10 +134,27 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
     if (visited.size >= 24) throw Object.assign(Error('交接链已达到轮次上限'), { statusCode: 409 });
     return kernel.delegate(sourceId, { requestId: input.requestId, agentId: input.agentId, title: input.title, instructions: input.instructions,
       conversationId: roomId, lane: `${roomId}:${input.agentId}`, suppressContinuation: input.notifySource === false,
-      source: { ...source.source, agentId: source.agentId } });
+      source: { ...source.source, roomId, agentId: source.agentId,
+        actor: { id: source.agentId, name: room.getAgent(source.agentId).name } } });
   } });
   const instructionsFor = agent => employeeTurnInstructions(agent.instructions,
     `你是${agent.name}，只以自己的身份回复。需要执行工作时可调用 create_background_task，追加要求使用 followup_background_task。需要群内同事协作时调用 negus_handoffs.delegate_task，写明目标、问题和所需结果；仅在文字中 @ 同事不会创建任务，工具确认保存后才算交接。请求意见、验收或等待结果继续处理时保持 notifySource 为 true；纯告知且无需后续处理时才设为 false。结果通知不是新的委派请求，不要重复派发相同工作。简单且已授权的事项直接处理；复杂事项若仍有影响结果的需求歧义、风险或方案取舍，先向用户说明预期效果和需要决定的选项，结束本轮等待答复，再按确认结果实施；不得重复询问已有授权。现有员工：${JSON.stringify(room.snapshot().agents.map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`);
+  const replyToFor = task => {
+    const current = kernel.get(task.id) || task;
+    const latest = current.inputs?.findLast(input => input.accepted && !input.cancelled && input.messageId
+      && input.turnId === current.runtime.turnId);
+    const id = latest?.messageId || current.source?.messageId;
+    return id ? { id } : null;
+  };
+  const publishCommentary = async (task, items) => {
+    if (task.background) return;
+    for (const item of items || []) {
+      if (item.type !== 'agentMessage' || item.phase !== 'commentary' || !item.id || !item.text?.trim()) continue;
+      await room.addMessage({ type: 'agent', authorId: task.agentId, authorName: room.getAgent(task.agentId)?.name,
+        agentId: task.agentId, workId: task.id, itemId: item.id, phase: 'commentary',
+        text: item.text, preserveText: true, replyTo: replyToFor(task) });
+    }
+  };
   const runtime = createNativeTaskRuntime({ log,
     resolve: async (task, controls, { recovering }) => {
       let agent = room.getAgent(task.agentId);
@@ -163,11 +180,22 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       };
       if (recovering) {
         if (threadId && independent) await registerBackground();
-        return { client, threadId };
+        return { client, threadId, onHistory: turn => publishCommentary(task, turn.items) };
       }
       if (controls.signal.aborted) return { client, threadId: threadId || 'cancelled-before-start', input: [] };
       if (threadId) {
-        try { if (independent) await registerBackground(); await client.request('thread/resume', { threadId, ...options, persistExtendedHistory: true }); }
+        try {
+          if (independent) await registerBackground();
+          if (!task.background) {
+            const previous = await client.request('thread/read', { threadId, includeTurns: true });
+            if (previous.thread?.status?.type === 'active' || previous.thread?.turns?.some(turn => !terminalStates.has(turn.status)))
+              throw Object.assign(Error('员工会话仍有其他执行，等待核对状态'), { ambiguous: true });
+            // A loaded native thread ignores resume MCP overrides. Revoke the old
+            // process before installing this task's capability (FEAT-002).
+            await client.request('thread/unsubscribe', { threadId });
+          }
+          await client.request('thread/resume', { threadId, ...options, persistExtendedHistory: true });
+        }
         catch (error) { if (!/thread(?:\s+id)?\s+not\s+found/iu.test(error.message)) throw error; threadId = ''; }
       }
       if (!threadId) {
@@ -196,6 +224,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       ].map(file => [file.id, file])).values()];
       const input = await inputFromAttachments(prompt, attachments, attachmentContent);
       return { client, threadId, input, previousTurnIds: turns.map(turn => turn.id),
+        onHistory: turn => publishCommentary(task, turn.items),
         onStarted: async () => {
           if (!independent) {
             await onContextDelivered({ agentId: agent.id, threadId, messages: context.messages, quotedMessage: context.quotedMessage });
@@ -215,7 +244,8 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
         await room.updateAgent(task.agentId, { active: true, phase: 'working', label: '正在处理任务', detail: '' });
         broadcast({ type: 'group_agent_started', workId: task.id, agentId: task.agentId, startedAt: task.createdAt });
       }
-      if (method === 'item/agentMessage/delta') broadcast({ type: 'group_agent_delta', ...params, agentId: task.agentId, workId: task.id });
+      if (method === 'item/completed') await publishCommentary(task, [params.item].filter(Boolean));
+      if (method === 'turn/completed') await publishCommentary(task, params.turn?.items);
     },
   });
   kernel = await createTaskKernel({ stateFile: path.join(stateRoot, 'tasks.json'), runtime, log,
@@ -229,7 +259,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       const succeeded = task.state === 'completed' && task.result;
       const message = task.background ? null : await room.addMessage({ type: succeeded ? 'agent' : 'system',
         authorId: succeeded ? task.agentId : 'system', authorName: succeeded ? agent?.name : '系统',
-        agentId: task.agentId, workId: task.id, replyTo: task.source?.messageId ? { id: task.source.messageId } : null,
+        agentId: task.agentId, workId: task.id, replyTo: replyToFor(task),
         text: task.result || `${agent?.name || '员工'}${task.state === 'interrupted' ? '的任务已停止。' : '未能完成回复。'}${task.error || ''}`,
         failure: task.state === 'failed' });
       room.finishAgentWork(task.id);
@@ -270,7 +300,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
           const files = resolveAttachments(attachments.map(file => file.id));
           if (files.length !== attachments.length) throw Object.assign(Error('补充消息附件不可用'), { statusCode: 400 });
           const input = await inputFromAttachments(requestText, files, attachmentContent);
-          await kernel.recordInput(running.id, { requestId: requestKey, submissionId: requestKey, text: requestText });
+          await kernel.recordInput(running.id, { requestId: requestKey, submissionId: requestKey, messageId: sourceMessageId, turnId: running.runtime.turnId, text: requestText });
           await client.request('turn/steer', { threadId: running.runtime.threadId, expectedTurnId: running.runtime.turnId,
             clientUserMessageId: requestKey, input });
         }

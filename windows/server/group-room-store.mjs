@@ -278,6 +278,8 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
     attachments = [],
     clientMessageId = null,
     workId = null,
+    itemId = null,
+    phase = null,
     preserveText = false,
     replyTo = null,
     failure = false,
@@ -288,9 +290,10 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
     const cleanAuthorId = cleanText(authorId, 80);
     const cleanClientMessageId = cleanText(clientMessageId, 80) || null;
     const cleanWorkId = cleanText(workId, 160) || null;
+    const cleanItemId = phase === "commentary" ? cleanText(itemId, 160) || null : null;
     const existing = messages.find((message) => (
       (cleanClientMessageId && message.authorId === cleanAuthorId && message.clientMessageId === cleanClientMessageId)
-      || (cleanWorkId && message.workId === cleanWorkId)
+      || (cleanWorkId && message.workId === cleanWorkId && (message.itemId || null) === cleanItemId)
     ));
     if (existing) return { message: existing, created: false };
     const files = (Array.isArray(attachments) ? attachments : []).slice(0, 6).map((file) => ({
@@ -316,6 +319,7 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
       id: randomUUID(),
       clientMessageId: cleanClientMessageId,
       workId: cleanWorkId,
+      ...(cleanItemId ? { itemId: cleanItemId, phase: "commentary" } : {}),
       sequence: ++nextMessageSequence,
       type,
       authorId: cleanAuthorId,

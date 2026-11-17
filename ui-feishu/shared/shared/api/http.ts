@@ -63,12 +63,12 @@ const requestJson = async <T,>(pathname: string, {
   });
   const payload = await response.json().catch(() => null) as { error?: unknown } | null;
   if (!response.ok) {
-    if (method === "GET" && response.status === 401) throw new Error("访问令牌无效，请使用启动命令输出的完整链接");
+    if (method === "GET" && response.status === 401) throw new HttpError("访问令牌无效，请使用启动命令输出的完整链接", response.status);
     if (method === "GET" && response.status === 404) throw new HttpError("请求的项目会话不存在", response.status);
     const message = typeof payload?.error === "string" && payload.error.trim()
       ? payload.error
       : method === "GET" ? `项目数据服务暂不可用（${response.status}）` : `${errorMessage}（${response.status}）`;
-    throw new Error(message);
+    throw method === "GET" ? new HttpError(message, response.status) : new Error(message);
   }
   if (requireJsonContentType && !(response.headers.get("content-type") || "").toLowerCase().includes("application/json")) {
     throw new Error("当前链接未连接到项目数据服务，请使用 pnpm start:demo 输出的 9360 链接");

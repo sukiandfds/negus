@@ -78,6 +78,7 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
       const candidates = turns.filter(turn => turn.id && (turnId ? turn.id === turnId : !ignored.has(turn.id)));
       if (candidates.length > 1) return { status: 'unknown', error: '发现多次可能的执行，无法确认本次任务结果' };
       const found = candidates[0];
+      if (found) await prepared.onHistory?.(found);
       const idle = value.thread?.status?.type === 'idle' || value.thread?.status === 'idle';
       if (recovering && value.thread?.status?.type === 'notLoaded') return {
         status: 'interrupted', error: '重启后原执行会话未加载，任务未自动重复启动',
@@ -130,7 +131,10 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
           turnId ||= response.turn.id;
           await started();
           if (controls.signal.aborted) await interrupt();
-          if (terminal.has(response.turn.status)) finish(resultFrom(response.turn));
+          if (terminal.has(response.turn.status)) {
+            await prepared.onHistory?.(response.turn);
+            finish(resultFrom(response.turn));
+          }
         } catch (error) {
           trace({ event: 'native_start_reconcile', taskId: task.id });
           try { const result = await check(); if (result) return result; }

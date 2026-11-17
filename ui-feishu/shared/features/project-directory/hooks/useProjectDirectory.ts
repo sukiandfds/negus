@@ -25,5 +25,6 @@ export function useProjectDirectory(store: ConversationStore) {
   return { projects, goalRecovery, loading: cached.data === null && !cached.error, error: cached.error, refresh,
     statusByThread: Object.fromEntries(entries.map(([id, view]) => [id, view.executionStatus])),
     contextByThread: Object.fromEntries(entries.map(([id, view]) => [id, view.contextStatus.phase])),
+    contextTimeByThread: Object.fromEntries(entries.map(([id, view]) => [id, view.contextStatus.compactionUpdatedAt])),
     goalByThread: Object.fromEntries(entries.map(([id, view]) => [id, view.goal])) };
 }

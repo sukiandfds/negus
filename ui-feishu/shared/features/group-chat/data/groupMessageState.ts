@@ -17,7 +17,8 @@ const compareMessages = (left: GroupMessage, right: GroupMessage) => {
 
 const sameMessage = (left: GroupMessage, right: GroupMessage) => left.id === right.id
   || Boolean(left.clientMessageId && right.clientMessageId && left.clientMessageId === right.clientMessageId)
-  || Boolean(left.workId && right.workId && left.workId === right.workId);
+  || Boolean(left.workId && right.workId && left.workId === right.workId
+    && (left.itemId || null) === (right.itemId || null));
 
 export const upsertGroupMessage = (messages: GroupMessage[], incoming: GroupMessage) => {
   const matchingIndexes = messages

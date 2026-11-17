@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import { ConversationStore } from "./frontend-conversation-store.mjs";
+import { ConversationStore, conversationApi } from "./frontend-conversation-store.mjs";
 import ts from '../../ui-feishu/node_modules/typescript/lib/typescript.js';
 
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
@@ -22,7 +22,7 @@ async function harness(file, dependencies) {
   delete globalThis[key];
   globalThis.window = { setTimeout, clearTimeout };
   const store = new ConversationStore({ cachedSessions: [], partialSessionIds: [] });
-  const render = (name, id) => { cursor = 0; return module[name](id, store); };
+  const render = (name, ...args) => { cursor = 0; return module[name](...args, store); };
   render.store = store;
   return render;
 }
@@ -343,4 +343,160 @@ test('accepted new turn drops old failure notices without erasing steering progr
   h = render('useCodexExecution','retry-error');
   assert.deepEqual(h.status.notices,['current warning']);
   assert.equal(h.status.phase,'tool');
+});
+
+test('context storms keep body revisions stable, coalesce in fixed windows and retain latest usage', async () => {
+  const render = await harness('features/context-management/hooks/useContextManagement.ts', { contextApi: {} });
+  const store = render.store, hook = render('useContextManagement', 't0');
+  for (let i = 0; i < 20; i++) store.commit(`t${i}`, store.empty(`t${i}`), 0);
+  let notifications = 0;
+  store.subscribe(() => notifications++);
+  const base = store.empty('t0').contextStatus;
+  const persisted = store.getPersistSnapshot();
+  for (let i = 0; i < 1000; i++) hook.handleEvent({ ...base, updatedAt: new Date(i).toISOString() });
+  assert.equal(store.getPersistSnapshot(), persisted);
+  assert.equal(store.revisions.size, 0);
+  for (let i = 0; i < 10000; i++) hook.handleEvent({ ...base, threadId: `t${i % 20}`, usedTokens: i });
+  assert.equal(store.bodyRevisions.size, 0);
+  assert.equal(notifications, 0);
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.equal(notifications, 20);
+  for (let i = 0; i < 20; i++) assert.equal(store.get(`t${i}`).contextStatus.usedTokens, 9980 + i);
+  const timer = setInterval(() => hook.handleEvent({ ...base, usedTokens: Date.now() }), 20);
+  await new Promise(resolve => setTimeout(resolve, 240));
+  clearInterval(timer);
+  assert.ok(notifications > 20, 'continuous events must flush before they stop');
+  await new Promise(resolve => setTimeout(resolve, 200));
+});
+
+test('slow snapshots preserve newer usage, dirty invalidations and model choices', async () => {
+  const render = await harness('features/context-management/hooks/useContextManagement.ts', { contextApi: {} });
+  const store = render.store, hook = render('useContextManagement', 't');
+  const snapshot = { ...store.empty('t'), session: { threadId: 't', messages: [] } };
+  store.commit('t', snapshot, 0);
+  store.invalidate('t');
+  const revision = store.revisions.get('t');
+  hook.handleEvent({ ...snapshot.contextStatus, usedTokens: 999 });
+  store.commit('t', snapshot, revision);
+  assert.equal(store.get('t').contextStatus.usedTokens, 999);
+  assert.equal(store.dirty.has('t'), false, 'usage must not hold a completed body read dirty');
+  store.invalidate('t');
+  store.invalidate('t');
+  store.commit('t', snapshot, revision);
+  assert.equal(store.dirty.has('t'), true);
+  hook.applyModelSettings('t', { model: 'chosen', reasoningEffort: 'high' });
+  store.commit('t', snapshot, revision);
+  assert.equal(store.get('t').contextStatus.model, 'chosen');
+  hook.handleEvent({ ...snapshot.contextStatus, phase: 'completed' });
+  assert.equal(store.dirty.has('t'), true, 'compaction completion requires calibration');
+});
+
+test('usage updates during calibration do not retain an old running overlay', async () => {
+  const render = await harness('features/context-management/hooks/useContextManagement.ts', { contextApi: {} });
+  const store = render.store, hook = render('useContextManagement', 't');
+  const initial = store.empty('t');
+  store.commit('t', initial, 0);
+  store.update('t', { executionStatus: { ...initial.executionStatus, active: true, phase: 'working' } }, true);
+  store.invalidate('t');
+  const revision = store.revisions.get('t');
+  hook.handleEvent({ ...initial.contextStatus, usedTokens: 10, updatedAt: '2026-11-17T00:00:01Z' });
+  const persist = store.getPersistSnapshot(), fields = store.revisions.get('t');
+  hook.handleEvent({ ...initial.contextStatus, usedTokens: 10, updatedAt: '2026-11-17T00:00:03Z' });
+  assert.equal(store.getPersistSnapshot(), persist);
+  assert.equal(store.revisions.get('t'), fields);
+  hook.handleEvent({ ...initial.contextStatus, usedTokens: 1, updatedAt: '2026-11-17T00:00:02Z' });
+  assert.equal(store.get('t').contextStatus.usedTokens, 10);
+  store.commit('t', { ...initial, executionStatus: { ...initial.executionStatus, active: false, phase: 'completed' } }, revision);
+  assert.equal(store.get('t').executionStatus.active, false);
+  assert.equal(store.get('t').contextStatus.usedTokens, 10);
+});
+
+
+test('a delayed older contentVersion cannot replace a newer body and concurrent readers share one request', async () => {
+  window.location = { search: '' };
+  const store = new ConversationStore({ cachedSessions: [], partialSessionIds: [] });
+  const latest = { ...store.empty('t'), session: { threadId: 't', contentVersion: 5, messages: [{ id: 'new', role: 'assistant', text: 'latest' }] } };
+  store.commit('t', latest, 0);
+  const original = conversationApi.snapshot, gate = deferred();
+  let requests = 0;
+  conversationApi.snapshot = () => { requests++; return gate.promise; };
+  try {
+    const signal = new AbortController().signal;
+    const first = store.read('t', '', signal), second = store.read('t', '', signal);
+    assert.equal(first, second);
+    gate.resolve({ session: { ...latest.session, contentVersion: 4, messages: [] }, context: latest.contextStatus,
+      status: latest.executionStatus, goal: null, queue: [], input: null });
+    const result = await first;
+    assert.equal(requests, 1);
+    assert.equal(result.session.contentVersion, 5);
+    assert.equal(result.session.messages[0].text, 'latest');
+  } finally { conversationApi.snapshot = original; }
+});
+
+
+test('optimistic archive cancels only its pending context notification before the API resolves', async () => {
+  const gate = deferred();
+  const render = await harness('features/conversations/hooks/useConversationCatalog.ts', {
+    conversationApi: { archive: () => gate.promise },
+  });
+  window.location = { search: '' };
+  window.dispatchEvent = () => {};
+  const store = render.store;
+  const initial = { sessions: [{ threadId: 'a', title: 'archive' }, { threadId: 'b', title: 'keep' }] };
+  let confirmations = 0, notifications = 0;
+  const selection = { cancelContextNotification: store.cancelContextNotification,
+    selectedIdRef: { current: 'b' }, setArchived: () => confirmations++, clearSelection() {} };
+  const hook = render('useConversationCatalog', initial, selection, '');
+  store.subscribe(() => notifications++);
+  for (const id of ['a', 'b']) store.update(id, { contextStatus: { ...store.empty(id).contextStatus, usedTokens: 1 } }, false, true);
+  const archiving = hook.archiveSession('a');
+  await new Promise(resolve => setTimeout(resolve, 220));
+  assert.equal(confirmations, 0, 'archive API is still pending');
+  assert.deepEqual(render('useConversationCatalog', initial, selection, '').sessions.map(item => item.threadId), ['b']);
+  assert.equal(notifications, 1, 'only the other thread timer fires after optimistic removal');
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.equal(notifications, 1, 'removed thread has no delayed notification');
+  gate.resolve({ threadId: 'a', archived: true });
+  assert.equal(await archiving, true);
+  assert.equal(confirmations, 1);
+});
+
+test('slow aggregate keeps usage calibration only for matching live model and body', async () => {
+  const original = conversationApi.snapshot;
+  try {
+    for (const id of ['ordinary', 'employee']) for (const change of ['same', 'model', 'body']) {
+      const render = await harness('features/context-management/hooks/useContextManagement.ts', { contextApi: {} });
+      window.location = { search: '' };
+      window.localStorage = { getItem: () => null, setItem() {} };
+      const store = render.store, hook = render('useContextManagement', id);
+      const initial = { ...store.empty(id), session: { threadId: id, sourceRevision: 'r1', messageCount: null,
+        messages: [{ id: 'answer', role: 'assistant', text: 'cached answer' }] },
+        contextStatus: { ...store.empty(id).contextStatus, model: 'a', usedTokens: null } };
+      store.committed.set(id, initial);
+      const gate = deferred();
+      conversationApi.snapshot = () => gate.promise;
+      const revision = store.revisions.get(id) || 0;
+      const reading = store.read(id, 'r1', new AbortController().signal);
+      hook.handleEvent({ ...initial.contextStatus, model: change === 'model' ? 'b' : 'a', message: 'live', phase: 'compacting' });
+      if (change === 'body') store.update(id, { session: { ...initial.session, sourceRevision: 'r2' } });
+      gate.resolve({ session: null, sourceRevision: 'r1', context: initial.contextStatus, status: initial.executionStatus, queue: [], goal: null, input: null });
+      store.commit(id, await reading, revision);
+      const expected = change === 'same' ? 'r1' : undefined;
+      assert.equal(store.committed.get(id).contextStatus.usageSourceRevision, expected, `${id}/${change} committed`);
+      assert.equal(store.live.get(id)?.contextStatus.usageSourceRevision, expected, `${id}/${change} live`);
+      assert.equal(store.get(id).contextStatus.message, 'live');
+      hook.handleEvent({ ...store.get(id).contextStatus, message: 'later status' });
+      assert.equal(store.get(id).contextStatus.usageSourceRevision, expected);
+      if (change === 'same') {
+        hook.applyModelSettings(id, { model: 'b', reasoningEffort: 'high' });
+        assert.equal(store.get(id).contextStatus.usageSourceRevision, undefined);
+      }
+      const freshRevision = store.revisions.get(id) || 0;
+      conversationApi.snapshot = async () => ({ session: { ...initial.session, sourceRevision: 'r2' }, sourceRevision: 'r2',
+        context: { ...initial.contextStatus, model: store.get(id).contextStatus.model }, status: initial.executionStatus, queue: [], goal: null, input: null });
+      store.commit(id, await store.read(id, 'r2', new AbortController().signal), freshRevision);
+      assert.equal(store.get(id).contextStatus.usageSourceRevision, 'r2', 'new body/model can be calibrated again');
+
+    }
+  } finally { conversationApi.snapshot = original; }
 });

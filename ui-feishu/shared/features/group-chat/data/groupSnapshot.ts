@@ -22,7 +22,7 @@ export const restoreActiveGroupWorks = (snapshot: GroupSnapshot): GroupSnapshot 
   ...snapshot,
   activeWorks: snapshot.activeWorks || [],
   messages: (snapshot.activeWorks || []).reduce(
-    (messages, work) => messages.some((message) => message.workId === work.workId)
+    (messages, work) => messages.some((message) => message.workId === work.workId && message.phase !== "commentary")
       ? messages
       : upsertGroupMessage(messages, createPendingAgentMessage(work)),
     removePendingAgentMessages(snapshot.messages),
@@ -43,7 +43,7 @@ export const reconcileGroupSnapshot = (
     ],
   );
   const completedWorkIds = new Set(messages
-    .filter((message) => !message.pending && message.workId)
+    .filter((message) => !message.pending && message.workId && message.phase !== "commentary")
     .map((message) => message.workId));
   return restoreActiveGroupWorks({
     ...incoming,

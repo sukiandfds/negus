@@ -136,7 +136,7 @@ export function FeishuApp() {
       const children = [...(project.children || []), ...rooms.filter(room => room.projectId === project.projectId)].sort(byLatest);
       return { ...project, time: children[0]?.time || project.time, children };
     }).sort(byLatest) };
-  }, [viewDirectory.projects, viewDirectory.statusByThread, viewDirectory.contextByThread, viewC.sessions, viewC.session, viewC.cachedSessions, viewC.archivedByThread, viewC.archivedView, viewC.project?.root, groups.rooms]);
+  }, [viewDirectory.projects, viewDirectory.statusByThread, viewDirectory.contextByThread, viewDirectory.contextTimeByThread, viewC.sessions, viewC.session, viewC.cachedSessions, viewC.archivedByThread, viewC.archivedView, viewC.project?.root, groups.rooms]);
   const filterOrigins = (items: Conversation[]): Conversation[] => items.flatMap(item => {
     const children = item.children ? filterOrigins(item.children) : undefined;
     return origins.includes(item.origin === 'assistant' ? 'assistant' : item.main && item.agentId ? 'employee' : 'user') || children?.length ? [{ ...item, children }] : [];
@@ -179,10 +179,11 @@ export function FeishuApp() {
     finally { setOpening(''); }
   };
   const create = () => {
-    const root = directory.projects.find(p => p.kind === 'personal')?.root || c.project?.root || '';
+    const root = (!employee && c.session?.cwd) || directory.projects.find(p => p.kind === 'personal')?.root || c.project?.root || '';
     const url = new URL(location.href);
     for (const key of ['roomId', 'agent', 'conversation', 'thread', 'employee', 'employeeId', 'managerProjectId', 'managerProjectTitle', 'managerProjectPhase', 'managerProjectGoal']) url.searchParams.delete(key);
     url.searchParams.set('view', 'conversation'); history.pushState({}, '', `${url.pathname}${url.search}`);
+    setAgentId(''); autoOpenedAgent.current = ''; setLegacyGroup(false); setDetails(false);
     c.openNewSession(root, '', '', { deferred: true }); setRoomId(''); setMobileChat(true); setSection('messages'); setTab('messages');
   };
   return <div className={`feishu-app ${mobileChat ? 'show-chat' : ''} ${railOpen ? 'rail-open' : ''} ${section === 'border' ? 'border-tool-open' : ''}`} style={{ '--agent-initial': JSON.stringify(selectedName.slice(0, 1)), '--agent-color': avatarColor(employee?.employeeId || agentId) } as CSSProperties}>

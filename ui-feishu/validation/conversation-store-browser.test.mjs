@@ -8,6 +8,7 @@ const stamp = '2026-11-01T00:00:00Z', errors = [], calls = [], sends = [];
 const summaries = ['a', 'b'].map(id => ({ threadId: id, source: 'codex', sourceRevision: 'r0', title: `对话${id}`, updatedAt: stamp,
   messageCount: 1, latestUser: '', latestAssistant: '', latestMessage: `历史${id}`, model: 'model-a' }));
 const messages = new Map(summaries.map(s => [s.threadId, [{ id: `history-${s.threadId}`, role: 'assistant', text: `历史${s.threadId}`, createdAt: stamp }]]));
+let directoryProjects = [];
 const queues = new Map(), statuses = new Map(), settings = new Map(), goals = new Map(), inputs = new Map();
 const idle = id => ({ type: 'execution_status', threadId: id, phase: 'idle', active: false, turnId: '', activities: [], startedAt: null, updatedAt: stamp, label: '', detail: '', commentary: '' });
 const context = id => ({ type: 'context_status', threadId: id, model: 'model-a', reasoningEffort: 'high', phase: 'idle', percentage: 10, usedTokens: 10, contextWindow: 100, autoCompactThreshold: 80, updatedAt: stamp, message: '', ...settings.get(id) });
@@ -43,7 +44,7 @@ await page.route('**/api/**', async route => {
   calls.push({ path, method, id, view: url.searchParams.get('view'), sourceRevision: url.searchParams.get('sourceRevision'), body });
   let data = {};
   if (path === '/api/project') data = { name: '项目', root: '/fixture', mode: 'interactive' };
-  else if (path === '/api/project-directory') data = { projects: [] };
+  else if (path === '/api/project-directory') data = { projects: directoryProjects };
   else if (path === '/api/sessions') data = summaries;
   else if (path === '/api/models') data = [{ id: 'model-a', model: 'model-a', displayName: '模型A', available: true, isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'high' }] }, { id: 'model-b', model: 'model-b', displayName: '模型B', available: true, supportedReasoningEfforts: [{ reasoningEffort: 'high' }] }];
   else if (path === '/api/model-defaults') data = { providerId: 'current', model: 'model-a', effort: 'high', archivedProviderIds: [] };
@@ -132,6 +133,67 @@ try {
     await browser.close(); process.exit(0);
   }
   await page.waitForFunction(() => document.querySelector('button[aria-label="刷新会话"]')?.getAttribute('aria-busy') === 'false');
+  if (process.env.NEGUS_TEST_TERMINAL_LIVE === '1') {
+    const active = { ...idle('a'), phase: 'working', active: true, turnId: 'old-turn', label: '运行',
+      eventEpoch: 'fixture', eventSeq: 1, updatedAt: '2026-11-01T00:00:01Z' };
+    const completed = { ...active, phase: 'completed', active: false, eventSeq: 2, updatedAt: '2026-11-01T00:00:02Z' };
+    directoryProjects = [{ id: 'employee', kind: 'employee', employeeId: 'fixture', name: '测试员工', mainThreadId: 'b',
+      conversations: [{ id: 'b', threadId: 'b', title: '测试员工', main: true, status: idle('b') },
+        { id: 'a', threadId: 'a', conversationId: 'handoff-fixture', title: '对话a', status: active }] }];
+    statuses.set('a', active);
+    await page.evaluate(event => { window.emit(event); window.dispatchEvent(new Event('negus:directory-changed')); }, active);
+    const parent = page.getByRole('button', { name: '打开测试员工单聊', exact: true });
+    await parent.getByText('正在处理后台任务').waitFor();
+    heldId = 'a'; holdRead = true; readGate = new Promise(resolve => releaseRead = resolve);
+    const before = calls.length;
+    await page.getByRole('button', { name: '刷新会话', exact: true }).click();
+    await wait(() => calls.slice(before).some(call => call.path === '/api/session' && call.id === 'a'));
+    await page.evaluate(status => { for (let i = 0; i < 1000; i++) window.emit({ ...status, usedTokens: i }); }, context('a'));
+    statuses.set('a', completed);
+    messages.get('a').push({ id: 'final', role: 'assistant', text: '终态最终正文', createdAt: completed.updatedAt });
+    summaries[0].sourceRevision = 'terminal';
+    // No completion SSE: only the authoritative read supplies terminal evidence.
+    holdRead = false; releaseRead();
+    await bubble('终态最终正文').waitFor();
+    await page.waitForFunction(() => !document.body.innerText.includes('正在处理后台任务') && !document.body.innerText.includes('助手正在运行'));
+    console.log('PASS terminal read after 1000 context events: title and employee idle, final text retained');
+
+    // A missed terminal event with only a fresh directory must also beat old live.
+    const next = { ...active, turnId: 'next-turn', eventSeq: 3, updatedAt: '2026-11-01T00:00:03Z' };
+    await page.evaluate(event => window.emit(event), next);
+    await parent.getByText('正在处理后台任务').waitFor();
+    directoryProjects[0].conversations[1].status = { ...completed, turnId: 'next-turn', eventSeq: 4, updatedAt: '2026-11-01T00:00:04Z' };
+    await page.evaluate(() => window.dispatchEvent(new Event('negus:directory-changed')));
+    await page.waitForFunction(() => !document.body.innerText.includes('正在处理后台任务') && !document.body.innerText.includes('助手正在运行'));
+    const sendsBefore = sends.length;
+    await send('目录完成后立即发送');
+    await wait(() => sends.length === sendsBefore + 1);
+    console.log('PASS directory-only terminal suppresses stale live in title/employee and permits immediate send');
+
+    // Old completed read must not clear a new turn that started while it was pending.
+    heldId = 'a'; holdRead = true; readGate = new Promise(resolve => releaseRead = resolve);
+    const readStart = calls.length;
+    await page.getByRole('button', { name: '刷新会话', exact: true }).click();
+    await wait(() => calls.slice(readStart).some(call => call.path === '/api/session' && call.id === 'a'));
+    const newer = { ...active, turnId: 'newer-turn', eventSeq: 5, updatedAt: '2026-11-01T00:00:05Z' };
+    await page.evaluate(event => window.emit(event), newer);
+    holdRead = false; releaseRead();
+    await page.waitForTimeout(350);
+    await parent.getByText('正在处理后台任务').waitFor();
+    assert.ok((await page.locator('body').innerText()).includes('助手正在运行'));
+    console.log('PASS newer active turn survives an old terminal response');
+    statuses.set('a', { ...newer, active: false, phase: 'completed', eventSeq: 6, updatedAt: '2026-11-01T00:00:06Z' });
+    directoryProjects[0].conversations[1].status = statuses.get('a');
+    for (const event of ['negus:directory-changed', 'negus:realtime-recovered', 'visibilitychange', 'pageshow']) {
+      await page.evaluate(name => window.dispatchEvent(new Event(name)), event);
+    }
+    await page.reload();
+    await bubble('终态最终正文').waitFor();
+    await page.waitForFunction(() => !document.body.innerText.includes('正在处理后台任务') && !document.body.innerText.includes('助手正在运行'));
+    assert.deepEqual(errors, []);
+    console.log('PASS refresh, reconnect/page restore and cached reload keep terminal idle');
+    await browser.close(); process.exit(0);
+  }
   if (process.env.NEGUS_TEST_LIST_TERMINAL === '1') {
     const running = { ...idle('a'), phase: 'working', active: true, turnId: 'compact-turn', startedAt: stamp, label: '运行' };
     statuses.set('a', running);

@@ -285,3 +285,45 @@ test('unchanged handoff feedback loop is rejected while revised work remains all
   const revised = await kernel.delegate(source.id, { requestId: 'revision', agentId: 'b', title: '补充', instructions: '补充公开来源' });
   assert.equal(revised.instructions, '补充公开来源');
 });
+
+test('reconciliation failures persist across restart and exhaust after three unknown results', async t => {
+  let observations = 0;
+  const { kernel, args, root } = await setup(t, { recoveryIntervalMs: 100000, runtime: {
+    execute: async () => assert.fail('must only observe'),
+    observe: async () => { observations++; return { status: 'unknown', error: 'provider unavailable' }; },
+  } });
+  const task = await kernel.enqueue({ ...input('bounded'), kind: 'external', runtime: { threadId: 'thread', turnId: 'turn' } });
+  await until(() => kernel.get(task.id).state === 'needs-reconciliation');
+  assert.equal(kernel.get(task.id).reconciliationFailures, 1);
+  await kernel.close();
+  const restarted = await createTaskKernel({ ...args, recoveryIntervalMs: 10 });
+  try {
+    await until(() => restarted.get(task.id).state === 'interrupted');
+    assert.equal(observations, 3);
+    assert.equal(restarted.get(task.id).error, 'provider unavailable');
+    assert.equal(restarted.hasPendingWork(), false);
+    await new Promise(resolve => setTimeout(resolve, 60));
+    assert.equal(observations, 3);
+    const saved = JSON.parse(await fs.readFile(path.join(root, 'tasks.json'), 'utf8'));
+    assert.equal(saved.tasks[0].reconciliationFailures, 3);
+    assert.equal(saved.tasks[0].state, 'interrupted');
+  } finally { await restarted.close(); }
+});
+
+test('confirmed active recovery resets consecutive failures and stays running until actual completion', async t => {
+  let attempt = 0; const completion = deferred();
+  const { kernel } = await setup(t, { recoveryIntervalMs: 10, runtime: {
+    observe: async (task, controls) => {
+      if (++attempt < 3) throw Error('temporary read error');
+      await controls.started(task.runtime);
+      return completion.promise;
+    },
+  } });
+  const task = await kernel.enqueue({ ...input('active'), kind: 'external', runtime: { threadId: 'thread', turnId: 'turn' } });
+  await until(() => kernel.get(task.id).state === 'running');
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(kernel.get(task.id).state, 'running');
+  assert.equal(kernel.get(task.id).reconciliationFailures, 0);
+  completion.resolve({ status: 'completed', text: 'actual final' });
+  await until(() => kernel.get(task.id).state === 'completed');
+});

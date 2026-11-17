@@ -7,6 +7,7 @@ import type { ContentBlock, ImageBlock, SessionMessage } from "../model/types";
 import { withAccessToken } from "../../../shared/api/http";
 import styles from "./ContentRenderer.module.css";
 import { CodeBlock } from "../../../shared/components/CodeBlock";
+import { MermaidBlock } from "../../../shared/components/MermaidBlock";
 
 import { conversationQuery, currentConversationId } from "../../../shared/api/conversationScope";
 
@@ -171,6 +172,7 @@ const markdownComponents: Components = {
 function MarkdownCode({ children, collapsible = true }: { children?: ReactNode; collapsible?: boolean }) {
   const child = Children.toArray(children)[0];
   if (!isValidElement<{ children?: ReactNode; className?: string }>(child) || typeof child.props.children !== "string") return <pre>{children}</pre>;
+  if (child.props.className?.toLowerCase() === "language-mermaid") return <MermaidBlock text={child.props.children} />;
   return <CodeBlock text={child.props.children} language={child.props.className?.replace(/^language-/, "") || ""} collapsible={collapsible} />;
 }
 

@@ -420,3 +420,41 @@ test('task directory excludes records without a native thread identity', async t
   t.after(async () => { await extension.close(); await fs.rm(root, { recursive: true, force: true }); });
   assert.deepEqual(extension.directoryEntries('a').map(entry => entry.threadId), ['native-thread']);
 });
+
+test('public task API and employee children exclude recovering/completed external while retaining real background', async t => {
+  const { createTaskRoutes } = await import('../server/task-routes.mjs');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-public-tasks-'));
+  const now = new Date().toISOString();
+  const task = (id, kind, state) => ({ id, requestKey: id, kind, state, background: kind !== 'external',
+    agentId: 'a', conversationId: `handoff-${id}`, lane: id, title: id, instructions: '',
+    runtime: { threadId: id, turnId: `turn-${id}`, modelProviderId: 'fixture' }, createdAt: now, updatedAt: now });
+  await fs.writeFile(path.join(root, 'tasks.json'), JSON.stringify({ version: 1, deliveries: [], tasks: [
+    task('external-recovering', 'external', 'recovering'), task('external-completed', 'external', 'completed'),
+    task('background', 'delegation', 'running'),
+  ] }));
+  let release; const gate = new Promise(resolve => release = resolve); const listeners = new Set();
+  const client = { subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); }, request: async (method, params) => {
+    assert.equal(method, 'thread/read');
+    if (params.threadId === 'external-recovering') await gate;
+    return { thread: { status: { type: 'active' }, turns: [{ id: `turn-${params.threadId}`, status: 'inProgress' }] } };
+  } };
+  const employee = { id: 'a', name: '助手', projectRoot: root };
+  const extension = await extendEmployeeTasks({ directoryEntries: () => [], close: async () => {} }, {
+    stateRoot: root, registry: { list: () => [employee], require: () => employee }, registerSession: async () => {},
+    modelProviders: { resolveRoute: route => route, getClient: async () => client }, providerForThread: async () => 'fixture',
+    bindings: { bindRuntime: async () => {} }, execution: { getStatus: () => ({ active: false }) }, queue: {},
+  });
+  t.after(async () => { release(); await extension.close(); await fs.rm(root, { recursive: true, force: true }); });
+  await until(() => extension.tasks().find(item => item.id === 'background')?.state === 'running');
+  const persisted = JSON.parse(await fs.readFile(path.join(root, 'tasks.json'), 'utf8'));
+  assert.equal(persisted.tasks.find(item => item.id === 'external-recovering').state, 'recovering');
+  const route = createTaskRoutes({ roomDirectory: { list: () => [] }, agentTasks: extension });
+  let body;
+  await route({ method: 'GET' }, { writeHead: status => assert.equal(status, 200), end: value => body = JSON.parse(value) }, new URL('http://fixture/api/tasks'));
+  assert.deepEqual(body.tasks.map(item => item.id), ['background']);
+  assert.deepEqual(extension.directoryEntries('a').map(item => item.threadId), ['background']);
+  assert.equal(extension.directoryEntries('a').filter(item => item.status.active).length, 1);
+  listeners.forEach(fn => fn({ method: 'turn/completed', params: { threadId: 'background', turn: { id: 'turn-background', status: 'completed', items: [] } } }));
+  await until(() => extension.tasks()[0].state === 'completed');
+  assert.equal(extension.directoryEntries('a').filter(item => item.status.active).length, 0);
+});

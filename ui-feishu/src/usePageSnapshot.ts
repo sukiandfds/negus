@@ -3,7 +3,7 @@ import type { ConversationState, DirectoryState } from './types';
 import { writeConversationSnapshot } from '../shared/features/conversations/data/conversationSnapshot';
 import { isPendingThread } from '../shared/features/conversations/model/pendingThread';
 import { readConversationBatches } from '../shared/features/conversations/state/conversationBatch';
-import { type ThreadSnapshot } from '../shared/features/conversations/state/conversationStore';
+import { terminalExecution, type ThreadSnapshot } from '../shared/features/conversations/state/conversationStore';
 import { readModelDefaults, resolveVisibleModel, resolveVisibleEffort } from '../shared/features/models/model/modelDefaults';
 import { buildConversationDirectory, mergeDirectoryProjects, snapshotStatusByThread } from './conversationDirectory';
 import { latestMessagePreview } from './taskNotice';
@@ -30,14 +30,18 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
   const mounted = useRef(true), generation = useRef(0);
   const controller = useRef<AbortController | null>(null);
   const [wakeVersion, wake] = useState(0);
-  const revisionKey = JSON.stringify([...store.revisions]);
-  const source = useMemo(() => JSON.stringify([c.sessions, directory.projects, revisionKey],
+  const revisionKey = JSON.stringify([...store.bodyRevisions]);
+  const source = useMemo(() => JSON.stringify([c.sessions, c.sessions.map(item => [item.threadId, item.title, item.updatedAt]), directory.projects, revisionKey],
     (key, value) => ['updatedAt', 'lastProbeAt', 'lastEventAt', 'eventEpoch', 'eventSeq', 'durationMs'].includes(key) ? undefined : value),
-  [c.sessions, directory.projects, revisionKey]);
+  [c.sessions, c.sessions.map(item => [item.threadId, item.title, item.updatedAt]), directory.projects, revisionKey]);
   const selectedThread = useRef(c.selectedId);
   if (selectedThread.current !== c.selectedId) {
     selectedThread.current = c.selectedId;
-    if (!store.committed.get(c.selectedId)?.session || store.errors.has(c.selectedId)
+    const cached = store.committed.get(c.selectedId);
+    const missingContext = !cached?.contextStatus.updatedAt
+      || (cached.contextStatus.usedTokens == null && Boolean(cached.session?.messages.length));
+    if (!cached?.session || store.errors.has(c.selectedId)
+      || (missingContext && cached?.contextStatus.usageSourceRevision !== (cached?.session?.sourceRevision || ''))
       || store.dirty.has(c.selectedId) || store.freshBodies.has(c.selectedId)) observed.current.delete(c.selectedId);
   }
   const archiveView = useRef(c.archivedView);
@@ -74,7 +78,8 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
     const entries = rows.filter(row => eligible.has(row.threadId!)).map(row => {
       const id = row.threadId!, revision = store.revisions.get(id) || 0;
       return { id, revision, conversationId: row.conversationId || undefined,
-        signature: JSON.stringify([row.name, row.time, row.preview, row.session, revision]), priority: priority.has(id) };
+        signature: JSON.stringify([row.session?.sourceRevision, row.session?.messageCount, row.preview,
+          store.bodyRevisions.get(id) || 0]), priority: priority.has(id) };
     }).filter(entry => observed.current.get(entry.id) !== entry.signature);
     for (const id of store.errors.keys()) if (!rows.some(row => row.threadId === id)) store.errors.delete(id);
     for (const [id, read] of independentReads.current) {
@@ -85,7 +90,13 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
     // Directory membership is visible immediately; body reads fill the same row later.
     setShown(previous => {
       const projects = mergeDirectoryProjects(previous.projects, directory.projects);
-      return JSON.stringify(projects) === JSON.stringify(previous.projects) ? previous : { ...previous, projects };
+      const sessions = previous.sessions.map(item => {
+        const summary = c.sessions.find(next => next.threadId === item.threadId);
+        return !summary || (item.title === summary.title && item.updatedAt === summary.updatedAt) ? item
+          : { ...item, title: summary.title, updatedAt: summary.updatedAt };
+      });
+      return JSON.stringify(projects) === JSON.stringify(previous.projects)
+        && sessions.every((item, index) => item === previous.sessions[index]) ? previous : { ...previous, projects, sessions };
     });
     if (!entries.length) {
       initialLoading.current = false;
@@ -124,7 +135,7 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
             const detail = store.committed.get(summary.threadId)?.session;
             const latestMessage = latestMessagePreview(detail?.messages) || '';
             const { messages: _messages, sourceSignature: _signature, ...fields } = detail || { ...summary, messages: [], sourceSignature: undefined };
-            const next = { ...summary, ...fields, updatedAt: summary.updatedAt, latestMessage };
+            const next = { ...summary, ...fields, title: summary.title, updatedAt: summary.updatedAt, latestMessage };
             return existing && JSON.stringify(existing) === JSON.stringify(next) ? existing : next;
           });
           const projects = mergeDirectoryProjects(previous.projects, live.current.directory.projects);
@@ -177,9 +188,19 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
     });
   }, [source, wakeVersion, c.initialSyncReady, directory.loading, c.selectedId, c.archivedView, c.historyEdit, c.archivedByThread, c.project]);
 
-  const selected = store.get(c.selectedId, false), session = selected.session;
+  const selected = store.get(c.selectedId, false), summary = c.sessions.find(item => item.threadId === c.selectedId);
+  const session = selected.session && summary
+    && (selected.session.title !== summary.title || selected.session.updatedAt !== summary.updatedAt)
+    ? { ...selected.session, title: summary.title, updatedAt: summary.updatedAt } : selected.session;
   // FEAT-001: execution events render immediately, independently of history reads.
-  const executionStatus = store.get(c.selectedId).executionStatus;
+  const statusByThread = snapshotStatusByThread(store, c.selectedId, shown.projects);
+  const executionStatus = statusByThread[c.selectedId] || store.get(c.selectedId).executionStatus;
+  useEffect(() => {
+    // The same authoritative terminal also clears the state used by send/queue controls.
+    for (const [id, status] of Object.entries(statusByThread)) {
+      if (terminalExecution(status) && store.get(id).executionStatus.active) store.update(id, { executionStatus: status });
+    }
+  }, [store, shown.projects, store.getSnapshot()]);
   const model = resolveVisibleModel(c.models, readModelDefaults(), selected.contextStatus.model, session?.model || '');
   const effort = resolveVisibleEffort(c.models, readModelDefaults(), model, selected.contextStatus.reasoningEffort);
   const states = [...store.committed];
@@ -194,6 +215,7 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
     loadingSession: c.loadingSession,
     refresh: () => {
       controller.current?.abort(); ++generation.current; running.current = false; observed.current.clear(); cancelIndependent();
+      wake(value => value + 1);
       return c.refresh();
     } };
   useEffect(() => {
@@ -209,7 +231,8 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
       presentation: Object.fromEntries(states.map(([id, { session: _session, ...view }]) => [id, { ...view, visibleModel: '', visibleEffort: '', usageModel: '', streamingText: '', commentaryText: '' }])) });
   }, [shown, c.sessions, c.selectedId, store.getPersistSnapshot()]);
   return { committed: shown.committed, conversations: display, directory: { ...directory, projects: shown.projects,
-    statusByThread: snapshotStatusByThread(store, c.selectedId, shown.projects),
+    statusByThread,
     contextByThread: Object.fromEntries(states.map(([id, view]) => [id, view.contextStatus.phase])),
+    contextTimeByThread: Object.fromEntries(states.map(([id, view]) => [id, view.contextStatus.compactionUpdatedAt])),
     goalByThread: Object.fromEntries(states.map(([id, view]) => [id, view.goal])) } };
 }

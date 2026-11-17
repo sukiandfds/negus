@@ -119,6 +119,10 @@ export const createProviderConversationStore = ({ current, providers, createStor
     return (await storeFor(owner(id))).getSessionResumeInfo(id, { ...options, historyFile: routes[id]?.resumeInfo?.path });
   };
   service.findSessionForProvider = async (providerId, ...args) => (await storeFor(providerId)).findSession(...args);
+  service.getRuntimeContextForProvider = async (providerId, id) => {
+    await ready;
+    return (await storeFor(providerId)).getRuntimeContext(id, { historyFile: routes[id]?.resumeInfo?.path });
+  };
   service.getSourceRevisionForProvider = async (providerId, id) => {
     const info = await (await storeFor(providerId)).getSessionResumeInfo(id, { readOnly: true, historyFile: routes[id]?.resumeInfo?.path });
     return info?.path ? latestRolloutFile(info.path)

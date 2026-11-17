@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 export const terminalStates = new Set(['completed', 'failed', 'interrupted']);
+const maxReconciliationFailures = 3;
 const copy = value => structuredClone(value);
 const fail = (message, statusCode = 409) => Object.assign(new Error(message), { statusCode });
 
@@ -68,6 +69,18 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
       return current;
     });
     emit({ event: 'task_terminal', taskId: id, state: task.state, conversationId: task.conversationId });
+  };
+  const reconciliationFailed = async (id, error) => {
+    const task = await mutate(data => {
+      const current = requireTask(data, id);
+      current.reconciliationFailures = (current.reconciliationFailures || 0) + 1;
+      current.state = 'needs-reconciliation';
+      current.error = error || '执行状态待核对';
+      return current;
+    });
+    if (task.reconciliationFailures >= maxReconciliationFailures) {
+      await complete(id, { status: 'interrupted', error: task.error });
+    } else emit({ event: 'task_reconciliation_required', taskId: id });
   };
   const checkpoint = (id, patch) => mutate(data => {
     const task = requireTask(data, id);
@@ -135,6 +148,7 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
               if (terminalStates.has(current.state)) return;
               Object.assign(current.runtime, copy(patch));
               current.state = current.cancelRequested ? 'stopping' : 'running';
+              current.reconciliationFailures = 0;
               if (!recovering) current.updatedAt = now();
             });
             if (!recovering) emit({ event: 'task_started', taskId: id, conversationId: task.conversationId });
@@ -143,15 +157,13 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
         };
         const result = recovering ? await runtime.observe(task, controls) : await runtime.execute(task, controls);
         if (result?.status === 'unknown') {
-          await mutate(data => { const current = requireTask(data, id); current.state = 'needs-reconciliation'; current.error = result.error || '执行状态待核对'; return current; });
-          emit({ event: 'task_reconciliation_required', taskId: id });
+          await reconciliationFailed(id, result.error);
         } else if (!closed) await complete(id, result);
       } catch (error) {
         if (closed) return;
         // Adapter must identify ambiguous side effects; unknown starts cannot be called failed or replayed.
         if (error.ambiguous || recovering) {
-          await mutate(data => { const task = requireTask(data, id); task.state = 'needs-reconciliation'; task.error = error.message; });
-          emit({ event: 'task_reconciliation_required', taskId: id });
+          await reconciliationFailed(id, error.message);
         } else await complete(id, { status: 'failed', error: error.message });
       }
     })().catch(error => emit({ event: 'task_storage_failed', taskId: id, code: error.code || 'unknown' }))
@@ -281,10 +293,11 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
     for (const task of data.tasks) {
       if (terminalStates.has(task.state)) continue;
       const lastActivity = Date.parse(task.updatedAt || task.createdAt);
-      const verifiable = hasRecoveryEvidence(task)
+      const exhausted = task.reconciliationFailures >= maxReconciliationFailures;
+      const verifiable = !exhausted && hasRecoveryEvidence(task)
         && Number.isFinite(lastActivity) && currentTime - lastActivity <= 30 * 60 * 1000;
       task.state = verifiable ? 'recovering' : 'interrupted';
-      if (!verifiable) task.error = task.runtime?.threadId && task.runtime?.turnId
+      if (!verifiable && !exhausted) task.error = task.runtime?.threadId && task.runtime?.turnId
         ? '服务重启时任务已超过 30 分钟没有活动'
         : '服务重启时没有可核对的运行证据';
     }

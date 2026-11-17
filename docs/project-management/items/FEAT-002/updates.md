@@ -348,3 +348,120 @@
 - 根因：`native-task-runtime.mjs` 的 `detach()` 只把运行中任务标记结束，不等待已在执行的事件处理（如 `turn/started` 后 `room.updateAgent`）。`task-kernel.mjs` 的 `close()` 也不等待，于是关闭返回后仍会写 `room.json`，与后续清理竞争，出现 ENOENT/ENOTEMPTY 和测试进程不退出。另外 `group-task-service.test.mjs` 中一个用例先登记删除目录、后登记关闭服务，清理顺序颠倒。
 - 修改范围：`detach()` 返回等待各任务在途事件处理的 Promise，`close()` 予以等待；结束后不再接收新事件，因此只等待已开始的处理。测试用例改为先关闭服务与房间再删除目录。
 - 验证：`group-task-service.test.mjs` 顺序 10 次与 8 路并发 40 次全部 0 退出、约 1 秒（修改前约每 10 次出现一次失败或挂起）；`ui-feishu/validation` 全套 5 次均约 3 秒结束，134 通过，14 失败与修改前一致（浏览器/测试服务/环境依赖）；`task-kernel`、`native-task-runtime`、`result-delivery` 37/37；`windows/tests` 563 通过、0 失败。`kernel-source-manifest.json` 中两文件哈希在修改前即与 HEAD 不符且无读取方，未更新。
+
+### 2026-11-16 群聊与普通对话体验差异登记
+
+- 状态：仅需求文档更新；问题已登记，尚未授权或实施代码修改。
+- 本次更新：在 `item.md` 的 FEAT-002 原条目末尾追加 `roomId: project-room:project:business:phonecameradata` 的群聊体验记录，保留用户原话，区分已证实事实、待证据项和最小后续顺序；未新增重复需求清单，也未覆盖既有决定。
+- 已登记核心事实：房间配置 6 位员工、持久化 12 条消息、3 条助手回复及 5 个任务均来自运营管理；运营管理原生会话的 6 条 commentary 未进入房间；群聊未复用普通对话已完成 commentary 的独立消息落库与展示链路；群内派工返回 `Unauthorized`；执行中补充没有“已加入当前执行”提示，最终回复只关联初始派工消息。
+- 边界：不把该房间的员工集中现象外推至所有群，不在缺少 stderr 证据时认定认证失败原因，不把滚动问题写成已确认 bug。
+- 代码与运行状态：业务代码 0 行；未发布、未重启、未提交。工作区其他既有未提交改动保持原样。
+- 验证：仅针对本次两份文档运行 `git diff --check`，结果通过。
+
+### 2026-11-16 后台代理查询工具选择问题登记
+
+- 状态：仅需求文档更新；问题已登记，是否修改全局提示词、员工职责及具体落点待后续执行任务决定，本问题未修复。
+- 本次更新：在 `item.md` 的 FEAT-002 原条目末尾追加后台代理过度使用 computer 和截图的问题登记，保留用户原话及技术研发反馈中的规则原话，不新增重复需求清单。
+- 问题性质：工具选择错误，不是 computer 能力不足；目标是减少慢路径和误操作，不新增工具。项目文件、代码、日志、API、Git 和运行状态应使用现有 shell 或只读文件能力；computer 仅用于必须操作图形界面、真实页面视觉验收或只能通过界面完成的步骤，并说明使用理由。
+- 开放决定：本次没有修改全局提示词或员工职责文件，也没有确定规则落点；后续仍须由明确执行任务完成实施与验证。
+- 验收方向：简单文件查询直接走命令；日志和 API 查询不截图；确需 UI 验证时允许 computer 并有明确理由；真实浏览器和界面测试能力保持可用。
+- 代码与运行状态：代码及提示词配置 0 行；未发布、未重启、未提交。工作区其他既有未提交改动保持原样。
+- 验证：仅针对本次两份文档运行 `git diff --check`。
+
+### 2026-11-16 完成态被旧 live 状态覆盖
+
+- 状态：已定位为既有前端状态合并/目录投影 BUG，并登记为待修复；业务代码 0 行。未发布、未重启、未提交、未发送测试消息，工作区其他既有未提交改动保持原样。
+- 用户反馈原话：`这个明明完成了，还是显示助手正在运行`；另要求沿用原问题记录修复后不再出现 `你的状态还是显示‘正在处理后台任务’，这个问题怎么反反复复？？？`，并明确要求 `把修复这个问题也列入需求表`。
+- 现场：conversationId=`handoff-05bb309bd4f097df68f9f962adf8289f`，threadId=`01a1e502-3baf-7770-b262-5bbb5c3e7467`；对应 task `a3f85cd1-9d6f-4fde-be41-a2a653fb5466` 为 background，已完成。另一个 task `21e34d04-3b2f-4655-9356-df939fc895f1` 为 external，查询时 recovering，现为 completed。
+- 已核实：补充线程最终消息已持久化；execution 为 completed/inactive，turnId 一致，durationMs=238449，lastProbeAt=null；员工状态和 `/api/project-directory` 父行均为 idle，任务子项为 completed。`21e34d04...` 已被 `/api/tasks` 的 public 投影排除，不会直接计作后台任务。
+- 已复现根因：慢读期间 `context_status` 增加 revision；读取返回 terminal 快照时 revision 已不相等，`ConversationStore.commit()` 不清理旧 live active。随后 `snapshotStatusByThread()` 无条件采用 live active，覆盖目录 completed，生成“助手正在运行”或“正在处理后台任务”。隔离内存复现结果包含 `livePresent=true`、`storedActive=true`、投影 working。
+- 同场区分：完整任务账本当时还有真实 background 任务 running，不能把那段“正在处理后台任务”直接归因于 external 追踪记录；external 被排除于后台任务目录的现有规则需要保留。
+- 独立风险：`needs-reconciliation` 带证据时每 15 秒回到 `recovering` 重试，无次数上限；本次 external 已正常收敛，未发生无限重试现场。
+- 最小方案：修正 terminal snapshot 对旧 live execution 的清理，并让目录 terminal 状态压过无更新证据的 live active；保留确有更新证据的新 active。给恢复核对设置有限次数，耗尽后使用现有 `interrupted`。补单元和浏览器验收，覆盖 completed 即空闲、慢读/重连/缓存不复活、external 不显示后台任务、真实运行不误清、recovering 不无限重试。
+- 当前版本：运行快照 `1794475480957-705e25f4`；只读健康检查为 healthy。文档修改尚未由任何功能代码生效。
+- 验证：仅针对本次两份文档运行 `git diff --check`，结果见本次交付。
+
+### 2026-11-17 完成态与有限恢复核对源码修复（审核通过并发布）
+
+- 用户本轮明确授权实际修复；沿用本项 11 月 16 日问题，保留历史“暂缓”和登记记录，不增加其他功能。
+- Store 独立按事件证据合并执行状态；目录完成态压过无更新证据的 active，标题、员工父行与发送控制共用完成态；较新的同 epoch/新 turn 保持活动。保留 bodyRevisions/fieldRevisions，不恢复正文请求风暴。
+- needs-reconciliation 连续失败上限三次，计数持久化，耗尽进入 interrupted 并保留实际错误；真实运行证据清零失败次数。external 的公开任务与目录排除规则未改。
+- 本项业务 +99/-26，测试 +231/-7。200 项相关测试、TypeScript、完成态专项及既有浏览器回归、diff 检查通过；三档 context_status 均零正文请求，受保护文件零差异。
+- [证据、逐文件原因、命令与覆盖边界](../../../../work/terminal-live-20261117/verification.md)。DeepSeek 独立审核 PASS，无阻断、中或低风险问题；已随受控发布加载到运行快照。
+
+### 2026-11-17 群聊协作差异源码修复（审核通过并发布）
+
+- 已完成 commentary 复用房间消息持久化、SSE 和普通 Message；以 workId/itemId 去重，中间回复不误结束运行占位，停止/失败仍保留。复用原生已有历史核对补回遗漏，不新增轮询。
+- 根因：群服务只转发 delta；长期原生线程已加载时 resume 不替换 MCP 配置，已交付任务释放 token 后下轮仍用旧凭据。群路径确认旧执行结束后 unsubscribe/resume 安装本轮能力；来源 actor、群作用域、后台禁止再次派工保持。
+- 补充消息保存 messageId/turnId，最终回复关联本轮最后已接收补充；不新增文案、组件或 CSS，不修改受保护滚动。
+- 证据、逐文件增减、测试命令与边界见 `work/group-collaboration-20261117/report.md`。DeepSeek 独立审核 PASS，无阻断或中风险问题；仅记录中段历史补录顺序的低风险边界。已随受控发布加载到运行快照。
+
+### 2026-11-17 后台查询工具选择源码修复（审核通过并发布）
+
+- 根因：共用 computer 提示未区分查询与界面操作，且旧后台执行者覆盖提示仅包含 basePrompt。
+- 修改：computerInstructions 集中定义直接数据查询/必要界面的选择和理由要求；既有 node_repl、permissions/screenshot 操作规则限定为界面步骤；旧后台服务复用该函数。无工具、MCP 配置、UI 或任务业务变更。
+- 验证：提示契约和 computer MCP 6/6；员工运行时、员工定义、成长提示、后台模型/健康及任务扩展回归 72/72；14 份实际生成提示覆盖 6 类查询和 3 类必要界面场景；MJS 语法与 git diff --check 通过。
+- 证据：`work/query-tool-choice-20261117/` 中的 generated-prompts.json、targeted-tests.log、regression-tests.log、verification.md。测试为隔离组装/协议验证，没有真实模型消息、截图或 UI 操作，真实模型选择行为留待授权运行验收。
+- 状态：DeepSeek 独立审核 PASS，无阻断或中风险问题。14 份实际生成提示覆盖前台、6 位员工和后台新建/resume/turn；已随受控发布加载到运行快照。既有未提交改动按修改前 SHA-256 核对保留。
+
+### 2026-11-17 本轮四项修复交付状态
+
+- 后端受控重启 jobId `1794850200246-69963` 已完成，结果 started，运行快照 `1794850193600-27e8db44`、pid `70019`。
+- 重启快照构建并生效的前端为 `feishu-mwjjgqj6`（2026-11-16T17:29:58.826Z），公网 `/version.json` 已核对一致。
+- watchdog 返回 backend/frontend/tunnel healthy；运行快照中的本项群聊、任务内核、上下文与工具选择文件同工作区 SHA-256 一致。
+- 仍需用真实公网手机输入、真实群聊中间回复/派工和真实后台代理查询做发布后验收；隔离测试不替代真实供应商端到端结论。
+
+### 2026-11-17 员工主对话完成后状态回落复核
+
+- 用户反馈原话：`完成后仍显示正在主对话工作`；本次进一步明确撤销短延迟自动核对方案，要求按 Provider 客户端事件过滤根因修复，禁止新增定时器或轮询。
+- 根因证据：`340baaa` 的 `ui-feishu/server/employee-provider-integration.mjs` 将订阅改为比较 `threadClients` 与当前 `runtimeClient` 对象；迁移后同一 Thread 的当前 Provider 完成事件会在入口被错误丢弃。`1b2ac07` 已删除该过滤并在 `employee-runtime-service.mjs` 增加主线程与 turnId 校验；`55f293b` 随后把运行时逻辑直接落入源码。
+- 修复前体验：最终答案已显示后，员工目录和主对话仍显示“正在主对话工作”，要等下一次发送才触发已有空闲核对；旧 Provider 晚到事件也可能干扰状态或正文。
+- 修复后体验：当前 Provider 的当前 turn 完成事件立即让员工回到空闲；其他 Provider 的旧 turn completed、delta 和 final answer 因 turnId 不匹配被丢弃；新 turn 可建立自己的 turnId；无 turnId 的 completed 保留兼容回落；最终答案先到、completed 后到仍会立即回落。
+- 本轮改动：生产逻辑沿用当前 `dfe8bcf` 的正确实现，无定时器或轮询新增。`ui-feishu/validation/employee-provider.test.mjs` 补充旧 Provider 不同 turnId 的 delta 被拒绝、旧 final answer 被拒绝、当前 Provider final answer 被接受且随后 completed 立即 idle 的断言。
+- 验证：`windows/tests/employee-runtime.test.mjs` 33/33、`ui-feishu/validation/employee-provider.test.mjs`、`ui-feishu/validation/realtime-regression.test.mjs` 及相关 MJS 语法、`git diff --check` 结果见本次交付。
+- 状态：当前工作区基线为 `develop / dfe8bcf`，与任务描述中的 `340baaa` 不一致；本次按实际工作区继续并保留全部既有改动。未提交、未推送、未发布、未重启，运行服务未由本轮加载验证。
+
+
+### 2026-11-17 四项真实使用问题源码修复与定向自测
+
+- 用户本轮明确授权修复；原话、现状及有效决定追加在同条目 item.md，既有记录和已发布改动保留。
+- 覆盖压缩活动时间、普通及员工主对话打开用量校准、员工页新建普通对话、跨设备完成目录同步；员工历史用量复用既有只读供应商历史路径，目录落盘后再失效，失败补读有界。
+- 185 项定向单测通过；隔离浏览器四项操作及缓存/发送回归通过；100/1,000/10,000 状态事件零新增正文请求。精确命令、增减、保护检查及证据见 [验证记录](../../../../work/four-usage-fixes-20261117/verification.md)。
+- 状态：仅 develop 工作区修改与自测；未提交、推送、发布、重启、截图或发送真实消息；运行服务没有因本轮加载新代码。来源对话后续安排 DeepSeek Flash High 独立验收；真实公网、手机和供应商端到端留到发布后。
+
+
+### 2026-11-17 第二轮：独立审核 FAIL 后三个漏项补修
+
+- 按用户限定仅补分页缓存上下文校准、同毫秒压缩序号和目录可恢复错误重试；不重做已通过四路主体，保留既有改动。
+- 本条目对应原话、有效决定与保留范围已追加在item.md。115项定向单测及四项浏览器、100/1,000/10,000纯状态事件零正文请求通过；完整命令、统计和最终检查见 [本轮验证记录](../../../../work/four-usage-fixes-20261117/verification.md#第二轮补修独立审核-fail-后)。
+- 上轮185项通过记录保留为历史局部证据，独立审核FAIL结论不覆盖或改写为PASS；本轮补修由来源对话复审。未提交、推送、发布、重启、截图或发送真实消息。
+
+### 2026-11-17 快速追加与响应前审批两个发布阻断
+
+- 用户明确只修两个发布阻断，最小改动，不新增状态表、队列或轮询；保留工作区其他改动，不提交、不发布、不重启。
+- 修复后体验：快速完成期间立即追加第二条会按原生线程状态走一次新的 `turn/start`，`turn/steer` 明确返回原 turn 已结束时也只安全重试一次；确实有另一活动 turn 时仍按真实占用返回。审批、requestUserInput 或 elicitation 早于 `turn/start` 响应时先按本次 submission 缓冲，确认 turnId 后回放，正文正常显示并最终 idle；旧 turn/旧线程审批不回放。
+- 测试：employee-runtime 38/38、employee-provider 13/13、realtime-regression 10/10；相关 MJS 语法与 `git diff --check` 通过。新增覆盖快速追加、ended-steer 两次分支、approval 与 requestUserInput 早到全链、旧审批拒绝，并保留 steer、无 turnId completed、重启恢复回归。
+- 状态：仅 develop 工作区修改与隔离协议/适配测试；未提交、推送、发布或重启，运行服务未加载本修复。证据见 [验证记录](../../../../work/runtime-release-blockers-20261117/verification.md)。
+
+### 2026-11-17 风控复核后的两个状态覆盖竞态
+
+- 用户明确只补迟到旧审批/补充输入和 steer response 覆盖等待两项，不提交、发布或重启。
+- 等待类事件现在先校验 active、current.turnId 与事件 turnId；旧 turn、idle 和已绑定后的无 ID 等待事件在进入 execution 前拒绝。递交中的无 ID 等待事件确认后注入 turnId 回放，另一等待文案不被覆盖。
+- steer 响应只在 submitted/working 发布 working；已有 waiting phase 仅补 confirmedTurnId，保留 label 与 active。随后 final/completed 正常回到 idle。
+- 测试：employee-runtime 38/38、employee-provider 13/13、realtime-regression 15/15，合计 66/66；MJS 语法与 `git diff --check` 通过。新增覆盖 active 旧 ID/无 ID 等待拒绝、idle 旧审批不重新点亮、无 ID 早到 buffer 注入、两条 steer waiting 全链，并保留快速追加、早到 full output、无 ID completion、steer、restart 和普通对话回归。
+- 状态：仅 develop 工作区修改与隔离协议/适配测试；未提交、推送、发布或重启，运行服务未加载本修复。证据见 [验证记录](../../../../work/runtime-release-blockers-20261117/verification.md#风控复核后的两个状态覆盖竞态)。
+
+### 2026-11-17 失败、旧响应与 close 状态覆盖
+
+- 用户限定只补三条路径：不同 turnId 旧响应、steer 普通/网络失败、close 后 continuation；不提交、发布或重启。
+- steer 请求前保存 phase/label/detail/active/turnId。失败后同 turn 恢复 snapshot，不同 turn 显示 authoritative occupied，inactive 进入 idle，unknown 保留 snapshot。旧响应清空 buffer 后以明确错误退出，不再落通用 catch。
+- close 后异步返回、catch、状态发布和回放均有门禁；只清理 buffer/submission，不写员工或 execution，不补正文。turn/start 失败原有安全语义保留。
+- 测试：employee-runtime 38/38、employee-provider 13/13、realtime-regression 23/23，合计 74/74；MJS 语法与 `git diff --check` 通过。新增覆盖两种 waiting 的旧响应、普通与网络失败保留 waiting、authoritative 异 turn/inactive/unknown、close 后返回不回放；既有快速追加、早到 output/waiting、无 ID completion、restart、目录和普通对话回归通过。
+- 状态：仅 develop 工作区修改与隔离协议/适配测试；未提交、推送、发布或重启，运行服务未加载本修复。证据见 [验证记录](../../../../work/runtime-release-blockers-20261117/verification.md#失败旧响应与-close-状态覆盖)。
+
+### 2026-11-17 steer 失败时保留请求后实时等待
+
+- 用户限定只修 steer 发出后才进入 waiting、随后失败又被旧 working snapshot 覆盖的时序问题；不提交、发布或重启。
+- steer same-turn-active 和 authoritative-unknown 分支现在先看实时状态；同 turn 已 waiting 时保留 phase、label、active 与 turnId。没有新 waiting 时仍恢复请求前 working snapshot；异 turn occupied、inactive idle、close 行为不变。
+- 测试：employee-runtime 38/38、employee-provider 13/13、realtime-regression 27/27，合计 78/78；MJS 语法与 `git diff --check` 通过。新增覆盖普通/网络/unknown 三条请求后 waiting 链路、无 waiting 的 working 对照，并验证 waiting 后 final/completed 正常 idle。
+- 状态：仅 develop 工作区修改与隔离协议/适配测试；未提交、推送、发布或重启，运行服务未加载本修复。证据见 [验证记录](../../../../work/runtime-release-blockers-20261117/verification.md#steer-失败时保留请求后实时等待)。

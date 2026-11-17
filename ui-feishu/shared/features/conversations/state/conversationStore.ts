@@ -21,6 +21,19 @@ const signature = (value: unknown, omitStream = false) => JSON.stringify(value,
       || (omitStream && (['streamingItemId', 'streamingText', 'commentary'].includes(key)
         || (key === 'detail' && this.phase === 'working' && (this.type === 'execution_status' || this.id === 'reasoning-current')))) ? undefined : field;
   });
+// FEAT-002: body revisions are not evidence that execution is newer.
+type ExecutionEvidence = { phase?: string; active?: boolean; turnId?: string | null;
+  eventEpoch?: string; eventSeq?: number; updatedAt?: string | null; startedAt?: string | null };
+export const terminalExecution = (status?: ExecutionEvidence) => Boolean(status && !status.active
+  && ['completed', 'failed', 'interrupted', 'systemError'].includes(status.phase || ''));
+const executionOrder = (candidate: ExecutionEvidence, baseline: ExecutionEvidence): number | null => {
+  if (candidate.eventEpoch && candidate.eventEpoch === baseline.eventEpoch
+    && candidate.eventSeq != null && baseline.eventSeq != null) return candidate.eventSeq - baseline.eventSeq;
+  const before = Date.parse(baseline.updatedAt || '');
+  const after = Date.parse(candidate.updatedAt || candidate.startedAt || '');
+  return Number.isFinite(before) && Number.isFinite(after) ? after - before : null;
+};
+export const newerExecution = (candidate: ExecutionEvidence, baseline: ExecutionEvidence) => (executionOrder(candidate, baseline) ?? 0) > 0;
 export const withStreamingStatus = (status: ThreadSnapshot['executionStatus'], live?: ThreadSnapshot['executionStatus']) =>
   status.active && status.turnId && live?.turnId === status.turnId ? { ...status,
     streamingItemId: live.streamingItemId ?? status.streamingItemId, streamingText: live.streamingText ?? status.streamingText,
@@ -73,6 +86,12 @@ export class ConversationStore {
   });
   modelChoices = new Map<string, { model: string; reasoningEffort: string }>();
   revisions = new Map<string, number>();
+  bodyRevisions = new Map<string, number>();
+  cancelContextNotification = (id: string) => {
+    clearTimeout(this.contextNotifications.get(id));
+    this.contextNotifications.delete(id);
+  };
+  private contextNotifications = new Map<string, ReturnType<typeof setTimeout>>();
   synced = new Set<string>();
   dirty = new Set<string>();
   errors = new Map<string, string>();
@@ -140,29 +159,67 @@ export class ConversationStore {
     if (item) this.rememberAccepted(id, item.submissionId);
     return item;
   };
-  update = (id: string, patch: Patch | ((current: ThreadSnapshot) => Patch), remote = false) => {
+  update = (id: string, patch: Patch | ((current: ThreadSnapshot) => Patch), remote = false, deferContext = false) => {
     if (!id) return;
-    const next = typeof patch === 'function' ? patch(this.get(id)) : patch;
+    let next = typeof patch === 'function' ? patch(this.get(id)) : patch;
+    const execution = this.get(id).executionStatus;
+    if (remote && next.executionStatus?.active && terminalExecution(execution)
+      && (next.executionStatus.turnId === execution.turnId
+        || (next.executionStatus.eventEpoch && next.executionStatus.eventEpoch === execution.eventEpoch))
+      && !newerExecution(next.executionStatus, execution)) {
+      const { executionStatus: _stale, ...rest } = next;
+      next = rest;
+      if (!Object.keys(next).length) return;
+    }
     this.rememberQueue(id, next.queueItems || []);
-    if (remote) {
-      const current = this.get(id);
-      const keys = Object.keys(next) as (keyof Patch)[];
-      if (keys.every(key => signature(current[key]) === signature(next[key]))) return;
-      this.live.set(id, { ...this.live.get(id), ...next });
-      this.notify();
-    } else {
+    const current = remote ? this.get(id) : (this.committed.get(id) || this.empty(id));
+    const keys = Object.keys(next) as (keyof Patch)[];
+    if ((remote || keys.every(key => key === 'contextStatus'))
+      && keys.every(key => signature(current[key]) === signature(next[key]))) {
+      // Retain event ordering even when only its timestamp advanced, without notifying or persisting.
+      if (next.contextStatus?.updatedAt && Date.parse(next.contextStatus.updatedAt) > (Date.parse(current.contextStatus.updatedAt || '') || 0)) {
+        const target = remote ? this.live.get(id) : this.committed.get(id);
+        if (target?.contextStatus) target.contextStatus = { ...target.contextStatus, updatedAt: next.contextStatus.updatedAt };
+      }
+      if (next.executionStatus && newerExecution(next.executionStatus, current.executionStatus)) {
+        const target = this.live.get(id) || this.committed.get(id);
+        if (target) target.executionStatus = { ...current.executionStatus, ...next.executionStatus };
+      }
+      return;
+    }
+    const notify = () => {
+      const pending = this.contextNotifications.get(id);
+      if (deferContext) {
+        // Fixed window: continued usage events never postpone the trailing notification.
+        if (!pending) this.contextNotifications.set(id, setTimeout(() => {
+          this.contextNotifications.delete(id);
+          this.notify();
+        }, 180));
+      } else {
+        this.cancelContextNotification(id);
+        this.notify();
+      }
+    };
+    if (!remote || next.contextStatus || next.executionStatus) {
       this.revisions.set(id, (this.revisions.get(id) || 0) + 1);
       this.fieldRevisions.set(id, { ...this.fieldRevisions.get(id),
-        ...Object.fromEntries(Object.keys(next).map(key => [key, this.revisions.get(id)])) });
+        ...Object.fromEntries(keys.map(key => [key, this.revisions.get(id)])) });
+    }
+    if (remote) {
+      this.live.set(id, { ...this.live.get(id), ...next });
+      notify();
+    } else {
       this.committed.set(id, { ...(this.committed.get(id) || this.empty(id)), ...next });
+      if (next.session) this.bodyRevisions.set(id, this.revisions.get(id)!);
       ++this.persistVersion;
       const live = this.live.get(id);
       if (live) for (const key of Object.keys(next) as (keyof Patch)[]) delete live[key];
-      this.notify();
+      notify();
     }
   };
   invalidate = (id: string, notify = true) => {
     this.revisions.set(id, (this.revisions.get(id) || 0) + 1);
+    this.bodyRevisions.set(id, this.revisions.get(id)!);
     this.dirty.add(id);
     if (notify) this.notify();
   };
@@ -191,7 +248,8 @@ export class ConversationStore {
       const model = saved ? resolveVisibleModel(models, defaults, saved.model, '') : result.context.model;
       const contextStatus = saved ? { ...result.context, model, selectedSettings,
         reasoningEffort: resolveVisibleEffort(models, defaults, model, saved.reasoningEffort) } : result.context;
-      return { session: { ...session, ...(incoming && result.historyFormatVersion ? { historyFormatVersion: result.historyFormatVersion } : {}), sourceRevision: result.sourceRevision || session.sourceRevision }, contextStatus,
+      return { session: { ...session, ...(incoming && result.historyFormatVersion ? { historyFormatVersion: result.historyFormatVersion } : {}), sourceRevision: result.sourceRevision || session.sourceRevision },
+        contextStatus: { ...contextStatus, usageSourceRevision: result.sourceRevision || session.sourceRevision || '' },
         executionStatus: result.status, goal: result.goal, queueItems: result.queue, userInputRequest: result.input };
     });
     const entry = { signal, promise };
@@ -211,11 +269,39 @@ export class ConversationStore {
     snapshot = { ...snapshot, queueItems: this.visibleQueue(id, snapshot.queueItems) };
     if (snapshot.goal?.status === 'complete' && this.dismissedGoals.get(id) === goalCompletionKey(snapshot.goal)) snapshot = { ...snapshot, goal: null };
     const latest = this.committed.get(id);
+    const liveExecution = this.live.get(id)?.executionStatus;
+    const executionChangedDuringRead = (this.fieldRevisions.get(id)?.executionStatus || 0) > revision;
+    const keepExecution = liveExecution && (terminalExecution(snapshot.executionStatus) || snapshot.executionStatus.active || executionChangedDuringRead)
+      && (newerExecution(liveExecution, snapshot.executionStatus)
+      || (executionChangedDuringRead
+        && snapshot.executionStatus.turnId && liveExecution.turnId !== snapshot.executionStatus.turnId
+        && executionOrder(liveExecution, snapshot.executionStatus) === null));
     for (const [key, changedAt] of Object.entries(this.fieldRevisions.get(id) || {}) as [keyof ThreadSnapshot, number][]) {
-      if (latest && changedAt > revision) snapshot = { ...snapshot, [key]: latest[key] };
+      if (changedAt <= revision) continue;
+      if (key === 'executionStatus') {
+        if (!liveExecution && latest && terminalExecution(latest.executionStatus)
+          && !newerExecution(snapshot.executionStatus, latest.executionStatus)) snapshot = { ...snapshot, executionStatus: latest.executionStatus };
+        continue;
+      }
+      const context = key === 'contextStatus' ? this.live.get(id)?.contextStatus : undefined;
+      if (context) snapshot = { ...snapshot, contextStatus: { ...context,
+        usageSourceRevision: context.model === snapshot.contextStatus.model
+          && (this.bodyRevisions.get(id) || 0) <= revision
+          ? snapshot.contextStatus.usageSourceRevision : undefined,
+        model: snapshot.contextStatus.model, reasoningEffort: snapshot.contextStatus.reasoningEffort,
+        selectedSettings: snapshot.contextStatus.selectedSettings } };
+      else {
+        const patch = this.live.get(id);
+        if (patch && key in patch) snapshot = { ...snapshot, [key]: patch[key] };
+        else if (latest) snapshot = { ...snapshot, [key]: latest[key] };
+      }
     }
+    if (keepExecution) snapshot = { ...snapshot, executionStatus: liveExecution };
     const current = latest?.session;
     if (current && snapshot.session) snapshot = { ...snapshot, session: refreshSession(current, snapshot.session) };
+    if (snapshot.contextStatus.usageSourceRevision !== (snapshot.session?.sourceRevision || '')
+      || (this.bodyRevisions.get(id) || 0) > revision) snapshot = { ...snapshot,
+      contextStatus: { ...snapshot.contextStatus, usageSourceRevision: undefined } };
     const pending = this.localPending.get(id);
     if (pending && snapshot.session) {
       const ids = new Set(snapshot.session.messages.map(message => message.id));
@@ -230,17 +316,30 @@ export class ConversationStore {
     }
     const live = this.live.get(id);
     if (live?.contextStatus) live.contextStatus = { ...live.contextStatus,
+      usageSourceRevision: snapshot.contextStatus.usageSourceRevision,
       model: snapshot.contextStatus.model, reasoningEffort: snapshot.contextStatus.reasoningEffort };
     this.synced.add(id);
-    if ((this.revisions.get(id) || 0) === revision) {
-      this.live.delete(id); this.dirty.delete(id); this.freshBodies.delete(id);
-      const executionStatus = withStreamingStatus(snapshot.executionStatus, live?.executionStatus);
-      if (executionStatus !== snapshot.executionStatus) this.live.set(id, { executionStatus });
+    if (live?.executionStatus && !keepExecution) {
+      const status = withStreamingStatus(snapshot.executionStatus, live.executionStatus);
+      if (status !== snapshot.executionStatus) live.executionStatus = status;
+      else delete live.executionStatus;
+    }
+    if (live && (this.bodyRevisions.get(id) || 0) <= revision) {
+      for (const key of Object.keys(live) as (keyof Patch)[]) {
+        if (key !== 'executionStatus' && (this.fieldRevisions.get(id)?.[key] || 0) <= revision) delete live[key];
+      }
+    }
+    if (live && !Object.keys(live).length) this.live.delete(id);
+    if ((this.bodyRevisions.get(id) || 0) <= revision) {
+      this.dirty.delete(id); this.freshBodies.delete(id);
     }
     this.finish(id);
     const dataChanged = signature(previousCommitted, true) !== signature(this.committed.get(id), true)
       || signature(previousPending, true) !== signature(this.localPending.get(id), true);
-    if (!dataChanged && previousCommitted) this.committed.set(id, previousCommitted);
+    if (!dataChanged && previousCommitted) {
+      previousCommitted.executionStatus = snapshot.executionStatus;
+      this.committed.set(id, previousCommitted);
+    }
     const stateChanged = hadError !== this.errors.has(id) || wasDirty !== this.dirty.has(id)
       || wasSynced !== this.synced.has(id) || previousLive !== signature(this.live.get(id), true);
     if (dataChanged) ++this.persistVersion;
@@ -275,7 +374,8 @@ export class ConversationStore {
     if (choice) this.modelChoices.set(to, choice);
     this.committed.delete(from); this.live.delete(from); this.localPending.delete(from); this.modelChoices.delete(from);
     this.dirty.delete(from); this.revisions.delete(from); this.errors.delete(from); this.synced.delete(from);
-    this.fieldRevisions.delete(from); this.freshBodies.delete(from);
+    this.fieldRevisions.delete(from); this.freshBodies.delete(from); this.bodyRevisions.delete(from);
+    this.cancelContextNotification(from);
     ++this.persistVersion;
     this.notify();
   };

@@ -84,6 +84,7 @@ export function useProjectConversations() {
   const contextManagement = useContextManagement(serverThreadId, selection.store);
   const catalog = useConversationCatalog(initial, {
     setArchived: selection.store.setArchived,
+    cancelContextNotification: selection.store.cancelContextNotification,
     selectedIdRef: selection.selectedIdRef,
     loadSession: selection.loadSession,
     adoptSelection: selection.adoptSelection,
@@ -695,8 +696,8 @@ export function useProjectConversations() {
   const handleEvent = useCallback((event: ProjectEvent) => {
     if (!selection.store.acceptEvent(event)) return;
     if (event.type === "assistant_message_completed") selection.store.completeMessage(event.threadId, event.message);
-    execution.handleEvent(event);
     const previousStatus = event.type === 'execution_status' ? selection.store.get(event.threadId).executionStatus : null;
+    execution.handleEvent(event);
     if (event.type === 'execution_status' && event.threadId !== selection.selectedIdRef.current) selection.store.update(event.threadId, { executionStatus: event }, true);
     if (event.type === 'execution_status' && event.threadId !== selection.selectedIdRef.current
       && ['completed', 'failed', 'interrupted', 'systemError'].includes(event.phase)
@@ -704,7 +705,7 @@ export function useProjectConversations() {
       selection.store.freshBodies.add(event.threadId);
       selection.store.invalidate(event.threadId, false);
     }
-    if ((event as { type: string }).type === 'employee_status' || (event as { type: string }).type === 'employee_message_completed') window.dispatchEvent(new Event('negus:directory-changed'));
+    if (['employee_status', 'employee_message_completed', 'employee_turn_completed'].includes(event.type)) window.dispatchEvent(new Event('negus:directory-changed'));
     const acceptedQueueItem = followUpQueue.handleEvent(event);
     goal.handleEvent(event);
     if (event.type === "context_status") contextManagement.handleEvent(event);
@@ -717,7 +718,8 @@ export function useProjectConversations() {
       reconciledSubmissionsRef.current.add(event.submissionId);
       selection.updateOptimisticMessage(event.threadId, `optimistic-${event.submissionId}`, { deliveryState: undefined, deliveryError: undefined, turnId: event.turnId, protocolTurnId: event.turnId });
     }
-    if (event.type === "execution_status" && event.phase === "completed") contextManagement.completeSettings(event.threadId);
+    if (event.type === "execution_status" && event.phase === "completed"
+      && (previousStatus?.phase !== event.phase || previousStatus?.turnId !== event.turnId)) contextManagement.completeSettings(event.threadId);
     if (event.type === "user_message_submitted") {
       if (event.queueSubmissionId) selection.store.linkQueuedMessage(event.threadId, event.queueSubmissionId, event.submissionId);
       selection.updateOptimisticMessage(event.threadId, event.messageId || `optimistic-${event.submissionId}`, { createdAt: event.createdAt, serverTimestamp: true });

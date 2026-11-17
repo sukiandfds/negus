@@ -9,6 +9,7 @@ import { readModelCatalog } from "../../models/data/modelCatalogCache";
 import { providerIdOf, readModelDefaults, resolveVisibleModel } from "../../models/model/modelDefaults";
 
 interface ConversationSelection {
+  cancelContextNotification: (threadId: string) => void;
   setArchived: (threadId: string, archived: boolean) => void;
   selectedIdRef: MutableRefObject<string>;
   loadSession: (threadId: string, options?: { older?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean }) => Promise<boolean>;
@@ -297,6 +298,7 @@ export function useConversationCatalog(
   }, []);
 
   const removeSessionOptimistically = useCallback((threadId: string): RemovedSession | null => {
+    selection.cancelContextNotification(threadId);
     const index = sessionsRef.current.findIndex((item) => item.threadId === threadId);
     if (index < 0) return null;
     const removed = { session: sessionsRef.current[index], index, archivedView: archivedViewRef.current };
@@ -304,7 +306,7 @@ export function useConversationCatalog(
     sessionsRef.current = next;
     setSessions(next);
     return removed;
-  }, []);
+  }, [selection.cancelContextNotification]);
 
   const restoreRemovedSession = useCallback((removed: RemovedSession | null) => {
     if (!removed || removed.archivedView !== archivedViewRef.current) return;

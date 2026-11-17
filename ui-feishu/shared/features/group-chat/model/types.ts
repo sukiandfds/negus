@@ -26,6 +26,8 @@ export interface GroupAgent {
 export interface GroupMessage {
   id: string;
   clientMessageId?: string | null;
+  itemId?: string;
+  phase?: "commentary";
   workId?: string | null;
   sequence?: number;
   pending?: boolean;

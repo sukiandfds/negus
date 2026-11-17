@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { chromium } = require('/Users/hans/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const browser = await chromium.launch({ headless: true, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' });
+const page = await browser.newPage({ viewport: { width: 1000, height: 800 } });
+const errors = [];
+page.on('pageerror', e => errors.push(e.message));
+try {
+  await page.goto(`${process.env.VALIDATION_ORIGIN || 'http://127.0.0.1:5198'}/validation/mermaid.html`);
+  const diagram = page.getByLabel('Mermaid 流程图');
+  await diagram.locator('svg').waitFor();
+  assert.match(await diagram.innerText(), /输入代码/);
+  assert.match(await page.locator('pre').last().innerText(), /const answer = 42/);
+  await page.getByLabel('图表代码').fill('flowchart LR\n A[');
+  await page.getByText('图表代码未完整或语法有误，请查看源码').waitFor();
+  assert.equal(await diagram.count(), 0);
+  await page.getByLabel('图表代码').fill('sequenceDiagram\n Alice->>Bob: hello');
+  await diagram.locator('svg').waitFor();
+  assert.match(await diagram.innerText(), /hello/);
+  await page.getByLabel('图表代码').fill('flowchart LR\n A["<img src=x onerror=alert(1)>"] --> B[安全]\n click B "javascript:alert(1)"');
+  await diagram.locator('svg').waitFor();
+  assert.equal(await diagram.locator('script, img, [onerror], [onclick], a[href^="javascript:"]').count(), 0);
+  await page.getByLabel('图表代码').fill('flowchart TB\n A[输入代码] --> B{语法正确?}\n B -->|是| C[显示流程图]\n B -->|否| D[查看源码]');
+  await page.waitForFunction(() => document.querySelector('[aria-label="Mermaid 流程图"]')?.textContent.includes('语法正确'));
+  await page.setViewportSize({ width: 390, height: 800 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await page.screenshot({ path: 'work/mermaid-20261116/browser.png' });
+  assert.deepEqual(errors, []);
+  console.log('PASS: flowchart, ordinary code, invalid/streaming recovery, sequence, strict security, mobile width; no page errors.');
+} finally { await browser.close(); }
