@@ -9,7 +9,10 @@ try {
   let roomRequests = 0;
   await page.route('**/api/group/rooms', route => {
     roomRequests += 1;
-    return route.fulfill({ json: { rooms: [{ id: 'room-a', name: '群聊', projectId: 'p', lastActivityAt: '2026-11-18T01:00:00Z' }] } });
+    return route.fulfill({ json: { rooms: [
+      { id: 'room-a', name: '群聊 A', projectId: 'p', lastActivityAt: '2026-11-18T01:00:00Z' },
+      { id: 'room-b', name: '群聊 B', projectId: 'p', lastActivityAt: '2026-11-18T01:00:00Z' },
+    ] } });
   });
   await page.goto('http://127.0.0.1:5197/validation/group-room-list.html');
   await page.waitForFunction(() => document.querySelector('[data-room-list]')?.textContent.includes('room-a'));
@@ -31,14 +34,27 @@ try {
         conversationId: 'room-a', employeeId: 'manager' });
     }, { second });
   }
+  await page.waitForTimeout(20);
+  await page.evaluate(() => {
+    window.emit({ type: 'group_message_created', roomId: 'room-b', message: {
+      id: 'message-b', type: 'agent', authorId: 'manager', authorName: '运营管理',
+      agentId: 'manager', text: '另一个群的消息', sequence: 1, createdAt: '2026-11-18T01:06:00Z', attachments: [],
+    } });
+    window.emit({ type: 'sessions_changed', source: 'group', roomId: 'room-b', threadId: 'thread-b',
+      conversationId: 'room-b', employeeId: 'manager' });
+  });
   await page.waitForTimeout(260);
   const state = await page.locator('[data-room-list]').evaluate(node => JSON.parse(node.textContent || '{}'));
+  const activityA = state.rooms.find(room => room.id === 'room-a').lastActivityAt;
+  const activityB = state.rooms.find(room => room.id === 'room-b').lastActivityAt;
+  const activityRequestCount = roomRequests;
   assert.equal(roomRequests, 1, 'new group messages must not refetch the room list');
-  assert.equal(state.rooms[0].lastActivityAt, '2026-11-18T01:05:00Z');
+  assert.equal(activityA, '2026-11-18T01:05:00Z');
+  assert.equal(activityB, '2026-11-18T01:06:00Z');
   await page.evaluate(() => window.emit({ type: 'sessions_changed', roomId: 'room-a' }));
   await page.waitForTimeout(260);
   assert.equal(roomRequests, 2, 'room metadata changes must still refresh the room list');
-  console.log(JSON.stringify({ roomRequests, lastActivityAt: state.rooms[0].lastActivityAt, metadataRefresh: true }));
+  console.log(JSON.stringify({ activityRequestCount, activityA, activityB, metadataRequestCount: roomRequests }));
 } finally {
   await browser.close();
 }

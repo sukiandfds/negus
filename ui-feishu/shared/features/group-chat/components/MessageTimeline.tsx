@@ -26,9 +26,13 @@ const groupExecution = (id: string, label: string, text: string, startedAt: stri
 
 // A task's empty placeholder and persisted terminal message are the same visual
 // bubble. Keep that identity stable so realtime delivery updates it in place.
-const timelineMessageKey = (message: GroupMessage) => message.workId
-  ? `work:${message.workId}:${message.itemId || "final"}`
-  : `message:${message.id}`;
+const timelineMessageKey = (message: GroupMessage) => {
+  if (!message.workId) return `message:${message.id}`;
+  if (message.phase === "commentary") {
+    return `work:${message.workId}:item:${message.itemId || message.id}`;
+  }
+  return `work:${message.workId}:final`;
+};
 
 const attachmentBlocks = (message: GroupMessage): ContentBlock[] => (message.attachments || []).map((file) => {
   const type = file.mimeType.startsWith("image/") ? "image"

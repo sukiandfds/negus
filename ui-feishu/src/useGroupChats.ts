@@ -31,25 +31,36 @@ export function useGroupChats() {
     const controller = new AbortController();
     void refresh(controller.signal);
     const source = observeProjectStream();
-    let timer = 0;
+    const activityTimers = new Map<string, number>();
+    let refreshTimer = 0;
     source.onmessage = event => {
       try {
         const payload = JSON.parse(event.data);
         if (payload.type === 'group_message_created' && payload.roomId && payload.message?.createdAt) {
-          clearTimeout(timer);
-          timer = window.setTimeout(() => updateActivity(payload.roomId, payload.message.createdAt), 180);
+          const pending = activityTimers.get(payload.roomId);
+          if (pending) window.clearTimeout(pending);
+          const timer = window.setTimeout(() => {
+            activityTimers.delete(payload.roomId);
+            updateActivity(payload.roomId, payload.message.createdAt);
+          }, 180);
+          activityTimers.set(payload.roomId, timer);
           return;
         }
         // A new message only changes the room's activity time; avoid replacing
         // the full room list and re-rendering the active conversation for it.
         if (payload.type === 'sessions_changed') {
           if (payload.source === 'group' && payload.roomId) return;
-          clearTimeout(timer);
-          timer = window.setTimeout(() => void refresh(controller.signal), 180);
+          window.clearTimeout(refreshTimer);
+          refreshTimer = window.setTimeout(() => void refresh(controller.signal), 180);
         }
       } catch {}
     };
-    return () => { controller.abort(); source.close(); clearTimeout(timer); };
+    return () => {
+      controller.abort();
+      source.close();
+      activityTimers.forEach(timer => window.clearTimeout(timer));
+      window.clearTimeout(refreshTimer);
+    };
   }, [refresh, updateActivity]);
   const update = useCallback(async (roomId: string, patch: { name?: string; archived?: boolean }) => {
     const { room } = await groupApi.updateRoom(roomId, patch);

@@ -27,7 +27,9 @@ try {
     const page = await browser.newPage({ viewport });
     page.setDefaultTimeout(7000);
     const errors = [];
+    const consoleErrors = [];
     page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
     const snapshot = { project: 'fixture', projectId: 'p', room: { id: roomId, name: '更新稳定性', projectId: 'p' },
       agents, members: [], messages: history, activeWorks: [] };
     await page.route('**/api/**', route => {
@@ -88,11 +90,15 @@ try {
       type: 'agent', agentId: 'developer', authorId: 'developer', authorName: '技术研发',
       text: '中间回复', sequence: 25, createdAt: '2026-11-18T01:31:00Z', attachments: [],
     };
+    const commentaryWithFinalItemId = {
+      ...commentary, id: 'commentary-final-item-id', itemId: 'final',
+      text: '中间回复（itemId=final）', sequence: 26, createdAt: '2026-11-18T01:31:30Z',
+    };
     const final = {
       id: 'final-stability', workId, type: 'agent', agentId: 'developer', authorId: 'developer',
-      authorName: '技术研发', text: '最终回复', sequence: 26, createdAt: '2026-11-18T01:32:00Z', attachments: [],
+      authorName: '技术研发', text: '最终回复', sequence: 27, createdAt: '2026-11-18T01:32:00Z', attachments: [],
     };
-    for (const message of [commentary, final]) {
+    for (const message of [commentary, commentaryWithFinalItemId, final]) {
       await page.evaluate(({ roomId, message }) => window.emit({ type: 'group_message_created', roomId, message }), { roomId, message });
     }
     await page.getByText('最终回复', { exact: true }).waitFor();
@@ -127,10 +133,11 @@ try {
     });
 
     assert.deepEqual(errors, []);
+    assert.deepEqual(consoleErrors, []);
     assert.deepEqual(after.blanks, []);
     assert.equal(after.stable, true, 'existing message nodes must be reused');
     assert.equal(after.samePendingNode, true, 'the pending bubble must become the final bubble without remounting');
-    assert.deepEqual(after.order.slice(-2), ['commentary-stability', 'final-stability']);
+    assert.deepEqual(after.order.slice(-3), ['commentary-stability', 'commentary-final-item-id', 'final-stability']);
     assert.ok(after.order.indexOf('commentary-stability') < after.order.indexOf('final-stability'));
     assert.deepEqual(after.header, before.header);
     assert.deepEqual(after.composer, before.composer);
@@ -138,7 +145,8 @@ try {
     assert.deepEqual(idle.composer, before.composer);
     assert.ok(Math.abs(idle.scrollTop - after.scrollTop) <= 1, 'a non-content agent status update must not move the timeline');
     console.log(JSON.stringify({ viewport, existingNodesStable: after.stable, pendingNodeReused: after.samePendingNode,
-      blankFrames: after.blanks.length, order: after.order.slice(-2), statusScrollDelta: idle.scrollTop - after.scrollTop }));
+      blankFrames: after.blanks.length, order: after.order.slice(-3), consoleErrors: consoleErrors.length,
+      statusScrollDelta: idle.scrollTop - after.scrollTop }));
     await page.close();
   }
 } finally {
