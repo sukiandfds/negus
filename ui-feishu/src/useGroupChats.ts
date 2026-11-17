@@ -43,6 +43,7 @@ export function useGroupChats() {
         // A new message only changes the room's activity time; avoid replacing
         // the full room list and re-rendering the active conversation for it.
         if (payload.type === 'sessions_changed') {
+          if (payload.source === 'group' && payload.roomId) return;
           clearTimeout(timer);
           timer = window.setTimeout(() => void refresh(controller.signal), 180);
         }

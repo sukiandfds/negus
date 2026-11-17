@@ -19,12 +19,17 @@ try {
     window.emit = event => publishProjectStream('message', new MessageEvent('message', { data: JSON.stringify(event) }));
   });
   for (let second = 1; second <= 5; second += 1) {
-    await page.evaluate(({ second }) => window.emit({
-      type: 'group_message_created',
-      roomId: 'room-a',
-      message: { id: `message-${second}`, type: 'agent', authorId: 'manager', authorName: '运营管理',
-        agentId: 'manager', text: `消息 ${second}`, sequence: second, createdAt: `2026-11-18T01:0${second}:00Z`, attachments: [] },
-    }), { second });
+    await page.evaluate(({ second }) => {
+      window.emit({
+        type: 'group_message_created',
+        roomId: 'room-a',
+        message: { id: `message-${second}`, type: 'agent', authorId: 'manager', authorName: '运营管理',
+          agentId: 'manager', text: `消息 ${second}`, sequence: second, createdAt: `2026-11-18T01:0${second}:00Z`, attachments: [] },
+      });
+      // Employee messages are followed by this transport-level session event.
+      window.emit({ type: 'sessions_changed', source: 'group', roomId: 'room-a', threadId: `thread-${second}`,
+        conversationId: 'room-a', employeeId: 'manager' });
+    }, { second });
   }
   await page.waitForTimeout(260);
   const state = await page.locator('[data-room-list]').evaluate(node => JSON.parse(node.textContent || '{}'));

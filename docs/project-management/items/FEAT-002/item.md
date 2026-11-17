@@ -1214,3 +1214,13 @@ taskId + artifactId
 实现：`ui-feishu/shared/features/group-chat/components/MessageTimeline.tsx` 增加稳定消息 key 和按实际内容记忆化的消息气泡；`ui-feishu/src/useGroupChats.ts` 对新消息只合并本地活动时间，房间元数据变化仍执行完整刷新。新增 `group-update-stability-browser.test.mjs` 与 `group-room-list-browser.test.mjs`，复用现有群聊组件和 Playwright 夹具。
 
 验证：修改前稳定性测试在“占位节点复用”断言失败；修改后桌面 1280px、手机 390px 均通过，已有节点稳定、占位节点原位复用、空白帧 0、消息顺序保持、非内容状态更新滚动位移 0。房间列表测试确认连续 5 条群消息期间房间请求保持 1 次，最后活动时间正确更新；`sessions_changed` 后由 1 次增加到 2 次。原群聊中间回复、断线重连、刷新、停止和跨群隔离浏览器回归通过；`group-workspace.test.mjs`、TypeScript `--noEmit`、`git diff --check` 通过；两个受保护滚动文件零修改。当前状态为源码、测试和需求记录完成，进入提交、前端发布和线上生效核对。
+
+#### 2026-11-18 员工群消息伴随 `sessions_changed` 的二次刷新补齐
+
+复核证据：`windows/scripts/remote-room-demo.mjs` 的 `broadcastEmployeeGroupMessage` 在每条员工群消息后，除 `group_message_created` 外还会广播 `sessions_changed`，字段为 `source:"group"`、`roomId`、`threadId`、`conversationId`、`employeeId`。上一版 `useGroupChats` 只跳过了前者，后者仍会重新请求完整房间列表，因此线上员工连续回复时仍存在额外上层刷新。
+
+有效决定：仅当 `sessions_changed` 同时带 `source:"group"` 和 `roomId` 时，跳过房间列表完整刷新；该消息的活动时间继续由紧邻的 `group_message_created` 本地合并。创建、改名、归档等无 `source:"group"` 的 `sessions_changed` 必须继续刷新。不得修改滚动文件或扩大后端范围。
+
+用户操作变化：修改前，员工消息到达后先更新活动时间，随后伴随的 `sessions_changed` 又拉取整套房间列表。修改后，连续员工消息只做当前群消息局部更新和活动时间合并，不会再因伴随通知整体刷新；群名称和归档变化仍正常反映。
+
+验证：测试先按真实顺序连续发送 5 组 `group_message_created + sessions_changed(source:"group", roomId)`。修改前房间请求为 2 次，修改后保持初始 1 次，最后活动时间正确；随后发送无 `source` 的 `sessions_changed`，请求由 1 次增至 2 次。当前状态为源码与回归测试完成，提交、前端发布和线上重放结果见本轮交付。
