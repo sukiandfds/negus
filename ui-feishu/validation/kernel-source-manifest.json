@@ -1,0 +1,14 @@
+{
+  "ui-feishu/kernel/message-inbox.mjs": "0169e07ce320aba191c644145d2a42150a1ab806ff85345fec2dc1702ae735b3",
+  "ui-feishu/kernel/message-routing.mjs": "a614d515f69036bc2790a2cfa065114eafdcd721a395b3daf2ecf65da131dbd5",
+  "ui-feishu/kernel/native-task-runtime.mjs": "1e0fe3054dc65df1547492f7473d189f17d4f057f8da54204c049234bfac732d",
+  "ui-feishu/kernel/task-kernel.mjs": "f4dfdcc99aa1f33133f2177b8e26375afd66b12a6448d88bfb49f6f83e64423f",
+  "ui-feishu/kernel/task-tools-mcp.mjs": "dcc1b5e8abeced418d0b915b029bc42d77c7add14942327ec74f629d6ed0ea1a",
+  "ui-feishu/kernel/task-tools.mjs": "d6d0bbfd29d7d0906a224a0f0119905c9cfea9801492ea72ea1bf84375fdfa36",
+  "ui-feishu/server/employee-task-extension.mjs": "06042ff37ac8183505e1caea990327398ba299b0291aa9206435bf186cf8a0be",
+  "ui-feishu/server/group-extension.mjs": "61d95e31c99a710bdfaed15a96c777f0c286928f1b05649d68637d3a01d25d24",
+  "ui-feishu/server/group-task-service.mjs": "9dd341733b37a64a19d9d0f093679a3d820041bd226a2a6bdc35e378feec4278",
+  "ui-feishu/server/launch-preview.mjs": "e59d9e885e83aba40a1d235d2d8bbfa5bb24a34d01806e6face58e36a6dc6b06",
+  "ui-feishu/server/register.mjs": "2d8ed0befba48608653bc79e1e8ebc23437921093fb7a80d678917c889c40458",
+  "ui-feishu/server/task-routes.mjs": "c5182521af3905451bd856e87bc106705f87c08cc63714a62aea60d0b4351aab"
+}

@@ -1,0 +1,15 @@
+{
+  "roomId": "chat-f98f7da1-4444-4458-8551-ffce1671a84e",
+  "startedAt": "2026-10-07T04:48:17.822Z",
+  "stopTaskId": "5c98d55a-0e3b-4c59-b418-ac4f7416e7cd",
+  "restartTaskId": "a705dbbd-1b40-4a93-9bfb-cb53cb2d2545",
+  "restartNative": {
+    "threadId": "01a114b0-ee30-7141-bf69-3f0dcca25ee4",
+    "starting": true,
+    "previousTurnIds": [
+      "01a114b0-f200-74a0-9390-7aaea7cacb84",
+      "01a114b1-a59b-7b21-a9ea-6727951fd850"
+    ],
+    "turnId": "01a114c2-83a4-7ec1-a63c-17e5bd5ff57c"
+  }
+}

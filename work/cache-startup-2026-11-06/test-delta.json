@@ -1,0 +1,17 @@
+[
+  {
+    "file": "windows/tests/service-worker-update.test.mjs",
+    "added": 68,
+    "deleted": 2
+  },
+  {
+    "file": "windows/tests/conversation-cache-restore.test.mjs",
+    "added": 72,
+    "deleted": 0
+  },
+  {
+    "file": "ui-feishu/validation/conversation-store-browser.test.mjs",
+    "added": 5,
+    "deleted": 4
+  }
+]

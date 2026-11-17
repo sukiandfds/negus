@@ -1,16 +1,21 @@
 import fs from "node:fs";
-import fsp from "node:fs/promises";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { activityFromItem, detailFromItem, maxActivities, stateFromItem, terminalPhases } from "./execution/activity.mjs";
+import { activityFromItem, detailFromItem, stateFromItem, terminalPhases } from "./execution/activity.mjs";
+import { messageFromThreadItem } from "./content-blocks.mjs";
+import { writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
-export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
+export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTerminal = () => {}, registerMedia = () => null }) => {
   const statuses = new Map();
+  const completedMessages = new Map();
+  const messageTimes = new Map();
+  const activeGoals = new Set();
   const messagePhases = new Map();
   const itemTurns = new Map();
   const retiredTurns = new Map();
   const completedTurns = new Map();
   const reasoningBuffers = new Map();
+  const isConversationItem = (item) => ["userMessage", "agentMessage", "imageGeneration"].includes(item?.type)
+    || (item?.type === "mcpToolCall" && String(item.server || "").replace(/-/gu, "_") === "negus_image");
   const protocolEventTimes = new Map();
   const eventSequences = new Map();
   const eventEpoch = randomUUID();
@@ -18,10 +23,14 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
   const maxItemTurns = 500;
   let persistTimer;
   let persistChain = Promise.resolve();
+  const completedNotices = (status) => (status.notices || []).filter(notice =>
+    !(status.retryNotices || []).includes(notice) && !/^Reconnecting\b/iu.test(notice));
 
   if (stateFile) {
     try {
       const stored = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+      for (const entry of stored.messageTimes || []) messageTimes.set(...entry);
+      for (const entry of stored.completedMessages || []) completedMessages.set(...entry);
       for (const status of stored.statuses || []) {
         if (!status?.threadId) continue;
         const needsRestartNormalization = status.phase === "systemError"
@@ -30,28 +39,27 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
           ...status,
           phase: "interrupted",
           label: "项目服务已重启，上一任务已中断",
+          interruptionReason: "serviceRestart",
+          notices: [...new Set([...(status.notices || []), "项目服务已重启，上一任务已中断"])],
           active: false,
           streamingItemId: "",
           streamingText: "",
-          updatedAt: new Date().toISOString(),
           eventEpoch,
           eventSeq: 0,
-        } : { ...status, eventEpoch, eventSeq: 0 });
+        } : { ...status, ...(status.phase === "completed" ? { notices: completedNotices(status), retryNotices: [] } : {}), eventEpoch, eventSeq: 0 });
       }
     } catch {}
   }
 
   const persist = () => {
     if (!stateFile) return Promise.resolve();
-    const payload = `${JSON.stringify({
-      version: 1,
-      statuses: [...statuses.values()].slice(-50),
-    }, null, 2)}\n`;
     persistChain = persistChain.catch(() => {}).then(async () => {
-      await fsp.mkdir(path.dirname(stateFile), { recursive: true });
-      const temporary = `${stateFile}.${process.pid}.tmp`;
-      await fsp.writeFile(temporary, payload, "utf8");
-      await fsp.rename(temporary, stateFile);
+      await writeJsonFileAtomic(stateFile, {
+        version: 2,
+        messageTimes: [...messageTimes],
+        completedMessages: [...completedMessages],
+        statuses: [...statuses.values()].slice(-50),
+      });
     }).catch((error) => console.warn(`[execution-tracker] state persistence failed: ${error.message}`));
     return persistChain;
   };
@@ -105,6 +113,11 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
   };
 
   const broadcastThreadEvent = (threadId, value) => {
+    if (value.type === "user_message_submitted" && value.submissionId && value.createdAt) {
+      const key = itemKey(threadId, `submission:${value.submissionId}`);
+      if (!messageTimes.has(key)) messageTimes.set(key, value.createdAt);
+      schedulePersist();
+    }
     broadcast({ ...value, ...nextEventMetadata(threadId) });
   };
 
@@ -124,7 +137,7 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
       const index = activities.findIndex((activity) => activity.id === next.activity.id);
       activities = index >= 0
         ? activities.map((activity, activityIndex) => activityIndex === index ? next.activity : activity)
-        : [...activities, next.activity].slice(-maxActivities);
+        : [...activities, next.activity];
     }
     const status = {
       type: "execution_status",
@@ -133,7 +146,11 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
       phase: next.phase,
       label: next.label,
       detail: next.detail || "",
+      interruptionReason: beginsTurn ? undefined : previous?.interruptionReason,
+      notices: next.notices ?? (beginsTurn ? [] : previous?.notices || []),
+      retryNotices: next.retryNotices ?? (beginsTurn ? [] : previous?.retryNotices || []),
       commentary: beginsTurn ? "" : previous?.commentary || "",
+      hasFinalAnswer: beginsTurn ? undefined : next.hasFinalAnswer ?? previous?.hasFinalAnswer,
       streamingItemId: beginsTurn || !active ? "" : previous?.streamingItemId || "",
       streamingText: beginsTurn || !active ? "" : previous?.streamingText || "",
       activities,
@@ -145,6 +162,10 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
       lastProbeAt: next.lastProbeAt ?? previous?.lastProbeAt ?? null,
       ...nextEventMetadata(threadId),
     };
+    if (status.phase === "completed") {
+      status.notices = completedNotices(status);
+      status.retryNotices = [];
+    }
     statuses.set(threadId, status);
     schedulePersist();
     broadcast(status);
@@ -178,27 +199,18 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
     const index = previous.activities.findIndex((value) => value.id === activity.id);
     const activities = index >= 0
       ? previous.activities.map((value, activityIndex) => activityIndex === index ? activity : value)
-      : [...previous.activities, activity].slice(-maxActivities);
+      : [...previous.activities, activity];
     const status = { ...previous, activities, updatedAt: activity.updatedAt, ...nextEventMetadata(threadId) };
     statuses.set(threadId, status);
     schedulePersist();
     broadcast(status);
   };
 
-  const addCommentaryActivity = (threadId, itemId, text) => {
+  const updateCommentary = (threadId, text) => {
     const previous = statuses.get(threadId);
     if (!previous) return;
     const now = new Date().toISOString();
-    const activity = {
-      id: itemId || `commentary-${Date.now()}`,
-      phase: "working",
-      label: text,
-      detail: "",
-      completed: true,
-      updatedAt: now,
-    };
-    const activities = [...previous.activities.filter((value) => value.id !== activity.id), activity].slice(-maxActivities);
-    const status = { ...previous, commentary: text, activities, updatedAt: now, ...nextEventMetadata(threadId) };
+    const status = { ...previous, commentary: text, updatedAt: now, ...nextEventMetadata(threadId) };
     statuses.set(threadId, status);
     schedulePersist();
     broadcast(status);
@@ -233,6 +245,11 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
     const { method, params = {} } = message || {};
     const threadId = params.threadId;
     if (!threadId) return;
+    if (method === "thread/goal/updated") {
+      if (params.goal?.status === "active") activeGoals.add(threadId);
+      else activeGoals.delete(threadId);
+    }
+    if (method === "thread/goal/cleared") activeGoals.delete(threadId);
 
     if (method === "turn/started") {
       const turnId = String(params.turn?.id || "");
@@ -254,19 +271,44 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
       reasoningBuffers.delete(threadId);
       const phase = params.turn?.status || "completed";
       const failed = phase === "failed";
+      const finalItems = Array.isArray(params.turn?.items)
+        ? params.turn.items.filter(item => item.type === "agentMessage" && item.phase === "final_answer") : [];
       publish(threadId, {
         phase,
         turnId,
         label: failed ? "Codex 执行失败" : phase === "interrupted" ? "Codex 已中断" : "Codex 已完成",
         detail: params.turn?.error?.message || "",
+        hasFinalAnswer: current?.hasFinalAnswer ?? (finalItems.length
+          ? finalItems.some(item => Boolean(String(item.text || "").trim())) : undefined),
         durationMs: Number.isFinite(params.turn?.durationMs) ? params.turn.durationMs : null,
       });
       rememberCompletedTurn(threadId, turnId || statuses.get(threadId)?.turnId || "");
       broadcastThreadEvent(threadId, { type: "sessions_changed", threadId });
+      Promise.resolve(onTurnTerminal({ threadId, turnId, status: phase })).catch((error) => {
+        console.warn(`[execution-tracker] terminal callback failed: ${error.message}`);
+      });
       return;
     }
     const eventTurnId = turnIdFor(threadId, params, params.itemId || params.item?.id || "");
-    if (isRetiredTurn(threadId, eventTurnId)) return;
+    if (isRetiredTurn(threadId, eventTurnId) && method !== "item/completed") return;
+    if (method === "error" || method === "warning") {
+      if (eventTurnId && completedTurns.get(threadId)?.has(eventTurnId) && params.willRetry) return;
+      const current = getStatus(threadId);
+      const detail = method === "error" ? params.error?.message : params.message;
+      if (!detail) return;
+      const failed = method === "error" && !params.willRetry;
+      publish(threadId, {
+        phase: failed ? "failed" : current.phase,
+        label: failed ? "Codex 执行失败" : current.label,
+        active: failed ? false : current.active,
+        turnId: params.turnId || current.turnId,
+        detail: failed ? detail : current.detail,
+        notices: [...new Set([...(current.notices || []), detail])],
+        retryNotices: method === "error" && params.willRetry
+          ? [...new Set([...(current.retryNotices || []), detail])] : current.retryNotices,
+      });
+      return;
+    }
     const isCompletedTurn = Boolean(eventTurnId && completedTurns.get(threadId)?.has(eventTurnId));
     if (isCompletedTurn && method !== "item/completed") return;
     protocolEventTimes.set(threadId, new Date().toISOString());
@@ -283,7 +325,7 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
         publish(threadId, { phase: "waitingOnApproval", label: "需要在电脑端确认" });
       } else if (status.type === "active" && status.activeFlags?.includes("waitingOnUserInput")) {
         publish(threadId, { phase: "waitingOnUserInput", label: "Codex 正在等待补充信息" });
-      } else if (status.type === "active") {
+      } else if (status.type === "active" && (current?.active || current?.phase === "submitted")) {
         publish(threadId, { phase: "working", label: "Codex 正在处理任务" });
       } else if (status.type === "idle" && !terminalPhases.has(statuses.get(threadId)?.phase)) {
         publish(threadId, { phase: "idle", label: "Codex 已就绪" });
@@ -293,6 +335,9 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
     if (method === "item/started") {
       const itemId = String(params.item?.id || "");
       if (itemId) rememberItemTurn(threadId, itemId, eventTurnId);
+      if (params.item?.type === "userMessage" && params.item.clientId) broadcastThreadEvent(threadId, {
+        type: "user_message_accepted", threadId, turnId: eventTurnId, submissionId: params.item.clientId,
+      });
       if (params.item?.type === "agentMessage") messagePhases.set(itemKey(threadId, itemId), params.item.phase);
       const state = stateFromItem(params.item);
       if (state) publish(threadId, {
@@ -305,72 +350,72 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
     if (method === "item/completed") {
       const itemId = String(params.item?.id || "");
       if (itemId) rememberItemTurn(threadId, itemId, eventTurnId);
-      if (isCompletedTurn) {
-        if (["userMessage", "agentMessage", "imageGeneration"].includes(params.item?.type)) {
-          broadcastThreadEvent(threadId, { type: "sessions_changed", threadId });
+      if (params.item?.type === "agentMessage" && params.item.phase !== "commentary" && !isRetiredTurn(threadId, eventTurnId)) {
+        const current = statuses.get(threadId);
+        if (current) {
+          const status = { ...current, hasFinalAnswer: Boolean(String(params.item.text || "").trim()), ...nextEventMetadata(threadId) };
+          statuses.set(threadId, status);
+          schedulePersist();
+          broadcast(status);
         }
-        if (params.item?.type === "agentMessage") messagePhases.delete(itemKey(threadId, itemId));
-        return;
       }
-      if (params.item?.type === "agentMessage" && params.item.phase === "commentary") {
-        const text = String(params.item.text || "").trim();
-        if (text) {
-          addCommentaryActivity(threadId, params.item.id || "", text);
-          const current = statuses.get(threadId);
-          broadcastThreadEvent(threadId, {
-            type: "assistant_commentary",
-            threadId,
-            turnId: eventTurnId || current?.turnId || "",
-            itemId,
-            text,
-          });
+      if (params.item?.type === "agentMessage") {
+        const parsed = messageFromThreadItem({ ...params.item, type: "agentMessage" }, registerMedia);
+        const text = String(parsed?.text || "").trim();
+        if ((text || parsed?.blocks?.length) && itemId) {
+          const key = itemKey(threadId, itemId);
+          const createdAt = messageTimes.get(key) || new Date().toISOString();
+          messageTimes.set(key, createdAt);
+          const turnId = eventTurnId || statuses.get(threadId)?.turnId || "";
+          const message = { ...parsed, id: `codex:${encodeURIComponent(turnId || "unknown")}:${encodeURIComponent(itemId)}`,
+            itemId, turnId, role: "assistant", text: parsed?.text || "", phase: params.item.phase || "final_answer", createdAt, serverTimestamp: true };
+          completedMessages.set(key, { threadId, message });
+          schedulePersist();
+          broadcastThreadEvent(threadId, { type: "assistant_message_completed", threadId, message });
+          if (!isCompletedTurn && !isRetiredTurn(threadId, eventTurnId) && params.item.phase === "commentary") updateCommentary(threadId, text);
+
         }
-      } else if (["userMessage", "agentMessage", "imageGeneration"].includes(params.item?.type)) {
-        if (params.item?.type === "agentMessage" && params.item?.phase !== "commentary") {
-          publish(threadId, {
-            phase: "finalizing",
-            label: "回复已完成，正在收尾",
-            active: true,
-          });
-        }
-        broadcastThreadEvent(threadId, { type: "sessions_changed", threadId });
-      } else {
-        completeActivity(threadId, params.item);
-      }
-      if (params.item?.type === "agentMessage") messagePhases.delete(itemKey(threadId, itemId));
+        messagePhases.delete(itemKey(threadId, itemId));
+      } else if (!isCompletedTurn && !isConversationItem(params.item)) completeActivity(threadId, params.item);
+      if (isConversationItem(params.item)) broadcastThreadEvent(threadId, { type: "sessions_changed", threadId });
       return;
     }
     if (method === "item/reasoning/summaryTextDelta") {
       addReasoningSummary(threadId, params.itemId || "reasoning", params.delta);
       return;
     }
-    if (method === "item/agentMessage/delta") {
-      const itemId = String(params.itemId || "");
-      if (messagePhases.get(itemKey(threadId, itemId)) !== "commentary") {
-        const previous = statuses.get(threadId);
-        if (previous) {
-          const streamingText = previous.streamingItemId === itemId
-            ? previous.streamingText + String(params.delta || "")
-            : String(params.delta || "");
-          statuses.set(threadId, {
-            ...previous,
-            streamingItemId: itemId,
-            streamingText,
-            updatedAt: new Date().toISOString(),
-            ...nextEventMetadata(threadId),
-          });
-          schedulePersist();
-        }
-        broadcastThreadEvent(threadId, { type: "assistant_delta", ...params, turnId: eventTurnId || previous?.turnId || "" });
-      }
-      return;
-    }
+    // FEAT-001: transport remains realtime, but text is published only at item completion.
+    if (method === "item/agentMessage/delta") return;
     if (method?.endsWith("/requestApproval")) {
       publish(threadId, { phase: "waitingOnApproval", label: "需要在电脑端确认" });
       return;
     }
     if (method === "item/tool/requestUserInput" || method === "mcpServer/elicitation/request") {
       publish(threadId, { phase: "waitingOnUserInput", label: "Codex 正在等待补充信息" });
+      if (method === "item/tool/requestUserInput") {
+        broadcastThreadEvent(threadId, {
+          type: "user_input_requested",
+          threadId,
+          request: {
+            requestId: message.id,
+            threadId,
+            turnId: String(params.turnId || ""),
+            itemId: String(params.itemId || ""),
+            isBlocking: params.isBlocking !== false,
+            questions: (Array.isArray(params.questions) ? params.questions : []).slice(0, 3).map((question) => ({
+              id: String(question?.id || ""),
+              header: String(question?.header || "").slice(0, 120),
+              question: String(question?.question || "").slice(0, 4000),
+              isOther: question?.isOther === true,
+              isSecret: question?.isSecret === true,
+              options: Array.isArray(question?.options) ? question.options.slice(0, 20).map((option) => ({
+                label: String(option?.label || "").slice(0, 240),
+                description: String(option?.description || "").slice(0, 1000),
+              })) : null,
+            })).filter((question) => question.id && question.question),
+          },
+        });
+      }
     }
   };
 
@@ -440,10 +485,12 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
       });
       return;
     }
-    if (event.phase === "recovered") {
+    if (event.phase === "recovered" || event.phase === "exited") {
+      // Idle threads were not running anything the user needs to hear about.
+      if (event.phase === "exited" && !statuses.get(threadId)?.active) return;
       publish(threadId, {
         phase: "interrupted",
-        label: "连接已恢复，上一任务已中断",
+        label: event.phase === "recovered" ? "连接已恢复，上一任务已中断" : "Codex 进程已退出，上一任务已中断",
         active: false,
         lastProbeAt,
       });
@@ -492,5 +539,51 @@ export const createExecutionTracker = ({ broadcast, stateFile = "" }) => {
     await persist();
   };
 
-  return { markSubmitted, markFailed, handleProtocolMessage, handleHealthState, getStatus, reconcile, close };
+  return {
+    hasPendingWork: () => activeGoals.size > 0 || [...statuses.values()].some((status) => status.active),
+    markSubmitted,
+    markFailed,
+    publishStatus: (threadId, next) => publish(threadId, next),
+    handleProtocolMessage,
+    handleHealthState,
+    getStatus,
+    recordMessage: (threadId, message) => {
+      completedMessages.set(itemKey(threadId, message.itemId || message.id), { threadId, message });
+      schedulePersist();
+    },
+    clearCompletedMessages: (threadId) => {
+      for (const [key, entry] of completedMessages) if (entry.threadId === threadId && entry.message.source !== "native-goal") completedMessages.delete(key);
+      schedulePersist();
+    },
+    completeSession: (session, append = false) => {
+      if (!session) return session;
+      const currentStatus = statuses.get(session.threadId);
+      const visible = session.messages.filter(message => !(currentStatus?.active
+        && message.role === "assistant" && message.turnId === currentStatus.turnId
+        && !messageTimes.has(itemKey(session.threadId, message.itemId))));
+      const byItem = new Set(visible.map(message => message.itemId || message.id));
+      const messages = visible.map(message => {
+        const createdAt = messageTimes.get(itemKey(session.threadId, message.role === "user" && message.submissionId ? `submission:${message.submissionId}` : message.itemId));
+        const complete = completedMessages.get(itemKey(session.threadId, message.itemId));
+        if (complete && message.text.length < complete.message.text.length) return { ...message, ...complete.message };
+        if (complete && !currentStatus?.active) {
+          completedMessages.delete(itemKey(session.threadId, message.itemId));
+          schedulePersist();
+        }
+        return createdAt ? { ...message, createdAt, serverTimestamp: true } : message;
+      });
+      if (append) for (const entry of completedMessages.values()) {
+        if (entry.threadId !== session.threadId || byItem.has(entry.message.itemId || entry.message.id)) continue;
+        // Do not resurrect replies removed by editing/reverting an existing turn.
+        const turn = messages.find(message => message.turnId === entry.message.turnId);
+        const current = statuses.get(session.threadId);
+        if (entry.message.source !== "native-goal" && !turn && current?.turnId !== entry.message.turnId) continue;
+        messages.push(entry.message);
+      }
+      return { ...session, messages };
+    },
+    reconcile,
+    publishThreadEvent: broadcastThreadEvent,
+    close,
+  };
 };

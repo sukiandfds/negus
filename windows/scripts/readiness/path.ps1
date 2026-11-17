@@ -86,7 +86,7 @@ function Get-PnpmStorePath {
     return $env:PNPM_STORE_DIR
   }
 
-  $modulesFile = Join-Path $ProjectRoot "web-ui\node_modules\.modules.yaml"
+  $modulesFile = Join-Path $ProjectRoot "ui-feishu\node_modules\.modules.yaml"
   if (Test-Path -LiteralPath $modulesFile -PathType Leaf) {
     try {
       $storeLine = Select-String -LiteralPath $modulesFile -Pattern '^storeDir:\s*(.+)$' |

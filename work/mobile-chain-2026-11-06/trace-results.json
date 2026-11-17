@@ -1,0 +1,41 @@
+{
+  "build": {
+    "buildId": "feishu-mw4fqhbj",
+    "builtAt": "2026-11-06T03:49:00.543Z"
+  },
+  "scope": "Chrome mobile viewport; controlled directory-only cache; mocked delayed network/context event; not actual phone",
+  "first": [
+    {
+      "ms": 65,
+      "title": "N手机链路对照所属项目:未关联消息云文档文件",
+      "composer": "给 Codex 发送指令添加文件选择模型上下文 --",
+      "messages": 0
+    },
+    {
+      "ms": 431,
+      "title": "N手机链路对照所属项目:未关联消息云文档文件",
+      "composer": "给 Codex 发送指令添加文件Fixture-Model · Medium上下文 12k / 100k（12%）",
+      "messages": 0
+    },
+    {
+      "ms": 1079,
+      "title": "project来自助手手机链路对照所属项目:project消息云文档文件",
+      "composer": "给 Codex 发送指令添加文件Fixture-Model · Medium上下文 12k / 100k（12%）",
+      "messages": 0
+    },
+    {
+      "ms": 2707,
+      "title": "project来自助手手机链路对照所属项目:project消息云文档文件",
+      "composer": "给 Codex 发送指令添加文件Fixture-Model · Medium上下文 12k / 100k（12%）",
+      "messages": 1
+    }
+  ],
+  "reload": [
+    {
+      "ms": 50,
+      "title": "project来自助手手机链路对照所属项目:project消息云文档文件",
+      "composer": "给 Codex 发送指令添加文件Fixture-Model · Medium上下文 12k / 100k（12%）",
+      "messages": 1
+    }
+  ]
+}

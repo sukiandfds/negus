@@ -97,7 +97,7 @@ Seeding is idempotent. Upgrades remove only retired bundled preset IDs; your
 own `custom-*` themes from “换一张图” and the currently active theme copy are
 never touched.
 
-To contribute a preset, see [`presets/README.md`](./presets/README.md).
+To contribute a preset, see [`presets/README.md`](presets/README.md).
 
 ## Image guidelines
 
@@ -109,7 +109,7 @@ To contribute a preset, see [`presets/README.md`](./presets/README.md).
 - Use pure edge-to-edge background art only: no window chrome, sidebar, cards,
   buttons, composer, readable text, logo, or watermark
 - The prompt-ready composition template and negative prompt live in
-  [`docs/reference-background-prompt-guide.md`](../docs/reference-background-prompt-guide.md)
+  [`docs/negus-knowledge/reference/reference-background-prompt-guide.md`](../docs/negus-knowledge/reference/reference-background-prompt-guide.md)
 
 ## Adaptive image themes
 

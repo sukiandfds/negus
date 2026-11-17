@@ -18,6 +18,9 @@ trap '/bin/rm -rf "$TMP"' EXIT
   --exclude 'runtime/' \
   "$ROOT/" "$ENGINE/"
 
+if [ -f "$ROOT/../windows/scripts/image-metadata.mjs" ]; then
+  /bin/cp "$ROOT/../windows/scripts/image-metadata.mjs" "$ENGINE/scripts/image-metadata.mjs"
+fi
 # Keep the customer ZIP self-contained: bundle prompt docs and referenced
 # images, then translate repository paths for the hidden standalone engine.
 "$ROOT/scripts/prepare-standalone-docs.sh" "$ENGINE"

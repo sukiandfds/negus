@@ -1,0 +1,9 @@
+.errorText,
+.noticeText {
+  width: min(var(--content-width), 100%);
+  margin: 0 auto 7px;
+  font-size: 11px;
+}
+
+.errorText { color: #d58c83; }
+.noticeText { color: var(--color-text-muted); pointer-events: none; }

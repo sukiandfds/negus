@@ -1,10 +1,32 @@
 import { createHash } from "node:crypto";
-import fs from "node:fs/promises";
-import path from "node:path";
+import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
-const fileVersion = 1;
+const fileVersion = 2;
 
 const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+
+// FEAT-001: detect Desktop/history writes without reading message bodies.
+export const conversationSourceRevision = (stat) => hash([stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs]);
+
+const normalizeMessages = (messages) => {
+  const used = new Set();
+  return (Array.isArray(messages) ? messages : []).map((message, index) => {
+    const baseId = String(message.id || `message-${index}`);
+    let id = baseId;
+    let duplicate = 0;
+    while (used.has(id)) {
+      duplicate += 1;
+      id = `${baseId}#duplicate-${duplicate}`;
+    }
+    used.add(id);
+    return message.id === id ? message : { ...message, id };
+  });
+};
+
+const normalizeSession = (session) => {
+  const messages = normalizeMessages(session.messages);
+  return messages === session.messages ? session : { ...session, messages };
+};
 
 const messageEntriesFrom = (messages) => (Array.isArray(messages) ? messages : []).map((message, index) => ({
   id: String(message.id || `message-${index}`),
@@ -15,6 +37,7 @@ const patchFromSession = (session) => ({
   threadId: session.threadId,
   source: session.source,
   title: session.title,
+  createdBy: session.createdBy,
   updatedAt: session.updatedAt,
   messageCount: session.messageCount,
   latestUser: session.latestUser,
@@ -33,6 +56,7 @@ const snapshotFromSession = (session) => {
     threadId: patch.threadId,
     source: patch.source,
     title: patch.title,
+    createdBy: patch.createdBy,
     updatedAt: patch.updatedAt,
     messageCount: patch.messageCount,
     latestUser: patch.latestUser,
@@ -63,7 +87,7 @@ export const createConversationVersionStore = ({ stateFile = "" } = {}) => {
     loaded = true;
     if (!stateFile) return;
     try {
-      const stored = JSON.parse(await fs.readFile(stateFile, "utf8"));
+      const stored = await readJsonFile(stateFile, null);
       if (stored?.version !== fileVersion || !stored.threads || typeof stored.threads !== "object") return;
       records = new Map(Object.entries(stored.threads).filter(([, record]) => validRecord(record)));
     } catch (error) {
@@ -73,11 +97,7 @@ export const createConversationVersionStore = ({ stateFile = "" } = {}) => {
 
   const persist = async () => {
     if (!stateFile) return;
-    const payload = `${JSON.stringify({ version: fileVersion, threads: Object.fromEntries(records) }, null, 2)}\n`;
-    await fs.mkdir(path.dirname(stateFile), { recursive: true });
-    const temporary = `${stateFile}.${process.pid}.tmp`;
-    await fs.writeFile(temporary, payload, "utf8");
-    await fs.rename(temporary, stateFile);
+    await writeJsonFileAtomic(stateFile, { version: fileVersion, threads: Object.fromEntries(records) });
   };
 
   const run = (operation) => {
@@ -88,14 +108,16 @@ export const createConversationVersionStore = ({ stateFile = "" } = {}) => {
 
   const decorate = (threadId, session) => run(async () => {
     await load();
+    const normalized = normalizeSession(session);
     const contentVersion = records.get(threadId)?.contentVersion;
-    return contentVersion ? { ...session, contentVersion } : session;
+    return contentVersion ? { ...normalized, contentVersion } : normalized;
   });
 
   const sync = (threadId, session, { requestedVersion, incremental = false } = {}) => run(async () => {
     await load();
+    const normalized = normalizeSession(session);
     const previous = records.get(threadId);
-    const current = snapshotFromSession(session);
+    const current = snapshotFromSession(normalized);
     const changed = !previous || previous.signature !== current.signature;
     const contentVersion = previous
       ? changed ? previous.contentVersion + 1 : previous.contentVersion
@@ -106,7 +128,7 @@ export const createConversationVersionStore = ({ stateFile = "" } = {}) => {
       await persist();
     }
 
-    const full = { ...session, contentVersion };
+    const full = { ...normalized, contentVersion };
     if (!incremental || !Number.isSafeInteger(requestedVersion) || !previous) return full;
 
     if (!changed && requestedVersion === contentVersion) {
@@ -137,7 +159,7 @@ export const createConversationVersionStore = ({ stateFile = "" } = {}) => {
         threadId,
         contentVersion,
         unchanged: false,
-        upserts: (Array.isArray(session.messages) ? session.messages : []).filter((message, index) => {
+        upserts: (Array.isArray(normalized.messages) ? normalized.messages : []).filter((message, index) => {
           const id = String(message.id || `message-${index}`);
           return previousMessages.get(id) !== currentMessages.get(id);
         }),

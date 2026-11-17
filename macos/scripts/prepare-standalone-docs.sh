@@ -13,7 +13,7 @@ if [ "$#" -eq 2 ]; then
   DOCS_SOURCE="$(cd "$2" && pwd -P)"
 else
   SCRIPT_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
-  for candidate in "$SCRIPT_ROOT/docs" "$SCRIPT_ROOT/../docs"; do
+  for candidate in "$SCRIPT_ROOT/docs" "$SCRIPT_ROOT/../docs/negus-knowledge/reference" "$SCRIPT_ROOT/../docs"; do
     if [ -f "$candidate/reference-background-prompt-guide.md" ]; then
       DOCS_SOURCE="$(cd "$candidate" && pwd -P)"
       break

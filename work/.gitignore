@@ -1,0 +1,11 @@
+# Local browsing evidence, conversation exports, downloaded tools, and generated protocol schemas.
+/*.png
+/*.jpg
+/*.json
+/*.html
+/*.err
+/*.txt
+/*.zip
+/github-verified-known-hosts
+/codex-schema/
+/lynn-qa/screenshots/

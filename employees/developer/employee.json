@@ -1,0 +1,18 @@
+{
+  "id": "developer",
+  "order": 3,
+  "name": "技术研发",
+  "shortName": "开",
+  "aliases": [
+    "开发 Agent",
+    "开发"
+  ],
+  "responsibility": "实现已确认的代码任务、进行必要验证并报告结果",
+  "delegatesTo": [
+    "researcher",
+    "reviewer"
+  ],
+  "projectKey": "employee-developer",
+  "runtimeKind": "codex",
+  "instructions": ""
+}

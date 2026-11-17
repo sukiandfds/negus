@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { createExecutionTracker } from "../server/execution-tracker.mjs";
 
-test("streams final answers but keeps commentary updates complete", () => {
+test("publishes only complete bubbles, without final answer deltas", () => {
   const events = [];
   const tracker = createExecutionTracker({ broadcast: (event) => events.push(event) });
 
@@ -32,11 +32,63 @@ test("streams final answers but keeps commentary updates complete", () => {
   });
 
   assert.equal(events.some((event) => event.type === "assistant_delta" && event.itemId === "commentary-1"), false);
-  assert.equal(events.some((event) => event.type === "assistant_commentary" && event.text === "已经完成分析"), true);
-  assert.equal(events.some((event) => event.type === "assistant_delta" && event.itemId === "answer-1"), true);
-  assert.equal(tracker.getStatus("thread-1").streamingText, "最终回复");
+  assert.equal(events.some((event) => event.type === "assistant_message_completed" && event.message.text === "已经完成分析"), true);
+  assert.equal(events.some((event) => event.type === "assistant_delta"), false);
+  tracker.handleProtocolMessage({ method: "item/completed", params: { threadId: "thread-1", item: {
+    id: "answer-1", type: "agentMessage", phase: "final_answer", text: "最终回复" } } });
+  assert.equal(events.filter(event => event.type === "assistant_message_completed").length, 2);
+  assert.equal(tracker.getStatus("thread-1").streamingText, "");
   assert.equal(tracker.getStatus("thread-1").commentary, "已经完成分析");
-  assert.equal(tracker.getStatus("thread-1").activities.at(-1).label, "已经完成分析");
+  assert.equal(tracker.getStatus("thread-1").activities.length, 0);
+});
+
+test("publishes generated files with existing file blocks in the completed realtime message", () => {
+  const events = [];
+  const registerMedia = (source) => ({
+    id: "generated-file",
+    name: "report.md",
+    path: source,
+    mimeType: "text/markdown",
+    url: "/api/media/generated-file",
+  });
+  const tracker = createExecutionTracker({ broadcast: (event) => events.push(event), registerMedia });
+  tracker.markSubmitted("thread-1");
+  tracker.handleProtocolMessage({
+    method: "item/completed",
+    params: { threadId: "thread-1", item: {
+      id: "answer-1",
+      type: "agentMessage",
+      phase: "final_answer",
+      text: "报告已生成。\n::file{path=\"/tmp/report.md\"}",
+    } },
+  });
+
+  const message = events.find((event) => event.type === "assistant_message_completed")?.message;
+  assert.equal(message.text, "报告已生成。");
+  assert.deepEqual(message.blocks.map((block) => block.type), ["markdown", "file"]);
+  assert.equal(message.blocks[1].source, "/api/media/generated-file");
+});
+
+test("publishes Codex user-input requests for the web conversation", () => {
+  const events = [];
+  const tracker = createExecutionTracker({ broadcast: (event) => events.push(event) });
+  tracker.markSubmitted("thread-1");
+  tracker.handleProtocolMessage({
+    id: 19,
+    method: "item/tool/requestUserInput",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      isBlocking: true,
+      questions: [{ id: "scope", header: "范围", question: "处理哪些内容？", isOther: true, isSecret: false, options: [] }],
+    },
+  });
+
+  assert.equal(tracker.getStatus("thread-1").phase, "waitingOnUserInput");
+  const requested = events.find((event) => event.type === "user_input_requested");
+  assert.equal(requested.request.requestId, 19);
+  assert.equal(requested.request.questions[0].id, "scope");
 });
 
 test("tracks the active turn id and completed tool activity", () => {
@@ -119,7 +171,8 @@ test("ignores delayed protocol events from a retired turn", () => {
   assert.equal(status.phase, "responding");
   assert.equal(status.active, true);
   assert.equal(status.commentary, "");
-  assert.equal(status.streamingText, "new answer");
+  assert.equal(status.streamingText, "");
+  assert.equal(events.some(event => event.type === "assistant_message_completed" && event.message.text === "late old commentary"), true);
   assert.equal(events.some((event) => event.type === "assistant_commentary" && event.text === "late old commentary"), false);
   assert.equal(events.some((event) => event.type === "assistant_delta" && event.delta === "late old answer"), false);
 });
@@ -146,6 +199,28 @@ test("does not let an unscoped idle event reset a newer active turn", () => {
   assert.equal(status.turnId, "turn-2");
   assert.equal(status.active, true);
   assert.equal(status.phase, "working");
+});
+
+test("does not revive a completed turn from an unscoped active event", () => {
+  const tracker = createExecutionTracker({ broadcast: () => {} });
+  tracker.markSubmitted("thread-1");
+  tracker.handleProtocolMessage({
+    method: "turn/started",
+    params: { threadId: "thread-1", turn: { id: "turn-1" } },
+  });
+  tracker.handleProtocolMessage({
+    method: "turn/completed",
+    params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } },
+  });
+  tracker.handleProtocolMessage({
+    method: "thread/status/changed",
+    params: { threadId: "thread-1", status: { type: "active" } },
+  });
+
+  const status = tracker.getStatus("thread-1");
+  assert.equal(status.turnId, "turn-1");
+  assert.equal(status.phase, "completed");
+  assert.equal(status.active, false);
 });
 
 test("does not let an unscoped turn completion reset a newer active turn", () => {
@@ -196,7 +271,10 @@ test("keeps a completed turn terminal when its final item completion arrives lat
   const status = tracker.getStatus("thread-1");
   assert.equal(status.phase, "completed");
   assert.equal(status.active, false);
-  assert.equal(events.filter((event) => event.type === "sessions_changed").length, 3);
+  assert.equal(status.hasFinalAnswer, true);
+  assert.equal(status.threadId, "thread-1");
+  assert.equal(events.at(-1).type, "sessions_changed");
+  assert.equal(events.at(-1).threadId, "thread-1");
 });
 
 test("assigns monotonic per-thread event sequences", () => {
@@ -404,7 +482,7 @@ test("reports an app-server recovery failure without leaving the page active", (
   assert.equal(tracker.getStatus("thread-1").active, false);
 });
 
-test("distinguishes a completed reply from a completed turn", () => {
+test("keeps the active turn stable until the completed turn arrives", () => {
   const tracker = createExecutionTracker({ broadcast: () => {} });
   tracker.markSubmitted("thread-1");
   tracker.handleProtocolMessage({
@@ -419,8 +497,7 @@ test("distinguishes a completed reply from a completed turn", () => {
     },
   });
 
-  assert.equal(tracker.getStatus("thread-1").phase, "finalizing");
-  assert.equal(tracker.getStatus("thread-1").label, "回复已完成，正在收尾");
+  assert.equal(tracker.getStatus("thread-1").phase, "working");
   assert.equal(tracker.getStatus("thread-1").active, true);
 
   tracker.handleHealthState({
@@ -479,6 +556,9 @@ test("normalizes a persisted recovery failure after the service restarts", async
     const status = tracker.getStatus("thread-recovery-failed");
     assert.equal(status.phase, "interrupted");
     assert.equal(status.label, "项目服务已重启，上一任务已中断");
+    assert.equal(status.interruptionReason, "serviceRestart");
+    assert.ok(status.notices.includes("项目服务已重启，上一任务已中断"));
+    assert.equal(status.updatedAt, "2026-08-03T06:48:27.000Z");
     assert.equal(status.active, false);
     assert.equal(status.streamingItemId, "");
     assert.equal(status.streamingText, "");
@@ -486,4 +566,64 @@ test("normalizes a persisted recovery failure after the service restarts", async
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
+});
+
+test('protocol errors and warnings remain visible through completion and preserve retry state', () => {
+  const tracker = createExecutionTracker({ broadcast: () => {} });
+  tracker.handleProtocolMessage({ method: 'turn/started', params: { threadId: 't', turn: { id: 'turn' } } });
+  tracker.handleProtocolMessage({ method: 'error', params: { threadId: 't', turnId: 'turn', willRetry: true, error: { message: 'retrying' } } });
+  assert.equal(tracker.getStatus('t').active, true);
+  tracker.handleProtocolMessage({ method: 'error', params: { threadId: 't', turnId: 'turn', willRetry: false, error: { message: '403: 额度不足' } } });
+  assert.equal(tracker.getStatus('t').phase, 'failed');
+  tracker.handleProtocolMessage({ method: 'turn/completed', params: { threadId: 't', turn: { id: 'turn', status: 'failed' } } });
+  assert.deepEqual(tracker.getStatus('t').notices, ['retrying', '403: 额度不足']);
+  tracker.handleProtocolMessage({ method: 'warning', params: { threadId: 'idle', message: 'model changed' } });
+  assert.equal(tracker.getStatus('idle').active, false);
+  assert.deepEqual(tracker.getStatus('idle').notices, ['model changed']);
+});
+
+test('native reconnect notices and final failure propagate in order', () => {
+  const published = [];
+  const tracker = createExecutionTracker({ broadcast: event => published.push(event) });
+  tracker.handleProtocolMessage({ method: 'turn/started', params: { threadId: 't', turn: { id: 'turn' } } });
+  for (const message of ['Reconnecting... 1/2', 'Reconnecting... 2/2']) {
+    tracker.handleProtocolMessage({ method: 'error', params: { threadId: 't', turnId: 'turn', willRetry: true, error: { message } } });
+    assert.equal(tracker.getStatus('t').active, true);
+    assert.ok(tracker.getStatus('t').notices.includes(message));
+  }
+  tracker.handleProtocolMessage({ method: 'error', params: { threadId: 't', turnId: 'turn', willRetry: false, error: { message: 'stream disconnected' } } });
+  tracker.handleProtocolMessage({ method: 'turn/completed', params: { threadId: 't', turn: { id: 'turn', status: 'failed', error: { message: 'stream disconnected' } } } });
+  const status = tracker.getStatus('t');
+  assert.equal(status.active, false);
+  assert.equal(status.phase, 'failed');
+  assert.deepEqual(status.notices, ['Reconnecting... 1/2', 'Reconnecting... 2/2', 'stream disconnected']);
+  assert.ok(published.some(event => event.type === 'execution_status' && event.notices?.includes('Reconnecting... 2/2')));
+});
+
+test('native user receipt identifies the exact submitted message before assistant progress', () => {
+  const events = [];
+  const tracker = createExecutionTracker({ broadcast: event => events.push(event) });
+  tracker.handleProtocolMessage({ method: 'turn/started', params: { threadId: 't', turn: { id: 'turn' } } });
+  tracker.handleProtocolMessage({ method: 'item/started', params: { threadId: 't', turnId: 'turn', item: { type: 'userMessage', id: 'native-id', clientId: 'submitted-id' } } });
+  const receipt = events.find(event => event.type === 'user_message_accepted');
+  assert.equal(receipt.submissionId, 'submitted-id');
+  assert.equal(receipt.turnId, 'turn');
+  assert.equal(receipt.threadId, 't');
+});
+
+test("marks a running turn interrupted when the app-server process exits", () => {
+  const events = [];
+  const tracker = createExecutionTracker({ broadcast: (event) => events.push(event) });
+  tracker.markSubmitted("thread-1");
+  tracker.handleProtocolMessage({
+    method: "turn/started",
+    params: { threadId: "thread-1", turn: { id: "turn-1" } },
+  });
+
+  tracker.handleHealthState({ phase: "exited", threadId: "thread-1", error: new Error("gone") });
+  tracker.handleHealthState({ phase: "exited", threadId: "thread-idle", error: new Error("gone") });
+
+  assert.equal(tracker.getStatus("thread-1").phase, "interrupted");
+  assert.equal(tracker.getStatus("thread-1").active, false);
+  assert.equal(tracker.getStatus("thread-idle").phase, "idle", "idle threads are not touched");
 });

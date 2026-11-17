@@ -30,6 +30,9 @@ deploy_project() {
     --exclude 'release/' \
     --exclude 'runtime/' \
     "$PROJECT_ROOT/" "$temporary/"
+if [ -f "$PROJECT_ROOT/../windows/scripts/image-metadata.mjs" ]; then
+  /bin/cp "$PROJECT_ROOT/../windows/scripts/image-metadata.mjs" "$temporary/scripts/image-metadata.mjs"
+fi
   /bin/chmod 700 "$temporary"/*.command "$temporary"/scripts/*.sh 2>/dev/null || true
   if [ -e "$INSTALL_ROOT" ]; then /bin/mv "$INSTALL_ROOT" "$previous"; fi
   if ! /bin/mv "$temporary" "$INSTALL_ROOT"; then

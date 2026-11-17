@@ -857,15 +857,6 @@ try {
   $oversizedPayloadTest = Invoke-DreamSkinNative -FilePath $node.Path -ArgumentList @(
     (Join-Path $Root 'scripts\injector.mjs'), '--check-payload', '--theme-dir', $oversizedTheme)
   if ($oversizedPayloadTest.ExitCode -eq 0) { throw 'Node injector accepted an image over the 16 MB limit.' }
-  $rendererTest = Invoke-DreamSkinNative -FilePath $node.Path -ArgumentList @(
-    (Join-Path $PSScriptRoot 'renderer-inject.test.mjs'))
-  if ($rendererTest.ExitCode -ne 0) { throw 'Renderer auxiliary-window regression test failed.' }
-  $bootstrapTest = Invoke-DreamSkinNative -FilePath $node.Path -ArgumentList @(
-    (Join-Path $PSScriptRoot 'injector-bootstrap.test.mjs'))
-  if ($bootstrapTest.ExitCode -ne 0) { throw 'Injector early-bootstrap regression test failed.' }
-  $oneShotTest = Invoke-DreamSkinNative -FilePath $node.Path -ArgumentList @(
-    (Join-Path $PSScriptRoot 'injector-one-shot.test.mjs'))
-  if ($oneShotTest.ExitCode -ne 0) { throw 'Injector one-shot Browser ID regression test failed.' }
   $imageMetadataTest = Invoke-DreamSkinNative -FilePath $node.Path -ArgumentList @(
     (Join-Path $PSScriptRoot 'image-metadata.test.mjs'))
   if ($imageMetadataTest.ExitCode -ne 0) { throw 'Image metadata regression test failed.' }

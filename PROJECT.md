@@ -1,223 +1,161 @@
-# Codex Collab Panel
+# negus Web 协作工作台项目说明
 
-更新日期：2026-07-22
-当前阶段：单项目真实对话 Web Demo，已完成浏览器双向 Codex 技术闭环
+方向与入口整理：2026-09-29 18:31 +08:00（PM-003）。以下能力说明原核对日期为 2026-09-14，未经本轮重新验收。
 
-完整的原始设想、推演过程、商业愿景与顾虑见 [VISION_NOTES.md](VISION_NOTES.md)。
+本次核对分支：`codex/publish-current-panel`。代码基线：`2114b7c6275db02479b7ff708f47491fab8c53ef`。
+本轮依据现有文档、前端组件、后端路由及服务实现进行静态核对，未启动服务、运行构建或重新进行实机验收。以下“已有实现”不表示已部署，也不替代功能档案的验收状态。
 
-## 2026-07-22 当前状态
+本文件只说明 negus Web 协作工作台。Codex Dream Skin 换肤工具的使用说明放在 `macos/README.md` 和 `windows/README.md`。
 
-当前 Demo 已经具备：
+## 项目定位
 
-- 读取一个项目中的真实 Codex Thread、真实标题和结构化内容；
-- 分页、缓存、虚拟列表及 Markdown、代码、表格和媒体渲染；
-- 从电脑或手机浏览器向当前真实 Thread 发送指令；
-- 通过 app-server Notification 和 SSE 展示执行状态与流式回复；
-- 自动选择可运行的 Codex Desktop 运行时，并在单次读取失败时回退 JSONL。
+当前方向：**以个人助理为主要沟通入口、可以持续自定义的工作空间**。桌面展示真实工作内容，总助理处理快速请求，专业 Agent 支持咨询与后台执行。正式行为与未定边界见 [产品定义](docs/negus-knowledge/product/PRODUCT_DEFINITION.md)，来源见 [文档导航](docs/README.md)。
 
-浏览器发送已由用户实测成功，但当前仍有一个重要边界：网页使用独立 app-server 进程。消息和回复会保存到同一个 Thread，已经打开的 Codex Desktop 页面却不会实时显示外部进程追加的内容。因此目前是“同一任务持久化 + Web 实时执行”，尚不是 Desktop 与 Web 的完整双端实时同步。
+本文件的能力介绍保留原静态核对基线，不将历史测试结果视为本次验收。当前入口源码默认进入桌面；后端仍在 `windows/server/`，目录名称不等于仅支持 Windows。
 
-当前最近目标：
+Codex Dream Skin 是历史来源，已确定逐步退出；本轮未删除代码，也不把换肤工具作为长期并行产品。下文已有 Codex、群聊和交付物能力是可复用基础，后续投入按新方向评估。
 
-1. 明确 Desktop 重新打开任务后的刷新行为；
-2. 评估 Desktop daemon/proxy/IPC 或统一 Connector；
-3. 在同步机制完成前避免同一 Thread 双端并发发送；
-4. 正式远程使用前解决固定 token、监听范围、审批和权限；
-5. 之后再进入多人项目群、项目经理 Agent 和多 Agent 组织层。
+## 现有实现功能介绍
 
-当天开发记录与调研入口：
+### 1. 真实 Codex 对话与执行控制
 
-- [DEVELOPMENT_LOG_2026-07-22.md](DEVELOPMENT_LOG_2026-07-22.md)
-- [DEVELOPMENT_BUG_LOG_2026-07-22.md](DEVELOPMENT_BUG_LOG_2026-07-22.md)
-- [AI_ASSISTANT_READ_FIRST.md](AI_ASSISTANT_READ_FIRST.md)
-- [多人协作与多 Agent 技术路径调研报告](项目战略与多角色评审/05-多人协作与多Agent技术路径调研报告-2026-07-22.md)
-- [群聊方向历史交互原型](docs/codex-group-chat-prototype.html)
+用户可以浏览真实会话、读取标题和历史、新建及重命名会话，发送文本或附件；任务执行中可以追加指令或停止。前端显示流式回复和执行活动，并包含分页、虚拟列表、快照缓存、SSE 重连及状态校正逻辑。消息提交使用提交身份、状态查询和去重机制，降低重试或多设备更新造成的重复消息。
 
-以下 `v0.1` 内容保留为项目早期阶段记录，不代表当前功能上限。
+消息支持复制、重新编辑、失败重试，以及从已完成 Turn 分叉继续；会话支持活动/归档列表和恢复。分叉、归档、审查等操作依赖所选 Codex 运行时支持，归档不是删除。
 
-## 项目愿景
+代码依据：[会话页面](ui-feishu/src/FeishuApp.tsx)、[会话路由](windows/server/routes/conversation-routes.mjs)、[会话服务](windows/server/conversation-service.mjs)。
 
-让 Codex 从单人使用的代码助手，逐步变成围绕真实项目工作的共享研发空间。
+### 2. 后续指令队列、模型、上下文与 Goal
 
-项目成员打开 Codex 后，可以看到自己和其他成员正在做什么、Agent 正在执行什么、项目最近形成了哪些结论，以及哪些问题仍在等待确认。长期形态接近一个真实研发团队：用户与 Leader Agent 沟通，Leader 负责澄清、汇总、拆解和进度管理，执行 Agent 负责具体工作。
+- 后续指令可以进入当前 Thread 的队列；服务已有队列存储、调度及编辑、删除、移动等操作。它是对话后续指令队列，不是生图批处理或定时任务系统。
+- 支持模型和思考强度切换；运行中的会话禁止通过对应接口直接切换。上下文支持状态读取、自动压缩阈值设置及主动压缩。
+- 已接入原生审查 `review/start`。Goal 不仅有能力菜单，还提供目标状态、用时和 Token 展示，以及暂停、继续、完成和清除操作；后端直接转发 `thread/goal/get`、`set`、`clear`，不维护第二套目标生命周期。实际可用性取决于本机 Codex 版本，本轮未探测运行时。
 
-第一步不追求完整团队系统。先把已经具有独立价值的右侧面板做好，并以此持续迭代。
+代码依据：[输入区](ui-feishu/shared/features/conversations/components/ConversationComposer.tsx)、[后续指令路由](windows/server/routes/follow-up-queue-routes.mjs)、[队列服务](windows/server/follow-up-queue-service.mjs)、[Goal 控件](ui-feishu/shared/features/goals/components/GoalControl.tsx)、[原生协议适配](windows/server/app-server-conversation-store.mjs)。
 
-## v0.1 已实现效果
+### 3. 多项目目录、员工与群聊
 
-Codex 窗口右侧增加“项目实时总结”面板，包含：
+已有项目目录、业务项目和员工项目身份、员工长期会话、项目群聊、`@` 路由及回复发布能力。用户可以进入员工单聊，读取执行状态、发送任务和调整员工模型设置；群聊通过真实 Agent 执行，并将结果发布回公共群聊。普通项目、员工会话和目标文件访问范围在数据层分别记录。
 
-- 实时总结与设置两个页面。
-- 本地对话记录连接状态。
-- 最近一次用户要求和 Codex 回复预览。
-- Luna 生成的四段式项目摘要：当前目标、已确认、进行中、待确认。
-- 总结模型、耗时、更新时间和错误状态。
-- 面板关闭后可通过侧边入口重新打开。
+产品规定员工直属单聊及其参与各群聊的会话归员工自己的项目，工作项目保留公共群聊记录。现有 Desktop 仍可能把仓库内员工子目录的 Thread 聚合到 negus 主项目；此问题已明确暂缓，不应介绍成归类完全隔离。群聊的历史、流式过程、队列和模型/上下文体验也不能宣称已全部与单聊一致。
 
-当前面板通过 Codex Dream Skin 的本机 CDP 注入机制进入 Codex 渲染页面，不修改官方安装包或 `app.asar`。所有验证均在单独启动的隔离版 Codex 中完成，没有重启或修改用户日常使用的主 Codex。
+代码依据：[项目目录](ui-feishu/shared/features/project-directory/hooks/useProjectDirectory.ts)、[员工接口](windows/server/routes/employee-routes.mjs)、[群聊界面](ui-feishu/src/components/GroupWorkspace.tsx)、[结果发布接口](windows/server/routes/agent-publication-routes.mjs)、[服务组装与会话归属](windows/scripts/remote-room-demo.mjs)。
 
-## 当前工作逻辑
+### 4. 附件、富文本与自然语言生图
 
-```text
-Codex 本地会话 JSONL
-        ↓
-summary-observer
-        ↓ 只提取用户消息和 Codex 最终回复
-12 秒静默窗口
-        ↓
-gpt-5.6-luna 四段式总结
-        ↓
-summary-bridge
-        ↓ 本机 CDP
-Codex 右侧面板
-```
+已有 Markdown、代码、表格、链接及图片、音频、视频和普通文件内容渲染。媒体通过后端登记和访问接口提供，音视频支持 Range 读取；附件上传、失败恢复、大文件和跨设备草稿的完整体验仍需实机确认。
 
-当前观察器需要显式传入任务 ID。它读取本机 Codex 的模型提供商、Base URL 和认证配置，调用当前配置中可用的 `gpt-5.6-luna`；API Key 不发送到面板，也不写入项目文件。
+生图入口已进入真实 Codex Thread/Turn，并有 image MCP、生成记录和图片输出处理，支持自然语言生图及同会话继续改图的代码链路。供应商、认证及运行时能力必须可用；专门生图工作台、批量模板和定时自动化仍是后续范围。
 
-## 已验证事实
+代码依据：[内容渲染](ui-feishu/shared/features/conversations/rendering/ContentRenderer.tsx)、[媒体服务](windows/server/media-service.mjs)、[图片 MCP](windows/server/image-generation/mcp-server.mjs)、[图片输出](windows/server/image-generation/image-output.mjs)。
 
-- 面板可在隔离版 Codex 中稳定显示，原生界面仍可使用。
-- 能读取指定任务的真实新增对话。
-- 不把推理过程和工具内部事件作为总结内容。
-- Luna 已完成真实调用并将中文摘要显示在面板中。
-- 对话结束后可显示“上一轮已完成，等待下一轮对话”。
-- 新增脚本通过 Node 语法检查，原注入器通过 loopback CDP 安全自测。
+### 5. 成果预览、版本与审核
+
+Agent 成果可以登记为 Artifact，查询版本、预览、下载并提交审核结果。已有静态 HTML 生成、通过 Edge 输出 PDF、安全打开网页和群聊发布链路。PDF 生成依赖本机浏览器和运行环境；整体交付体验仍待验证，不等同于完整网页编辑器或 Office 文档平台。
+
+代码依据：[成果路由](windows/server/routes/artifact-routes.mjs)、[成果服务](windows/server/artifact-service.mjs)、[HTML/PDF 服务](windows/server/web-output-service.mjs)。
+
+### 6. 移动端、用量和项目管理
+
+已有移动端布局、PWA 安装资源、设备身份和新版本刷新提示。用量控件提供浮生云算摘要与详情；模型智能/效率控件支持筛选和排序，内容依赖对应数据源，不能视为本次实测。项目管理页面从仓库条目文件读取摘要和更新记录，项目目录也有活动状态接口。
+
+代码依据：[用量控件](ui-feishu/shared/features/usage-monitor/components/UsageSummaryControl.tsx)、[模型比较控件](ui-feishu/shared/features/intelligence-efficiency/components/IntelligenceEfficiencyControl.tsx)、[项目管理页面](ui-feishu/shared/features/project-management/ProjectManagementApp.tsx)、[项目状态接口](windows/server/routes/project-review-routes.mjs)、[PWA](ui-feishu/shared/pwa)。
+
+### 7. 员工成长：已有基础设施，自动学习尚未接通
+
+源码包含事实和提案存储、规则/技能提案批准或拒绝、批准后写入员工 `AGENTS.md` 或 `.agents/skills/*/SKILL.md`，以及写入失败回退和日志。已有成长面板和接口。
+
+但当前启动入口使用无模型注入的默认评审器，返回空的 facts、rules、skills。因而只能确认审核与落盘基础设施存在，不能说员工每次任务后会自动提炼经验、生成技能或完成每日压缩。长期经验和自动学习的产品范围仍以产品定义为准。
+
+代码依据：[成长服务](windows/server/employee-growth-service.mjs)、[默认评审器](windows/server/employee-growth-reviewer.mjs)、[成长接口](windows/server/routes/employee-growth-routes.mjs)、[成长面板](ui-feishu/shared/features/employee-growth/components/EmployeeGrowthPanel.tsx)。
+
+功能验收状态仍以 [功能状态索引](docs/negus-knowledge/features/FEATURE_STATUS_INDEX.md) 和对应档案为准；索引中的历史测试数量及部署结论不是本次检查结果。
+
+## 产品定义入口
+
+当前产品行为、用户流程、归属关系和不可违反的边界统一写在 [`PRODUCT_DEFINITION.md`](docs/negus-knowledge/product/PRODUCT_DEFINITION.md)。本文件提供带代码依据的实现概览，不重新定义产品行为；历史计划和逐版本记录仍放在功能档案中。
+
+固定阅读顺序：`PROJECT.md` -> `docs/negus-knowledge/product/PRODUCT_DEFINITION.md` -> 本次涉及的 `FEAT-*.md`。
+
+其中群聊和员工的核心原则是：工作项目拥有项目文件和公共群聊记录；员工自己的项目始终拥有该员工的直属单聊和参与各项目群聊的长期会话。员工可以操作目标工作项目，但不得在目标工作项目的普通会话列表中创建或留下员工会话。
+
+## 代码结构与模块入口
+
+| 路径 | 内容 |
+| --- | --- |
+| `ui-feishu/shared/features/` | React 前端功能模块 |
+| `ui-feishu/src/`、`ui-feishu/shared/` | 跨页面 UI、API 和模型共用代码 |
+| `windows/server/` | Web API、SSE、会话、群聊、Artifact 和生图服务 |
+| `windows/server/routes/` | HTTP 路由入口 |
+| `windows/scripts/remote-room-demo.mjs` | Web 服务组装和启动入口 |
+| `windows/scripts/start-web-demo.ps1`、`restart-web-demo.ps1` | Web 服务启动和重启 |
+| `runtime/` | 会话、执行、群聊、Artifact、员工和媒体数据 |
+| `macos/` | Codex Dream Skin macOS 换肤代码和资源 |
+| `windows/assets/`、`windows/scripts/*dream-skin*` | Codex Dream Skin Windows 换肤代码和资源 |
+| `docs/` | 项目、功能、架构、研究、管理和历史记录 |
+
+## 模块查找表
+
+| 要修改的模块 | 先读的文档 | 主要代码位置 |
+| --- | --- | --- |
+| 单人 Web 对话、执行、历史 | `docs/negus-knowledge/features/feature-records/FEAT-001-single-codex-web.md` | `ui-feishu/shared/features/conversations/`、`execution/`、`context-management/`；`windows/server/conversation-service.mjs`、`app-server-conversation-store.mjs`、`execution-tracker.mjs` |
+| 多业务项目与会话归类 | `docs/negus-knowledge/features/feature-records/FEAT-017-multiple-business-projects.md` | `ui-feishu/shared/features/project-directory/`、`ui-feishu/src/conversationDirectory.ts`；`windows/server/business-project-config.mjs`、`project-identity-store.mjs`、`employee-project-directory.mjs` |
+| 项目群聊和多 Agent | `docs/negus-knowledge/features/feature-records/FEAT-002-group-multi-agent.md` | `ui-feishu/src/components/GroupWorkspace.tsx`、`ui-feishu/shared/features/group-chat/`；`windows/server/group-room-store.mjs`、`multi-agent-service.mjs` |
+| 附件和内容渲染 | `docs/negus-knowledge/features/feature-records/FEAT-003-attachments-content-rendering.md` | `ui-feishu/shared/features/attachments/`、`conversations/rendering/`；`windows/server/content-blocks.mjs`、`media-service.mjs` |
+| PWA、设备和移动端入口 | `docs/negus-knowledge/features/feature-records/FEAT-004-pwa-device-identity.md` | `ui-feishu/shared/pwa/`、`features/device/`、`features/app-update/`；`ui-feishu/public/`、`windows/server/request-handler.mjs` |
+| Desktop/Web 连续性和实时事件 | `docs/negus-knowledge/features/feature-records/FEAT-005-desktop-web-continuity.md` | `windows/server/app-server-client.mjs`、`app-server-conversation-store.mjs`、`execution-tracker.mjs`、`realtime-hub.mjs` |
+| Artifact、HTML 和 PDF | `docs/negus-knowledge/features/feature-records/FEAT-007-agent-artifacts.md`、`FEAT-008-html-page-pdf-generation.md` | `ui-feishu/shared/features/artifacts/`；`windows/server/artifact-service.mjs`、`web-output-service.mjs`、`request-handler.mjs` |
+| 自然语言生图 | `docs/negus-knowledge/features/feature-records/FEAT-015-image-generation-and-automation-workbench.md` | `ui-feishu/shared/features/` 相关生图入口；`windows/server/image-generation/`、`conversation-routes.mjs` |
+| macOS 换肤 | `macos/README.md`、`macos/SKILL.md` | `macos/` |
+| Windows 换肤 | `windows/README.md`、`windows/SKILL.md` | `windows/assets/`、`windows/scripts/*dream-skin*`、`windows/scripts/injector.mjs` |
+
+## 数据和运行链路
+
+主要数据链路：
+
+Codex app-server
+-> app-server conversation store
+-> conversation service
+-> HTTP API 和 SSE
+-> React Web UI
+
+app-server 是主要数据源。本地 Codex JSONL 是降级数据源。
+
+主要页面：
+
+- /：唯一前端入口；/?view=conversation：单人对话
+- /?view=group：群聊
+- /?view=settings&settings=progress：项目进度
+- /?view=settings&settings=management：项目管理
+- 旧的 `/group.html`、`/progress`、`/project-management` 地址只做跳转，不再加载独立页面
+
+构建和运行：
+
+- 跨平台构建：`pnpm negus:build`；启动：`pnpm negus:start`；只读状态：`pnpm negus:status`。
+- Windows 原有入口：`pnpm build:ui`、`pnpm start:demo`。
+- Mac 检查/恢复：`pnpm negus:health` / `pnpm negus:recover`；后端独立重启：`pnpm negus:backend:restart`（`negus:restart` 同入口）；前端构建发布：`pnpm negus:frontend:restart`，不重启后端。
+- Mac 正常启动 `pnpm negus:start` 自动初始化访问凭据，并在服务就绪后安装每 3 小时检查；重复启动复用或更新定时配置，无需独立安装。
+- 定时检查、结果查询、首次加载与限制见 [服务维护说明](docs/operations/NEGUS_SERVICE_CONTROL.md)。Mac 进程身份检查尚未适配 Windows，Windows 原有封装保留。
+- canonical 服务端口：9360
+- 4173 是旧的 Vite Preview 入口，不作为交付地址
 
 ## 当前限制
 
-- 任务 ID 仍需手动指定，尚未自动跟随当前打开的 Codex 任务。
-- 观察器和桥接服务尚未随 Codex 稳定自动启动。
-- 设置页部分控件仍属于界面 Demo，尚未真正控制后台配置。
-- 当前只支持单机个人总结，尚未同步给其他项目成员。
-- CDP 注入依赖 Codex 当前页面结构，适合验证体验，但不是长期唯一集成方式。
+- Desktop 和 Web 可以写入同一个持久化 Thread，但 Desktop 已打开页面不会实时显示 Web 外部追加内容。
+- Desktop 和 Web 暂不应同时向同一个 Thread 发送任务。
+- 群聊、多 Agent 和员工项目能力仍在持续开发。
+- 固定公网入口、正式认证和长时间远程运行仍需进一步验收。
+- 移动端、断线恢复、长任务和跨端体验仍以真实验收结果为准。
+- 当前版本尚未具备完整的企业权限、任意业务页面自动发布和跨员工助手通信；这些方向按具体功能逐步设计与验收。
 
-## 关键方向：复用 Happy
+## 资料入口
 
-[slopus/happy](https://github.com/slopus/happy) 是 MIT 开源项目，已经提供：
-
-- Codex/Agent 事件捕获。
-- CLI 与 Codex `app-server` 连接。
-- 手机、Web 和跨设备客户端。
-- WebSocket 实时同步。
-- 端到端加密、设备配对和推送通知。
-- 可自托管的 Happy Server。
-
-Happy 当前主要解决“同一用户在多个设备控制自己的 Codex”。本项目希望在它的能力之上增加“多个用户围绕同一个项目共享工作状态”。下一步需要重点核对 Happy 的用户、设备、会话、加密密钥和服务端授权模型，再决定直接扩展 Happy，还是在其旁边增加独立的项目状态层。
-
-## 第一个跨电脑 Demo
-
-目标只有一个：
-
-> 用户 A 在自己的电脑使用 Codex 开发；用户 B 在另一台电脑打开自己的 Codex，能够看到 A 是否正在工作、当前大概在做什么，以及最近一次活动时间。
-
-第一版只共享经过筛选的项目状态，不共享完整对话、文件内容、API Key或内部推理。
-
-状态更新采用事件驱动，不使用固定 15 秒上传：
-
-- 会话开始。
-- 用户提出或改变需求。
-- Agent 开始执行。
-- 完成一次可描述的阶段成果。
-- 等待用户确认。
-- 工作完成或正常离线。
-
-每个真实事件更新一次状态和过期时间。异常关机或断网无法发送离线事件时，由状态租约过期后自动显示“可能已离开”。没有工作时不上传数据。
-
-朋友端最终看到的是简洁状态，而不是原始日志：
-
-```text
-Hans 正在修改首页 Banner
-Agent 已完成组件结构，正在调整移动端尺寸
-最近更新：8 秒前
-```
-
-## 已确认的产品原则
-
-1. 右侧总结面板本身就是第一个可独立成立的产品版本。
-2. 本地原始对话默认不离开电脑。
-3. 共享内容必须经过筛选和总结，并明确区分私密信息与项目状态。
-4. 在线状态由真实事件触发，不制造无意义的高频心跳。
-5. GitHub负责代码、分支、提交和长期项目记录，不承担实时在线状态数据库的职责。
-6. 优先复用 Happy 已完成的通信、加密和跨设备能力，避免重复开发基础设施。
-
-## 下一步最小动作
-
-把 Happy 拉到独立研究目录，针对以下路径做源码级核查：
-
-1. Codex 事件如何捕获和归一化。
-2. CLI 如何把事件发送给 Happy Server。
-3. 用户、设备和会话如何识别。
-4. 端到端加密密钥如何配对，能否扩展到项目成员。
-5. 客户端如何订阅、存储和显示实时状态。
-
-核查结束后，只实现一条跨电脑链路：A 产生工作事件，服务端同步，B 的 Codex 右侧面板显示状态。
-
-## 原始目标设想
-
-这个项目最初不是为了单纯增加一个 Codex 聊天窗口，而是从一个很具体的工作场景开始：
-
-- Codex 在电脑上持续执行任务时，使用者可能暂时空闲。
-- 使用者可以用手机与朋友聊天，知道朋友正在让 Codex 做什么。
-- 如果发现朋友布置的需求有问题，例如最新产品需要紧急返工，可以及时提醒朋友，甚至在明确确认后让 Codex 调整方向。
-- 多个同事可以围绕同一个项目交流，而不是只能分别查看各自的 Codex 窗口。
-
-因此，长期设想是让 Codex 的工作过程成为团队可以共同理解、讨论和协作的项目状态，而不是孤立在个人电脑里的黑盒执行过程。
-
-## 衍生内容与长期方向
-
-### 1. 网页版项目群聊
-
-多个成员进入同一个项目空间，看到：
-
-- 哪位成员正在指挥哪个 Codex。
-- 当前项目正在进行什么工作。
-- 最近产生了哪些结论、变更和风险。
-- 哪些问题需要人工确认。
-
-群聊不是普通聊天工具，而是围绕 Codex 工作状态组织的协作入口。
-
-### 2. 项目经理 Agent
-
-项目经理 Agent 作为每个项目或群组中的共同成员，负责：
-
-- 实时总结不同对话的内容。
-- 将讨论整理成目标、决策、任务、风险和待确认事项。
-- 发现需求冲突、范围失控或高风险操作时提醒团队。
-- 在获得明确授权后，协助把讨论转成 Codex 可执行任务。
-
-它首先应该是“项目状态整理和风险提醒者”，而不是未经确认就替人做决定的自动管理者。
-
-### 3. 面向 AI 内容公司的工作流
-
-这个方向也可以延伸到 AI 视频、AI 短剧和内容生产团队：
-
-- 管理选题、脚本、分镜、素材、提示词、生成结果和版本。
-- 记录哪些提示词、模型和参数效果较好。
-- 自动归纳每轮试验的结果和失败原因。
-- 让编剧、导演、剪辑、运营和 AI Agent 共享同一条生产上下文。
-
-这不是当前 Demo 的立即开发范围，而是项目状态协作能力成熟后的行业场景。
-
-### 4. 商业化判断
-
-潜在价值不在于“再做一个聊天软件”，而在于把 AI Agent 的隐性工作过程变成团队可观察、可讨论、可追责、可复用的生产信息。
-
-早期宣传和融资场景应优先选择一个非常具体的案例，例如：
-
-> 一名员工用 Codex 长时间开发，其他成员通过手机看到项目进度，及时提出修改意见，项目经理 Agent 自动整理决策并提醒风险。
-
-之后再验证它是否适合 AI 内容公司、短剧公司、研发团队或其他多 Agent 工作流。
-
-## 当前收束原则
-
-远期目标可以很大，但当前产品不立即跳到“飞书加 Codex”或完整企业协作平台。当前优先级是：
-
-1. 先把本地 Codex 右侧记录小助手做成真正有用的项目控制台。
-2. 让它稳定展示当前项目的目标、对话摘要、任务状态、风险和下一步。
-3. 再做只读网页版，让其他人能查看项目状态和经过筛选的对话。
-4. 最后再增加网页版项目群聊、人工确认的指令转发和多 Codex 协作。
-
-安全边界始终保持：默认只读、不过度暴露原始日志、不展示推理过程、不上传 API Key，远程控制必须经过明确授权和人工确认。
-## 来源与声明
-
-本项目当前基于 [Fei-Away/Codex-Dream-Skin](https://github.com/Fei-Away/Codex-Dream-Skin) 开发，保留其原始 README、MIT 软件许可证和相关 NOTICE。Codex、OpenAI 及相关商标属于其各自权利人；本项目不是 OpenAI 官方产品。
+- 方向证据、开放问题与历史利用：[文档导航](docs/README.md)
+- 助手工作规则：`AI_ASSISTANT_WORK_RULES.md`
+- 功能状态：`docs/negus-knowledge/features/FEATURE_STATUS_INDEX.md`
+- 功能详情：`docs/negus-knowledge/features/feature-records/`
+- 开发常见错误：`docs/negus-knowledge/features/DEVELOPMENT_COMMON_MISTAKES.md`
+- 架构职责：docs/architecture/
+- 项目管理：docs/project-management/
+- 研究和证据：docs/negus-knowledge/research/、docs/negus-knowledge/records/
+- 产品愿景和历史讨论：docs/negus-knowledge/decisions/VISION_NOTES.md、docs/negus-knowledge/strategy/

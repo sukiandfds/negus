@@ -25,7 +25,10 @@ const createFixture = (projectRoot = "C:\\demo") => {
     media: {},
     realtime: {},
     contextManagement: {},
-    groupRoom: { snapshot: () => ({ room: { id: "room" }, messages: [], agents: [], members: [] }) },
+      groupRoom: {
+        snapshot: () => ({ room: { id: "room" }, messages: [], agents: [], members: [] }),
+        getMessagePage: () => ({ messages: [], total: 0 }),
+      },
     multiAgent: {},
     artifacts: { list: () => [{ id: "artifact" }] },
     webOutputs: {},
@@ -66,18 +69,20 @@ test("dispatches feature routes and preserves static fallback", async () => {
 
 test("keeps API routes protected after route extraction", async () => {
   await withServer(async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/api/project`);
-    assert.equal(response.status, 401);
-    assert.equal(await response.text(), "Unauthorized");
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const response = await fetch(`${baseUrl}/api/project?token=wrong-${attempt}`);
+      assert.equal(response.status, 401);
+      assert.equal(await response.text(), "Unauthorized");
+    }
   });
 });
 
 test("serves the current feature index as live project progress", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "codex-progress-route-"));
   try {
-    const docs = path.join(root, "docs", "feature-development");
+    const docs = path.join(root, "docs", "negus-knowledge", "features");
     await fs.mkdir(docs, { recursive: true });
-    await fs.writeFile(path.join(docs, "FEATURE_INDEX.md"), "# Feature index\n\n| ID | Status |\n| --- | --- |\n| FEAT-001 | active |\n", "utf8");
+    await fs.writeFile(path.join(docs, "FEATURE_STATUS_INDEX.md"), "# Feature index\n\n| ID | Status |\n| --- | --- |\n| FEAT-001 | active |\n", "utf8");
     await withServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/project-progress?token=test-token`);
       const payload = await response.json();
@@ -93,9 +98,9 @@ test("serves the current feature index as live project progress", async () => {
 test("returns structured entries and update history for the progress panel", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "codex-progress-structured-"));
   try {
-    const docs = path.join(root, "docs", "feature-development");
-    await fs.mkdir(path.join(docs, "features"), { recursive: true });
-    await fs.writeFile(path.join(docs, "FEATURE_INDEX.md"), [
+    const docs = path.join(root, "docs", "negus-knowledge", "features");
+    await fs.mkdir(path.join(docs, "feature-records"), { recursive: true });
+    await fs.writeFile(path.join(docs, "FEATURE_STATUS_INDEX.md"), [
       "---",
       "document_type: feature_index",
       "---",
@@ -103,13 +108,13 @@ test("returns structured entries and update history for the progress panel", asy
       "## 当前功能",
       "| 功能编号 | 功能 | 当前状态 | 当前版本 | 最近更新 | 当前结论 | 记录 |",
       "| --- | --- | --- | --- | --- | --- | --- |",
-      "| `FEAT-001` | 单人对话 | `in_progress` | `v1.0.0` | 2026-08-02 12:00 +08:00 | 正在补齐状态展示 | [FEAT-001-demo.md](./features/FEAT-001-demo.md) |",
+      "| `FEAT-001` | 单人对话 | `in_progress` | `v1.0.0` | 2026-08-02 12:00 +08:00 | 正在补齐状态展示 | [FEAT-001-demo.md](./feature-records/FEAT-001-demo.md) |",
       "## 当前待办开发顺序",
       "| 顺序 | 功能项目 | 当前要做什么 |",
       "| --- | --- | --- |",
       "| `P1` | `FEAT-001-I01` | 补齐状态展示 |",
     ].join("\n"), "utf8");
-    await fs.writeFile(path.join(docs, "features", "FEAT-001-demo.md"), [
+    await fs.writeFile(path.join(docs, "feature-records", "FEAT-001-demo.md"), [
       "---",
       "feature_id: FEAT-001",
       "status: in_progress",

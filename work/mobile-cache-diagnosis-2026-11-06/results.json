@@ -1,0 +1,27 @@
+{
+  "buildId": "feishu-mw4fqhbj",
+  "actualMessageCount": 42,
+  "actualJsonBytes": 62660,
+  "cases": [
+    {
+      "failWrites": false,
+      "initialVisible": 40,
+      "persisted": {
+        "hasMetadata": true,
+        "bodyMessages": 42
+      },
+      "restoredVisibleBeforeNetwork": 40,
+      "cacheErrors": 0
+    },
+    {
+      "failWrites": true,
+      "initialVisible": 40,
+      "persisted": {
+        "hasMetadata": false,
+        "bodyMessages": 0
+      },
+      "restoredVisibleBeforeNetwork": 0,
+      "cacheErrors": 5
+    }
+  ]
+}

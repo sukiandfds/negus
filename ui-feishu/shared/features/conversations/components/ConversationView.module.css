@@ -1,0 +1,45 @@
+.viewport { position: relative; width: 100%; height: 100%; min-height: 0; }
+.jumpToLatest { position: absolute; z-index: 4; right: 50%; bottom: 12px; transform: translateX(50%); }
+.scrollArea { height: 100%; min-height: 0; overflow-y: auto; overflow-anchor: none; overscroll-behavior-y: contain; scrollbar-gutter: stable; padding: 30px 30px 24px; scrollbar-color: #3b3d3f transparent; scrollbar-width: thin; }
+.conversation { width: min(var(--content-width), 100%); min-height: 100%; margin: 0 auto; }
+.message { padding-bottom: 34px; }
+.selectMessage { display: flex; align-items: center; gap: 6px; width: fit-content; margin-bottom: 6px; color: var(--color-text-muted); font-size: 12px; cursor: pointer; }
+.body { position: relative; color: var(--color-text); }
+.sending, .waiting { position: absolute; left: -22px; top: 12px; width: 14px; height: 14px; color: var(--color-text-muted); }
+.sending { opacity: 0; animation: loading-spin .8s linear infinite, sending-reveal 0s 10s forwards; }
+@keyframes sending-reveal { to { opacity: 1; } }
+.userBubble { width: fit-content; max-width: min(620px, 82%); margin-left: auto; padding: 10px 14px; border: 1px solid rgba(255,255,255,.04); border-radius: 16px; background: #2b2b2b; }
+.heartbeatLabel { display: flex; align-items: center; justify-content: flex-end; gap: 4px; width: fit-content; max-width: min(620px, 82%); margin: 0 0 4px auto; color: var(--color-text-muted); font-size: 12px; line-height: 1.3; }
+.heartbeatLabel svg { width: 14px; height: 14px; flex: none; }
+.assistantBody {
+  width: 100%;
+  max-width: 100%;
+  padding: 2px 0;
+}
+.actionRow { display: flex; width: 100%; min-height: 24px; margin-top: 5px; }
+.user .actionRow { justify-content: flex-end; }
+.assistant .actionRow { justify-content: flex-start; }
+.timestamp { display: block; margin-bottom: 6px; color: var(--color-text-muted); font-size: 11px; line-height: 1.3; }
+.user .timestamp { text-align: right; }
+.authorName { display: block; margin-bottom: 3px; color: var(--color-text-muted); font-size: 12px; line-height: 1.3; }
+.user .authorName { text-align: right; }
+.streamingText { font-size: 15px; line-height: 1.68; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cursor { display: inline-block; width: 2px; height: 1em; margin-left: 3px; vertical-align: -2px; background: var(--color-text); animation: cursor-blink 1s steps(2) infinite; }
+@keyframes cursor-blink { 50% { opacity: .2; } }
+.state { display: grid; min-height: 50vh; place-items: center; color: var(--color-text-muted); text-align: center; }
+.loading { padding: 16px 0; color: var(--color-text-muted); font-size: 13px; text-align: center; }
+.loading svg { width: 18px; height: 18px; animation: loading-spin .8s linear infinite; }
+@keyframes loading-spin { to { transform: rotate(360deg); } }
+.older { position: absolute; z-index: 5; top: 8px; left: 50%; display: grid; width: 24px; height: 24px; place-items: center; transform: translateX(-50%); color: var(--color-text-muted); pointer-events: none; }
+.older svg { width: 16px; height: 16px; animation: loading-spin .8s linear infinite; }
+@media (max-width: 760px) {
+  .scrollArea { padding: 22px 15px 24px; }
+  .message { padding-bottom: 28px; }
+}
+
+@media (any-pointer: coarse) {
+  .scrollArea { -webkit-overflow-scrolling: touch; }
+}
+
+.goalAchieved { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; padding-left: 8px; border-left: 1px solid var(--color-border-strong); color: var(--color-text-muted); font-size: 12px; white-space: nowrap; }
+.goalAchieved svg { width: 14px; height: 14px; }

@@ -1,0 +1,27 @@
+{
+  "version": "feishu-mw3uoqvm",
+  "next": "feishu-mw3uoqvm-testnext",
+  "versionChecks": 4,
+  "workerRequests": [
+    "feishu-mw3uoqvm",
+    "feishu-mw3uoqvm-testnext"
+  ],
+  "results": [
+    {
+      "name": "真实聊天入口不打开设置也自动注册并控制SW",
+      "pass": true
+    },
+    {
+      "name": "真实聊天刷新在导航网络挂起时直接恢复已有缓存",
+      "pass": true
+    },
+    {
+      "name": "真实聊天版本升级只显示提示且等待确认",
+      "pass": true
+    },
+    {
+      "name": "用户确认后激活新版本并保持原对话缓存",
+      "pass": true
+    }
+  ]
+}

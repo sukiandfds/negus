@@ -20,7 +20,7 @@ function Get-DevelopmentEnvironmentReadiness {
   foreach ($candidate in @(
     [pscustomobject]@{ Id = "path.project"; Subject = "Project root"; Path = $root },
     [pscustomobject]@{ Id = "path.git"; Subject = "Git metadata"; Path = (Join-Path $root ".git") },
-    [pscustomobject]@{ Id = "path.dependencies"; Subject = "Project dependencies"; Path = (Join-Path $root "web-ui\node_modules") },
+    [pscustomobject]@{ Id = "path.dependencies"; Subject = "Project dependencies"; Path = (Join-Path $root "ui-feishu\node_modules") },
     [pscustomobject]@{ Id = "path.local-app-data"; Subject = "LOCALAPPDATA"; Path = $env:LOCALAPPDATA },
     [pscustomobject]@{ Id = "path.temp"; Subject = "TEMP"; Path = $env:TEMP },
     [pscustomobject]@{ Id = "path.codex-home"; Subject = "Codex home"; Path = $codexHome },

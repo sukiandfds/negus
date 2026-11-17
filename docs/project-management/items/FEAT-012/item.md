@@ -4,9 +4,9 @@ type: feature
 title: 消息内容快捷复制
 category: development
 priority: P2
-status: implemented_uncommitted
-updated_at: 2026-08-03 14:47 +08:00
-source: docs/feature-development/features/FEAT-012-conversation-copy.md
+status: pending_review
+updated_at: 2026-08-06
+source: docs/negus-knowledge/features/feature-records/FEAT-012-conversation-copy.md
 related: [FEAT-001]
 ---
 
@@ -40,9 +40,9 @@ related: [FEAT-001]
 
 ## 当前状态
 
-已实现但未提交，等待用户在手机和电脑浏览器实际点击确认。
+已实现并已进入提交历史，等待用户在手机和电脑浏览器实际点击确认。
 
 ## 当前证据
 
-- `docs/feature-development/features/FEAT-012-conversation-copy.md`
+- `docs/negus-knowledge/features/feature-records/FEAT-012-conversation-copy.md`
 - `web-ui/src/features/conversations/components/MessageActions.tsx`

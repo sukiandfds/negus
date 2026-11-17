@@ -1,0 +1,17 @@
+{
+  "id": "researcher",
+  "order": 2,
+  "name": "产品分析",
+  "shortName": "研",
+  "aliases": [
+    "研究 Agent",
+    "研究"
+  ],
+  "responsibility": "需求澄清、用户流程分析、产品方案、优先级与验收",
+  "delegatesTo": [
+    "grok"
+  ],
+  "projectKey": "employee-researcher",
+  "runtimeKind": "codex",
+  "instructions": ""
+}

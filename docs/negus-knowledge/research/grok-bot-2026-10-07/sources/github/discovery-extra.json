@@ -1,0 +1,66 @@
+[
+  {
+    "full_name": "microsoft/agent-framework",
+    "description": "A framework for building, orchestrating and deploying AI agents and multi-agent workflows with support for Python and .NET.",
+    "html_url": "https://github.com/microsoft/agent-framework",
+    "license": {
+      "key": "mit",
+      "name": "MIT License",
+      "spdx_id": "MIT",
+      "url": "https://api.github.com/licenses/mit",
+      "node_id": "MDc6TGljZW5zZTEz"
+    },
+    "pushed_at": "2026-10-06T18:04:52Z",
+    "archived": false,
+    "stargazers_count": 13965,
+    "commit": "41e785fb9a3c853272ce0fbd2eb93364e9d1de13"
+  },
+  {
+    "full_name": "opensquad-ai/opensquad",
+    "description": "OpenSquad — local-first multi-harness-agent collaboration framework. PM, Coder, QA  agents coordinate via group chat to complete complex tasks.",
+    "html_url": "https://github.com/opensquad-ai/opensquad",
+    "license": {
+      "key": "mit",
+      "name": "MIT License",
+      "spdx_id": "MIT",
+      "url": "https://api.github.com/licenses/mit",
+      "node_id": "MDc6TGljZW5zZTEz"
+    },
+    "pushed_at": "2026-10-05T12:14:53Z",
+    "archived": false,
+    "stargazers_count": 7,
+    "commit": "dd9739910560d40b9c43f1670e0f4a8b749e09c9"
+  },
+  {
+    "full_name": "cpp285/Piko",
+    "description": "Piko（皮可）｜个人 Agent 与办公 Agent 工作台。Personal Agent & Office Agent workspace: AI coworkers, group chats, custom identities, skills, proactive updates and multi-agent collaboration. macOS + local web.",
+    "html_url": "https://github.com/cpp285/Piko",
+    "license": {
+      "key": "mit",
+      "name": "MIT License",
+      "spdx_id": "MIT",
+      "url": "https://api.github.com/licenses/mit",
+      "node_id": "MDc6TGljZW5zZTEz"
+    },
+    "pushed_at": "2026-10-05T13:56:10Z",
+    "archived": false,
+    "stargazers_count": 0,
+    "commit": "66ec8902112976f554edac3fc86456dca83e8fe2"
+  },
+  {
+    "full_name": "Qumge/marlo",
+    "description": "An open-source desktop AI coworker that delivers finished work, not chat — security reviews, documents, spreadsheets, triaged inbox. Any model, runs on your machine. A Qumge distribution of OpenWorker (MIT, andrewyng/openworker).",
+    "html_url": "https://github.com/Qumge/marlo",
+    "license": {
+      "key": "mit",
+      "name": "MIT License",
+      "spdx_id": "MIT",
+      "url": "https://api.github.com/licenses/mit",
+      "node_id": "MDc6TGljZW5zZTEz"
+    },
+    "pushed_at": "2026-09-28T14:16:30Z",
+    "archived": false,
+    "stargazers_count": 0,
+    "commit": "5b18ba51ee6bf55ee1ebdaa570e39c3c97b0bd0d"
+  }
+]

@@ -1,4 +1,6 @@
-export const terminalAgentPhases = new Set(["completed", "failed", "interrupted", "systemError"]);
+import { terminalPhases } from "../execution/protocol.mjs";
+
+export const terminalAgentPhases = terminalPhases;
 
 export const agentStateFromItem = (item) => {
   switch (item?.type) {

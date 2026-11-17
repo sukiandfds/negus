@@ -1,14 +1,46 @@
 {
-  "name": "codex-collab-panel-demo",
+  "name": "negus",
   "private": true,
   "packageManager": "pnpm@10.28.2",
   "scripts": {
-    "build:ui": "powershell -NoProfile -ExecutionPolicy Bypass -File windows/scripts/build-web-ui.ps1",
+    "build:ui": "powershell -NoProfile -ExecutionPolicy Bypass -File windows/scripts/build-ui-feishu.ps1",
     "start:demo": "powershell -NoProfile -ExecutionPolicy Bypass -File windows/scripts/start-web-demo.ps1",
     "start:demo:build": "powershell -NoProfile -ExecutionPolicy Bypass -File windows/scripts/start-web-demo.ps1 -Build",
-    "restart:demo": "powershell -NoProfile -ExecutionPolicy Bypass -File windows/scripts/restart-web-demo.ps1"
+    "restart:demo": "powershell -NoProfile -ExecutionPolicy Bypass -File windows/scripts/restart-web-demo.ps1",
+    "negus:build": "node scripts/negus.mjs build",
+    "negus:init": "node scripts/negus.mjs init",
+    "negus:start": "node scripts/negus.mjs start",
+    "negus:stop": "node scripts/negus.mjs stop",
+    "negus:status": "node scripts/negus.mjs status",
+    "negus:diagnose": "node scripts/negus.mjs diagnose",
+    "negus:restart": "node scripts/negus.mjs restart",
+    "negus:tunnel:login": "node scripts/negus-tunnel.mjs login",
+    "negus:tunnel:setup": "node scripts/negus-tunnel.mjs setup",
+    "negus:tunnel:move": "node scripts/negus-tunnel.mjs move",
+    "negus:tunnel:start": "node scripts/negus-tunnel.mjs start",
+    "negus:tunnel:stop": "node scripts/negus-tunnel.mjs stop",
+    "negus:tunnel:status": "node scripts/negus-tunnel.mjs status",
+    "negus:tunnel:restart": "node scripts/negus-tunnel.mjs restart",
+    "negus:backend:check": "node scripts/negus-backend.mjs check",
+    "negus:backend:restart": "node scripts/negus-supervisor.mjs restart",
+    "negus:frontend:restart": "node scripts/negus-frontend.mjs restart",
+    "negus:frontend:rollback": "node scripts/negus-frontend.mjs rollback",
+    "negus:health": "node scripts/negus-watchdog.mjs check",
+    "negus:recover": "node scripts/negus-watchdog.mjs recover",
+    "negus:watchdog:install": "node scripts/negus-watchdog-macos.mjs install",
+    "negus:watchdog:status": "node scripts/negus-watchdog-macos.mjs status",
+    "negus:watchdog:uninstall": "node scripts/negus-watchdog-macos.mjs uninstall",
+    "negus:rebuild": "node scripts/negus.mjs rebuild",
+    "negus:release:prepare": "node scripts/negus-supervisor.mjs prepare",
+    "negus:restart:status": "node scripts/negus-supervisor.mjs status",
+    "test:routing": "node --test windows/server/multi-agent/agent-routing.test.mjs"
   },
   "dependencies": {
-    "image-size": "2.0.2"
+    "@iarna/toml": "2.2.5",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
+    "image-size": "2.0.2",
+    "sharp": "^0.34.5",
+    "zod": "4.4.3"
   }
 }

@@ -1,0 +1,141 @@
+← Back
+Grok Bot FAQs
+
+Short answers for access, usage, service status, and using Grok Bot. Longer steps live on the linked articles.
+
+Do I need a separate Grok Bot subscription?
+
+No. Grok Bot comes with Cursor Pro, Pro+, Ultra, and self-serve Teams. You can also link an individual SuperGrok, SuperGrok Plus, SuperGrok Heavy, or X Premium+ account. On Enterprise, ask your account team. See Plans and billing.
+
+Is Grok Bot the same as the Grok app?
+
+No. Grok (the chat app from xAI) and Grok Bot are two different apps. A paywall or a Weekly SuperGrok Limit in the Grok app is not about Grok Bot. Grok Bot signs in with your Cursor account. See Sign in to Grok Bot.
+
+Which Grok plans can I link?
+
+Individual SuperGrok, SuperGrok Plus, SuperGrok Heavy, and X Premium+. SuperGrok Lite, SuperGrok Team, and SuperGrok Enterprise cannot link. See Which SuperGrok tiers grant Grok Bot?.
+
+I don't see Link Grok Account.
+
+That option shows only on the Get Started screen, before you sign in. Settings does not have it. Fully quit Grok Bot (on Mac, choose Quit from the menu bar), then open it again. See Why don't I see a Link Grok Account option after I've already logged in?.
+
+I linked SuperGrok to the wrong Cursor account. Can I unlink it?
+
+No. A link is permanent, and you cannot move it yourself. Contact support with the account that got the link and the account that should have it. See Can I unlink or move a SuperGrok link?.
+
+Can I change the email on my account?
+
+No. The email on a Cursor account cannot change. To use a different email, make a new account. See Change your email address.
+
+I'm stuck in a sign-in loop or see an authentication error.
+
+Update the app, then sign out and sign in again. Clear cookies for cursor.com and x.ai and try a private window. If the phone loops, sign in on desktop first. If the error is new, wait 30 to 60 minutes. Reinstalling usually does not help. See Sign in to Grok Bot.
+
+Is Grok Bot down?
+
+Check status.cursor.com and look at the Grok Bot row. The app doesn't show service status, so the status page is the place to check. You can subscribe to updates there.
+
+If the status page shows a Grok Bot incident:
+
+
+Wait for the incident to be resolved. The status page posts updates.
+
+Don't Reset the computer or reinstall the app. Neither fixes a service problem, and Reset can lose very recent changes if the computer can't be reached to save them.
+
+When the incident is resolved, send your message again.
+
+
+If the status page shows no incident and the Bot says Bot failed to respond or Model provider is overloaded, wait a moment and send the message again. If the Bot still doesn't reply, fully quit and reopen Grok Bot, then follow How do I troubleshoot Grok Bot computer, routine, connector, and startup problems? If it keeps happening, contact support with the request ID.
+
+My Bot stopped replying and says I hit my usage limit. Is it broken?
+
+No. Your weekly usage is used up. It resets each week. To keep going now, turn on on-demand usage or move to a bigger Cursor plan. See How does Grok Bot usage work?.
+
+Why doesn't my SuperGrok limit match my Grok Bot usage?
+
+They are two separate meters for two products. Grok Bot usage lives on your Cursor account. See it in Grok Bot under Settings > Usage & Billing, not in the Grok app. See What do the plan and spending screens call usage?.
+
+Do a Cursor plan and SuperGrok add together?
+
+No. They do not stack. For more usage, upgrade your Cursor plan (for example Pro+ to Ultra) or turn on on-demand usage. See Do Cursor and SuperGrok plans stack?.
+
+How do I stop charges after my weekly usage runs out?
+
+Turn off on-demand, or set a cap. In Grok Bot, open Settings > On-demand monthly limit. On the web, go to cursor.com/dashboard > Spending > Monthly Limit. The cap does not stop a Bot in the middle of a run, so a running task can go a little past it. See How does the on-demand monthly limit apply to Grok Bot? and Usage-based charges.
+
+My trial ran out in one task. Can I get it back?
+
+No. The trial is a usage credit, and one big task can use all of it. Used credit is not restored. See What if my trial ran out during a single run?.
+
+I paid in the iPhone or Android app. How do I cancel or get a refund?
+
+Apple or Google handles it. Cancel in Apple ID > Subscriptions, or in Google Play > Payments & subscriptions. Cursor cannot cancel or refund store purchases. See Subscribe from the iOS app, Subscribe from the Android app, and Refunds.
+
+Do I have to pay again on my phone?
+
+No. Sign in to the phone app with the same Cursor account, and your access carries over. See Do I need to buy again on mobile?.
+
+Does my Bot keep working when my laptop is closed?
+
+Yes. Bots work on a cloud computer. Closing the app, the laptop, or the phone does not stop a task or a routine. See Routines.
+
+Does the Bot use my own computer?
+
+Bots work on their own cloud computer. A Bot runs a command on your desktop only if you allow it. The setting is under Settings > Computer, labeled Execution on this computer. If no desktop is listed there yet, look under Settings > General > Bot for Execution on Local Computer. By default it asks you each time. See Grok Bot settings.
+
+Why does a website block my Bot or show a captcha?
+
+Some sites block traffic from cloud computers. When that happens, the Bot hands you the step, and you can sign in yourself on the Bot's computer. You can also turn on Settings > Computer > Route traffic through this computer, so sites see your own connection.
+
+
+My chats or Bots are missing.
+
+They are usually not deleted. Fully quit and reopen. Check another device on the same account. Open Hidden Bots. Make sure you are on the same Cursor account. Don't use Recover or Reset to look for them. See My chats or bots look missing.
+
+The computer says Reconnecting or "Couldn't Reach Grok Bot's Computer."
+
+Wait and choose Retry. Then fully quit and reopen. Then Update, then Recover. Use Reset only last. Like Recover, it can lose very recent changes if the computer can't be reached to save them. See Which should I try first?.
+
+What does the low disk space warning mean?
+
+Computer is low on disk space or Computer is critically low on disk space is about your Bots' cloud computer, not your laptop. Choose Go to Disk Saver. Disk Saver is a Bot that checks what is using space and suggests what to clean up. It asks before it deletes anything, and nothing is deleted unless you confirm. Your chats are not affected. See My chats or bots look missing.
+
+Why did an approval expire before I saw it?
+
+Approvals from work that started without you, like a routine or a message from another Bot, expire after about 10 minutes. Approvals in a chat you are in wait for you. Turn on the Bot's Notifications, or choose Always allow for actions you trust. See Why did an approval expire?
+
+Can I pick the model?
+
+No. Cursor picks the model for the specific task under the hood. There is no model picker in Grok Bot. See Grok Bot settings.
+
+Which devices work?
+
+The desktop app runs on Mac, Windows, and Linux. The phone app runs on iPhone and Android. Get the desktop app from the Grok Bot page at cursor.com/dashboard/bot. See Grok Bot on mobile.
+
+How do I contact support?
+
+Contact support while signed in to your Cursor account. Include your account email, your Grok Bot version (account menu > About > Copy version info), a screenshot, and the request ID (right-click the message > Copy request ID). See How do I find my Grok Bot version? and How do I copy a request ID?.
+
+Related
+
+
+Onboarding
+
+Grok Bot How Tos
+
+Change a Bot's name, picture, and description
+
+Voice chat with a Bot
+
+Plans and billing
+
+Link SuperGrok for Grok Bot
+
+Sign in to Grok Bot
+
+Grok Bot on mobile
+
+Grok Bot computer
+
+Get help
+

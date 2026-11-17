@@ -1,0 +1,326 @@
+import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { createBusinessProjectLoader } from "../server/business-project-config.mjs";
+import { createProjectIdentityStore } from "../server/project-identity-store.mjs";
+import { createEmployeeProjectDirectory } from "../server/employee-project-directory.mjs";
+
+const employee = (root, patch = {}) => ({
+  id: "developer",
+  name: "Developer Director Agent",
+  projectKey: "employee-developer",
+  runtimeKind: "codex",
+  projectRoot: root,
+  contextRoot: path.join(root, "runtime", "employee-contexts", "developer"),
+  mainThreadId: "thread-old",
+  conversationId: "conversation-old",
+  ...patch,
+});
+
+test("maps legacy employee records to stable project identities without changing legacy state", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-project-identity-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const legacyFile = path.join(root, "employee-projects.json");
+  const legacyText = JSON.stringify({ version: 1, employees: [employee(root)] }, null, 2);
+  await fs.writeFile(legacyFile, legacyText, "utf8");
+  const registry = { list: () => [employee(root)] };
+  const store = await createProjectIdentityStore({
+    stateFile: path.join(root, "project-identities.json"),
+    project: "negus",
+    projectRoot: root,
+    registry,
+  });
+  t.after(() => store.close());
+
+  const records = store.list();
+  assert.equal(records.length, 2);
+  const worker = store.getForEmployee("developer");
+  assert.equal(worker.projectId, "project:employee:employee-developer");
+  assert.notEqual(worker.projectId, worker.conversation.runtimeSessionId);
+  assert.deepEqual(worker.memberEmployeeIds, ["developer"]);
+  assert.deepEqual(worker.agentIds, ["developer"]);
+  assert.equal(worker.roots.context.endsWith("developer"), true);
+  assert.equal(worker.capabilities.growth.source, "employee-growth-store");
+  assert.equal(worker.capabilities.localHistory.enabled, true);
+  assert.equal(await fs.readFile(legacyFile, "utf8"), legacyText);
+});
+
+test("keeps project extensions and main binding across restart", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-project-identity-reload-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const stateFile = path.join(root, "project-identities.json");
+  const registry = { list: () => [employee(root)] };
+  const first = await createProjectIdentityStore({ stateFile, project: "negus", projectRoot: root, registry });
+  const bound = await first.bindMainConversation({
+    employeeId: "developer",
+    conversationId: "conversation-new",
+    runtimeKind: "openclaw",
+    runtimeSessionId: "runtime-session-new",
+  });
+  await first.close();
+  const state = JSON.parse(await fs.readFile(stateFile, "utf8"));
+  const saved = state.projects.find((item) => item.projectId === bound.projectId);
+  saved.memberEmployeeIds.push("another-agent");
+  saved.agentIds.push("another-agent");
+  saved.capabilities.customTool = { enabled: true, source: "future-runtime" };
+  await fs.writeFile(stateFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+
+  const second = await createProjectIdentityStore({
+    stateFile,
+    project: "negus",
+    projectRoot: root,
+    registry: { list: () => [employee(root, { name: "Renamed Developer", mainThreadId: null, conversationId: null })] },
+  });
+  t.after(() => second.close());
+  const restored = second.getForEmployee("developer");
+  assert.equal(restored.projectId, bound.projectId);
+  assert.equal(restored.name, "Renamed Developer");
+  assert.deepEqual(restored.memberEmployeeIds, ["developer", "another-agent"]);
+  assert.equal(restored.capabilities.customTool.source, "future-runtime");
+  assert.equal(restored.conversation.runtimeKind, "openclaw");
+  assert.equal(restored.conversation.role, "main");
+});
+
+test("directory exposes project identity metadata and conversation role", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-project-directory-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const registry = { list: () => [employee(root)] };
+  const identity = await createProjectIdentityStore({
+    stateFile: path.join(root, "project-identities.json"),
+    project: "negus",
+    projectRoot: root,
+    registry,
+  });
+  t.after(() => identity.close());
+  const directory = createEmployeeProjectDirectory({
+    project: "negus",
+    projectRoot: root,
+    registry,
+    projectIdentity: identity,
+    employeeRuntime: { getStatus: async () => ({ status: { phase: "idle", active: false } }) },
+    conversations: {
+      findSession: async () => ({ updatedAt: "2026-08-10T10:00:00.000Z" }),
+    },
+  });
+  const listing = await directory.list();
+  const worker = listing.projects.find((item) => item.kind === "employee");
+  assert.equal(worker.projectId, "project:employee:employee-developer");
+  assert.equal(worker.provider, "codex");
+  assert.equal(worker.capabilities.growth.source, "employee-growth-store");
+  assert.equal(worker.conversations[0].role, "main");
+  assert.equal(worker.conversations[0].projectId, worker.projectId);
+  assert.equal(worker.lastActivityAt, "2026-08-10T10:00:00.000Z");
+  assert.equal(listing.projects.find((item) => item.kind === "personal").projectId, "project:personal:negus");
+});
+
+test("directory groups Codex conversations under an additional business project", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-business-project-"));
+  const financeRoot = path.join(root, "finance");
+  await fs.mkdir(financeRoot);
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const identity = await createProjectIdentityStore({
+    stateFile: path.join(root, "project-identities.json"),
+    project: "negus",
+    projectRoot: root,
+    registry: { list: () => [] },
+    businessProjects: [{ key: "finance", name: "财务报表管理", root: financeRoot }],
+  });
+  t.after(() => identity.close());
+  const directory = createEmployeeProjectDirectory({
+    project: "negus",
+    projectRoot: root,
+    registry: { list: () => [] },
+    projectIdentity: identity,
+    conversations: {
+      listSessions: async () => [
+        { threadId: "main-thread", title: "Main", cwd: root, updatedAt: "2026-08-12T10:00:00.000Z" },
+        { threadId: "finance-thread", title: "未命名会话", cwd: financeRoot, updatedAt: "2026-08-12T11:00:00.000Z" },
+      ],
+      findSession: async (threadId) => threadId === "finance-thread" ? { title: "完善税务报表" } : null,
+    },
+  });
+
+  const listing = await directory.list();
+  const finance = listing.projects.find((item) => item.kind === "business");
+  assert.equal(listing.projects.filter((item) => item.kind !== "employee").length, 2);
+  assert.equal(finance.name, "财务报表管理");
+  assert.deepEqual(finance.conversations.map((item) => item.threadId), ["finance-thread"]);
+  assert.deepEqual(finance.conversations.map((item) => item.title), ["完善税务报表"]);
+  assert.deepEqual(
+    listing.projects.find((item) => item.kind === "personal").conversations.map((item) => item.threadId),
+    ["main-thread"],
+  );
+});
+
+test("business project edits and removals apply on the next identity sync without a restart", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-business-project-refresh-"));
+  const financeRoot = path.join(root, "finance");
+  const cameraRoot = path.join(root, "cameras");
+  const configFile = path.join(root, "business-projects.json");
+  await Promise.all([fs.mkdir(financeRoot), fs.mkdir(cameraRoot)]);
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const writeProjects = async (projects, seconds) => {
+    await fs.writeFile(configFile, JSON.stringify({ projects }), "utf8");
+    const stamp = new Date(Date.now() + seconds * 1000);
+    await fs.utimes(configFile, stamp, stamp);
+  };
+  await writeProjects([{ key: "finance", name: "财务", root: financeRoot }], 1);
+  const store = await createProjectIdentityStore({
+    stateFile: path.join(root, "project-identities.json"),
+    project: "negus",
+    projectRoot: root,
+    registry: { list: () => [] },
+    businessProjects: createBusinessProjectLoader(configFile),
+  });
+  t.after(() => store.close());
+  const directory = createEmployeeProjectDirectory({
+    project: "negus", projectRoot: root, registry: { list: () => [] }, projectIdentity: store,
+    conversations: { listSessions: async () => [] },
+  });
+  const first = await directory.list();
+  const finance = first.projects.find((item) => item.kind === "business");
+  assert.equal(finance.name, "财务");
+
+  await writeProjects([{ key: "finance", name: "财务中心", root: financeRoot }], 2);
+  const renamed = (await directory.list()).projects.find((item) => item.kind === "business");
+  assert.equal(renamed.projectId, finance.projectId);
+  assert.equal(renamed.name, "财务中心");
+
+  await writeProjects([
+    { key: "capital", name: "资金", root: financeRoot },
+    { key: "cameras", name: "相机数据", root: cameraRoot },
+  ], 3);
+  const [refreshed] = await Promise.all([directory.list(), store.sync()]);
+  const businesses = refreshed.projects.filter((item) => item.kind === "business");
+  assert.deepEqual(businesses.map((item) => item.name), ["资金", "相机数据"]);
+  assert.equal(businesses.find((item) => item.name === "资金").projectId, finance.projectId);
+  assert.equal(businesses.filter((item) => item.name === "资金").length, 1);
+  assert.equal(businesses.filter((item) => item.projectId.endsWith(":cameras")).length, 1);
+  assert.equal(refreshed.projects.filter((item) => item.kind === "personal").length, 1);
+
+  await writeProjects([], 4);
+  const [removed] = await Promise.all([directory.list(), store.sync()]);
+  assert.deepEqual(removed.projects.filter((item) => item.kind === "business"), []);
+});
+
+test("directory reads existing employee group bindings without creating them", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-project-directory-readonly-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const worker = employee(root, {
+    id: "manager",
+    projectKey: "employee-manager",
+    mainThreadId: null,
+    conversationId: null,
+  });
+  let createCalls = 0;
+  const binding = {
+    conversationId: "group:current-project:manager",
+    runtimeKind: "codex",
+    runtimeSessionId: "group-thread-manager",
+    projectId: "project:employee:employee-manager",
+    targetProjectId: "project:personal:negus",
+    executionRoot: root,
+    title: "negus 项目群 · 运营管理",
+  };
+  const roomStore = {
+    getAgent: () => ({ id: "manager", name: "运营管理", threadId: "group-thread-manager" }),
+    snapshot: () => ({ messages: [] }),
+  };
+  const directory = createEmployeeProjectDirectory({
+    project: "negus",
+    projectRoot: root,
+    registry: { list: () => [worker] },
+    projectIdentity: {
+      sync: async () => {},
+      list: () => [
+        { projectId: "project:personal:negus", key: "negus", name: "negus", kind: "personal", root },
+        { projectId: "project:employee:employee-manager", key: "employee-manager", name: "运营管理", kind: "employee", root: worker.projectRoot },
+      ],
+      getByKey: () => ({ projectId: "project:employee:employee-manager", root: worker.projectRoot }),
+    },
+    employeeRuntime: { getStatus: async () => ({ status: { phase: "idle", active: false } }) },
+    employeeConversations: {
+      findByAgentRoom: () => binding,
+      openGroupForAgent: async () => { createCalls += 1; return binding; },
+    },
+    roomDirectory: {
+      listForAgent: () => [{ id: "current-project", projectId: "project:personal:negus", name: "negus 项目群" }],
+      get: () => roomStore,
+      threadIds: () => ["group-thread-manager"],
+    },
+    conversations: { listSessions: async () => [] },
+  });
+
+  const first = await directory.list();
+  const second = await directory.list();
+  const employeeProject = second.projects.find((item) => item.kind === "employee");
+  assert.equal(createCalls, 0);
+  assert.equal(employeeProject.conversations.length, 1);
+  assert.equal(employeeProject.conversations[0].conversationId, binding.conversationId);
+  assert.equal(employeeProject.conversations[0].projectId, "project:employee:employee-manager");
+  assert.equal(employeeProject.conversations[0].targetProjectId, "project:personal:negus");
+  assert.equal(first.projects.length, second.projects.length);
+});
+
+test("directory aggregates employee work across main, groups, and background tasks", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-project-directory-work-status-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const worker = employee(root);
+  const directory = createEmployeeProjectDirectory({
+    project: "negus",
+    projectRoot: root,
+    registry: { list: () => [worker] },
+    employeeRuntime: { getStatus: async () => ({ status: { phase: "idle", active: false } }) },
+    employeeConversations: { findByAgentRoom: () => ({
+      conversationId: "group:room:developer",
+      runtimeKind: "codex",
+      runtimeSessionId: "group-thread",
+    }) },
+    roomDirectory: {
+      listForAgent: () => [{ id: "room", projectId: "project:personal:negus", name: "项目群" }],
+      get: () => ({
+        getAgent: () => ({ threadId: "group-thread", phase: "working", label: "working", active: true }),
+        snapshot: () => ({ messages: [] }),
+      }),
+    },
+    agentTasks: {
+      directoryEntries: () => [{ id: "task-chat", conversationId: "handoff-task", threadId: "task-thread",
+        title: "后台任务", status: { phase: "running", label: "running", active: true } }],
+      providerForThread: () => "current",
+    },
+    conversations: { listSessions: async () => [], findSession: async () => null },
+  });
+
+  const listing = await directory.list();
+  const project = listing.projects.find((item) => item.employeeId === "developer");
+  assert.equal(project.status.phase, "running");
+  assert.equal(project.status.label, "正在进行 2 项工作");
+  assert.equal(project.status.active, true);
+  assert.equal(project.status.indicator, "green");
+});
+
+test("directory never assigns employee Runtime threads to a business project", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-project-directory-owner-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const employeeThreadId = "employee-group-thread";
+  const directory = createEmployeeProjectDirectory({
+    project: "project-a",
+    projectRoot: root,
+    registry: { list: () => [] },
+    employeeConversations: {
+      findByRuntimeSession: (_runtimeKind, threadId) => threadId === employeeThreadId ? { conversationKind: "group" } : null,
+    },
+    conversations: {
+      listSessions: async () => [
+        { threadId: employeeThreadId, title: "employee work", cwd: root },
+        { threadId: "project-thread", title: "project work", cwd: root },
+      ],
+    },
+  });
+
+  const listing = await directory.list();
+  const project = listing.projects.find((item) => item.kind === "personal");
+  assert.deepEqual(project.conversations.map((item) => item.threadId), ["project-thread"]);
+});

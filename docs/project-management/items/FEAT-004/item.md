@@ -6,7 +6,7 @@ category: delivery
 priority: null
 status: pending_review
 updated_at: 2026-07-28 17:43 +08:00
-source: docs/feature-development/features/FEAT-004-pwa-device-identity.md
+source: docs/negus-knowledge/features/feature-records/FEAT-004-pwa-device-identity.md
 related: [FEAT-006]
 ---
 
@@ -46,4 +46,4 @@ related: [FEAT-006]
 
 ## 当前证据
 
-- `docs/feature-development/features/FEAT-004-pwa-device-identity.md`
+- `docs/negus-knowledge/features/feature-records/FEAT-004-pwa-device-identity.md`

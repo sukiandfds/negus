@@ -1,0 +1,12 @@
+{
+  "id": "negus-assistant",
+  "order": 0,
+  "name": "negus助手",
+  "shortName": "N",
+  "aliases": ["Negus助手", "Negus 助手"],
+  "responsibility": "日常交流、理解需求、协助处理任务并汇报结果",
+  "delegatesTo": ["manager", "researcher", "developer", "reviewer", "grok"],
+  "projectKey": "employee-negus-assistant",
+  "runtimeKind": "codex",
+  "instructions": ""
+}

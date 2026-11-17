@@ -1,289 +1,110 @@
-import { randomUUID } from "node:crypto";
-import { paginationFrom, readJson, sendJson } from "../http/request-utils.mjs";
+import { createConversationMessageRoutes } from "./conversation-message-routes.mjs";
+import { createConversationHistoryRoutes } from "./conversation-history-routes.mjs";
+import { createConversationSettingsRoutes } from "./conversation-settings-routes.mjs";
+import { createConversationInteractionRoutes } from "./conversation-interaction-routes.mjs";
 
-const publicAttachment = ({ id, name, mimeType, url, width, height }) => ({
+const publicAttachment = ({ id, name, mimeType, url, width, height, readStatus, readError }) => ({
   id,
   name,
   mimeType,
   url,
   ...(Number.isSafeInteger(width) && Number.isSafeInteger(height) ? { width, height } : {}),
+  ...(readStatus ? { readStatus } : {}),
+  ...(readError ? { readError } : {}),
 });
 
-export const createConversationRoutes = ({ conversations, execution, contextManagement, media, broadcast = () => {} }) => {
-  const submissions = new Map();
-  const submissionTtlMs = 60000;
-  const maxSubmissions = 200;
+const publicUserInputRequest = (message) => {
+  if (!message || message.method !== "item/tool/requestUserInput") return null;
+  const params = message.params || {};
+  return {
+    requestId: message.id,
+    threadId: String(params.threadId || ""),
+    turnId: String(params.turnId || ""),
+    itemId: String(params.itemId || ""),
+    isBlocking: params.isBlocking !== false,
+    questions: (Array.isArray(params.questions) ? params.questions : []).slice(0, 3).map((question) => ({
+      id: String(question?.id || ""),
+      header: String(question?.header || "").slice(0, 120),
+      question: String(question?.question || "").slice(0, 4000),
+      isOther: question?.isOther === true,
+      isSecret: question?.isSecret === true,
+      options: Array.isArray(question?.options) ? question.options.slice(0, 20).map((option) => ({
+        label: String(option?.label || "").slice(0, 240),
+        description: String(option?.description || "").slice(0, 1000),
+      })) : null,
+    })).filter((question) => question.id && question.question),
+  };
+};
 
-  const rememberSubmission = (submissionId, fingerprint, promise) => {
-    if (!submissionId) return promise;
-    const existing = submissions.get(submissionId);
-    if (existing) {
-      if (existing.fingerprint !== fingerprint) {
-        const error = new Error("submissionId was already used for a different message");
-        error.statusCode = 409;
-        throw error;
-      }
-      return existing.promise;
+export const createConversationRoutes = ({
+  conversations, execution, followUpQueue, contextManagement, media, submissionStore,
+  broadcast = () => {}, publishThreadEvent = (_threadId, event) => broadcast(event), agentConversationStore,
+  employeeRuntime, roomDirectory, modelProviders, agentTasks,
+}) => {
+  const authorizeAgentThread = async ({ threadId, conversationId, allowGroup = false }) => {
+    if (!agentConversationStore) return null;
+    const cleanThreadId = String(threadId || "").trim();
+    const cleanConversationId = String(conversationId || "").trim();
+    const boundByThread = cleanThreadId
+      ? agentConversationStore.findByRuntimeSession?.("codex", cleanThreadId)
+      : null;
+    if (!cleanConversationId && boundByThread) {
+      throw Object.assign(new Error("conversationId is required for an Agent conversation"), { statusCode: 409 });
     }
-    const timer = setTimeout(() => {
-      if (submissions.get(submissionId)?.promise === promise) submissions.delete(submissionId);
-    }, submissionTtlMs);
-    timer.unref?.();
-    submissions.set(submissionId, { fingerprint, promise, timer });
-    while (submissions.size > maxSubmissions) {
-      const oldestId = submissions.keys().next().value;
-      const oldest = submissions.get(oldestId);
-      clearTimeout(oldest?.timer);
-      submissions.delete(oldestId);
+    if (!cleanConversationId && !boundByThread) return null;
+    const binding = cleanConversationId
+      ? await agentConversationStore.resolve({ conversationId: cleanConversationId })
+      : boundByThread;
+    const allowed = binding.runtimeSessionId === cleanThreadId;
+    if (!allowed) throw Object.assign(new Error("conversationId 与 threadId 不匹配"), { statusCode: 409 });
+    if (binding.conversationKind === "group" && allowGroup) return binding;
+    if (binding.conversationKind === "task" && agentTasks?.ownsThread(cleanThreadId)) return binding;
+    if (binding.conversationKind !== "direct") {
+      throw Object.assign(new Error("Agent 单聊尚未绑定独立 Thread"), { statusCode: 409 });
     }
-    void promise.catch(() => {
-      const entry = submissions.get(submissionId);
-      if (entry?.promise === promise) {
-        clearTimeout(entry.timer);
-        submissions.delete(submissionId);
-      }
-    });
-    return promise;
+    return binding;
   };
 
+  const isEmployeeDirectBinding = (binding) => Boolean(
+    binding?.conversationKind === "direct"
+      && binding?.agentId
+      && employeeRuntime?.supportsEmployee?.(binding.agentId)
+      && employeeRuntime?.ownsConversation?.(binding),
+  );
+  const sessionSource = (binding) => isEmployeeDirectBinding(binding) ? employeeRuntime : conversations;
+
+  const readGroupAgentSession = async (binding, source, pagination = {}) => {
+    const options = binding.conversationKind === "task" && pagination ? { ...pagination, contentVersion: undefined } : pagination;
+    const session = await conversations.findSession(binding.runtimeSessionId, source, options);
+    if (!session) return null;
+    return {
+      ...session,
+      conversationKind: "group",
+      readOnly: true,
+      conversationId: binding.conversationId,
+    };
+  };
+
+  const readAgentSession = async (binding, source, pagination) => {
+    if (binding.conversationKind === "group") return readGroupAgentSession(binding, source, pagination);
+    if (isEmployeeDirectBinding(binding)) return employeeRuntime.readSession(binding.agentId, pagination);
+    const session = await conversations.findSession(binding.runtimeSessionId, source, pagination);
+    return binding.conversationKind === "task" ? agentTasks?.decorateTaskSession?.(binding.runtimeSessionId, session) ?? session : session;
+  };
+  const readOrdinarySession = async (threadId, source, pagination) => {
+    const session = await conversations.findSession(threadId, source, pagination);
+    return agentTasks?.decorateTaskSession?.(threadId, session) ?? session;
+  };
+
+  const context = { conversations, execution, followUpQueue, contextManagement, media, submissionStore, publishThreadEvent, agentConversationStore, employeeRuntime, roomDirectory, modelProviders, agentTasks, authorizeAgentThread, isEmployeeDirectBinding, sessionSource, readAgentSession, readOrdinarySession, publicUserInputRequest, publicAttachment };
+  const routes = [
+    createConversationMessageRoutes(context),
+    createConversationHistoryRoutes(context),
+    createConversationSettingsRoutes(context),
+    createConversationInteractionRoutes(context),
+  ];
   return async (request, response, url) => {
-  if (url.pathname === "/api/models" && request.method === "GET") {
-    sendJson(response, await conversations.listModels());
-    return true;
-  }
-  if (url.pathname === "/api/session/message" && request.method === "POST") {
-    const body = await readJson(request);
-    const threadId = String(body.threadId || "").trim();
-    const text = String(body.text || "").trim();
-    const attachments = media.resolveMany(body.attachmentIds);
-    if (!threadId || (!text && !attachments.length)) {
-      sendJson(response, { error: "threadId and message content are required" }, 400);
-      return true;
-    }
-    if (text.length > 32000) {
-      sendJson(response, { error: "message is too long" }, 413);
-      return true;
-    }
-    const submissionId = String(body.submissionId || "").trim().slice(0, 160) || randomUUID();
-    const messageId = `optimistic-${submissionId}`;
-    const createdAt = new Date().toISOString();
-    const fingerprint = JSON.stringify({
-      threadId,
-      text,
-      attachmentIds: Array.isArray(body.attachmentIds) ? body.attachmentIds : [],
-    });
-    const cachedSubmission = submissionId ? submissions.get(submissionId) : null;
-    if (cachedSubmission) {
-      if (cachedSubmission.fingerprint !== fingerprint) {
-        const error = new Error("submissionId was already used for a different message");
-        error.statusCode = 409;
-        throw error;
-      }
-      const cachedResult = await cachedSubmission.promise;
-      sendJson(response, cachedResult.body, cachedResult.statusCode);
-      return true;
-    }
-    const status = execution.getStatus(threadId);
-    if (status.active && !status.turnId) {
-      sendJson(response, { error: "Codex 正在启动当前任务，请稍后再试" }, 409);
-      return true;
-    }
-    broadcast({
-      type: "user_message_submitted",
-      threadId,
-      submissionId,
-      messageId,
-      text,
-      attachments: attachments.map(publicAttachment),
-      createdAt,
-    });
-    const submit = (async () => {
-      let result;
-      try {
-        result = status.active
-          ? await conversations.steerMessage(threadId, status.turnId, text, attachments)
-          : await conversations.sendMessage(threadId, text, attachments);
-      } catch (error) {
-        const recovered = execution.getStatus(threadId);
-        if (status.active || !recovered.turnId || recovered.turnId === status.turnId) throw error;
-        return {
-          body: { threadId, turnId: recovered.turnId, status: "inProgress", recovered: true, submissionId, messageId },
-          statusCode: 202,
-        };
-      }
-      return {
-        body: {
-          threadId,
-          turnId: status.active ? status.turnId : result.turn?.id || "",
-          status: status.active ? "steered" : result.turn?.status || "inProgress",
-          submissionId,
-          messageId,
-        },
-        statusCode: 202,
-      };
-    })();
-    const accepted = rememberSubmission(submissionId, fingerprint, submit);
-    const responsePayload = await accepted;
-    sendJson(response, responsePayload.body, responsePayload.statusCode);
-    return true;
-  }
-  if (url.pathname === "/api/session/model" && request.method === "POST") {
-    const body = await readJson(request);
-    const threadId = String(body.threadId || "").trim();
-    const model = String(body.model || "").trim();
-    if (!threadId || !model) {
-      sendJson(response, { error: "threadId and model are required" }, 400);
-      return true;
-    }
-    if (execution.getStatus(threadId).active) {
-      sendJson(response, { error: "当前任务运行中，请在完成后切换模型" }, 409);
-      return true;
-    }
-    sendJson(response, await conversations.updateModel(threadId, model));
-    return true;
-  }
-  if (url.pathname === "/api/session/reasoning-effort" && request.method === "POST") {
-    const body = await readJson(request);
-    const threadId = String(body.threadId || "").trim();
-    const reasoningEffort = String(body.reasoningEffort || "").trim();
-    if (!threadId || !reasoningEffort) {
-      sendJson(response, { error: "threadId and reasoningEffort are required" }, 400);
-      return true;
-    }
-    if (execution.getStatus(threadId).active) {
-      sendJson(response, { error: "当前任务运行中，请在完成后调整推理强度" }, 409);
-      return true;
-    }
-    sendJson(response, await conversations.updateReasoningEffort(threadId, reasoningEffort));
-    return true;
-  }
-  if (url.pathname === "/api/session/interrupt" && request.method === "POST") {
-    const body = await readJson(request);
-    const threadId = String(body.threadId || "").trim();
-    const status = execution.getStatus(threadId);
-    if (!threadId || !status.active || !status.turnId) {
-      sendJson(response, { error: "当前没有可停止的任务" }, 409);
-      return true;
-    }
-    await conversations.interrupt(threadId, status.turnId);
-    sendJson(response, { threadId, turnId: status.turnId, status: "interrupting" }, 202);
-    return true;
-  }
-  if (url.pathname === "/api/session/fork" && request.method === "POST") {
-    const body = await readJson(request);
-    const threadId = String(body.threadId || "").trim();
-    const lastTurnId = String(body.lastTurnId || "").trim();
-    if (!threadId || !lastTurnId) {
-      sendJson(response, { error: "threadId and lastTurnId are required" }, 400);
-      return true;
-    }
-    if (execution.getStatus(threadId).active) {
-      sendJson(response, { error: "当前任务运行中，请完成后再从这里继续" }, 409);
-      return true;
-    }
-    const session = await conversations.forkSession(threadId, lastTurnId);
-    sendJson(response, {
-      session,
-      sourceThreadId: threadId,
-      forkedFromTurnId: lastTurnId,
-    }, 201);
-    return true;
-  }
-  if (url.pathname === "/api/session/archive" && request.method === "POST") {
-    const body = await readJson(request);
-    const threadId = String(body.threadId || "").trim();
-    if (!threadId) {
-      sendJson(response, { error: "threadId is required" }, 400);
-      return true;
-    }
-    if (execution.getStatus(threadId).active) {
-      sendJson(response, { error: "当前任务运行中，请完成后再归档" }, 409);
-      return true;
-    }
-    sendJson(response, await conversations.archiveSession(threadId), 202);
-    return true;
-  }
-  if (url.pathname === "/api/session/unarchive" && request.method === "POST") {
-    const body = await readJson(request);
-    const threadId = String(body.threadId || "").trim();
-    if (!threadId) {
-      sendJson(response, { error: "threadId is required" }, 400);
-      return true;
-    }
-    sendJson(response, await conversations.unarchiveSession(threadId), 202);
-    return true;
-  }
-  if (url.pathname === "/api/session/context" && request.method === "GET") {
-    const threadId = url.searchParams.get("threadId") || "";
-    if (!threadId) {
-      sendJson(response, { error: "threadId is required" }, 400);
-      return true;
-    }
-    sendJson(response, await contextManagement.load(threadId));
-    return true;
-  }
-  if (url.pathname === "/api/session/context/settings" && request.method === "POST") {
-    const body = await readJson(request);
-    const threadId = String(body.threadId || "").trim();
-    if (!threadId) {
-      sendJson(response, { error: "threadId is required" }, 400);
-      return true;
-    }
-    const threshold = body.autoCompactThreshold === null ? null : Number(body.autoCompactThreshold);
-    sendJson(response, await contextManagement.setThreshold(threadId, threshold));
-    return true;
-  }
-  if (url.pathname === "/api/session/context/compact" && request.method === "POST") {
-    const body = await readJson(request);
-    const threadId = String(body.threadId || "").trim();
-    if (!threadId) {
-      sendJson(response, { error: "threadId is required" }, 400);
-      return true;
-    }
-    sendJson(response, await contextManagement.requestCompaction(threadId), 202);
-    return true;
-  }
-  if (url.pathname === "/api/execution-status") {
-    const threadId = url.searchParams.get("threadId") || "";
-    if (!threadId) {
-      sendJson(response, { error: "threadId is required" }, 400);
-      return true;
-    }
-    const current = execution.getStatus(threadId);
-    if (current.active && url.searchParams.get("reconcile") === "1") {
-      try {
-        execution.reconcile(threadId, await conversations.getThreadStatus(threadId));
-      } catch {
-        execution.reconcile(threadId, null);
-      }
-    }
-    sendJson(response, execution.getStatus(threadId));
-    return true;
-  }
-  if (url.pathname === "/api/sessions") {
-    const archived = url.searchParams.get("archived") === "1";
-    const sessions = await conversations.listSessions(url.searchParams.get("source") || "all", archived);
-    sendJson(response, sessions.map(({ messages, file, ...summary }) => summary));
-    return true;
-  }
-  if (url.pathname === "/api/session" && request.method === "POST") {
-    const body = await readJson(request);
-    sendJson(response, await conversations.createSession(String(body.model || "").trim()), 201);
-    return true;
-  }
-  if (url.pathname === "/api/session") {
-    const session = await conversations.findSession(
-      url.searchParams.get("threadId") || "",
-      url.searchParams.get("source") || "all",
-      paginationFrom(url),
-    );
-    if (!session) {
-      sendJson(response, { error: "session not found" }, 404);
-      return true;
-    }
-    sendJson(response, session);
-    return true;
-  }
-  return false;
-};
+    for (const route of routes) if (await route(request, response, url)) return true;
+    return false;
+  };
 };

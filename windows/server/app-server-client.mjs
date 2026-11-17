@@ -1,6 +1,57 @@
+import { executionParams } from "../../ui-feishu/server/execution-policy.mjs";
+import { cloudflareMcpArguments } from './connections/cloudflare-runtime.mjs';
+import { imageMcpArguments } from "./image-generation/image-runtime.mjs";
+import { githubEnvironment } from "./github-runtime.mjs";
+import { computerMcpArguments, nativeComputerMcpArguments } from "./computer-control/runtime.mjs";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
+import TOML from "@iarna/toml";
+import { requestWithNeutralIdentity, sharedModelCatalogArguments } from './model-catalog.mjs';
+
+// Scan each incoming chunk once; assemble an incomplete JSONL record only at its newline.
+export const createProtocolLineReader = () => {
+  let parts = [];
+  return chunk => {
+    const lines = [];
+    let start = 0, newline;
+    while ((newline = chunk.indexOf("\n", start)) >= 0) {
+      const segment = chunk.slice(start, newline);
+      const line = parts.length ? [...parts, segment].join("") : segment;
+      parts = [];
+      lines.push(line.trim());
+      start = newline + 1;
+    }
+    if (start < chunk.length) parts.push(chunk.slice(start));
+    return lines;
+  };
+};
+
+export const streamRetryArguments = (home) => {
+  let config;
+  try { config = TOML.parse(fs.readFileSync(path.join(home, "config.toml"), "utf8")); }
+  catch (error) { if (error.code === "ENOENT") return []; throw error; }
+  const providers = config.model_providers || {};
+  for (const provider of Object.values(providers)) {
+    provider.stream_max_retries = 2;
+    // Custom providers also need this gate to expose Codex's native web tool.
+    provider.supports_standalone_web_search = true;
+  }
+  return Object.keys(providers).length ? ['-c', `model_providers=${TOML.stringify.value(providers)}`] : [];
+};
+
+export const modelProviderNoProxyHosts = (home) => {
+  let config;
+  try { config = TOML.parse(fs.readFileSync(path.join(home, "config.toml"), "utf8")); }
+  catch (error) { if (error.code === "ENOENT") return []; throw error; }
+  return [...new Set(Object.values(config.model_providers || {}).flatMap((provider) => {
+    try {
+      const url = new URL(provider.base_url);
+      return url.protocol === "https:" ? [url.hostname] : [];
+    } catch { return []; }
+  }))];
+};
 
 const versionParts = (version) => {
   const match = version.match(/(\d+)\.(\d+)\.(\d+)(?:-([\w.-]+))?/);
@@ -64,7 +115,24 @@ const desktopCandidates = () => {
   return candidates;
 };
 
-const resolveCodexCommand = () => {
+const macOSAppCandidates = () => {
+  if (process.platform !== "darwin") return [];
+  const resourcePaths = [
+    ["Contents", "Resources", "codex"],
+    ["Contents", "Resources", "codex-cli", "CodexCLI.app", "Contents", "MacOS", "codex"],
+  ];
+  return ["/Applications", path.join(os.homedir(), "Applications")].flatMap((applicationsRoot) =>
+    ["ChatGPT.app", "Codex.app"].flatMap((app) => resourcePaths.map((parts) => path.join(applicationsRoot, app, ...parts))));
+};
+
+const commandOnPath = () => {
+  const command = process.platform === "win32" ? "where.exe" : "which";
+  const result = spawnSync(command, ["codex"], { encoding: "utf8", timeout: 5000, windowsHide: true });
+  if (result.error || result.status !== 0) return null;
+  return String(result.stdout || "").split(/\r?\n/u).map((value) => value.trim()).find(Boolean) || null;
+};
+
+export const resolveCodexCommand = () => {
   const override = process.env.CODEX_APP_SERVER_BIN?.trim();
   if (override) {
     const selected = inspectCandidate(path.resolve(override));
@@ -78,6 +146,12 @@ const resolveCodexCommand = () => {
     .sort((left, right) => compareVersions(right.version, left.version));
   if (desktop.length) return desktop[0];
 
+  const macOSApp = macOSAppCandidates()
+    .map(inspectCandidate)
+    .filter(Boolean)
+    .sort((left, right) => compareVersions(right.version, left.version));
+  if (macOSApp.length) return macOSApp[0];
+
   const appData = process.env.APPDATA
     || path.join(process.env.USERPROFILE || "", "AppData", "Roaming");
   const globalNpm = inspectCandidate(path.join(
@@ -85,17 +159,51 @@ const resolveCodexCommand = () => {
   ));
   if (globalNpm) return globalNpm;
 
+  const pathCommand = commandOnPath();
+  const pathCandidate = pathCommand && inspectCandidate(pathCommand);
+  if (pathCandidate) return pathCandidate;
+
   throw new Error("No runnable Codex app-server runtime was found.");
 };
 
-export const createAppServerClient = ({ requestTimeoutMs = 15000 } = {}) => {
+const sensitiveEnvironmentName = /(credential|password|secret|token|(?:^|_)key(?:_|$))/iu;
+
+export const buildAppServerEnvironment = ({
+  baseEnvironment = process.env,
+  environment = {},
+  codexHome = "",
+  sanitizeEnvironment = false,
+} = {}) => {
+  const next = {};
+  for (const [name, value] of Object.entries(baseEnvironment || {})) {
+    if (value === undefined || (sanitizeEnvironment && sensitiveEnvironmentName.test(name))) continue;
+    next[name] = value;
+  }
+  for (const [name, value] of Object.entries(environment || {})) {
+    if (value === undefined || value === null) delete next[name];
+    else next[name] = String(value);
+  }
+  if (codexHome) next.CODEX_HOME = path.resolve(codexHome);
+  Object.assign(next, githubEnvironment(next));
+  return next;
+};
+
+export const createAppServerClient = ({
+  requestTimeoutMs = 15000,
+  codexHome = "",
+  environment = {},
+  sanitizeEnvironment = false,
+  label = "",
+  workingDirectory = process.cwd(),
+} = {}) => {
+  let closed = false;
   let child;
-  let buffer = "";
   let nextId = 1;
   let initializePromise;
   let restartPromise;
   let probeFailures = 0;
   const pending = new Map();
+  const pendingUserInputs = new Map();
   const listeners = new Set();
   const healthListeners = new Set();
   const stderrLines = [];
@@ -137,16 +245,28 @@ export const createAppServerClient = ({ requestTimeoutMs = 15000 } = {}) => {
   };
 
   const start = () => {
+    if (closed) throw new Error("Codex app-server client closed");
     if (child && !child.killed) return;
     const selected = resolveCodexCommand();
-    console.log(`[app-server-client] using ${selected.entrypoint} (${selected.version})`);
-    const spawned = spawn(selected.command, [...selected.prefixArgs, "app-server"], {
-      cwd: process.cwd(),
+    const logPrefix = label ? `[app-server-client:${label}]` : "[app-server-client]";
+    console.log(`${logPrefix} using ${selected.entrypoint} (${selected.version})`);
+    const effectiveHome = codexHome || environment.CODEX_HOME || process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+    const noProxy = [...new Set([
+      environment.NO_PROXY, environment.no_proxy, process.env.NO_PROXY, process.env.no_proxy,
+      ...modelProviderNoProxyHosts(effectiveHome),
+    ].filter(Boolean).flatMap((value) => String(value).split(",")).map((value) => value.trim()).filter(Boolean))].join(",");
+    const spawned = spawn(selected.command, [...selected.prefixArgs, "app-server", "-c", 'web_search="live"', ...streamRetryArguments(effectiveHome), ...sharedModelCatalogArguments(), ...imageMcpArguments(), ...computerMcpArguments(), ...nativeComputerMcpArguments(), ...cloudflareMcpArguments()], {
+      cwd: workingDirectory,
+      env: buildAppServerEnvironment({
+        environment: noProxy ? { ...environment, NO_PROXY: noProxy, no_proxy: noProxy } : environment,
+        codexHome,
+        sanitizeEnvironment,
+      }),
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });
     child = spawned;
-    buffer = "";
+    const readLines = createProtocolLineReader();
     spawned.stdout.setEncoding("utf8");
     spawned.stderr.setEncoding("utf8");
     spawned.stderr.on("data", (chunk) => {
@@ -154,15 +274,16 @@ export const createAppServerClient = ({ requestTimeoutMs = 15000 } = {}) => {
       if (stderrLines.length > 200) stderrLines.splice(0, stderrLines.length - 200);
     });
     spawned.stdout.on("data", (chunk) => {
-      buffer += chunk;
-      let newline;
-      while ((newline = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, newline).trim();
-        buffer = buffer.slice(newline + 1);
+      for (const line of readLines(chunk)) {
         if (!line) continue;
         try {
           const message = JSON.parse(line);
           if (message.method && message.id !== undefined) {
+            if (message.method === "item/tool/requestUserInput") {
+              pendingUserInputs.set(String(message.id), message);
+              emit(message);
+              continue;
+            }
             emit(message);
             writeMessage({ id: message.id, result: automaticResponse(message) });
             continue;
@@ -188,11 +309,16 @@ export const createAppServerClient = ({ requestTimeoutMs = 15000 } = {}) => {
     });
     spawned.once("exit", (code) => {
       const tail = stderrLines.slice(-20).join("\n");
-      rejectPending(new Error(`Codex app-server exited with code ${code ?? "unknown"}${tail ? `: ${tail}` : ""}`));
-      if (child === spawned) {
-        child = undefined;
-        initializePromise = undefined;
-      }
+      const error = new Error(`Codex app-server exited with code ${code ?? "unknown"}${tail ? `: ${tail}` : ""}`);
+      rejectPending(error);
+      pendingUserInputs.clear();
+      // A deliberate restart or close has already replaced `child`; only an
+      // exit nobody asked for is reported, because every turn it was running
+      // is lost and nothing else will ever announce that.
+      if (child !== spawned) return;
+      child = undefined;
+      initializePromise = undefined;
+      emitHealth({ phase: "exited", error });
     });
   };
 
@@ -212,7 +338,7 @@ export const createAppServerClient = ({ requestTimeoutMs = 15000 } = {}) => {
 
   const initialize = () => {
     initializePromise ||= requestRaw("initialize", {
-      clientInfo: { name: "codex-collab-panel-demo", title: "Codex Collab Panel", version: "0.1.0" },
+      clientInfo: { name: "negus", title: "negus", version: "0.1.0" },
       capabilities: { experimentalApi: true },
     }).then((result) => {
       writeMessage({ method: "initialized", params: {} });
@@ -224,10 +350,14 @@ export const createAppServerClient = ({ requestTimeoutMs = 15000 } = {}) => {
     return initializePromise;
   };
 
+  const neutralThreads = new Set();
   const request = async (method, params = {}, options = {}) => {
     if (restartPromise) await restartPromise;
     await initialize();
-    return requestRaw(method, params, options.timeoutMs);
+    return requestWithNeutralIdentity(method, params, (method, params) => {
+
+    return requestRaw(method, executionParams(method, params), options.timeoutMs);
+    }, neutralThreads);
   };
 
   const restart = (reason = "health check failed", threadId = "") => {
@@ -237,8 +367,9 @@ export const createAppServerClient = ({ requestTimeoutMs = 15000 } = {}) => {
       const previous = child;
       child = undefined;
       initializePromise = undefined;
-      buffer = "";
+      neutralThreads.clear();
       rejectPending(new Error(`Codex app-server restarting: ${reason}`));
+      pendingUserInputs.clear();
       previous?.kill();
       if (previous) {
         await Promise.race([
@@ -271,7 +402,9 @@ export const createAppServerClient = ({ requestTimeoutMs = 15000 } = {}) => {
   };
 
   const close = () => {
+    closed = true;
     rejectPending(new Error("Codex app-server client closed"));
+    pendingUserInputs.clear();
     child?.kill();
     child = undefined;
     initializePromise = undefined;
@@ -288,5 +421,29 @@ export const createAppServerClient = ({ requestTimeoutMs = 15000 } = {}) => {
     return () => healthListeners.delete(listener);
   };
 
-  return { request, probe, restart, subscribe, subscribeHealth, close };
+  const getPendingUserInput = (threadId) => {
+    const requestedThreadId = String(threadId || "");
+    const requests = [...pendingUserInputs.values()].filter((message) => (
+      String(message.params?.threadId || "") === requestedThreadId
+    ));
+    return requests.at(-1) || null;
+  };
+
+  const respondToUserInput = (threadId, requestId, answers) => {
+    const key = String(requestId ?? "");
+    const message = pendingUserInputs.get(key);
+    if (!message || String(message.params?.threadId || "") !== String(threadId || "")) {
+      const error = new Error("该互动请求已结束或不存在");
+      error.statusCode = 409;
+      throw error;
+    }
+    writeMessage({ id: message.id, result: { answers } });
+    pendingUserInputs.delete(key);
+    return message;
+  };
+
+  return {
+    request, probe, restart, subscribe, subscribeHealth,
+    getPendingUserInput, respondToUserInput, close,
+  };
 };

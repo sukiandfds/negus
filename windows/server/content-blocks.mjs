@@ -6,18 +6,84 @@ const UI_DIRECTIVES = [
   /<oai-mem-citation>[\s\S]*?<\/oai-mem-citation>/giu,
 ];
 
+const generatedFileDirective = /^\s*::file\{path=(?:"((?:\\.|[^"\\])*)"|'([^']+)')\}\s*$/iu;
+
+const nextFence = (line, fence) => {
+  const match = /^\s*(`{3,}|~{3,})/u.exec(line);
+  if (!match) return fence;
+  if (!fence) return { marker: match[1][0], length: match[1].length };
+  return fence.marker === match[1][0] && match[1].length >= fence.length ? null : fence;
+};
+
 const stripCodexDirectives = (value) => {
-  let fence = "";
+  let fence = null;
   return String(value || "").split("\n").filter((line) => {
-    const fenceMatch = /^\s*(`{3,}|~{3,})/u.exec(line);
-    if (fenceMatch) {
-      const marker = fenceMatch[1][0];
-      fence = fence === marker ? "" : fence || marker;
-      return true;
-    }
+    const wasInFence = Boolean(fence);
+    fence = nextFence(line, fence);
+    if (wasInFence) return true;
     if (fence) return true;
+    if (generatedFileDirective.test(line)) return true;
     return !/^\s*::[a-z][a-z0-9-]*\{.*\}\s*$/iu.test(line);
   }).join("\n");
+};
+
+export const generatedFilesFromText = (value, registerMedia) => {
+  const files = [];
+  const seen = new Set();
+  let fence = null;
+  const text = String(value || "").split("\n").filter((line) => {
+    const wasInFence = Boolean(fence);
+    fence = nextFence(line, fence);
+    if (wasInFence) return true;
+    if (fence) return true;
+    const match = generatedFileDirective.exec(line);
+    if (!match) return true;
+    let source = match[2] || match[1] || "";
+    if (match[1]) {
+      try { source = JSON.parse(`"${match[1]}"`); } catch {}
+    }
+    if (!/^(?:\/|[A-Za-z]:[\\/]|file:)/u.test(source)) return true;
+    const media = registerMedia(source);
+    if (media?.url && !seen.has(media.url)) {
+      seen.add(media.url);
+      files.push(media);
+    }
+    return false;
+  }).join("\n").replace(/\n{3,}/gu, "\n\n").trim();
+  return { text, files };
+};
+
+const assistantBlocksFromContent = (value, registerMedia) => {
+  const files = [];
+  const seen = new Set();
+  const clean = (item) => {
+    if (typeof item === "string") {
+      const parsed = generatedFilesFromText(item, registerMedia);
+      for (const file of parsed.files) {
+        if (seen.has(file.url)) continue;
+        seen.add(file.url);
+        files.push(file);
+      }
+      return parsed.text;
+    }
+    if (Array.isArray(item)) return item.map(clean);
+    if (item && typeof item === "object") {
+      for (const key of ["content", "message", "text", "input_text", "output_text"]) {
+        if (key in item) return { ...item, [key]: clean(item[key]) };
+      }
+    }
+    return item;
+  };
+  return [
+    ...blocksFromContent(clean(value), registerMedia),
+    ...files.map((file) => ({
+      id: blockId("file", file.url),
+      type: "file",
+      source: file.url,
+      name: file.name || path.basename(file.path || "file"),
+      file,
+    })),
+  ];
 };
 
 const optionBlocksFrom = (value) => {
@@ -49,7 +115,10 @@ const valueFrom = (object, keys) => {
 
 const localPathFrom = (value) => {
   if (!value || /^https?:\/\//iu.test(value) || /^data:/iu.test(value)) return "";
-  return value.startsWith("file://") ? decodeURIComponent(new URL(value).pathname.replace(/^\/(?:[A-Za-z]:)/u, (match) => match.slice(1))) : value;
+  if (value.startsWith("file://")) {
+    return decodeURIComponent(new URL(value).pathname.replace(/^\/(?:[A-Za-z]:)/u, (match) => match.slice(1)));
+  }
+  return /^\/[A-Za-z]:[\\/]/u.test(value) ? value.slice(1) : value;
 };
 
 const registerMarkdownMedia = (text, registerMedia) => text.replace(/!\[([^\]]*)\]\((<[^>]+>|[^)\n]+)\)/gu, (match, alt, rawSource) => {
@@ -68,6 +137,35 @@ const mediaBlock = (type, source, registerMedia, extra = {}) => {
     return media ? { id: blockId(type, localPath), type, source: media.url, ...extra, file: media } : null;
   }
   return { id: blockId(type, source), type, source, ...extra };
+};
+
+const structuredContentFrom = (item) => {
+  const value = item?.result?.structuredContent;
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
+
+const isNegusImageToolCall = (item) => item?.type === "mcpToolCall"
+  && String(item.server || "").replace(/-/gu, "_") === "negus_image"
+  && item.status === "completed";
+
+const negusImageBlocks = (item, registerMedia) => {
+  if (!isNegusImageToolCall(item)) return [];
+  const outputs = structuredContentFrom(item)?.outputs;
+  if (!Array.isArray(outputs)) return [];
+  return outputs.flatMap((output) => {
+    const source = output?.url || output?.path;
+    const block = mediaBlock("image", source, registerMedia, {
+      alt: path.basename(String(source || "generated-image")),
+      ...(Number.isSafeInteger(output?.width) ? { width: output.width } : {}),
+      ...(Number.isSafeInteger(output?.height) ? { height: output.height } : {}),
+    });
+    return block ? [block] : [];
+  });
 };
 
 export const blocksFromContent = (value, registerMedia, depth = 0) => {
@@ -125,11 +223,60 @@ const cleanUserAttachmentEnvelope = (blocks) => blocks.flatMap((block) => {
   if (block.type !== "markdown") return [block];
   const text = String(block.text || "");
   if (!text.trimStart().startsWith("# Files mentioned by the user:")) return [block];
-  const marker = /^## My request for Codex:\s*$/mu.exec(text);
+  const marker = /^## My request(?: for Codex)?:\s*$/mu.exec(text);
   if (!marker) return [block];
   const cleaned = text.slice(marker.index + marker[0].length).trim();
   return cleaned ? [{ ...block, text: cleaned }] : [];
 });
+
+// Normalize attachment context before Markdown parsing: document text must not
+// become user prose (or produce inline images/options in the conversation).
+const userBlocksFromContent = (content, registerMedia) => {
+  const files = [];
+  const names = new Set();
+  const collect = (value) => {
+    if (Array.isArray(value)) return value.forEach(collect);
+    if (value && typeof value === "object") {
+      if (["mention", "file", "attachment", "inputfile"].includes(String(value.type || "").replace(/[_-]/g, "").toLowerCase())) {
+        if (value.name && blocksFromContent(value, registerMedia).length) names.add(value.name);
+      }
+      if (typeof value.text === "string") collect(value.text);
+      return;
+    }
+    if (typeof value !== "string" || !value.startsWith("# Files mentioned by the user:")) return;
+    const marker = /^## My request(?: for Codex)?:\s*$/mu.exec(value);
+    if (!marker) return;
+    for (const match of value.slice(0, marker.index).matchAll(/^## (.+?): (.+)$/gmu)) {
+      const block = mediaBlock("file", match[2].trim(), registerMedia, { name: match[1] });
+      if (block) { names.add(match[1]); files.push(block); }
+    }
+  };
+  const clean = (value) => {
+    if (Array.isArray(value)) return value.map(clean);
+    if (value && typeof value === "object") {
+      if (["text", "input_text", "inputText"].includes(value.type)) return { ...value, text: clean(value.text || value.input_text || "") };
+      return value;
+    }
+    if (typeof value !== "string") return value;
+    let text = value.trimEnd();
+    // Only remove complete trailing envelopes paired with a real file reference.
+    // A bare marker in ordinary prose is not evidence of an uploaded document.
+    while (text.endsWith("\n[附件正文结束]")) {
+      let start = -1;
+      for (const name of names) {
+        const index = text.indexOf(`[附件正文：${name}]\n`);
+        if (index >= 0 && (index === 0 || text[index - 1] === "\n")) start = start < 0 ? index : Math.min(start, index);
+      }
+      if (start < 0) break;
+      text = text.slice(0, start).trimEnd();
+    }
+    return text;
+  };
+  collect(content);
+  const blocks = cleanUserAttachmentEnvelope(blocksFromContent(clean(content), registerMedia));
+  const sources = new Set(blocks.filter((block) => block.type === "file").map((block) => block.source));
+  return [...blocks, ...files.filter((block) => !sources.has(block.source) && sources.add(block.source))];
+};
 
 const typedInputs = (value, type) => {
   const items = Array.isArray(value) ? value : value ? [value] : [];
@@ -163,7 +310,7 @@ export const messageFromItem = (item, registerMedia) => {
     role = "assistant";
     content = payload.message ?? payload.content ?? payload;
   } else if (item?.type === "response_item" && payload?.type === "message" && ["user", "assistant"].includes(payload.role)) {
-    if (payload.role === "assistant" && payload.phase && payload.phase !== "final_answer") return null;
+    if (payload.role === "assistant" && payload.phase && !["final_answer", "commentary"].includes(payload.phase)) return null;
     role = payload.role;
     content = payload.content;
   } else if (item?.type === "response_item" && payload?.type === "image_view") {
@@ -173,8 +320,7 @@ export const messageFromItem = (item, registerMedia) => {
     return null;
   }
 
-  const parsedBlocks = blocksFromContent(content, registerMedia);
-  const blocks = role === "user" ? cleanUserAttachmentEnvelope(parsedBlocks) : parsedBlocks;
+  const blocks = role === "user" ? userBlocksFromContent(content, registerMedia) : assistantBlocksFromContent(content, registerMedia);
   const text = visibleText(blocks);
   if (role === "user" && !isUsefulUserMessage(text, blocks)) return null;
   if (!blocks.length) return null;
@@ -186,25 +332,63 @@ export const messageFromItem = (item, registerMedia) => {
     role,
     text,
     blocks,
+    ...(role === "assistant" && payload.phase ? { phase: payload.phase } : {}),
     ...(itemId ? { itemId } : {}),
+    ...(role === "user" && payload.client_id ? { submissionId: payload.client_id } : {}),
     ...(metadata.turn_id || item.turnId ? { turnId: metadata.turn_id || item.turnId } : {}),
   };
 };
 
 export const previewText = (value, limit = 180) => cleanText(value).replace(/\s+/g, " ").slice(0, limit);
 
+export const messagePreview = (message) => message?.text
+  ? previewText(`${message.authorName || (message.role === "user" ? "用户" : "助手")}：${message.text}`, 260) : "";
+
+const markdownImagePattern = /!\[([^\]]*)\]\((<[^>]+>|[^)\n]+)\)/gu;
+
+export const dedupeAssistantMediaMessages = (messages, seen = new Set()) => (Array.isArray(messages) ? messages : [])
+  .map((message) => {
+    if (message?.role !== "assistant" || !Array.isArray(message.blocks)) return message;
+    const blocks = message.blocks.flatMap((block) => {
+      if (block.type === "image") {
+        const source = String(block.source || "");
+        if (!source || seen.has(source)) return [];
+        seen.add(source);
+        return [block];
+      }
+      if (block.type !== "markdown") return [block];
+      const text = String(block.text || "").replace(markdownImagePattern, (match, _alt, rawSource) => {
+        const source = rawSource.trim().replace(/^<|>$/gu, "");
+        if (!source || seen.has(source)) return "";
+        seen.add(source);
+        return match;
+      }).trim();
+      return text ? [{ ...block, id: blockId("markdown", text), text }] : [];
+    });
+    if (!blocks.length) return null;
+    return { ...message, blocks, text: visibleText(blocks) };
+  })
+  .filter(Boolean);
+
 export const messageFromThreadItem = (item, registerMedia) => {
   if (item?.type === "userMessage") {
-    const blocks = cleanUserAttachmentEnvelope(blocksFromContent(item.content, registerMedia));
+    const blocks = userBlocksFromContent(item.content, registerMedia);
     const text = visibleText(blocks);
     if (!isUsefulUserMessage(text, blocks)) return null;
-    return { id: item.id || blockId("message", JSON.stringify(blocks)), role: "user", text, blocks };
+    const submissionId = String(item.clientUserMessageId || item.clientId || "").trim();
+    return {
+      id: item.id || blockId("message", JSON.stringify(blocks)),
+      role: "user",
+      text,
+      blocks,
+      ...(submissionId ? { submissionId } : {}),
+    };
   }
   if (item?.type === "agentMessage") {
-    if (item.phase && item.phase !== "final_answer") return null;
-    const blocks = blocksFromContent(item.text, registerMedia);
+    if (item.phase && !["final_answer", "commentary"].includes(item.phase)) return null;
+    const blocks = assistantBlocksFromContent(item.text, registerMedia);
     const text = visibleText(blocks);
-    return blocks.length ? { id: item.id || blockId("message", item.text), role: "assistant", text, blocks } : null;
+    return blocks.length ? { id: item.id || blockId("message", item.text), role: "assistant", text, blocks, phase: item.phase } : null;
   }
   if (item?.type === "imageGeneration" && (item.savedPath || item.result)) {
     const content = item.savedPath
@@ -212,6 +396,16 @@ export const messageFromThreadItem = (item, registerMedia) => {
       : { type: "image", url: `data:image/png;base64,${item.result}` };
     const blocks = blocksFromContent(content, registerMedia);
     return blocks.length ? { id: item.id || blockId("message", item.savedPath || item.result), role: "assistant", text: "", blocks } : null;
+  }
+  if (isNegusImageToolCall(item)) {
+    const blocks = negusImageBlocks(item, registerMedia);
+    return blocks.length ? {
+      id: item.id || blockId("message", JSON.stringify(structuredContentFrom(item))),
+      itemId: item.id || "",
+      role: "assistant",
+      text: "",
+      blocks,
+    } : null;
   }
   return null;
 };

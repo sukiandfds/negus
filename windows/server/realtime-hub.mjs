@@ -6,13 +6,22 @@ export const createRealtimeHub = () => {
   let nextEventId = 1;
   let lastIdleKeepAlive = 0;
 
+  // A client that stops reading (phone asleep behind a tunnel) would otherwise
+  // make this process buffer every event for it without limit. Dropping the
+  // connection is safe: the browser reconnects and replays from its last id.
+  const maxBufferedBytes = 4 * 1024 * 1024;
+
+  const drop = (client) => {
+    clients.delete(client);
+    client.destroy?.();
+  };
+
   const write = (client, chunk) => {
     try {
       client.write(chunk);
-      return true;
+      if (client.writableLength > maxBufferedBytes) drop(client);
     } catch {
-      clients.delete(client);
-      return false;
+      drop(client);
     }
   };
 

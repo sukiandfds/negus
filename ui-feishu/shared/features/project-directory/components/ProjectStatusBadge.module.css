@@ -1,0 +1,4 @@
+.badge { display: inline-block; width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; }
+.badge[data-status="answering"] { background: #69cf8d; box-shadow: 0 0 0 3px rgb(105 207 141 / 12%); }
+.badge[data-status="occupied"] { background: #df6b64; box-shadow: 0 0 0 3px rgb(223 107 100 / 12%); }
+.compact { width: 6px; height: 6px; flex-basis: 6px; }

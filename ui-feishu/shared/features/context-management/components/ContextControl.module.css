@@ -1,0 +1,95 @@
+.controls { position: relative; min-width: 0; }
+
+.trigger {
+  display: inline-flex;
+  width: 210px;
+  max-width: 46vw;
+  height: var(--control-text-height);
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: var(--control-radius);
+  padding: 0 7px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  transition: var(--control-transition);
+}
+
+.trigger:hover,
+.trigger[aria-expanded="true"] { background: var(--color-control-hover); color: var(--color-text); cursor: pointer; }
+.trigger span { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.trigger svg { width: var(--control-icon-size); height: var(--control-icon-size); flex: none; stroke-width: 1.8; }
+
+.menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 12;
+  display: grid;
+  width: 260px;
+  max-width: calc(100vw - 48px);
+  gap: 8px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--color-surface);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, .4);
+}
+
+.usage,
+.thresholdRow { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; }
+.usage span,
+.thresholdRow span { color: var(--color-text-secondary); }
+.usage strong { color: var(--color-text); font-size: 12px; font-weight: 600; }
+
+.meter { height: 3px; overflow: hidden; border-radius: 2px; background: rgba(255, 255, 255, .08); }
+.meter i { display: block; height: 100%; border-radius: inherit; background: var(--color-text-secondary); }
+
+.threshold {
+  width: 116px;
+  height: 30px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-small);
+  outline: 0;
+  padding: 0 6px;
+  background: var(--color-surface-soft);
+  color: var(--color-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.threshold:disabled { cursor: default; opacity: .55; }
+
+.compactButton {
+  display: flex;
+  width: 100%;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--control-radius);
+  background: var(--color-surface-soft);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.compactButton:not(:disabled):hover { background: var(--color-control-hover); color: var(--color-text); cursor: pointer; }
+.compactButton:disabled { opacity: .55; }
+.compactButton svg { width: 14px; height: 14px; stroke-width: 1.8; }
+.compacting svg { animation: context-spin .9s linear infinite; }
+
+@keyframes context-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 760px) {
+  .trigger { height: var(--control-touch-text-height); gap: 4px; padding: 0 4px; font-size: 11px; color: var(--color-text-secondary); }
+  .trigger svg { width: 13px; height: 13px; color: var(--color-text-muted); }
+  .menu { width: min(260px, calc(100vw - 44px)); }
+}

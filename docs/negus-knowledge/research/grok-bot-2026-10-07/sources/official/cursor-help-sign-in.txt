@@ -1,0 +1,94 @@
+← Back
+Sign in to Grok Bot
+
+Grok Bot uses your Cursor account. There is no separate Grok Bot login.
+
+How do I sign in to Grok Bot on desktop?
+
+
+Open the Grok Bot app.
+
+Choose the sign-in button the app shows.
+
+Finish signing in in your browser with your Cursor account.
+
+Return to Grok Bot. You should see your account in Settings.
+
+
+How do I sign in to Grok Bot on mobile?
+
+
+Open the Grok Bot mobile app.
+
+Sign in with the same Cursor account you use on desktop.
+
+See Grok Bot on mobile for setup tips.
+
+
+Why is Grok Bot showing a persistent authentication error even after I log out, clear cache, and reinstall?
+
+Start with these steps, which resolve most persistent authentication errors:
+
+
+Update the desktop app to the latest version, then sign out and sign back in.
+
+Clear browser cache and cookies for cursor.com and x.ai, then sign in again in a private or incognito window.
+
+On desktop, also try signing in at x.ai/bot using the same Cursor account.
+
+If the error started recently, wait 30 to 60 minutes and retry. Some auth errors clear on their own as your session refreshes.
+
+
+Reinstalling the app usually does not fix this, so try the steps above first.
+
+Some persistent authentication errors are known issues our engineers are working on. If the error remains after these steps, see What if authentication or account-link errors don't resolve with standard troubleshooting?.
+
+What if Grok Bot authentication or account-link errors don't resolve with standard troubleshooting?
+
+Some session and account-link failures, including looped sign-in flows, can't be fixed from your side and need our team to resolve.
+
+Include when you contact support:
+
+
+The email on your Cursor account
+
+The exact error text (e.g. "Authentication error", "Access blocked", GitHub 404 on OAuth)
+
+Your platform and Grok Bot version
+
+The steps you already tried (logout/login, cache clear, reinstall, incognito, x.ai/bot sign-in)
+
+Whether the issue started during SuperGrok or X Premium+ linking
+
+
+If the steps in Why is Grok Bot showing a persistent authentication error even after I log out, clear cache, and reinstall? don't resolve the issue, contact support
+
+What if my Grok Bot account is access-blocked by a phone verification failure?
+
+Phone verification failures can block account access, including after SuperGrok or X Premium+ linking. These blocks can't be cleared from your side, so support needs to reset them.
+
+Include when you contact support:
+
+
+Cursor account email
+
+Whether the user completed phone verification or received an error
+
+Whether the block appeared during sign-in or during SuperGrok or X Premium+ linking
+
+Screenshot of the access-blocked screen
+
+
+Contact support if you cannot complete phone verification and remain access-blocked after retrying.
+
+Related
+
+
+Grok Bot How Tos
+
+Plans and billing
+
+Grok Bot on mobile
+
+Get help
+

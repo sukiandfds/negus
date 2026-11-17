@@ -1,0 +1,70 @@
+{
+  "name": "grok-bot-cli",
+  "version": "0.12.4",
+  "description": "CLI and Agent Bundle plugin for Grok Bot agents and groups: create, update, message, inspect threads, and automate cleanup",
+  "type": "module",
+  "bin": {
+    "gbot": "./dist/bin/gbot.mjs",
+    "gbot-install": "./dist/bin/gbot-install.js",
+    "grok-bot": "./dist/bin/gbot.mjs"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "agent-bundle build",
+    "changeset": "changeset",
+    "check": "npm run validate && npm run build && npm run validate:artifact && npm run typecheck && npm test",
+    "gbot": "node dist/bin/gbot.mjs",
+    "prepack": "agent-bundle prepack",
+    "release": "changeset publish",
+    "release:version": "changeset version && npm run build && npm run validate:artifact",
+    "test": "npm run test:unit && npm run test:routes",
+    "test:routes": "rstest --config rstest.route-unit.config.ts",
+    "test:unit": "node scripts/run-unit-tests.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "validate": "agent-bundle validate",
+    "validate:artifact": "agent-bundle validate --artifact artifact"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ScriptedAlchemy/grok-bot-cli.git"
+  },
+  "homepage": "https://github.com/ScriptedAlchemy/grok-bot-cli#readme",
+  "bugs": {
+    "url": "https://github.com/ScriptedAlchemy/grok-bot-cli/issues"
+  },
+  "author": "Zack Jackson (https://github.com/ScriptedAlchemy)",
+  "license": "MIT",
+  "keywords": [
+    "grok",
+    "grok-bot",
+    "grokbot",
+    "gbot",
+    "cursor",
+    "ai-agents",
+    "automation",
+    "terminal",
+    "cli",
+    "agent-bundle"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "devDependencies": {
+    "@agent-bundle/runtime": "https://pkg.pr.new/ScriptedAlchemy/agent-bundle/@agent-bundle/runtime@bf98f04f4620b8ff416f040245c6b7a007b7a677",
+    "@changesets/cli": "3.0.3",
+    "@modelcontextprotocol/server": "2.3.1",
+    "@rstest/core": "0.12.3",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.18",
+    "agent-bundle": "https://pkg.pr.new/ScriptedAlchemy/agent-bundle/agent-bundle@bf98f04f4620b8ff416f040245c6b7a007b7a677",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "7.0.2",
+    "zod": "4.6.5"
+  }
+}

@@ -65,7 +65,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-dream-s
 - 皮肤装饰层不会拦截鼠标事件。
 - 当前为首页时，首页主题结构已经正确加载。
 
-随后用生成的截图检查横向溢出和文字对比度，再分别在首页与普通任务页手动检查项目菜单和输入框交互。完整视觉检查项见 [`references/qa-inventory.md`](./references/qa-inventory.md)。
+随后用生成的截图检查横向溢出和文字对比度，再分别在首页与普通任务页手动检查项目菜单和输入框交互。完整视觉检查项见 [`references/qa-inventory.md`](references/qa-inventory.md)。
 
 ## 更换和保存主题
 
@@ -157,4 +157,4 @@ Get-AppxPackage -Name OpenAI.Codex
 - 不写入 API Key、Base URL 或模型供应商配置。
 - 恢复脚本只会控制经过包身份、进程路径和会话状态校验的 Codex 进程。
 
-维护者和代理使用的实现约束见 [`SKILL.md`](./SKILL.md)，运行时排错细节见 [`references/runtime-notes.md`](./references/runtime-notes.md)。
+维护者和代理使用的实现约束见 [`SKILL.md`](SKILL.md)，运行时排错细节见 [`references/runtime-notes.md`](references/runtime-notes.md)。

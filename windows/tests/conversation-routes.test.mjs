@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import test from "node:test";
+import { createConversationService } from "../server/conversation-service.mjs";
 import { createConversationRoutes } from "../server/routes/conversation-routes.mjs";
 
 const invoke = (route, body) => {
@@ -15,6 +16,238 @@ const invoke = (route, body) => {
   };
   return { response, promise: route(request, response, new URL("http://127.0.0.1/api/session/message")) };
 };
+
+const invokeGet = (route, pathname) => {
+  const request = Readable.from([]);
+  request.method = "GET";
+  request.url = pathname;
+  const response = {
+    status: 0,
+    body: "",
+    writeHead(status) { this.status = status; },
+    end(value) { this.body = value || ""; },
+  };
+  return { response, promise: route(request, response, new URL(`http://127.0.0.1${pathname}`)) };
+};
+
+const invokePost = (route, pathname, body) => {
+  const request = Readable.from([Buffer.from(JSON.stringify(body))]);
+  request.method = "POST";
+  request.url = pathname;
+  const response = {
+    status: 0,
+    body: "",
+    writeHead(status) { this.status = status; },
+    end(value) { this.body = value || ""; },
+  };
+  return { response, promise: route(request, response, new URL(`http://127.0.0.1${pathname}`)) };
+};
+
+test("combined session view reuses ordinary/employee readers and can skip unchanged history", async () => {
+  for (const employee of [false, true]) {
+    let reads = 0;
+    let revision = "r1";
+    const binding = { runtimeSessionId: "t1", conversationKind: "direct", agentId: "engineer" };
+    const session = { threadId: "t1", messages: [{ id: "m1", text: "hello" }], hasMore: true, nextCursor: "older" };
+    const reader = {
+      findSession: async () => { reads++; return session; },
+      readSession: async () => { reads++; return session; },
+      getSourceRevision: async () => revision,
+      getGoal: async () => ({ goal: null }), getPendingUserInput: async () => null,
+      supportsEmployee: () => true, ownsConversation: () => true,
+    };
+    const route = createConversationRoutes({
+      conversations: employee ? {} : reader, employeeRuntime: employee ? reader : null,
+      agentConversationStore: employee ? { resolve: async () => binding } : null,
+      execution: { getStatus: () => ({ phase: "working", active: true }) },
+      contextManagement: { load: async () => ({ model: "model-a", reasoningEffort: "high" }) },
+      followUpQueue: { list: () => [{ id: "queued" }] },
+    });
+    const path = `/api/session?threadId=t1&view=1${employee ? "&conversationId=employee-chat" : ""}`;
+    const full = invokeGet(route, path);
+    await full.promise;
+    assert.equal(full.response.status, 200);
+    assert.deepEqual(JSON.parse(full.response.body), { session, context: { model: "model-a", reasoningEffort: "high" },
+      status: { phase: "working", active: true }, goal: null, queue: [{ id: "queued" }], input: null, sourceRevision: "r1", historyFormatVersion: 3 });
+    const reused = invokeGet(route, `${path}&sourceRevision=r1`);
+    await reused.promise;
+    assert.equal(JSON.parse(reused.response.body).session, null);
+    assert.equal(reads, 1, "unchanged body must not be read again");
+    revision = "r2";
+    const changed = invokeGet(route, `${path}&sourceRevision=r1`);
+    await changed.promise;
+    assert.deepEqual(JSON.parse(changed.response.body).session, session);
+    revision = null;
+    const unavailable = invokeGet(route, `${path}&sourceRevision=r1`);
+    await unavailable.promise;
+    assert.deepEqual(JSON.parse(unavailable.response.body).session, session);
+    const legacy = invokeGet(route, `${path}&body=0`);
+    await legacy.promise;
+    assert.deepEqual(JSON.parse(legacy.response.body).session, session);
+    assert.equal(reads, 4);
+  }
+});
+
+test("combined session view propagates a component failure instead of returning partial success", async () => {
+  const route = createConversationRoutes({
+    conversations: { findSession: async () => ({ messages: [] }), getGoal: async () => { throw new Error("goal failed"); }, getPendingUserInput: async () => null },
+    contextManagement: { load: async () => ({}) }, execution: { getStatus: () => ({}) }, followUpQueue: { list: () => [] },
+  });
+  const call = invokeGet(route, "/api/session?threadId=t1&view=1");
+  await assert.rejects(call.promise, /goal failed/);
+  assert.equal(call.response.body, "");
+});
+
+test("combined session view rejects a revision change during the read", async () => {
+  let revision = "r1";
+  const route = createConversationRoutes({
+    conversations: { getSourceRevision: async () => revision, findSession: async () => ({ messages: [] }),
+      getGoal: async () => ({ goal: null }), getPendingUserInput: async () => null },
+    contextManagement: { load: async () => { revision = "r2"; return {}; } },
+    execution: { getStatus: () => ({}) }, followUpQueue: { list: () => [] },
+  });
+  const call = invokeGet(route, "/api/session?threadId=t1&view=1&sourceRevision=r1");
+  await assert.rejects(call.promise, /对话更新中/);
+  assert.equal(call.response.body, "");
+});
+
+test("combined ordinary and employee views check revision after slow context completes", async () => {
+  for (const employee of [false, true]) {
+    let revision = "r1", revisionReads = 0, releaseContext, contextStarted;
+    const started = new Promise(resolve => { contextStarted = resolve; });
+    const waiting = new Promise(resolve => { releaseContext = resolve; });
+    const session = { threadId: "t1", messages: [{ id: "old" }] };
+    const reader = {
+      findSession: async () => session,
+      readSession: async (_agentId, options) => { assert.equal(options.readOnly, true); return session; },
+      getSourceRevision: async () => { revisionReads++; return revision; },
+      getGoal: async () => ({ goal: null }), getPendingUserInput: async () => null,
+      supportsEmployee: () => true, ownsConversation: () => true,
+    };
+    const route = createConversationRoutes({
+      conversations: employee ? {} : reader, employeeRuntime: employee ? reader : null,
+      agentConversationStore: employee ? { resolve: async () => ({ runtimeSessionId: "t1", conversationKind: "direct", agentId: "engineer" }) } : null,
+      contextManagement: { load: async () => { contextStarted(); await waiting; return {}; } },
+      execution: { getStatus: () => ({}) }, followUpQueue: { list: () => [] },
+    });
+    const call = invokeGet(route, `/api/session?threadId=t1&view=1${employee ? "&conversationId=employee-chat" : ""}`);
+    await started;
+    await new Promise(resolve => setImmediate(resolve));
+    revision = "r2";
+    releaseContext();
+    await assert.rejects(call.promise, error => error.statusCode === 409 && /对话更新中/.test(error.message));
+    assert.equal(revisionReads, 2);
+    assert.equal(call.response.body, "");
+    assert.equal(call.response.status, 0);
+  }
+});
+
+test("reads and answers the matching Codex user-input request", async () => {
+  const pending = {
+    id: 41,
+    method: "item/tool/requestUserInput",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      isBlocking: true,
+      questions: [{
+        id: "choice",
+        header: "处理方式",
+        question: "请选择下一步",
+        isOther: true,
+        isSecret: false,
+        options: [{ label: "继续", description: "沿用当前设置" }],
+      }],
+    },
+  };
+  const submitted = [];
+  const events = [];
+  const statuses = [];
+  const route = createConversationRoutes({
+    conversations: {
+      getPendingUserInput: async () => pending,
+      respondToUserInput: async (...args) => submitted.push(args),
+    },
+    execution: {
+      getStatus: () => ({ active: true, turnId: "turn-1" }),
+      publishStatus: (...args) => statuses.push(args),
+    },
+    contextManagement: {},
+    media: { resolveMany: () => [] },
+    publishThreadEvent: (...args) => events.push(args),
+  });
+
+  const read = invokeGet(route, "/api/session/user-input?threadId=thread-1");
+  await read.promise;
+  assert.equal(read.response.status, 200);
+  assert.equal(JSON.parse(read.response.body).request.questions[0].question, "请选择下一步");
+
+  const answer = invokePost(route, "/api/session/user-input", {
+    threadId: "thread-1",
+    requestId: 41,
+    answers: { choice: { answers: ["继续"] } },
+  });
+  await answer.promise;
+
+  assert.equal(answer.response.status, 200);
+  assert.deepEqual(submitted, [["thread-1", 41, { choice: { answers: ["继续"] } }]]);
+  assert.equal(statuses[0][1].phase, "working");
+  assert.equal(events[0][1].type, "user_input_resolved");
+});
+
+test("shows the real Runtime thread for a group employee conversation while keeping it read-only", async () => {
+  const binding = {
+    conversationId: "group:current-project:manager",
+    agentId: "manager",
+    runtimeKind: "codex",
+    runtimeSessionId: "group-thread-manager",
+    conversationKind: "group",
+    roomId: "current-project",
+    projectId: "project:employee:employee-manager",
+    targetProjectId: "project:personal:negus",
+  };
+  const runtimeSession = {
+    threadId: binding.runtimeSessionId,
+    source: "codex",
+    title: "运营管理处理项目群任务",
+    archived: false,
+    messages: [
+      { id: "message-1", role: "assistant", text: "我先检查相关文件。" },
+      { id: "message-2", role: "tool", text: "rg -n group windows/server" },
+      { id: "message-3", role: "assistant", text: "检查完成" },
+    ],
+  };
+  const reads = [];
+  const route = createConversationRoutes({
+    conversations: {
+      findSession: async (...args) => {
+        reads.push(args);
+        return runtimeSession;
+      },
+    },
+    execution: { getStatus: () => ({ active: false, turnId: "" }) },
+    contextManagement: {},
+    media: { resolveMany: () => [] },
+    agentConversationStore: {
+      findByRuntimeSession: () => binding,
+      resolve: async () => binding,
+    },
+  });
+  const call = invokeGet(route, "/api/session?threadId=group-thread-manager&conversationId=group%3Acurrent-project%3Amanager");
+  await call.promise;
+  const session = JSON.parse(call.response.body);
+
+  assert.equal(call.response.status, 200);
+  assert.equal(reads.length, 1);
+  assert.equal(reads[0][0], binding.runtimeSessionId);
+  assert.equal(reads[0][1], "all");
+  assert.deepEqual(session.messages, runtimeSession.messages);
+  assert.equal(session.title, runtimeSession.title);
+  assert.equal(session.conversationKind, "group");
+  assert.equal(session.conversationId, binding.conversationId);
+  assert.equal(session.readOnly, true);
+});
 
 test("reuses the in-flight result for a repeated submission id", async () => {
   let release;
@@ -63,4 +296,385 @@ test("reuses the in-flight result for a repeated submission id", async () => {
   assert.equal(sendCalls, 1);
   assert.equal(events.length, 1);
   assert.deepEqual(JSON.parse(first.response.body), JSON.parse(third.response.body));
+});
+
+test("routes image requests through the real Codex turn without a web-side bypass", async () => {
+  const codexCalls = [];
+  const route = createConversationRoutes({
+    conversations: {
+      sendMessage: async (threadId, text, attachments) => {
+        codexCalls.push({ threadId, text, attachments });
+        return { turn: { id: "turn-image-1", status: "inProgress" } };
+      },
+      steerMessage: async () => { throw new Error("steer should not be called"); },
+    },
+    execution: { getStatus: () => ({ active: false, turnId: "" }) },
+    contextManagement: {},
+    media: { resolveMany: () => [] },
+    imageGeneration: {
+      intentFor: () => { throw new Error("legacy image intent must not be used"); },
+      start: async () => { throw new Error("legacy image service must not be used"); },
+    },
+  });
+  const prompt = "Generate one 2.35：1 cinematic image in 4K";
+  const call = invoke(route, {
+    threadId: "thread-1",
+    text: prompt,
+    attachmentIds: [],
+    submissionId: "image-submission",
+  });
+  await call.promise;
+
+  assert.equal(call.response.status, 202);
+  assert.deepEqual(codexCalls, [{ threadId: "thread-1", text: prompt, attachments: [] }]);
+  const body = JSON.parse(call.response.body);
+  assert.equal(body.turnId, "turn-image-1");
+  assert.equal("capability" in body, false);
+  assert.equal("runId" in body, false);
+});
+
+test("returns the new real thread id after migrating a legacy image conversation", async () => {
+  const route = createConversationRoutes({
+    conversations: {
+      sendMessage: async () => ({
+        threadId: "real-thread",
+        migratedFromThreadId: "legacy-thread",
+        turn: { id: "real-turn", status: "inProgress" },
+      }),
+      steerMessage: async () => { throw new Error("steer should not be called"); },
+    },
+    execution: { getStatus: () => ({ active: false, turnId: "" }) },
+    contextManagement: {},
+    media: { resolveMany: () => [] },
+  });
+  const call = invoke(route, {
+    threadId: "legacy-thread",
+    text: "Make the previous image a night scene",
+    attachmentIds: [],
+    submissionId: "legacy-migration",
+  });
+  await call.promise;
+
+  assert.equal(call.response.status, 202);
+  assert.deepEqual(JSON.parse(call.response.body), {
+    threadId: "real-thread",
+    migratedFromThreadId: "legacy-thread",
+    turnId: "real-turn",
+    status: "inProgress",
+    submissionId: "legacy-migration",
+    messageId: "optimistic-legacy-migration",
+  });
+});
+
+test("routes direct employee text through employee runtime", async () => {
+  const binding = {
+    conversationId: "employee-conversation",
+    agentId: "developer",
+    runtimeKind: "codex",
+    runtimeSessionId: "employee-thread",
+    conversationKind: "direct",
+  };
+  const employeeCalls = [];
+  const events = [];
+  let genericCalls = 0;
+  const route = createConversationRoutes({
+    conversations: {
+      sendMessage: async () => { genericCalls += 1; throw new Error("generic conversation path used"); },
+      steerMessage: async () => { genericCalls += 1; throw new Error("generic conversation path used"); },
+    },
+    execution: { getStatus: () => ({ active: true, turnId: "native-turn" }) },
+    contextManagement: {},
+    media: { resolveMany: () => [] },
+    broadcast: (event) => events.push(event),
+    agentConversationStore: {
+      findByRuntimeSession: () => binding,
+      resolve: async () => binding,
+    },
+    employeeRuntime: {
+      supportsEmployee: (employeeId) => employeeId === "developer",
+      ownsConversation: (value) => value === binding,
+      sendMessage: async (value) => {
+        employeeCalls.push(value);
+        return {
+          employeeId: "developer",
+          conversationId: binding.conversationId,
+          threadId: binding.runtimeSessionId,
+          turnId: "employee-turn",
+          status: "inProgress",
+        };
+      },
+    },
+  });
+
+  const call = invoke(route, {
+    threadId: binding.runtimeSessionId,
+    conversationId: binding.conversationId,
+    text: "run employee task",
+    attachmentIds: [],
+    submissionId: "employee-submission",
+  });
+  await call.promise;
+
+  assert.equal(call.response.status, 202);
+  assert.equal(genericCalls, 0);
+  assert.deepEqual(employeeCalls, [{
+    employeeId: "developer",
+    text: "run employee task",
+    attachments: [],
+    requestId: "employee-submission",
+  }]);
+  assert.deepEqual(JSON.parse(call.response.body), {
+    threadId: binding.runtimeSessionId,
+    turnId: "employee-turn",
+    status: "inProgress",
+    submissionId: "employee-submission",
+    messageId: "optimistic-employee-submission",
+  });
+  assert.equal(events[0].type, "user_message_submitted");
+});
+
+test("reads an external-provider employee session through employee runtime", async () => {
+  const binding = {
+    conversationId: "employee-grok-conversation",
+    agentId: "researcher",
+    runtimeKind: "codex",
+    runtimeSessionId: "employee-grok-thread",
+    conversationKind: "direct",
+  };
+  let genericReads = 0;
+  const route = createConversationRoutes({
+    conversations: {
+      findSession: async () => { genericReads += 1; throw new Error("generic path used"); },
+    },
+    execution: { getStatus: () => ({ active: false, turnId: "" }) },
+    contextManagement: {},
+    media: { resolveMany: () => [] },
+    agentConversationStore: {
+      findByRuntimeSession: () => binding,
+      resolve: async () => binding,
+    },
+    employeeRuntime: {
+      supportsEmployee: () => true,
+      ownsConversation: (value) => value === binding,
+      readSession: async () => ({
+        threadId: binding.runtimeSessionId,
+        source: "codex",
+        title: "Researcher · Main",
+        archived: false,
+        messages: [{ id: "message-1", role: "assistant", text: "grok reply" }],
+      }),
+    },
+  });
+
+  const call = invokeGet(route, "/api/session?threadId=employee-grok-thread&conversationId=employee-grok-conversation");
+  await call.promise;
+
+  assert.equal(call.response.status, 200);
+  assert.equal(genericReads, 0);
+  assert.equal(JSON.parse(call.response.body).messages[0].text, "grok reply");
+});
+
+test("adds external models only for an owned employee conversation", async () => {
+  const binding = {
+    conversationId: "employee-conversation",
+    agentId: "developer",
+    runtimeSessionId: "employee-thread",
+    conversationKind: "direct",
+  };
+  const route = createConversationRoutes({
+    conversations: {
+      listModels: async () => [{ id: "gpt", model: "gpt-5.6-terra" }],
+    },
+    execution: { getStatus: () => ({ active: false, turnId: "" }) },
+    contextManagement: {},
+    media: { resolveMany: () => [] },
+    agentConversationStore: { resolve: async () => binding },
+    employeeRuntime: {
+      supportsEmployee: () => true,
+      ownsConversation: (value) => value === binding,
+    },
+    modelProviders: {
+      listModels: async (current) => [...current, {
+        id: "grok",
+        model: "grok-4.6",
+        modelProviderId: "fusheng-grok",
+        available: true,
+      }],
+    },
+  });
+
+  const call = invokeGet(route, "/api/models?conversationId=employee-conversation");
+  await call.promise;
+
+  assert.equal(call.response.status, 200);
+  assert.deepEqual(JSON.parse(call.response.body).map((model) => model.model), ["gpt-5.6-terra", "grok-4.6"]);
+});
+
+test("routes employee attachments through employee runtime", async () => {
+  const binding = {
+    conversationId: "employee-conversation",
+    agentId: "developer",
+    runtimeKind: "codex",
+    runtimeSessionId: "employee-thread",
+    conversationKind: "direct",
+  };
+  const employeeCalls = [];
+  const attachment = { id: "file-1", name: "test.txt", mimeType: "text/plain", path: "/tmp/test.txt" };
+  const route = createConversationRoutes({
+    conversations: { sendMessage: async () => { throw new Error("generic path used"); } },
+    execution: { getStatus: () => ({ active: false, turnId: "" }) },
+    contextManagement: {},
+    media: { resolveMany: () => [attachment] },
+    agentConversationStore: {
+      findByRuntimeSession: () => binding,
+      resolve: async () => binding,
+    },
+    employeeRuntime: {
+      supportsEmployee: () => true,
+      ownsConversation: (value) => value === binding,
+      sendMessage: async (value) => { employeeCalls.push(value); return { threadId: binding.runtimeSessionId, turnId: "employee-turn" }; },
+    },
+  });
+
+  const call = invoke(route, {
+    threadId: binding.runtimeSessionId,
+    conversationId: binding.conversationId,
+    text: "inspect attachment",
+    attachmentIds: ["file-1"],
+    submissionId: "employee-attachment-submission",
+  });
+  await call.promise;
+  assert.equal(call.response.status, 202);
+  assert.deepEqual(employeeCalls, [{ employeeId: "developer", text: "inspect attachment", attachments: [attachment], requestId: "employee-attachment-submission" }]);
+});
+
+test("keeps an older direct binding on the generic conversation path", async () => {
+  const binding = {
+    conversationId: "legacy-conversation",
+    agentId: "developer",
+    runtimeKind: "codex",
+    runtimeSessionId: "legacy-thread",
+    conversationKind: "direct",
+  };
+  let genericCalls = 0;
+  let employeeCalls = 0;
+  const route = createConversationRoutes({
+    conversations: {
+      sendMessage: async () => {
+        genericCalls += 1;
+        return { turn: { id: "legacy-turn", status: "inProgress" } };
+      },
+      steerMessage: async () => { throw new Error("legacy steer should not be called"); },
+    },
+    execution: { getStatus: () => ({ active: false, turnId: "" }) },
+    contextManagement: {},
+    media: { resolveMany: () => [] },
+    agentConversationStore: {
+      findByRuntimeSession: () => binding,
+      resolve: async () => binding,
+    },
+    employeeRuntime: {
+      supportsEmployee: () => true,
+      ownsConversation: () => false,
+      sendMessage: async () => { employeeCalls += 1; },
+    },
+  });
+
+  const call = invoke(route, {
+    threadId: binding.runtimeSessionId,
+    conversationId: binding.conversationId,
+    text: "legacy task",
+    attachmentIds: [],
+    submissionId: "legacy-submission",
+  });
+  await call.promise;
+
+  assert.equal(genericCalls, 1);
+  assert.equal(employeeCalls, 0);
+  assert.equal(JSON.parse(call.response.body).turnId, "legacy-turn");
+});
+
+test("copy latest delegates to the same native fork and retains explicit message branching", async () => {
+ let active=false;const calls=[];
+ const route=createConversationRoutes({conversations:{
+  findSession:async()=>({messages:[{turnId:"last-turn"}]}),
+  forkSession:async(...args)=>{calls.push(args);return {threadId:"branch"};}
+ },execution:{getStatus:()=>({active,turnId:"last-turn"})}});
+ for(const body of [{threadId:"source",latest:true},{threadId:"source",lastTurnId:"older-turn"}]){
+  const run=invokePost(route,"/api/session/fork",body);await run.promise;assert.equal(run.response.status,201);
+ }
+ assert.deepEqual(calls,[["source","last-turn"],["source","older-turn"]]);
+ active=true;
+ for(const body of [{threadId:"source",latest:true},{threadId:"source",lastTurnId:"last-turn"}]){
+  const run=invokePost(route,"/api/session/fork",body);await run.promise;assert.equal(run.response.status,409);
+ }
+ const run=invokePost(route,"/api/session/fork",{threadId:"source",lastTurnId:"older-turn"});
+ await run.promise;assert.equal(run.response.status,201);assert.equal(calls.length,3);
+});
+
+test('task binding opens, steers and stops its own thread while leader is busy', async () => {
+  const binding = { conversationId: 'task-chat', runtimeSessionId: 'worker', agentId: 'researcher', runtimeKind: 'codex', conversationKind: 'task' };
+  const calls = [];
+  const route = createConversationRoutes({
+    agentTasks: { ownsThread: id => id === 'worker' },
+    agentConversationStore: { findByRuntimeSession: () => binding, resolve: async () => binding },
+    employeeRuntime: { supportsEmployee: () => true, ownsConversation: () => false, sendMessage: () => assert.fail('must not send to leader') },
+    conversations: {
+      findSession: async id => ({ threadId: id, source: 'codex', messages: [], archived: false }),
+      steerMessage: async (...args) => { calls.push(['steer', ...args]); return {}; },
+      interrupt: async (...args) => { calls.push(['stop', ...args]); },
+      getGoal: async () => ({ goal: null }),
+    },
+    execution: { getStatus: () => ({ active: true, turnId: 'worker-turn' }) },
+    media: { resolveMany: () => [] },
+  });
+  const read = invokeGet(route, '/api/sessions?conversationId=task-chat');
+  await read.promise;
+  assert.equal(JSON.parse(read.response.body)[0].threadId, 'worker');
+  const body = { threadId: 'worker', conversationId: 'task-chat', text: '补充资料', submissionId: 'amend-task' };
+  await invoke(route, body).promise;
+  await invokePost(route, '/api/session/interrupt', body).promise;
+  assert.deepEqual(calls.map(c => c.slice(0, 3)), [['steer', 'worker', 'worker-turn'], ['stop', 'worker', 'worker-turn']]);
+  await assert.rejects(invoke(route, { ...body, threadId: 'leader', submissionId: 'wrong-thread' }).promise, /不匹配/);
+  await assert.rejects(invoke(route, { ...body, conversationId: '', submissionId: 'missing-binding' }).promise, /conversationId/);
+});
+
+test('editing reverts the original thread and refuses to change an active conversation', async () => {
+  const calls = [];
+  let active = false;
+  const route = createConversationRoutes({
+    conversations: createConversationService({ primary: { revertSession: async (...args) => calls.push(args) }, fallback: {} }),
+    execution: { getStatus: () => ({ active }) },
+  });
+  const result = invokePost(route, '/api/session/revert', { threadId: 'original', beforeTurnId: 'edited-turn' });
+  await result.promise;
+  assert.deepEqual(calls, [['original', 'edited-turn']]);
+  assert.deepEqual(JSON.parse(result.response.body), { threadId: 'original' });
+  active = true;
+  await assert.rejects(invokePost(route, '/api/session/revert', { threadId: 'original', beforeTurnId: 'edited-turn' }).promise, /先停止/);
+  assert.equal(calls.length, 1);
+});
+
+const callGoalWithAttachment = async (route, pathname, body) => {
+  const request = Readable.from([Buffer.from(JSON.stringify(body))]);
+  request.method = 'POST';
+  const response = { status: 0, body: '', writeHead(status) { this.status = status; }, end(value) { this.body = value || ''; } };
+  await route(request, response, new URL('http://127.0.0.1' + pathname));
+  return response;
+};
+
+test('goal submission with attachment records and broadcasts the submitted message', async () => {
+  const events = [];
+  const route = createConversationRoutes({
+    conversations: { setGoal: async () => ({ goal: { status: 'active' } }) },
+    media: { resolveMany: ids => ids?.length ? [{ id: 'file-1', name: 'note.txt', mimeType: 'text/plain', url: '/media/file-1', path: '/tmp/note.txt' }] : [] },
+    execution: { recordMessage: () => {} },
+    publishThreadEvent: (_threadId, event) => events.push(event),
+  });
+  const response = await callGoalWithAttachment(route, '/api/session/goal', {
+    threadId: 'thread-1', objective: 'Read note', status: 'active', submissionId: 'submission-1', attachmentIds: ['file-1'],
+  });
+  assert.equal(response.status, 200);
+  assert.equal(events[0].type, 'user_message_submitted');
+  assert.equal(events[0].attachments[0].id, 'file-1');
 });

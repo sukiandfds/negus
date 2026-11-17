@@ -4,9 +4,9 @@ type: delivery
 title: Agent 交付物生成、预览与版本管理
 category: delivery
 priority: P6
-status: implemented_uncommitted
-updated_at: 2026-07-27 22:23 +08:00
-source: docs/feature-development/features/FEAT-007-agent-artifacts.md
+status: pending_review
+updated_at: 2026-08-06
+source: docs/negus-knowledge/features/feature-records/FEAT-007-agent-artifacts.md
 related: [FEAT-008]
 ---
 
@@ -42,8 +42,8 @@ related: [FEAT-008]
 
 ## 当前状态
 
-已实现，未提交。
+已实现并已进入提交历史；当前等待用户体验确认，不再列为未提交开发。
 
 ## 当前证据
 
-- `docs/feature-development/features/FEAT-007-agent-artifacts.md`
+- `docs/negus-knowledge/features/feature-records/FEAT-007-agent-artifacts.md`

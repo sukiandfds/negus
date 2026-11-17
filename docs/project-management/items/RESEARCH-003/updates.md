@@ -7,6 +7,6 @@
 - 用户影响：后续开发和外部评估可在当前开发分支直接找到原文档分支的有效资料，不需要保留长期文档分支。
 - 产品基线：d382a469d9670743f82142b3b0408f2b9f0471b4
 - 来源文档分支：codex/project-docs-and-audits @ 12155fca55aea45436656713c065a21c5cdef8ca
-- 文档：docs/research/DOCUMENTATION_BRANCH_MIGRATION_RESEARCH_2026-08-03.md
+- 文档：docs/negus-knowledge/research/DOCUMENTATION_BRANCH_MIGRATION_RESEARCH_2026-08-03.md
 - 迁移提交：f1ad197
 - 下一步：推送迁移提交，复核远程内容后删除来源分支。

@@ -1,0 +1,33 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import '../server/register.mjs';
+import { backgroundToolConfig } from '../server/execution-policy.mjs';
+const { createAppServerClient } = await import('../../windows/server/app-server-client.mjs');
+
+test('isolated native app-server excludes inherited handoff MCP in background', { timeout: 60000 }, async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-native-tools-'));
+  const mcp = fileURLToPath(new URL('../kernel/task-tools-mcp.mjs', import.meta.url));
+  const config = name => `[mcp_servers.${name}]\ncommand = ${JSON.stringify(process.execPath)}\nargs = [${JSON.stringify(mcp)}]\n[mcp_servers.${name}.env]\nNEGUS_HANDOFF_ENDPOINT = "http://127.0.0.1:1/"\nNEGUS_HANDOFF_TOKEN = "fixture"\nNEGUS_BACKGROUND_TASKS = "1"\n`;
+  await fs.writeFile(path.join(root, 'config.toml'), config('negus_handoffs') + config('negus_tasks'));
+  const client = createAppServerClient({ codexHome: root, workingDirectory: root });
+  t.after(async () => { client.close(); await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); });
+  const inherited = await client.request('thread/start', { cwd: root, config: {} });
+  const baseline = await client.request('mcpServerStatus/list', { threadId: inherited.thread.id });
+  assert.ok(Object.keys(baseline.data.find(server => server.name === 'negus_handoffs')?.tools || {}).includes('delegate_task'));
+  assert.ok(Object.keys(baseline.data.find(server => server.name === 'negus_tasks')?.tools || {}).includes('delegate_task'));
+  const thread = await client.request('thread/start', { cwd: root, config: backgroundToolConfig });
+  const { data } = await client.request('mcpServerStatus/list', { threadId: thread.thread.id });
+  const handoff = data.find(server => server.name === 'negus_handoffs');
+  assert.ok(!handoff || Object.keys(handoff.tools || {}).length === 0, 'background inherited handoff tools');
+  assert.ok(!data.find(server => server.name === 'negus_tasks')?.tools?.delegate_task);
+  await client.request('thread/inject_items', { threadId: thread.thread.id, items: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: '隔离协议测试' }] }] });
+  await client.request('thread/unsubscribe', { threadId: thread.thread.id });
+  await client.request('thread/resume', { threadId: thread.thread.id, config: backgroundToolConfig });
+  const resumed = await client.request('mcpServerStatus/list', { threadId: thread.thread.id });
+  assert.ok(!resumed.data.find(server => server.name === 'negus_handoffs')?.tools?.delegate_task);
+  assert.ok(!resumed.data.find(server => server.name === 'negus_tasks')?.tools?.delegate_task);
+});
