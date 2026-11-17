@@ -1,4 +1,4 @@
-import { backgroundTaskRoute, requestedBackgroundRoute } from '../../windows/server/background-tasks/model-policy.mjs';
+import { backgroundTaskRoute, employeeTaskRoute, requestedBackgroundRoute } from '../../windows/server/background-tasks/model-policy.mjs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { createTaskKernel, terminalStates } from '../kernel/task-kernel.mjs';
@@ -25,7 +25,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     return { id: sourceThreadId ? `assistant:${sourceThreadId}` : `assistant:${providerId || 'current'}:${model || 'default'}`,
       name: named?.displayName || model || 'Negus 助手' };
   };
-  const handoffInstructions = '保持本员工的姓名、职位和职责，直接回答日常聊天和专业讨论，不自称“前台助手”，也不以派工为由推卸职责；尽量在30秒内回应。先判断用户是在讨论、提问、指出问题还是明确要求执行；只有本轮用户已明确要求执行，且目标、当前现状、范围、不做事项、完成标准和授权边界都足以派工时，开发、测试、验证、资料搜集、电脑操作等实操才调用 negus_handoffs.create_background_task 创建独立任务对话。关键信息不足时先集中提问并等待回答，不得用猜测补全，不得先创建试探任务；质疑、批评和“为什么”不等于派工授权。需要其他员工专长时才转交协作，由你负责汇总结果。派工时写清目标、输入、授权边界、验收步骤和返回格式（结论、证据路径、验证结果、失败原因）；工具确认接单后，简短告知用户并结束本轮回复，不等待、轮询或停止后台任务，主对话继续接待用户。创建失败须说明真实原因，不假称已派工。收到已有任务的结果通知时，先核对是否达到用户要求；接单或执行结束不等于工作完成。未完成则在原授权内继续处理或明确补派缺失部分，不重复派发同一任务、不只转述未完成就停下；依据返回证据核对标准，不重复执行已验证的操作；证据缺失或矛盾只补派缺项，完成后向用户简洁交付结果。';
+  const handoffInstructions = '保持本员工的姓名、职位和职责，直接回答日常聊天和专业讨论，不自称“前台助手”，也不以派工为由推卸职责；尽量在30秒内回应。先判断用户是在讨论、提问、指出问题还是明确要求执行；只有本轮用户已明确要求执行，且目标、当前现状、范围、不做事项、完成标准和授权边界都足以派工时，开发、测试、验证、资料搜集、电脑操作等实操才调用 negus_handoffs.create_background_task 创建独立任务对话。后台执行优先使用带 Negus 真实来源、任务账本和自动回传的入口；只有该工具确实不可用或用户明确要求时才改用 Codex 原生子代理。派工路由读取 runtime/model-routing.json：目标模型首选渠道不可用时，先尝试同一模型的其他渠道，再按配置顺序尝试其他模型，并把实际选择和回退原因写入任务。关键信息不足时先集中提问并等待回答，不得用猜测补全，不得先创建试探任务；质疑、批评和“为什么”不等于派工授权。需要其他员工专长时才转交协作，由你负责汇总结果。派工时写清目标、输入、授权边界、验收步骤和返回格式（结论、证据路径、验证结果、失败原因）；工具返回 startup.confirmed=true 才可告知用户已经开始执行，随后结束本轮回复，不等待、轮询或停止后台任务，主对话继续接待用户。startup.confirmed=false 时必须报告真实状态、渠道或启动错误；任务只算已创建，不得宣称已安排下去。收到已有任务的结果通知时，先核对是否达到用户要求；接单或执行结束不等于工作完成。未完成则在原授权内继续处理或明确补派缺失部分，不重复派发同一任务、不只转述未完成就停下；依据返回证据核对标准，不重复执行已验证的操作；证据缺失或矛盾只补派缺项，完成后向用户简洁交付结果。';
   const backgroundInstructions = '你是独立后台任务执行者，直接执行本任务中用户已授权的工作并完成必要验证，不再创建或委派后台任务。最终回复包含实际结果、证据和未完成项，由系统送回来源助手；不要自行向来源对话发消息。';
   const instructions = (employee, background = false) => employeeTurnInstructions(employee.instructions, [growthService?.getContext(employee.id), background
     ? backgroundInstructions
@@ -37,6 +37,28 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       throw Object.assign(Error('不能继续此后台任务'), { statusCode: 403 });
     return followupTask({ kernel, source, target, input, queue, execution, clientFor, providerForThread,
       actor: source.source?.actor || (source.agentId ? { id: source.agentId, name: registry.require(source.agentId).name } : null) });
+  };
+  const startupFor = async task => {
+    const current = await kernel.waitForStart(task.id, 15000);
+    const confirmed = current.state === 'running' || current.state === 'completed';
+    const message = confirmed ? '已确认任务开始执行'
+      : current.state === 'failed' ? `启动或执行失败：${current.error || '任务未产生错误详情'}`
+        : current.state === 'queued' ? '任务已创建，仍在等待调度，尚未确认启动'
+          : current.state === 'starting' ? '任务已创建，正在建立执行会话，尚未确认启动'
+            : current.state === 'needs-reconciliation' ? '任务已创建，启动响应不确定，正在核对真实状态'
+              : `任务已创建，当前状态为 ${current.state || '未知'}，尚未确认正常启动`;
+    return { ...current, startup: { confirmed, state: current.state, message,
+      threadId: current.runtime?.threadId || '', turnId: current.runtime?.turnId || '',
+      modelProviderId: current.runtime?.modelProviderId || current.modelProviderId || '',
+      model: current.runtime?.model || current.model || '',
+      reasoningEffort: current.runtime?.reasoningEffort || current.reasoningEffort || '',
+      routing: current.taskRouting || null,
+      error: confirmed ? '' : current.error || message } };
+  };
+  const routeForTask = async (employee, input) => {
+    if (input.modelProviderId || input.model)
+      return requestedBackgroundRoute(modelProviders, { modelProviderId: input.modelProviderId, model: input.model }, kernel.list());
+    return modelProviders && employeeTaskRoute(modelProviders, employee, kernel.list());
   };
   const tools = await createTaskTools({ background: true, invoke: async (scope, input) => {
     const employeeScope = scope.startsWith('employee:');
@@ -89,24 +111,26 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     // Resolve the actual source owner above, then enforce one downward edge in
     // the employee DAG at the handoff endpoint.
     const agentId = background ? source.agentId : input.agentId;
-    if (!background) hierarchy.assertCanDelegate(source.agentId, agentId);
+    if (!background && source.agentId) hierarchy.assertCanDelegate(source.agentId, agentId);
     if (agentId) registry.require(agentId);
     else if (source.source?.kind !== 'conversation' || !background) throw Object.assign(Error('执行员工不存在'), { statusCode: 400 });
-    const selection = input.modelProviderId || input.model
-      ? await requestedBackgroundRoute(modelProviders, { modelProviderId: input.modelProviderId, model: input.model }, kernel.list()) : null;
+    const selection = await routeForTask(agentId ? registry.require(agentId) : null, input);
+    const reasoningEffort = input.reasoningEffort || selection?.reasoningEffort || '';
     const conversationId = `handoff-${createHash('sha256').update(`${source.id}:${input.requestId}`).digest('hex').slice(0,32)}`;
     const handoff = { requestId: input.requestId, agentId, background, title: input.title, instructions: input.instructions,
-      ...(selection ? { modelProviderId: selection.modelProviderId, model: selection.model } : {}),
-      ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+      ...(selection ? { modelProviderId: selection.modelProviderId, model: selection.model,
+        ...(selection.taskRouting ? { taskRouting: selection.taskRouting } : {}) } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
       conversationId, lane: conversationId, suppressContinuation: true,
       source: source.source?.kind === 'conversation' ? source.source
         : { threadId: source.runtime.threadId, agentId: source.agentId, conversationId: source.conversationId,
           actor: { id: source.agentId, name: registry.require(source.agentId).name } } };
+    let task;
     if (source.source?.kind === 'conversation') {
       const requestKey = `handoff:${source.runtime.threadId}:${input.requestId}`;
-      return kernel.enqueue({ ...handoff, kind: 'delegation', parentTaskId: source.id, requestKey });
-    }
-    return kernel.delegate(source.id, handoff);
+      task = await kernel.enqueue({ ...handoff, kind: 'delegation', parentTaskId: source.id, requestKey });
+    } else task = await kernel.delegate(source.id, handoff);
+    return startupFor(task);
   } });
   const runtime = createNativeTaskRuntime({ log, resolve: async (task, controls, { recovering }) => {
     const agentless = task.source?.kind === 'conversation' && !task.agentId;
@@ -326,11 +350,16 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       if (tracked.some(task => task.runtime.threadId === threadId && !terminalStates.has(task.state))) return;
       if (!userItems.length && !['turn/started', 'turn/completed'].includes(event.method)) return;
       if (!known) return;
+      const routeProviderId = known.modelProviderId || known.runtime.modelProviderId;
+      const routeModel = known.model || known.runtime.model;
+      const routeEffort = known.reasoningEffort || known.runtime.reasoningEffort;
       await kernel.enqueue({ kind: 'followup', requestKey: `followup:${threadId}:${turnId}`,
         conversationId: binding?.conversationId || known.conversationId, lane: threadId, agentId: binding?.agentId || known.agentId,
         source: known.source, parentTaskId: known.parentTaskId, ...(matched ? { assistantFollowup: { parentTaskId: matched.task.id, submissionId: matched.input.submissionId, sourceTaskId: matched.input.sourceTaskId } } : {}),
+        ...(routeProviderId ? { modelProviderId: routeProviderId } : {}), ...(routeModel ? { model: routeModel } : {}),
+        ...(routeEffort ? { reasoningEffort: routeEffort } : {}), ...(known.taskRouting ? { taskRouting: known.taskRouting } : {}),
         title: binding?.title || known.title || '任务对话', instructions: '', runtime: { threadId, turnId,
-          modelProviderId: known.runtime.modelProviderId, model: known.runtime.model, reasoningEffort: known.runtime.reasoningEffort }, suppressContinuation: true });
+          modelProviderId: routeProviderId, model: routeModel, reasoningEffort: routeEffort }, suppressContinuation: true });
     },
     leaderConfig: employeeId => tools.config(`employee:${employeeId}`),
     leaderInstructions: employeeId => `${handoffInstructions}\n你只能向这些直属下属派工：${JSON.stringify(hierarchy.childrenOf(employeeId))}\n员工名单：${JSON.stringify(registry.list().map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`,

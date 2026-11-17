@@ -48,9 +48,15 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
   const delegate = async requestId => {
     const response = await fetch(config.env.NEGUS_HANDOFF_ENDPOINT, { method: 'POST', headers: { Authorization: `Bearer ${config.env.NEGUS_HANDOFF_TOKEN}` },
       body: JSON.stringify({ action: background ? 'background' : 'delegate', requestId, agentId: 'b', title: '调研', instructions: '查证来源' }) });
-    assert.equal(response.status, 200); return response.json();
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body)); return body;
   };
   const child = await delegate('tool-1');
+  assert.equal(child.startup.confirmed, true);
+  assert.equal(child.startup.modelProviderId, 'deepseek');
+  assert.equal(child.startup.model, 'deepseek-flash');
+  assert.equal(child.startup.routing.selectedProviderId, 'deepseek');
+  assert.equal(child.startup.routing.selectedModel, 'deepseek-flash');
   assert.equal((await delegate('tool-1')).id, child.id);
   await until(() => starts.length === 1);
   assert.equal(created[0].model, 'deepseek-flash');
@@ -66,6 +72,8 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
   assert.equal(bindings.length, 1); assert.equal(bindings[0].conversationKind, 'task'); assert.equal(bindings[0].agentId, agentId);
   assert.notEqual(starts[0].threadId, 'main');
   await until(() => extension.tasks()[0]?.runtime.turnId === starts[0].turn.id);
+  assert.equal(extension.tasks()[0].taskRouting.selectedProviderId, 'deepseek');
+  assert.equal(extension.tasks()[0].taskRouting.selectedModel, 'deepseek-flash');
   const initial = { id: 'codex:turn:first', itemId: 'first', turnId: starts[0].turn.id, turnItemIndex: 0,
     submissionId: child.id, role: 'user', text: '查证来源' };
   const appended = { ...initial, id: 'codex:turn:next', itemId: 'next', turnItemIndex: 2, submissionId: 'human-id', text: '用户追加' };
@@ -114,6 +122,12 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
   threads.get(threadId).turns.push(followup);
   await extension.onProtocolMessage({ method: 'turn/started', params: { threadId, turn: followup } });
   await until(() => extension.tasks().some(task => task.kind === 'followup' && task.state === 'running'));
+  const persistedFollowup = extension.tasks().find(task => task.kind === 'followup');
+  assert.equal(persistedFollowup.modelProviderId, 'deepseek');
+  assert.equal(persistedFollowup.model, 'deepseek-flash');
+  assert.equal(persistedFollowup.reasoningEffort, 'high');
+  assert.equal(persistedFollowup.taskRouting.selectedProviderId, 'deepseek');
+  assert.equal(persistedFollowup.taskRouting.selectedModel, 'deepseek-flash');
   followup.status = 'completed'; followup.items = [{ type: 'agentMessage', text: '私聊的新回复' }];
   listeners.forEach(callback => callback({ method: 'turn/completed', params: { threadId, turn: followup } }));
   await until(() => extension.tasks().find(task => task.kind === 'followup')?.state === 'completed');
@@ -150,6 +164,7 @@ test('ordinary assistant creates an explicit-provider task, follows up in place,
     } };
   const providers = { providers: () => [{ id: 'vip', displayName: 'VIP', models: [{ model: 'gpt-6.1-terra', displayName: 'Terra' }] },
     { id: 'deepseek', displayName: 'DeepSeek', models: [{ model: 'deepseek-flash', displayName: 'DeepSeek Flash' }] }],
+    isProviderConfigured: async () => true,
     resolveRoute: ({ modelProviderId, model }) => ({ modelProviderId, model }), getClient: async () => client };
   const original = { ownsThread: () => false, list: () => [], directoryEntries: () => [], runtimeOptions: () => null,
     hasPendingWork: () => false, close: async () => {} };
@@ -457,4 +472,88 @@ test('public task API and employee children exclude recovering/completed externa
   listeners.forEach(fn => fn({ method: 'turn/completed', params: { threadId: 'background', turn: { id: 'turn-background', status: 'completed', items: [] } } }));
   await until(() => extension.tasks()[0].state === 'completed');
   assert.equal(extension.directoryEntries('a').filter(item => item.status.active).length, 0);
+});
+
+test('ordinary assistant can delegate directly to a named employee through the same verified startup chain', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-ordinary-delegation-'));
+  const listeners = new Set(); const threads = new Map(); const starts = []; const created = []; const registrations = []; const deliveries = [];
+  const employee = { id: 'reviewer', name: '风控质量', projectRoot: root, model: 'deepseek-flash',
+    modelProviderId: 'deepseek', reasoningEffort: 'high' };
+  threads.set('source-thread', { id: 'source-thread', status: { type: 'active' },
+    turns: [{ id: 'source-turn', status: 'inProgress', items: [] }] });
+  const client = { subscribe: callback => { listeners.add(callback); return () => listeners.delete(callback); },
+    request: async (method, params) => {
+      if (method === 'thread/start') {
+        created.push(params);
+        const thread = { id: 'review-thread', status: { type: 'idle' }, turns: [] };
+        threads.set(thread.id, thread); return { thread };
+      }
+      if (method === 'thread/read') return { thread: threads.get(params.threadId) };
+      if (method === 'turn/start') {
+        const turn = { id: 'review-turn', status: 'inProgress', items: [] };
+        threads.get(params.threadId).turns.push(turn);
+        starts.push({ ...params, turn });
+        queueMicrotask(() => listeners.forEach(callback => callback({
+          method: 'turn/started', params: { threadId: params.threadId, turn },
+        })));
+        return { turn };
+      }
+      return {};
+    } };
+  const providers = {
+    providers: () => [{ id: 'deepseek', displayName: 'DeepSeek', models: [{ model: 'deepseek-flash' }] }],
+    isProviderConfigured: async () => true,
+    resolveRoute: ({ modelProviderId, model }) => ({ modelProviderId, model }),
+    getClient: async () => client,
+  };
+  const extension = await extendEmployeeTasks({
+    ownsThread: () => false, list: () => [], directoryEntries: () => [], runtimeOptions: () => null,
+    hasPendingWork: () => false, close: async () => {},
+  }, {
+    stateRoot: root,
+    registry: { list: () => [employee], require: id => {
+      if (id !== employee.id) throw Error(`普通来源不是员工：${id}`);
+      return employee;
+    } },
+    modelProviders: providers,
+    conversations: { getSessionResumeInfo: async () => ({ cwd: root, model: 'deepseek-flash' }) },
+    providerForThread: async id => id === 'source-thread' ? 'deepseek' : null,
+    bindings: { bindRuntime: async () => {}, findByRuntimeSession: () => null },
+    execution: { getStatus: id => ({ active: id === 'source-thread', turnId: id === 'source-thread' ? 'source-turn' : '' }) },
+    registerSession: async (...args) => registrations.push(args),
+    queue: { list: () => [], enqueue: async value => {
+      deliveries.push(value);
+      threads.get('source-thread').turns[0].items.push({ type: 'userMessage',
+        clientId: value.stableDispatchId, content: [{ type: 'text', text: value.text }] });
+      return { id: value.submissionId, state: 'pending' };
+    } },
+    broadcast: () => {},
+  });
+  t.after(async () => { await extension.close(); await fs.rm(root, { recursive: true, force: true }); });
+  const config = extension.runtimeOptions({ id: 'source-thread' }).resume.config['mcp_servers.negus_handoffs'];
+  const response = await fetch(config.env.NEGUS_HANDOFF_ENDPOINT, { method: 'POST',
+    headers: { Authorization: `Bearer ${config.env.NEGUS_HANDOFF_TOKEN}` },
+    body: JSON.stringify({ action: 'delegate', requestId: 'ordinary-review', agentId: 'reviewer',
+      title: '独立验收', instructions: '检查派工渠道和启动确认', notifySource: true }) });
+  const task = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(task));
+  assert.equal(task.agentId, 'reviewer');
+  assert.equal(task.source.actor.id, 'assistant:source-thread');
+  assert.equal(task.startup.confirmed, true);
+  assert.equal(task.startup.modelProviderId, 'deepseek');
+  assert.equal(task.startup.model, 'deepseek-flash');
+  assert.equal(task.startup.routing.selectedProviderId, 'deepseek');
+  assert.equal(task.startup.routing.selectedModel, 'deepseek-flash');
+  assert.equal(task.taskRouting.selectedProviderId, 'deepseek');
+  assert.equal(task.taskRouting.selectedModel, 'deepseek-flash');
+  assert.equal(starts.length, 1);
+  assert.equal(created[0].model, 'deepseek-flash');
+  starts[0].turn.status = 'completed';
+  starts[0].turn.items.push({ type: 'agentMessage', text: '验收通过' });
+  listeners.forEach(callback => callback({ method: 'turn/completed', params: {
+    threadId: 'review-thread', turn: starts[0].turn,
+  } }));
+  await until(() => deliveries.length === 1);
+  assert.match(deliveries[0].text, /验收通过/);
+  assert.equal(registrations[0][3].createdBy, 'assistant');
 });

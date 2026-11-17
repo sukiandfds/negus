@@ -8,29 +8,36 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { createGroupTaskService } from '../server/group-task-service.mjs';
 import { createGroupRoomStore } from '../../windows/server/group-room-store.mjs';
 const until = async check => { for (let i = 0; i < 800; i++) { if (check()) return; await new Promise(r => setTimeout(r, 5)); } assert.fail('condition timed out'); };
-async function fixture(t, roomId = 'room') {
+async function fixture(t, roomId = 'room', options = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-collaboration-'));
-  const events = [], registered = [], calls = [], listeners = new Set(), health = new Set(), threads = new Map(), bridges = [];
-  const agentDefinitions = ['manager', 'researcher', 'developer', 'reviewer'].map(id => ({ id, name: id }));
+  const events = [], registered = [], calls = [], turnStarts = [], threadStarts = [], resumeStarts = [], providerRequests = [],
+    listeners = new Set(), health = new Set(), threads = new Map(), bridges = [];
+  const agentDefinitions = options.agentDefinitions || ['manager', 'researcher', 'developer', 'reviewer'].map(id => ({ id, name: id }));
+  if (options.roomState) await fs.writeFile(path.join(root, 'room.json'), JSON.stringify(options.roomState));
   const room = await createGroupRoomStore({ stateFile: path.join(root, 'room.json'), roomId, project: 'fixture', agentDefinitions, broadcast: event => events.push(event) });
+  for (const [id, thread] of Object.entries(options.initialThreads || {})) threads.set(id, thread);
   const emit = (method, params) => listeners.forEach(listener => listener({method, params}));
   const client = { subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
     subscribeHealth: listener => { health.add(listener); return () => health.delete(listener); },
     request: async (method, params) => {
       calls.push(method);
-      if (method === 'thread/start') { const thread = { id: `thread-${threads.size}`, turns: [], config: params.config, loaded: true }; threads.set(thread.id, thread); return {thread}; }
+      if (method === 'thread/start') { threadStarts.push(params); const thread = { id: `thread-${threads.size}`, turns: [], config: params.config, loaded: true }; threads.set(thread.id, thread); return {thread}; }
       const thread = threads.get(params.threadId);
       if (method === 'thread/read') return {thread};
       // Match the native behavior: loaded resume does not replace MCP config.
-      if (method === 'thread/resume') { if (!thread.loaded) thread.config = params.config; thread.loaded = true; return {thread}; }
+      if (method === 'thread/resume') { resumeStarts.push(params); if (!thread.loaded) thread.config = params.config; thread.loaded = true; return {thread}; }
       if (method === 'thread/unsubscribe') { thread.loaded = false; return {}; }
-      if (method === 'turn/start') { const turn = {id:`${thread.id}-turn-${thread.turns.length}`, status:'inProgress', items:[]}; thread.turns.push(turn); queueMicrotask(() => emit('turn/started', {threadId:thread.id,turn})); return {turn}; }
+      if (method === 'turn/start') { turnStarts.push(params); const turn = {id:`${thread.id}-turn-${thread.turns.length}`, status:'inProgress', items:[]}; thread.turns.push(turn); queueMicrotask(() => emit('turn/started', {threadId:thread.id,turn})); return {turn:{...turn}}; }
       if (method === 'turn/interrupt') { const turn = thread.turns.at(-1); turn.status = 'interrupted'; emit('turn/completed',{threadId:thread.id,turn}); }
       return {};
     } };
+  const modelProviders = options.modelProviders
+    ? { ...options.modelProviders, getClient: async route => { providerRequests.push(route); return client; } }
+    : { providers:()=>[{id:'deepseek',displayName:'DeepSeek',models:[{model:'deepseek-flash'}]}],isProviderConfigured:async()=>true,
+      resolveRoute: settings=>settings,getClient:async route=>{ providerRequests.push(route); return client; } };
   const service = await createGroupTaskService({stateRoot:root,room,projectRoot:root,appServerClient:client,broadcast:event=>events.push(event),
-    modelProviders: {providers:()=>[{id:'deepseek',displayName:'DeepSeek',models:[{model:'deepseek-flash'}]}],isProviderConfigured:async()=>true,
-      resolveRoute: settings=>settings,getClient:async()=>client},
+    modelProviders,
+    transferThread: options.transferThread,
     registerSession:async (...args)=>registered.push(args), bindings:{bindRuntime:async()=>{}},queue:{list:()=>[]},execution:{} });
   t.after(async()=>{ for (const bridge of bridges) await bridge.close(); await service.close(); await room.close(); await fs.rm(root,{recursive:true,force:true}); });
   const send = async (id, agentIds=[]) => { const result = await service.receive({requestId:id,agentIds,message:{type:'human',authorId:'fixture',authorName:'fixture',text:id,attachments:[]}}); await until(()=>service.tasks().some(task=>task.state==='running')); return result.message; };
@@ -38,7 +45,7 @@ async function fixture(t, roomId = 'room') {
   const complete = async (task,status='completed') => { const turn=threads.get(task.runtime.threadId).turns.at(-1); turn.status=status; turn.items.push({id:`final-${turn.id}`,type:'agentMessage',text:`result ${task.agentId}`}); emit('turn/completed',{threadId:task.runtime.threadId,turn}); await until(()=>service.deliveries().some(d=>d.taskId===task.id && d.state==='delivered')); };
   const bridge = async task => { const config=threads.get(task.runtime.threadId).config['mcp_servers.negus_handoffs']; const mcp=new Client({name:'isolated-group-test',version:'1'}); await mcp.connect(new StdioClientTransport({command:config.command,args:config.args,env:{...process.env,...config.env}})); bridges.push(mcp); return mcp; };
   const call = async (mcp,name,args={}) => mcp.callTool({name,arguments:args});
-  return {root,room,service,events,registered,calls,threads,emit,health,send,running,complete,bridge,call};
+  return {root,room,service,events,registered,calls,turnStarts,threadStarts,resumeStarts,providerRequests,threads,emit,health,send,running,complete,bridge,call};
 }
 
 test('group completed commentary is durable, ordered, deduplicated and survives failure/reconnect', async t=>{
@@ -73,6 +80,67 @@ test('group completed commentary is durable, ordered, deduplicated and survives 
   assert.deepEqual(persisted.messages.map(m=>m.sequence),[...persisted.messages.map(m=>m.sequence)].sort((a,b)=>a-b));
   const reloaded=await createGroupRoomStore({stateFile:path.join(f.root,'room.json'),roomId:'room',project:'fixture',agentDefinitions:[]});
   assert.equal(reloaded.snapshot().messages.filter(m=>m.phase==='commentary').length,3); await reloaded.close();
+});
+
+test('group first message selects a configured fallback channel before task creation', async t=>{
+  const modelProviders = {
+    providers: () => [
+      { id: 'channel-a', displayName: '渠道A', models: [{ model: 'beta' }] },
+      { id: 'channel-b', displayName: '渠道B', models: [{ model: 'alpha' }] },
+    ],
+    isProviderConfigured: async () => true,
+    resolveRoute: ({ modelProviderId, model }) => ({ modelProviderId, model }),
+  };
+  const f=await fixture(t,'collaboration-route-before-start',{
+    agentDefinitions:[{id:'manager',name:'运营管理',responsibility:'协调执行',modelProviderId:'channel-a',model:'alpha',reasoningEffort:'high'}],
+    modelProviders,
+  });
+  const message=await f.send('route-before-start',[],'直接处理这件事');
+  const task=f.service.tasks().find(item=>item.conversationId==='collaboration-route-before-start'&&item.source?.messageId===message.id);
+  assert.ok(task);
+  assert.equal(task.modelProviderId,'channel-b');
+  assert.equal(task.model,'alpha');
+  assert.equal(task.reasoningEffort,'high');
+  assert.equal(task.taskRouting.selectedProviderId,'channel-b');
+  assert.equal(task.taskRouting.selectedModel,'alpha');
+  assert.equal(task.taskRouting.reason,'同模型改用其他渠道');
+  assert.ok(task.taskRouting.attempted.some(item=>item.providerId==='channel-a'&&item.reason.includes('不包含')));
+  assert.equal(task.runtime.modelProviderId,'channel-b');
+  assert.equal(f.threadStarts[0].model,'alpha');
+  assert.ok(f.providerRequests.length>0);
+  assert.ok(f.providerRequests.every(route=>route.modelProviderId==='channel-b'));
+});
+
+test('group task transfers an existing employee thread to the selected fallback channel', async t=>{
+  const modelProviders = {
+    providers: () => [
+      { id: 'channel-a', displayName: '渠道A', models: [{ model: 'beta' }] },
+      { id: 'channel-b', displayName: '渠道B', models: [{ model: 'alpha' }] },
+    ],
+    isProviderConfigured: async () => true,
+    resolveRoute: ({ modelProviderId, model }) => ({ modelProviderId, model }),
+  };
+  const transfers=[];
+  const f=await fixture(t,'collaboration-existing-thread-route',{
+    agentDefinitions:[{id:'manager',name:'运营管理',responsibility:'协调执行'}],
+    roomState:{agents:[{id:'manager',modelProviderId:'channel-a',model:'alpha',reasoningEffort:'high',threadId:'group-thread'}],
+      messages:[],agentContextSequences:{}},
+    initialThreads:{'group-thread':{id:'group-thread',status:{type:'idle'},turns:[],config:{},loaded:true}},
+    modelProviders,
+    transferThread:async ({route,threadId})=>transfers.push({route,threadId}),
+  });
+  const message=await f.send('existing-thread-route',[],'继续处理这件事');
+  const task=f.service.tasks().find(item=>item.conversationId==='collaboration-existing-thread-route'&&item.source?.messageId===message.id);
+  assert.ok(task);
+  assert.equal(task.modelProviderId,'channel-b');
+  assert.equal(task.model,'alpha');
+  assert.equal(task.runtime.modelProviderId,'channel-b');
+  assert.deepEqual(transfers,[{route:{modelProviderId:'channel-b',model:'alpha'},threadId:'group-thread'}]);
+  assert.equal(f.threadStarts.length,0);
+  assert.equal(f.resumeStarts.at(-1).model,'alpha');
+  assert.equal(f.providerRequests.at(-1).modelProviderId,'channel-b');
+  assert.equal(f.room.getAgent('manager').modelProviderId,'channel-b');
+  assert.equal(f.room.getAgent('manager').model,'alpha');
 });
 
 test('real MCP group tools refresh capability on reused thread, preserve actors and reject forbidden scope', async t=>{

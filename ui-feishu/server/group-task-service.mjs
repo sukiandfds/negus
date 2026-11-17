@@ -1,4 +1,4 @@
-import { backgroundTaskRoute, requestedBackgroundRoute } from '../../windows/server/background-tasks/model-policy.mjs';
+import { backgroundTaskRoute, employeeTaskRoute, requestedBackgroundRoute } from '../../windows/server/background-tasks/model-policy.mjs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { createTaskKernel, terminalStates } from '../kernel/task-kernel.mjs';
@@ -95,6 +95,39 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
   const clientFor = async agent => modelProviders
     ? modelProviders.getClient(modelProviders.resolveRoute({ modelProviderId: agent.modelProviderId || 'current', model: agent.model || '' }))
     : appServerClient;
+  const startupFor = async task => {
+    const current = await kernel.waitForStart(task.id, 15000);
+    const confirmed = current.state === 'running' || current.state === 'completed';
+    const message = confirmed ? '已确认任务开始执行'
+      : current.state === 'failed' ? `启动或执行失败：${current.error || '任务未产生错误详情'}`
+        : current.state === 'queued' ? '任务已创建，仍在等待调度，尚未确认启动'
+          : current.state === 'starting' ? '任务已创建，正在建立执行会话，尚未确认启动'
+            : current.state === 'needs-reconciliation' ? '任务已创建，启动响应不确定，正在核对真实状态'
+              : `任务已创建，当前状态为 ${current.state || '未知'}，尚未确认正常启动`;
+    return { ...current, startup: { confirmed, state: current.state, message,
+      threadId: current.runtime?.threadId || '', turnId: current.runtime?.turnId || '',
+      modelProviderId: current.runtime?.modelProviderId || current.modelProviderId || '',
+      model: current.runtime?.model || current.model || '',
+      reasoningEffort: current.runtime?.reasoningEffort || current.reasoningEffort || '',
+      routing: current.taskRouting || null,
+      error: confirmed ? '' : current.error || message } };
+  };
+  const routeForTask = async (agentId, input) => {
+    if (input.modelProviderId || input.model)
+      return requestedBackgroundRoute(modelProviders, input, kernel.list());
+    return modelProviders && employeeTaskRoute(modelProviders, room.getAgent(agentId), kernel.list());
+  };
+  const routingFields = async agentId => {
+    const selection = await routeForTask(agentId, {});
+    if (!selection) return {};
+    const reasoningEffort = selection.reasoningEffort || '';
+    return {
+      modelProviderId: selection.modelProviderId,
+      model: selection.model,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+      ...(selection.taskRouting ? { taskRouting: selection.taskRouting } : {}),
+    };
+  };
   const tools = await createTaskTools({ background: true, invoke: async (sourceId, input) => {
     const source = kernel.get(sourceId);
     if (!source || terminalStates.has(source.state) || source.cancelRequested) throw Object.assign(Error('来源任务已经结束'), { statusCode: 409 });
@@ -112,13 +145,17 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
     }
     if (input.action === 'background') {
       if (!registerSession || !queue || !execution) throw Object.assign(Error('后台任务服务未连接'), { statusCode: 503 });
-      const selection = input.modelProviderId || input.model ? await requestedBackgroundRoute(modelProviders, input, kernel.list()) : null;
+      const selection = await routeForTask(source.agentId, input);
+      const reasoningEffort = input.reasoningEffort || selection?.reasoningEffort || '';
       const conversationId = `handoff-${createHash('sha256').update(`${sourceId}:${input.requestId}`).digest('hex').slice(0, 32)}`;
-      return kernel.delegate(sourceId, { requestId: input.requestId, agentId: source.agentId, background: true,
+      const task = await kernel.delegate(sourceId, { requestId: input.requestId, agentId: source.agentId, background: true,
         title: input.title, instructions: input.instructions, conversationId, lane: `${roomId}:${conversationId}:${source.agentId}`,
-        ...(selection || {}), ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+        ...(selection ? { modelProviderId: selection.modelProviderId, model: selection.model,
+          ...(selection.taskRouting ? { taskRouting: selection.taskRouting } : {}) } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
         attachmentIds: source.attachmentIds || [], source: { ...source.source, roomId, agentId: source.agentId,
           threadId: source.runtime.threadId, actor: { id: source.agentId, name: room.getAgent(source.agentId).name } } });
+      return startupFor(task);
     }
     if (input.action !== 'delegate') throw Object.assign(Error('不支持的任务操作'), { statusCode: 400 });
     if (!room.getAgent(input.agentId) || input.agentId === source.agentId) throw Object.assign(Error('交接对象必须是群内其他员工'), { statusCode: 400 });
@@ -132,13 +169,19 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       if (ancestor) ancestors.push(ancestor.parentTaskId, ancestor.resultOf);
     }
     if (visited.size >= 24) throw Object.assign(Error('交接链已达到轮次上限'), { statusCode: 409 });
-    return kernel.delegate(sourceId, { requestId: input.requestId, agentId: input.agentId, title: input.title, instructions: input.instructions,
+    const selection = await routeForTask(input.agentId, input);
+    const reasoningEffort = input.reasoningEffort || selection?.reasoningEffort || '';
+    const delegated = await kernel.delegate(sourceId, { requestId: input.requestId, agentId: input.agentId, title: input.title, instructions: input.instructions,
       conversationId: roomId, lane: `${roomId}:${input.agentId}`, suppressContinuation: input.notifySource === false,
+      ...(selection ? { modelProviderId: selection.modelProviderId, model: selection.model,
+        ...(selection.taskRouting ? { taskRouting: selection.taskRouting } : {}) } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
       source: { ...source.source, roomId, agentId: source.agentId,
         actor: { id: source.agentId, name: room.getAgent(source.agentId).name } } });
+    return startupFor(delegated);
   } });
   const instructionsFor = agent => employeeTurnInstructions(agent.instructions,
-    `你是${agent.name}，只以自己的身份回复。需要执行工作时可调用 create_background_task，追加要求使用 followup_background_task。需要群内同事协作时调用 negus_handoffs.delegate_task，写明目标、问题和所需结果；仅在文字中 @ 同事不会创建任务，工具确认保存后才算交接。请求意见、验收或等待结果继续处理时保持 notifySource 为 true；纯告知且无需后续处理时才设为 false。结果通知不是新的委派请求，不要重复派发相同工作。简单且已授权的事项直接处理；复杂事项若仍有影响结果的需求歧义、风险或方案取舍，先向用户说明预期效果和需要决定的选项，结束本轮等待答复，再按确认结果实施；不得重复询问已有授权。现有员工：${JSON.stringify(room.snapshot().agents.map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`);
+    `你是${agent.name}，只以自己的身份回复。需要执行工作时优先调用 Negus 的 create_background_task，追加要求使用 followup_background_task。需要群内同事协作时调用 negus_handoffs.delegate_task，写明目标、问题和所需结果；仅在文字中 @ 同事不会创建任务。派工路由读取 runtime/model-routing.json：目标模型首选渠道不可用时，先尝试同一模型的其他渠道，再按配置顺序尝试其他模型；实际选择和回退原因以 taskRouting 记录为准。工具返回 startup.confirmed=true 才表示任务真实启动；false 时按 startup.state 和 startup.error 说明已创建未启动、启动失败或等待状态，不得提前宣称已安排。请求意见、验收或等待结果继续处理时保持 notifySource 为 true；纯告知且无需后续处理时才设为 false。结果通知不是新的委派请求，不要重复派发相同工作。简单且已授权的事项直接处理；复杂事项若仍有影响结果的需求歧义、风险或方案取舍，先向用户说明预期效果和需要决定的选项，结束本轮等待答复，再按确认结果实施；不得重复询问已有授权。现有员工：${JSON.stringify(room.snapshot().agents.map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`);
   const replyToFor = task => {
     const current = kernel.get(task.id) || task;
     const latest = current.inputs?.findLast(input => input.accepted && !input.cancelled && input.messageId
@@ -159,11 +202,32 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
     resolve: async (task, controls, { recovering }) => {
       let agent = room.getAgent(task.agentId);
       if (!agent) throw Error('执行员工已不在当前群聊');
-      if (task.conversationId === roomId && agent.threadId && agent.pendingModelSettings) {
-        agent = await migrateGroupAgentThread({ agent, room, modelProviders, clientFor, transferThread });
+      const taskRoute = task.modelProviderId
+        ? { modelProviderId: task.modelProviderId, model: task.model,
+          reasoningEffort: task.reasoningEffort || task.runtime.reasoningEffort || agent.reasoningEffort || '' }
+        : task.runtime.modelProviderId
+          ? { modelProviderId: task.runtime.modelProviderId, model: task.runtime.model || agent.model, reasoningEffort: task.runtime.reasoningEffort || '' }
+          : null;
+      if (task.conversationId === roomId && agent.threadId
+        && (agent.pendingModelSettings || (taskRoute && taskRoute.modelProviderId !== agent.modelProviderId))) {
+        const requested = taskRoute || agent.pendingModelSettings;
+        agent = await migrateGroupAgentThread({
+          agent: { ...agent, pendingModelSettings: {
+            modelProviderId: requested.modelProviderId,
+            model: requested.model,
+            reasoningEffort: requested.reasoningEffort || agent.reasoningEffort || '',
+            modelSelectionSource: 'default',
+          } },
+          room, modelProviders, clientFor, transferThread,
+        });
+        if (taskRoute && (agent.modelProviderId !== taskRoute.modelProviderId || agent.model !== taskRoute.model)) {
+          throw Error(`群聊员工会话无法切换到任务渠道 ${taskRoute.modelProviderId} / ${taskRoute.model}`);
+        }
       }
-      if (task.conversationId !== roomId) agent = { ...agent, ...(task.modelProviderId ? { modelProviderId: task.modelProviderId, model: task.model } : task.runtime.modelProviderId ? { modelProviderId: task.runtime.modelProviderId, model: task.runtime.model || agent.model } : await backgroundTaskRoute(modelProviders)) };
-      if (task.background) agent = { ...agent, reasoningEffort: task.reasoningEffort || task.runtime.reasoningEffort || agent.reasoningEffort };
+      if (taskRoute) agent = { ...agent, ...taskRoute };
+      else if (task.conversationId !== roomId) agent = { ...agent, ...(await backgroundTaskRoute(modelProviders)) };
+      if (task.background || task.reasoningEffort || task.runtime.reasoningEffort)
+        agent = { ...agent, reasoningEffort: task.reasoningEffort || task.runtime.reasoningEffort || agent.reasoningEffort };
       const modelProviderId = task.runtime.modelProviderId || agent.modelProviderId || 'current';
       const client = await clientFor({ ...agent, modelProviderId });
       const independent = task.conversationId !== roomId;
@@ -206,7 +270,10 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
           try { await registerBackground(); } catch (error) { throw Object.assign(error, { ambiguous: true }); }
           await kernel.recordInput(task.id, { requestId: 'initial', submissionId: task.id, text: task.instructions, actor: task.source.actor });
         }
-        else await room.updateAgent(agent.id, { threadId });
+        else await room.updateAgent(agent.id, {
+          threadId,
+          ...(taskRoute ? { modelProviderId, model: agent.model || '', reasoningEffort: agent.reasoningEffort || '', modelSelectionSource: 'default' } : {}),
+        });
         await client.request('thread/name/set', { threadId, name: independent ? task.title : `${agent.name} · ${room.snapshot().room.name}` });
       }
       const snapshot = await client.request('thread/read', { threadId, includeTurns: true });
@@ -290,9 +357,10 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
           if (!delivered) {
             const turn = history.thread?.turns?.find(turn => turn.id === running.runtime.turnId);
             if (!turn || !terminalStates.has(turn.status)) throw Object.assign(Error('正在核对补充消息是否送达，请稍后重试'), { statusCode: 409 });
+            const routing = await routingFields(agentId);
             tasks.push(await kernel.enqueue({ requestKey, conversationId: roomId, lane: `${roomId}:${agentId}`, agentId,
               title: requestText, instructions: requestText, source: { roomId, projectId: room.snapshot().room.projectId, messageId: sourceMessageId },
-              attachmentIds: attachments.map(file => file.id) }));
+              attachmentIds: attachments.map(file => file.id), ...routing }));
             continue;
           }
         }
@@ -306,9 +374,12 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
         }
         await kernel.acceptInput(running.id, requestKey);
         tasks.push(running);
-      } else tasks.push(await kernel.enqueue({ requestKey,
-        conversationId: roomId, lane: `${roomId}:${agentId}`, agentId, title: requestText, instructions: requestText,
-        source: { roomId, projectId: room.snapshot().room.projectId, messageId: sourceMessageId }, attachmentIds: attachments.map(file => file.id) }));
+      } else {
+        const routing = await routingFields(agentId);
+        tasks.push(await kernel.enqueue({ requestKey,
+          conversationId: roomId, lane: `${roomId}:${agentId}`, agentId, title: requestText, instructions: requestText,
+          source: { roomId, projectId: room.snapshot().room.projectId, messageId: sourceMessageId }, attachmentIds: attachments.map(file => file.id), ...routing }));
+      }
     }
     return { jobId: tasks[0]?.id, taskIds: tasks.map(task => task.id), agentIds, agentNames: agentIds.map(id => room.getAgent(id)?.name), status: 'queued' };
   };
@@ -360,7 +431,9 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       const source = kernel.get(matched.sourceTaskId);
       if (!source || source.cancelRequested || source.agentId !== target.source.agentId) return;
       await kernel.enqueue({ kind: 'followup', requestKey: `followup:${threadId}:${turnId}`, submissionId: matched.submissionId, background: true,
-        conversationId: target.conversationId, lane: target.lane, agentId: target.agentId, source: target.source,
+        conversationId: target.conversationId, lane: target.lane, agentId: target.agentId,
+        modelProviderId: target.modelProviderId, model: target.model, reasoningEffort: target.reasoningEffort,
+        taskRouting: target.taskRouting, source: target.source,
         parentTaskId: source.id, replyTo: { conversationId: roomId, lane: `${roomId}:${source.agentId}`, agentId: source.agentId,
           source: source.source, resumeThreadId: source.runtime.threadId }, title: target.title, instructions: '',
         runtime: { threadId, turnId, modelProviderId: target.runtime.modelProviderId, model: target.runtime.model, reasoningEffort: target.runtime.reasoningEffort } });

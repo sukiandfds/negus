@@ -17,7 +17,10 @@ export async function createTaskTools({ invoke, background = false }) {
       for await (const chunk of request) text += chunk;
       const result = await invoke(source, JSON.parse(text));
       response.end(JSON.stringify(result));
-    } catch (error) { response.writeHead(error.statusCode || 500); response.end(JSON.stringify({ error: error.message })); }
+    } catch (error) {
+      response.writeHead(error.statusCode || 500);
+      response.end(JSON.stringify({ error: error.message, ...(error.details ? { details: error.details } : {}) }));
+    }
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   return {

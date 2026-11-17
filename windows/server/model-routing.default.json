@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "defaultModel": "deepseek-flash",
+  "reasoningEffort": "high",
+  "channels": [
+    {
+      "name": "DeepSeek",
+      "models": [
+        "deepseek-flash",
+        "deepseek-v4-pro"
+      ]
+    },
+    {
+      "name": "vip",
+      "models": [
+        "gpt-6.1-sol",
+        "gpt-6-astra",
+        "gpt-6-sol",
+        "gpt-5.6-sol",
+        "gpt-6.1-terra"
+      ]
+    },
+    {
+      "name": "折扣",
+      "models": [
+        "gpt-6.1-sol",
+        "gpt-6-astra",
+        "gpt-6-sol",
+        "gpt-5.6-sol",
+        "gpt-6.1-terra"
+      ]
+    },
+    {
+      "name": "astr",
+      "models": [
+        "gpt-6-astra"
+      ]
+    },
+    {
+      "name": "grok",
+      "models": [
+        "grok-4.7",
+        "grok-4.6"
+      ]
+    }
+  ]
+}

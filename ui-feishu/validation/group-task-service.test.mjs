@@ -132,7 +132,12 @@ test('群内员工在真实下一轮先迁移后启动，同 thread 不重开', 
   };
   let migrations = 0;
   const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root,
-    modelProviders: { resolveRoute: settings => settings, getClient: async () => client }, appServerClient: client,
+    modelProviders: {
+      providers: () => [{ id: 'ccswitch_deepseek', displayName: 'DeepSeek', models: [{ model: 'deepseek-flash' }] }],
+      isProviderConfigured: async () => true,
+      resolveRoute: settings => settings,
+      getClient: async () => client,
+    }, appServerClient: client,
     transferThread: async ({ threadId, route }) => {
       migrations += 1;
       assert.equal(threadId, 'group-thread');

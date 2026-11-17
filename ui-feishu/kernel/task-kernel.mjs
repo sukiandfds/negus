@@ -21,11 +21,16 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
   let closed = false;
   let scheduled = false;
   const running = new Map();
+  const startWaiters = new Map();
   const delivering = new Set();
   const notifications = new Set();
   const emit = event => {
     try { log(event); } catch {}
     try { broadcast({ type: 'tasks_changed', ...event }); } catch {}
+    if (event.event === 'task_started' || event.event === 'task_terminal') {
+      for (const resolve of startWaiters.get(event.taskId) || []) resolve();
+      startWaiters.delete(event.taskId);
+    }
   };
   // Commit a cloned state: failed writes cannot leak accepted tasks into memory.
   const mutate = operation => {
@@ -255,6 +260,26 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
     schedule();
     return task;
   };
+  const waitForStart = async (id, timeoutMs = 15000) => {
+    const current = find(id);
+    if (!current) throw fail('任务不存在', 404);
+    const settled = task => task.state === 'running' || terminalStates.has(task.state);
+    if (settled(current)) return copy(current);
+    await new Promise(resolve => {
+      const finish = () => {
+        clearTimeout(timer);
+        startWaiters.get(id)?.delete(finish);
+        if (!startWaiters.get(id)?.size) startWaiters.delete(id);
+        resolve();
+      };
+      const timer = setTimeout(finish, Math.max(0, Number(timeoutMs) || 0));
+      timer.unref?.();
+      const waiters = startWaiters.get(id) || new Set();
+      waiters.add(finish);
+      startWaiters.set(id, waiters);
+    });
+    return copy(find(id));
+  };
   async function delegate(parentId, input) {
     const parent = find(parentId);
     if (!parent || terminalStates.has(parent.state) || parent.cancelRequested) throw fail('来源任务已结束或正在停止');
@@ -316,7 +341,7 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
   recoveryTimer.unref?.();
   schedule();
   return {
-    enqueue, delegate, recordInput, acceptInput, cancelInput, linkInput, attributeFollowup, cancel,
+    enqueue, delegate, waitForStart, recordInput, acceptInput, cancelInput, linkInput, attributeFollowup, cancel,
     list: () => copy(state.tasks), deliveries: () => copy(state.deliveries), get: id => copy(find(id)),
     hasPendingWork: () => state.tasks.some(task => !terminalStates.has(task.state)),
     retryDelivery: async id => { await mutate(data => {

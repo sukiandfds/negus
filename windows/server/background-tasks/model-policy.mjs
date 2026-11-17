@@ -1,5 +1,47 @@
-// Shared default for new ordinary conversations, employees and Negus-managed tasks.
-export const DEFAULT_DEEPSEEK_ROUTE = Object.freeze({ model: 'deepseek-flash', reasoningEffort: 'high', label: 'DeepSeek Flash High' });
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const installRoot = process.env.NEGUS_INSTALL_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+export const TASK_ROUTING_CONFIG_FILE = path.join(installRoot, 'runtime', 'model-routing.json');
+const bundledRoutingConfig = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../model-routing.default.json');
+const reasoningEfforts = new Set(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+
+const normalizeRoutingPolicy = value => {
+  if (value?.version !== 1 || !Array.isArray(value?.channels) || !value.channels.length)
+    throw new Error('任务模型路由配置格式错误');
+  const channels = [];
+  const names = new Set();
+  for (const channel of value.channels) {
+    const name = String(channel?.name || '').trim();
+    const models = [...new Set((Array.isArray(channel?.models) ? channel.models : [])
+      .map(model => String(model || '').trim()).filter(Boolean))];
+    if (!name || !models.length || names.has(name.toLowerCase())) continue;
+    names.add(name.toLowerCase());
+    channels.push({ name, models });
+  }
+  const allModels = [...new Set(channels.flatMap(channel => channel.models))];
+  const defaultModel = String(value.defaultModel || allModels[0] || '').trim();
+  const reasoningEffort = String(value.reasoningEffort || 'high').trim();
+  if (!channels.length || !allModels.includes(defaultModel) || !reasoningEfforts.has(reasoningEffort))
+    throw new Error('任务模型路由配置没有有效的默认模型或思考等级');
+  return { version: 1, defaultModel, reasoningEffort, channels };
+};
+
+export const loadTaskRoutingPolicy = async ({ file = TASK_ROUTING_CONFIG_FILE } = {}) => {
+  for (const candidate of [file, bundledRoutingConfig]) {
+    try {
+      return normalizeRoutingPolicy(JSON.parse(await fs.readFile(candidate, 'utf8')));
+    } catch (error) {
+      if (error.code === 'ENOENT' && candidate === file) continue;
+      if (error.code === 'ENOENT') throw new Error('任务模型路由配置缺失');
+      if (error instanceof SyntaxError || /配置/.test(error.message))
+        throw new Error(`任务模型路由配置无效：${error.message}`);
+      throw error;
+    }
+  }
+  throw new Error('任务模型路由配置缺失');
+};
 
 export const modelDefaultsFromRoute = route => ({
   providerId: route.modelProviderId,
@@ -9,52 +51,166 @@ export const modelDefaultsFromRoute = route => ({
   archivedProviderIds: [],
 });
 
-export const requestedBackgroundRoute = async (providers, request, tasks = []) => {
-  const { model = '', modelProviderId = '' } = request;
-  if (modelProviderId || model.includes('::')) return providers.resolveRoute(request);
-  await providers.refreshShared?.();
-  const catalog = providers.providers();
-  // A configuration name requests its default model; an exact model keeps its identity.
-  const named = catalog.filter(provider => provider.displayName.toLowerCase() === model.toLowerCase());
-  let candidates = named.length ? named : catalog.filter(provider => provider.models.some(entry => entry.model === model));
-  const configured = await Promise.all(candidates.map(provider => providers.isProviderConfigured(provider.id)));
-  candidates = candidates.filter((_, index) => configured[index]);
-  if (!candidates.length) throw new Error(`没有已配置的渠道支持 ${model}`);
-  const successes = tasks.filter(task => task.background && task.state === 'completed'
-    && task.runtime?.model && (named.length || task.runtime.model === model))
-    .sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)));
-  const successful = successes.map(task => candidates.find(provider => provider.id === task.runtime.modelProviderId)).find(Boolean);
-  const preferred = successful || candidates.find(provider => provider.displayName.toLowerCase() === 'vip');
-  if (!preferred && candidates.length > 1) throw new Error(`${model} 有多个可用配置，请指定配置：${candidates.map(provider => provider.displayName).join('、')}`);
-  const route = providers.resolveRoute({ modelProviderId: (preferred || candidates[0]).id, model: named.length ? '' : model });
-  if (!named.length && route.model !== model) throw new Error(`所选配置无法保持指定模型 ${model}`);
-  return route;
+const matchesChannel = (provider, channelName) => [provider?.id, provider?.displayName]
+  .filter(Boolean).some(value => String(value).toLowerCase() === channelName.toLowerCase());
+
+const requestedRouteRequest = (request, policy) => {
+  let model = String(request?.model || '').trim();
+  let modelProviderId = String(request?.modelProviderId || '').trim();
+  if (model.includes('::')) {
+    const [providerId, exactModel] = model.split('::');
+    modelProviderId ||= providerId;
+    model = exactModel;
+  }
+  const namedChannel = policy.channels.find(channel => channel.name.toLowerCase() === model.toLowerCase());
+  if (namedChannel) {
+    modelProviderId ||= namedChannel.name;
+    model = namedChannel.models[0];
+  }
+  return { requestedModel: model || policy.defaultModel, preferredProviderId: modelProviderId };
 };
 
-export const backgroundTaskRoute = async (providers) => {
-  const unavailable = detail => new Error(`默认模型 ${DEFAULT_DEEPSEEK_ROUTE.label} 不可用：${detail}`);
+export const selectTaskRoute = async (providers, request = {}, {
+  tasks: _tasks = [], policy = null, unavailableMessage = '',
+} = {}) => {
   if (!providers?.providers || !providers?.isProviderConfigured || !providers?.resolveRoute)
-    throw unavailable('模型提供方服务未连接');
+    throw new Error(`${unavailableMessage}模型提供方服务未连接`);
+  const routing = policy || await loadTaskRoutingPolicy();
+  let refreshError = '';
   try {
     await providers.refreshShared?.();
   } catch (error) {
-    throw unavailable(`配置刷新失败：${error?.message || String(error)}`);
+    refreshError = error?.message || String(error);
   }
-  const candidates = providers.providers().filter(provider =>
-    provider.models?.some(entry => entry.model === DEFAULT_DEEPSEEK_ROUTE.model)
-    && (provider.mode !== 'current' || !provider.activeModel
-      || !provider.activeModels?.length || provider.activeModels.includes(DEFAULT_DEEPSEEK_ROUTE.model)));
-  const configured = await Promise.all(candidates.map(provider => providers.isProviderConfigured(provider.id)));
-  const available = candidates.filter((_, index) => configured[index]);
-  if (!available.length) throw unavailable(`没有已配置的渠道支持 ${DEFAULT_DEEPSEEK_ROUTE.model}`);
-  const provider = available.find(entry => /deepseek/iu.test(entry.displayName || '')) || available[0];
-  let route;
-  try {
-    route = providers.resolveRoute({ modelProviderId: provider.id, model: DEFAULT_DEEPSEEK_ROUTE.model });
-  } catch (error) {
-    throw unavailable(`渠道 ${provider.displayName || provider.id} 路由失败：${error.message}`);
+  const catalog = providers.providers();
+  const routeFailurePattern = /无可用渠道|distributor|\b(?:401|403|408|409|42[0-9]|5\d\d)\b|timeout|timed out|超时|rate.?limit|限流|network|fetch failed|ECONN|unauthori[sz]ed|authentication failed|auth(?:entication)? error|not authenticated|invalid (?:api key|token)|token expired|access token[^\n]*expired|鉴权失败|认证失败|未认证|身份(?:验证|认证)失败|令牌过期|令牌无效|凭据无效|凭证无效|无效(?:的)?\s*(?:token|令牌|凭证|凭据)|credential|凭证|model[^\n]*(?:not available|unavailable|not found|不支持|不可用)/iu;
+  const latestTerminalRoutes = new Map();
+  for (const task of _tasks || []) {
+    if (!['completed', 'failed', 'interrupted'].includes(task?.state)) continue;
+    const providerId = task.modelProviderId || task.runtime?.modelProviderId;
+    const model = task.model || task.runtime?.model;
+    if (!providerId || !model) continue;
+    const key = `${providerId}::${model}`;
+    const previous = latestTerminalRoutes.get(key);
+    const taskTime = Date.parse(task.updatedAt || task.createdAt || '') || 0;
+    const previousTime = Date.parse(previous?.updatedAt || previous?.createdAt || '') || 0;
+    if (!previous || taskTime >= previousTime) latestTerminalRoutes.set(key, task);
   }
-  if (route.model !== DEFAULT_DEEPSEEK_ROUTE.model)
-    throw unavailable(`渠道 ${provider.displayName || provider.id} 无法保持指定模型 ${DEFAULT_DEEPSEEK_ROUTE.model}`);
-  return { ...route, reasoningEffort: DEFAULT_DEEPSEEK_ROUTE.reasoningEffort };
+  const recentFailures = new Map([...latestTerminalRoutes]
+    .filter(([, task]) => task.state !== 'completed' && routeFailurePattern.test(String(task.error || '')))
+    .map(([key, task]) => [key, task.error]));
+  const { requestedModel, preferredProviderId } = requestedRouteRequest(request, routing);
+  const configuredChannels = routing.channels.map(channel => channel.name);
+  const rank = provider => {
+    const preferredIndex = preferredProviderId && matchesChannel(provider, preferredProviderId) ? -1 : 0;
+    const channelIndex = configuredChannels.findIndex(name => matchesChannel(provider, name));
+    return `${preferredIndex}:${channelIndex < 0 ? 999 : channelIndex}:${provider.displayName || provider.id}`;
+  };
+  const orderedProviders = [...catalog].sort((left, right) => rank(left).localeCompare(rank(right)));
+  const configuredModels = [...new Set(routing.channels.flatMap(channel => channel.models))];
+  const discoveredModels = [...new Set(catalog.flatMap(provider => (provider.models || []).map(model => model.model)))];
+  const modelOrder = [...new Set([requestedModel, ...configuredModels, ...discoveredModels])];
+  const attempted = [];
+  const consider = async (provider, model, channel = '') => {
+    if (attempted.some(item => item.providerId === provider.id && item.model === model)) return null;
+    const previousFailure = recentFailures.get(`${provider.id}::${model}`);
+    if (previousFailure) {
+      attempted.push({ providerId: provider.id, displayName: provider.displayName || provider.id, model,
+        reason: `最近一次执行失败：${previousFailure}` });
+      return null;
+    }
+    const supported = provider.models?.some(entry => entry.model === model);
+    if (!supported) {
+      attempted.push({ providerId: provider.id, displayName: provider.displayName || provider.id, model,
+        reason: '渠道模型目录不包含该模型' });
+      return null;
+    }
+    const configured = await providers.isProviderConfigured(provider.id).catch(() => false);
+    if (!configured) {
+      attempted.push({ providerId: provider.id, displayName: provider.displayName || provider.id, model, reason: '渠道未配置' });
+      return null;
+    }
+    try {
+      const route = providers.resolveRoute({ modelProviderId: provider.id, model });
+      if (route.model !== model) {
+        attempted.push({ providerId: provider.id, displayName: provider.displayName || provider.id, model,
+          reason: `实际路由为 ${route.model || '(空)'}` });
+        return null;
+      }
+      const reason = model === requestedModel
+        ? preferredProviderId && !matchesChannel(provider, preferredProviderId)
+          ? '同模型改用其他渠道'
+          : '使用配置渠道'
+        : preferredProviderId && matchesChannel(provider, preferredProviderId)
+          ? '目标渠道没有可用模型，改用其他模型'
+          : '目标模型不可用，改用其他渠道和模型';
+      const requestedEffort = String(request?.reasoningEffort || '').trim();
+      return { ...route, taskRouting: {
+        configFile: TASK_ROUTING_CONFIG_FILE,
+        requestedModel,
+        requestedProviderId: preferredProviderId,
+        selectedModel: model,
+        selectedProviderId: provider.id,
+        selectedProviderName: provider.displayName || provider.id,
+        reason,
+        attempted,
+        ...(refreshError ? { refreshWarning: refreshError } : {}),
+      }, reasoningEffort: requestedEffort && reasoningEfforts.has(requestedEffort)
+        ? requestedEffort : routing.reasoningEffort };
+    } catch (error) {
+      attempted.push({ providerId: provider.id, displayName: provider.displayName || provider.id, model,
+        reason: error.message });
+      return null;
+    }
+  };
+
+  const preferredProvider = preferredProviderId
+    ? orderedProviders.find(provider => matchesChannel(provider, preferredProviderId)) : null;
+  if (preferredProvider) {
+    const preferredRoute = await consider(preferredProvider, requestedModel, preferredProviderId);
+    if (preferredRoute) return preferredRoute;
+  }
+  for (const model of modelOrder) {
+    for (const channel of routing.channels) {
+      if (!channel.models.includes(model)) continue;
+      const provider = orderedProviders.find(candidate => matchesChannel(candidate, channel.name));
+      if (!provider) {
+        attempted.push({ providerId: channel.name, displayName: channel.name, model, reason: '配置渠道当前不可用' });
+        continue;
+      }
+      const route = await consider(provider, model, channel.name);
+      if (route) return route;
+    }
+  }
+  for (const model of modelOrder) {
+    for (const provider of orderedProviders) {
+      const route = await consider(provider, model);
+      if (route) return route;
+    }
+  }
+  const details = { configFile: TASK_ROUTING_CONFIG_FILE, requestedModel, requestedProviderId: preferredProviderId, attempts: attempted,
+    ...(refreshError ? { refreshWarning: refreshError } : {}) };
+  const summary = attempted.map(item => `${item.displayName}/${item.model}：${item.reason}`).join('；');
+  const error = new Error(`${unavailableMessage || '任务模型不可用：'}按 ${TASK_ROUTING_CONFIG_FILE} 尝试全部渠道和模型后仍无可用配置${summary ? `。尝试记录：${summary}` : ''}`);
+  error.details = details;
+  throw error;
+};
+
+export const requestedBackgroundRoute = async (providers, request, tasks = [], policy = null) =>
+  selectTaskRoute(providers, request, { tasks, policy });
+
+export const employeeTaskRoute = async (providers, employee, tasks = [], policy = null) => {
+  const route = await selectTaskRoute(providers,
+    { model: employee?.model || '', modelProviderId: employee?.modelProviderId || '', reasoningEffort: employee?.reasoningEffort || '' },
+    { tasks, policy, unavailableMessage: '任务模型不可用：' });
+  return { ...route, ...(employee?.reasoningEffort ? { reasoningEffort: employee.reasoningEffort } : {}) };
+};
+
+export const backgroundTaskRoute = async (providers, policy = null) => {
+  const selectedPolicy = policy || await loadTaskRoutingPolicy();
+  const route = await selectTaskRoute(providers, { model: selectedPolicy.defaultModel }, {
+    policy: selectedPolicy,
+    unavailableMessage: `默认模型 ${selectedPolicy.defaultModel} 不可用：`,
+  });
+  return { ...route, reasoningEffort: route.reasoningEffort || selectedPolicy.reasoningEffort };
 };

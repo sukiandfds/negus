@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createTaskKernel } from '../kernel/task-kernel.mjs';
 import { routeMessage } from '../kernel/message-routing.mjs';
+import { createTaskTools } from '../kernel/task-tools.mjs';
 
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 async function until(check) {
@@ -70,6 +71,49 @@ test('acceptance is durable and fast, retries return the same task, lanes run in
   turns.get(queued.id).resolve({ status: 'completed', text: 'second' });
   turns.get(b.id).resolve({ status: 'completed', text: 'third' });
   await until(() => kernel.deliveries().length === 3 && kernel.deliveries().every(item => item.state === 'delivered'));
+});
+
+test('startup confirmation follows the first native start event and does not treat persistence as execution', async t => {
+  const gate = deferred();
+  const { kernel } = await setup(t, { runtime: { execute: async (task, controls) => {
+    await controls.checkpoint({ threadId: 'thread-starting' });
+    await gate.promise;
+    await controls.started({ threadId: 'thread-starting', turnId: 'turn-started' });
+    return { status: 'completed', text: 'done' };
+  } } });
+  const task = await kernel.enqueue(input('start-confirmation'));
+  const pending = kernel.waitForStart(task.id, 1000);
+  await until(() => kernel.get(task.id).state === 'starting');
+  assert.equal(kernel.get(task.id).state, 'starting');
+  gate.resolve();
+  const confirmed = await pending;
+  assert.equal(confirmed.state, 'running');
+  assert.equal(confirmed.runtime.turnId, 'turn-started');
+});
+
+test('startup confirmation returns the real failure without relabelling creation as started', async t => {
+  const { kernel } = await setup(t, { runtime: { execute: async () => {
+    throw Error('分组 vip 下模型 deepseek-flash 无可用渠道');
+  } } });
+  const task = await kernel.enqueue(input('start-failure'));
+  const result = await kernel.waitForStart(task.id, 1000);
+  assert.equal(result.state, 'failed');
+  assert.match(result.error, /分组 vip.*无可用渠道/);
+});
+
+test('startup confirmation timeout preserves the real queued state', async t => {
+  const gate = deferred();
+  const { kernel } = await setup(t, { runtime: { execute: async (task, controls) => {
+    await controls.checkpoint({ threadId: 'thread-busy' });
+    await gate.promise;
+    return { status: 'completed', text: '' };
+  } } });
+  const first = await kernel.enqueue(input('lane-owner'));
+  await until(() => kernel.get(first.id).state === 'starting');
+  const queued = await kernel.enqueue(input('same-lane'));
+  const result = await kernel.waitForStart(queued.id, 10);
+  assert.equal(result.state, 'queued');
+  gate.resolve();
 });
 
 test('asynchronous delegation returns before target ends, reports to source, permits another handoff round', async t => {
@@ -326,4 +370,27 @@ test('confirmed active recovery resets consecutive failures and stays running un
   assert.equal(kernel.get(task.id).reconciliationFailures, 0);
   completion.resolve({ status: 'completed', text: 'actual final' });
   await until(() => kernel.get(task.id).state === 'completed');
+});
+
+test('task tool HTTP errors return structured attempted-route details', async t => {
+  const tools = await createTaskTools({ invoke: async () => {
+    const error = Object.assign(Error('全部候选不可用。尝试记录：vip/deepseek-flash：渠道模型目录不包含该模型'), { statusCode: 503 });
+    error.details = {
+      configFile: '/runtime/model-routing.json',
+      requestedModel: 'deepseek-flash',
+      attempts: [{ providerId: 'vip', displayName: 'vip', model: 'deepseek-flash', reason: '渠道模型目录不包含该模型' }],
+    };
+    throw error;
+  } });
+  t.after(() => tools.close());
+  const config = tools.config('source')['mcp_servers.negus_handoffs'];
+  const response = await fetch(config.env.NEGUS_HANDOFF_ENDPOINT, {
+    method: 'POST', headers: { Authorization: `Bearer ${config.env.NEGUS_HANDOFF_TOKEN}` },
+    body: JSON.stringify({ action: 'delegate' }),
+  });
+  const body = await response.json();
+  assert.equal(response.status, 503);
+  assert.match(body.error, /渠道模型目录不包含该模型/);
+  assert.equal(body.details.configFile, '/runtime/model-routing.json');
+  assert.equal(body.details.attempts[0].providerId, 'vip');
 });
