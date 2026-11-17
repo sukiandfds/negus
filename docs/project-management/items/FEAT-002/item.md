@@ -1194,3 +1194,23 @@ taskId + artifactId
 实现：`windows/server/multi-agent/agent-routing.mjs` 与 `ui-feishu/kernel/message-routing.mjs` 在广播词前接受零到多个 `先/请/让` 指令引导词；`agent-routing.test.mjs`、`task-kernel.test.mjs` 和 `group-routes.test.mjs` 覆盖完整复现句、前后端路由及持久化目标员工，同时保留明确 `@` 优先和非广播普通消息用例。
 
 验证：见本轮提交后的命令输出与 [FEAT-002 更新记录](updates.md)。当前状态为源码、测试和需求记录修改完成，提交、推送、受控重启及线上验证结果在交付答复中核对。
+
+### 2026-11-18 群聊消息更新时闪屏
+
+来源：当前项目群聊 `chat-b514385a-9c00-4599-b626-148f5eb8bb8b`。
+
+用户原话（逐字保留）：
+
+> 现在群聊，更新消息，群聊一直闪屏
+
+用户现有操作：停留在群聊，员工开始回复、产生中间消息或最终消息到达时，页面消息区出现反复闪动。
+
+现有逻辑与证据：群任务启动时前端先插入 `pending-任务ID` 占位消息；最终消息落库后，同一任务的正式消息 ID 替换占位消息，`MessageTimeline` 使用消息 ID 作为 React key，浏览器实测占位 DOM 被删除并新建。与此同时，每条 `group_message_created` 会让 `useGroupChats` 重新请求完整房间列表，使上层再次刷新；消息列表还会重新渲染所有已有消息。Playwright 在桌面和 390px 宽度重放启动、流式增量、中间回复、最终消息与状态收敛后，修改前确认最终消息没有复用占位节点。
+
+有效决定：群任务占位消息和最终消息视为同一视觉气泡，按 `workId + itemId/最终态` 使用稳定 key，正式消息到达时就地更新占位节点；已有消息仅在自身内容、流式文本或成员身份变化时重渲染；`group_message_created` 只更新本地群列表活动时间，`sessions_changed` 等房间元数据变化才重新读取房间列表。不得修改 `ConversationView.tsx`、`useReturnToBottom.ts`，不得改变首次定位、底部跟随或历史位置恢复。
+
+用户操作变化：修改前，停留在群聊接收员工回复时，占位气泡被删除后重建，群消息又引发房间列表请求和整组消息重渲染，形成闪动。修改后，占位气泡原地更新为最终回复，已有消息节点和顺序保持不变；普通消息更新不会重新请求房间列表，非内容状态更新不会改变消息区、页头和输入区的布局或滚动位置。
+
+实现：`ui-feishu/shared/features/group-chat/components/MessageTimeline.tsx` 增加稳定消息 key 和按实际内容记忆化的消息气泡；`ui-feishu/src/useGroupChats.ts` 对新消息只合并本地活动时间，房间元数据变化仍执行完整刷新。新增 `group-update-stability-browser.test.mjs` 与 `group-room-list-browser.test.mjs`，复用现有群聊组件和 Playwright 夹具。
+
+验证：修改前稳定性测试在“占位节点复用”断言失败；修改后桌面 1280px、手机 390px 均通过，已有节点稳定、占位节点原位复用、空白帧 0、消息顺序保持、非内容状态更新滚动位移 0。房间列表测试确认连续 5 条群消息期间房间请求保持 1 次，最后活动时间正确更新；`sessions_changed` 后由 1 次增加到 2 次。原群聊中间回复、断线重连、刷新、停止和跨群隔离浏览器回归通过；`group-workspace.test.mjs`、TypeScript `--noEmit`、`git diff --check` 通过；两个受保护滚动文件零修改。当前状态为源码、测试和需求记录完成，进入提交、前端发布和线上生效核对。

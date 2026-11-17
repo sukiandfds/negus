@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { JumpToLatest } from "../../../components/JumpToLatest/JumpToLatest";
 import { useReturnToBottom } from "../../../components/JumpToLatest/useReturnToBottom";
 import { emptyStatus } from "../../context-management/hooks/useContextManagement";
@@ -23,6 +23,12 @@ const groupExecution = (id: string, label: string, text: string, startedAt: stri
   updatedAt: null,
   activities: text ? [{ id, phase: "working", label: "正在回复", detail: text, completed: false, updatedAt: startedAt || "" }] : [],
 });
+
+// A task's empty placeholder and persisted terminal message are the same visual
+// bubble. Keep that identity stable so realtime delivery updates it in place.
+const timelineMessageKey = (message: GroupMessage) => message.workId
+  ? `work:${message.workId}:${message.itemId || "final"}`
+  : `message:${message.id}`;
 
 const attachmentBlocks = (message: GroupMessage): ContentBlock[] => (message.attachments || []).map((file) => {
   const type = file.mimeType.startsWith("image/") ? "image"
@@ -49,6 +55,33 @@ const sessionMessage = (message: GroupMessage, currentMemberId: string): Session
   deliveryState: message.type === "human" && message.pending ? "sending" : message.type === "human" && message.failure ? "failed" : undefined,
   deliveryError: message.failure ? "发送失败" : undefined,
 });
+
+const TimelineMessage = memo(function TimelineMessage({
+  groupMessage,
+  currentMemberId,
+  liveText,
+  onQuote,
+}: {
+  groupMessage: GroupMessage;
+  currentMemberId: string;
+  liveText: string;
+  onQuote?: () => void;
+}) {
+  const pendingAgent = groupMessage.type === "agent" && groupMessage.pending;
+  const executionId = groupMessage.workId || groupMessage.id;
+  return <Message
+    message={sessionMessage(groupMessage, currentMemberId)}
+    executionPlaceholder={Boolean(pendingAgent)}
+    executionStatus={pendingAgent ? groupExecution(executionId, "正在回复", liveText, groupMessage.createdAt) : undefined}
+    contextStatus={pendingAgent ? emptyStatus(executionId) : undefined}
+    onQuote={onQuote}
+    onFork={async () => false}
+    onEdit={() => {}}
+  />;
+}, (previous, next) => previous.groupMessage === next.groupMessage
+  && previous.currentMemberId === next.currentMemberId
+  && previous.liveText === next.liveText
+  && Boolean(previous.onQuote) === Boolean(next.onQuote));
 
 export function MessageTimeline({
   active,
@@ -191,23 +224,18 @@ export function MessageTimeline({
         ) : null}
         {messages.map((message) => {
           const liveStream = message.workId ? streaming[message.workId] : undefined;
-          const pendingAgent = message.type === "agent" && message.pending;
-          const executionId = message.workId || message.id;
           return (
             <div
-              key={message.id}
+              key={timelineMessageKey(message)}
               data-message-id={message.id}
               data-focused={highlightedId === message.id ? "" : undefined}
               style={{ "--agent-color": avatarColor(message.agentId || message.authorId) } as CSSProperties}
             >
-              <Message
-                message={sessionMessage(message, currentMemberId)}
-                executionPlaceholder={Boolean(pendingAgent)}
-                executionStatus={pendingAgent ? groupExecution(executionId, "正在回复", liveStream?.text || message.text, message.createdAt) : undefined}
-                contextStatus={pendingAgent ? emptyStatus(executionId) : undefined}
+              <TimelineMessage
+                groupMessage={message}
+                currentMemberId={currentMemberId}
+                liveText={liveStream?.text || message.text}
                 onQuote={onQuote && !message.pending && !message.id.startsWith("optimistic-") && (message.text.trim() || message.attachments?.length) ? () => onQuote(message) : undefined}
-                onFork={async () => false}
-                onEdit={() => {}}
               />
             </div>
           );

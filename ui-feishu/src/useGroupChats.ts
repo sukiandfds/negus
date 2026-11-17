@@ -15,16 +15,41 @@ export function useGroupChats() {
     }
     catch { /* Original conversation connection handles service recovery. */ }
   }, []);
+  const updateActivity = useCallback((roomId: string, lastActivityAt: string) => {
+    if (!roomId || !lastActivityAt) return;
+    setRooms(current => {
+      let changed = false;
+      const next = current.map(room => {
+        if (room.id !== roomId || (room.lastActivityAt || "") >= lastActivityAt) return room;
+        changed = true;
+        return { ...room, lastActivityAt };
+      });
+      return changed ? next : current;
+    });
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
     void refresh(controller.signal);
     const source = observeProjectStream();
     let timer = 0;
     source.onmessage = event => {
-      try { if (['sessions_changed', 'group_message_created'].includes(JSON.parse(event.data).type)) { clearTimeout(timer); timer = window.setTimeout(() => void refresh(controller.signal), 180); } } catch {}
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'group_message_created' && payload.roomId && payload.message?.createdAt) {
+          clearTimeout(timer);
+          timer = window.setTimeout(() => updateActivity(payload.roomId, payload.message.createdAt), 180);
+          return;
+        }
+        // A new message only changes the room's activity time; avoid replacing
+        // the full room list and re-rendering the active conversation for it.
+        if (payload.type === 'sessions_changed') {
+          clearTimeout(timer);
+          timer = window.setTimeout(() => void refresh(controller.signal), 180);
+        }
+      } catch {}
     };
     return () => { controller.abort(); source.close(); clearTimeout(timer); };
-  }, [refresh]);
+  }, [refresh, updateActivity]);
   const update = useCallback(async (roomId: string, patch: { name?: string; archived?: boolean }) => {
     const { room } = await groupApi.updateRoom(roomId, patch);
     ++requestVersion.current;
