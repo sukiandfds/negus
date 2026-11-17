@@ -318,7 +318,8 @@ export const createEmployeeRuntimeService = ({
         || rawStatus === "inProgress"
         || rawStatus?.type === "active"
         || rawStatus?.type === "inProgress"
-        || Boolean(unfinished)
+        // FEAT-002: an explicit idle status outranks a stale unfinished turn left in history (e.g. after a restart).
+        || (!rawStatus && thread.active === undefined && Boolean(unfinished))
         || (Array.isArray(thread.activeFlags) && thread.activeFlags.length > 0)
         || (thread.activeFlags && typeof thread.activeFlags === "object" && Object.keys(thread.activeFlags).length > 0);
       return {

@@ -553,3 +553,10 @@
 - 根因1：`74e4024` 中 `background-tasks/model-policy.mjs` 查找内置 `model-routing.default.json` 时多上溯一级，指向 `windows/model-routing.default.json`，实际文件在 `windows/server/`。没有本机 `runtime/model-routing.json` 的环境（CI、新安装）中所有后台任务报“任务模型路由配置缺失”，CI Static checks 因此 11 项失败。改为 `../model-routing.default.json`。
 - 根因2：同提交新增的 `task-kernel.mjs` `waitForStart` 超时计时器调用了 `unref()`。调用方正在等待该 Promise 时，若无其他句柄，进程提前结束、Promise 不再完成；`task-kernel.test.mjs` 第6项因此挂起，其后14项被取消。计时器有上限且在开始/终态时清除，改为保持引用。
 - 验证：`windows/tests` 599 通过、0 失败、2 跳过；`task-kernel.test.mjs` 20 项不再被取消；任务相关6个文件连续6次仅出现既有偶发失败“timed reconciliation…”（`da47256` 上同样偶发，未改动）；TypeScript `--noEmit`、`git diff --check` 通过。
+
+### 2026-11-17 空闲线程残留未完成 turn 时员工不再永久“被占用中”
+
+- 状态：已实现，待评审（PR）；未发布、未重启。用户在本次对话中确认推送此修复。
+- 根因：`df69859` 让 `readAuthoritativeStatus` 只要历史中存在 `inProgress` turn 就判为运行中，即使 Codex 明确返回线程 `idle`。重启等情况下残留的未完成 turn 因此被当成运行中：每次发送都对已失效 turn 执行 steer，失败后再次读到同一残留 turn，员工停在“被占用中”，所有消息失败，空闲校正也无法恢复。`native-task-runtime.mjs` 已将“idle + 未完成 turn”视为原执行已不在运行。
+- 修改范围：`employee-runtime-service.mjs`。仅当 Codex 未提供线程状态时才以未完成 turn 判断运行中；线程确为运行中时仍从未完成 turn 取 turnId。新增回归测试：idle 线程 + 残留 inProgress turn 时连续两次发送均走 `turn/start` 并进入 working（修改前该测试失败）。
+- 验证：`windows/tests` 600 通过、0 失败、2 跳过；`realtime-regression`、`employee-provider` 40/40；`git diff --check` 通过。

@@ -975,3 +975,23 @@ test('employee context restores provider history usage without opening or sendin
   assert.equal((await restored.getRuntimeContext('employee-thread')).usage, undefined);
   assert.deepEqual(f.calls, []);
 });
+
+test("an idle thread with a stale unfinished turn in history still accepts new messages", async (t) => {
+  const f = await fixture(t);
+  const request = f.client.request.bind(f.client);
+  const methods = [];
+  f.client.request = async (method, params) => {
+    methods.push(method);
+    if (method === "thread/read") return { thread: { id: params.threadId, status: { type: "idle" },
+      turns: [{ id: "dead-turn", status: "inProgress", items: [] }] } };
+    if (method === "turn/steer") throw Object.assign(new Error("no active turn to steer"), { statusCode: 400 });
+    return request(method, params);
+  };
+  for (const requestId of ["first", "second"]) {
+    const result = await f.runtime.sendMessage({ employeeId: "developer", text: requestId, requestId });
+    assert.equal(result.requestId, requestId);
+    assert.equal((await f.runtime.getStatus("developer")).status.phase, "working");
+  }
+  assert.equal(methods.filter(method => method === "turn/steer").length, 0);
+  assert.equal(methods.filter(method => method === "turn/start").length, 2);
+});
