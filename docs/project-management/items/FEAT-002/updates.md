@@ -546,3 +546,10 @@
 - 补修后认证错误覆盖无效令牌、未认证、身份验证失败和凭据无效；followup 从来源任务继承完整路由并写入任务顶层与 runtime，任务列表、磁盘记录和实际执行 client 使用同一渠道、模型和线程。
 - 第五次风控任务 `07b563d5-fd4d-4797-a792-139d9750c0a3` 返回 PASS。独立探针验证 7 种失败共 14 次换路、14 次成功恢复；followup 实测同一 thread、turn、渠道与模型。指定回归 45/45、46/46、53/53，合计 144/144；受保护滚动文件零 diff，`git diff --check` 通过。
 - 状态：候选源码、测试和需求记录已通过独立质量验收，可进入选择性提交和受控重启；运行快照 `1794917696362-f61034db` 尚未加载本次修复。证据见 [验证记录](../../../../work/dispatch-startup-routing-20261117/verification.md)。
+
+### 2026-11-17 后台任务内置路由配置路径与启动等待计时器修复
+
+- 状态：已实现，待评审（PR）；未发布、未重启。
+- 根因1：`74e4024` 中 `background-tasks/model-policy.mjs` 查找内置 `model-routing.default.json` 时多上溯一级，指向 `windows/model-routing.default.json`，实际文件在 `windows/server/`。没有本机 `runtime/model-routing.json` 的环境（CI、新安装）中所有后台任务报“任务模型路由配置缺失”，CI Static checks 因此 11 项失败。改为 `../model-routing.default.json`。
+- 根因2：同提交新增的 `task-kernel.mjs` `waitForStart` 超时计时器调用了 `unref()`。调用方正在等待该 Promise 时，若无其他句柄，进程提前结束、Promise 不再完成；`task-kernel.test.mjs` 第6项因此挂起，其后14项被取消。计时器有上限且在开始/终态时清除，改为保持引用。
+- 验证：`windows/tests` 599 通过、0 失败、2 跳过；`task-kernel.test.mjs` 20 项不再被取消；任务相关6个文件连续6次仅出现既有偶发失败“timed reconciliation…”（`da47256` 上同样偶发，未改动）；TypeScript `--noEmit`、`git diff --check` 通过。

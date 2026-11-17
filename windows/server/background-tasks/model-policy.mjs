@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const installRoot = process.env.NEGUS_INSTALL_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 export const TASK_ROUTING_CONFIG_FILE = path.join(installRoot, 'runtime', 'model-routing.json');
-const bundledRoutingConfig = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../model-routing.default.json');
+const bundledRoutingConfig = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../model-routing.default.json');
 const reasoningEfforts = new Set(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
 
 const normalizeRoutingPolicy = value => {

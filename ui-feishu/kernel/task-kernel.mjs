@@ -272,8 +272,8 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
         if (!startWaiters.get(id)?.size) startWaiters.delete(id);
         resolve();
       };
+      // Keep this timer referenced: a caller is awaiting it, and it is bounded and cleared on start/terminal.
       const timer = setTimeout(finish, Math.max(0, Number(timeoutMs) || 0));
-      timer.unref?.();
       const waiters = startWaiters.get(id) || new Set();
       waiters.add(finish);
       startWaiters.set(id, waiters);
