@@ -98,7 +98,7 @@ test("retries a message after a dispatch failure instead of deduplicating it for
   assert.equal(humanMessages[0].failure, false);
 });
 
-test("broadcast language creates one queued target per employee and exposes the mode", async (t) => {
+test("directive-prefixed broadcast queues and persists one target per employee", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "negus-group-route-broadcast-"));
   const room = await createGroupRoomStore({ stateFile: path.join(directory, "group-room.json"), project: "negus", broadcast: () => {} });
   let execution = null;
@@ -116,13 +116,15 @@ test("broadcast language creates one queued target per employee and exposes the 
   const { port } = server.address();
   const response = await fetch(`http://127.0.0.1:${port}/api/group/message`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ memberId: "member-1", authorName: "Hans", clientMessageId: "client-broadcast-1", text: "各位看一下最近情况", attachmentIds: [] }),
+    body: JSON.stringify({ memberId: "member-1", authorName: "Hans", clientMessageId: "client-broadcast-1",
+      text: "现在 negus 有问题。我需要你们协作，快速修复。先每个人都出来打招呼", attachmentIds: [] }),
   });
   const result = await response.json();
   const employeeIds = room.snapshot().agents.map((agent) => agent.id);
   assert.equal(response.status, 202);
   assert.equal(result.execution.mode, "broadcast");
   assert.deepEqual(result.execution.agentIds, employeeIds);
+  assert.deepEqual(result.message.targetAgentIds, employeeIds);
   assert.deepEqual(execution.agentIds, employeeIds);
   assert.deepEqual(result.execution.targets.map((target) => target.state), employeeIds.map(() => "queued"));
 });

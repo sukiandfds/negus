@@ -560,3 +560,10 @@
 - 根因：`df69859` 让 `readAuthoritativeStatus` 只要历史中存在 `inProgress` turn 就判为运行中，即使 Codex 明确返回线程 `idle`。重启等情况下残留的未完成 turn 因此被当成运行中：每次发送都对已失效 turn 执行 steer，失败后再次读到同一残留 turn，员工停在“被占用中”，所有消息失败，空闲校正也无法恢复。`native-task-runtime.mjs` 已将“idle + 未完成 turn”视为原执行已不在运行。
 - 修改范围：`employee-runtime-service.mjs`。仅当 Codex 未提供线程状态时才以未完成 turn 判断运行中；线程确为运行中时仍从未完成 turn 取 turnId。新增回归测试：idle 线程 + 残留 inProgress turn 时连续两次发送均走 `turn/start` 并进入 working（修改前该测试失败）。
 - 验证：`windows/tests` 600 通过、0 失败、2 跳过；`realtime-regression`、`employee-provider` 40/40；`git diff --check` 通过。
+
+### 2026-11-17 中文指令引导词后的全员请求漏派
+
+- 用户原话：“现在 negus 有问题。我需要你们协作，快速修复。先每个人都出来打招呼”；随后要求修复。
+- 根因：前后端广播正则只识别句首或分隔符后的广播词，“先每个人都出来打招呼”中的“每个人”前是“先”，因此未命中；群消息保存后 `targetAgentIds` 为空。
+- 实现：两个路由的同义判断允许广播词前出现 `先/请/让` 指令引导词；明确 `@` 仍优先，普通消息仍不广播。
+- 验证：定向测试覆盖完整复现句、前后端路由、群接口持久化全体目标及既有回归；其余提交、推送、重启和线上验证结果以本轮交付答复为准。

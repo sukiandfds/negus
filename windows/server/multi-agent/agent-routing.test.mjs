@@ -18,6 +18,15 @@ test("broadcast phrases address every employee", () => {
   assert.equal(isBroadcastRequest("这是大家庭的普通说明"), false);
 });
 
+test("directive prefixes do not hide an explicit broadcast", () => {
+  for (const text of ["先每个人都出来打招呼", "请大家一起检查", "让各位一起检查"]) {
+    assert.equal(isBroadcastRequest(text), true);
+    const route = resolveAgentRouting({ text, agents });
+    assert.deepEqual(route.targetAgentIds, agents.map((agent) => agent.id));
+    assert.equal(route.broadcast, true);
+  }
+});
+
 test("explicit mentions still win over broadcast wording", () => {
   const route = resolveAgentRouting({ text: "各位看看，@产品分析，先给意见", agents });
   assert.deepEqual(route.targetAgentIds, ["researcher"]);
