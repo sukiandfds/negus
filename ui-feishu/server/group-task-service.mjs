@@ -363,7 +363,8 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       if (method === 'turn/started') {
         room.beginAgentWork({ workId: task.id, agentId: task.agentId, agentName: room.getAgent(task.agentId)?.name, startedAt: task.createdAt });
         await room.updateAgent(task.agentId, { active: true, phase: 'working', label: '正在处理任务', detail: '' });
-        broadcast({ type: 'group_agent_started', workId: task.id, agentId: task.agentId, startedAt: task.createdAt });
+        broadcast({ type: 'group_agent_started', workId: task.id, agentId: task.agentId,
+          agentName: room.getAgent(task.agentId)?.name || task.agentId, startedAt: task.createdAt });
       }
       if (method === 'item/completed') await publishCommentary(task, [params.item].filter(Boolean));
       if (method === 'turn/completed') {

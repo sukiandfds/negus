@@ -9,7 +9,49 @@ import { routeMessage } from '../kernel/message-routing.mjs';
 import { mentionedAgentIds } from '../../windows/server/multi-agent/agent-routing.mjs';
 import { createEmployeeGrowthStore } from '../../windows/server/employee-growth-store.mjs';
 import { createEmployeeGrowthService } from '../../windows/server/employee-growth-service.mjs';
+import { createPendingAgentMessage } from '../shared/features/group-chat/data/groupMessageState.ts';
 const until = async check => { const deadline = Date.now() + 4000; while (!check()) { if (Date.now() > deadline) assert.fail('condition timed out'); await new Promise(resolve => setTimeout(resolve, 5)); } };
+
+test('群任务开始事件携带员工中文名并保留缺失时回退', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-group-started-name-'));
+  const room = await createGroupRoomStore({ stateFile: path.join(root, 'room.json'), roomId: 'room', project: '测试',
+    agentDefinitions: [{ id: 'manager', name: '运营管理' }] });
+  const listeners = new Set(); const threads = new Map(); const turns = []; const events = [];
+  const client = {
+    subscribe: callback => { listeners.add(callback); return () => listeners.delete(callback); },
+    request: async (method, params) => {
+      if (method === 'thread/start') { const thread = { id: 'thread', turns: [], config: params.config }; threads.set(thread.id, thread); return { thread }; }
+      const thread = threads.get(params.threadId);
+      if (method === 'thread/read' || method === 'thread/resume') return { thread };
+      if (method === 'turn/start') {
+        const turn = { id: 'turn', status: 'inProgress', items: [] };
+        thread.turns.push(turn); turns.push({ thread, turn });
+        queueMicrotask(() => listeners.forEach(callback => callback({ method: 'turn/started', params: { threadId: thread.id, turn } })));
+        return { turn };
+      }
+      return {};
+    },
+  };
+  const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root,
+    appServerClient: client, broadcast: event => events.push(event) });
+  t.after(async () => { await service.close(); await room.close(); await fs.rm(root, { recursive: true, force: true }); });
+  await service.receive({ requestId: 'name-test', agentIds: [],
+    message: { type: 'human', authorId: 'user', authorName: '用户', text: '请处理', attachments: [] } });
+  await until(() => events.some(event => event.type === 'group_agent_started'));
+  const started = events.find(event => event.type === 'group_agent_started');
+  assert.equal(started.agentId, 'manager');
+  assert.equal(started.agentName, '运营管理');
+  assert.equal(room.snapshot().activeWorks[0].agentName, '运营管理');
+  assert.equal(createPendingAgentMessage({ workId: 'normal', agentId: 'manager', agentName: '运营管理',
+    startedAt: started.startedAt }).authorName, '运营管理');
+  assert.equal(createPendingAgentMessage({ workId: 'fallback', agentId: 'manager',
+    startedAt: started.startedAt }).authorName, 'manager');
+  turns[0].turn.status = 'completed';
+  turns[0].turn.items = [{ type: 'agentMessage', text: '完成' }];
+  listeners.forEach(callback => callback({ method: 'turn/completed', params: { threadId: 'thread', turn: turns[0].turn } }));
+  const deadline = Date.now() + 3000;
+  while (service.hasPendingWork() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
+});
 
 test('群聊自然语言不广播，明确点名优先', async () => {
   const members = [{ id: 'manager', name: '运营管理' }, { id: 'dev', name: '技术研发' }, { id: 'risk', name: '风控' }];
