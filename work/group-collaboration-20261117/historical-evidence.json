@@ -1,0 +1,74 @@
+{
+  "roomId": "project-room:project:business:phonecameradata",
+  "agents": [
+    "negus-assistant",
+    "manager",
+    "researcher",
+    "developer",
+    "reviewer",
+    "grok"
+  ],
+  "messageCount": 12,
+  "assistantAuthors": [
+    "manager",
+    "manager",
+    "manager"
+  ],
+  "tasks": [
+    {
+      "id": "60125541-de27-464b-a99d-bf125c7efd96",
+      "agentId": "manager",
+      "state": "completed",
+      "threadId": "01a1e4ed-551a-7802-8be4-07a34e11431e",
+      "createdAt": "2026-11-16T15:15:21.472Z",
+      "updatedAt": "2026-11-16T15:15:23.160Z"
+    },
+    {
+      "id": "34366046-8439-4e99-8ef3-1897fc77b943",
+      "agentId": "manager",
+      "state": "completed",
+      "threadId": "01a1e4ed-551a-7802-8be4-07a34e11431e",
+      "createdAt": "2026-11-16T15:16:06.377Z",
+      "updatedAt": "2026-11-16T15:16:41.068Z"
+    },
+    {
+      "id": "fc9575d9-6b7b-43d2-af54-798b4457946a",
+      "agentId": "manager",
+      "state": "completed",
+      "threadId": "01a1e4ed-551a-7802-8be4-07a34e11431e",
+      "createdAt": "2026-11-16T15:16:43.382Z",
+      "updatedAt": "2026-11-16T15:16:48.811Z"
+    },
+    {
+      "id": "ed37cd84-2e23-4441-9b47-04bce2987a61",
+      "agentId": "manager",
+      "state": "interrupted",
+      "threadId": "01a1e4ed-551a-7802-8be4-07a34e11431e",
+      "createdAt": "2026-11-16T15:18:04.120Z",
+      "updatedAt": "2026-11-16T15:21:27.219Z"
+    },
+    {
+      "id": "ac2e23c0-77f8-452e-bac5-63181ed2418c",
+      "agentId": "manager",
+      "state": "interrupted",
+      "threadId": "01a1e4ed-551a-7802-8be4-07a34e11431e",
+      "createdAt": "2026-11-16T15:21:30.015Z",
+      "updatedAt": "2026-11-16T15:21:50.369Z"
+    }
+  ],
+  "commentaryCount": 6,
+  "toolErrors": [
+    {
+      "at": "2026-11-16T15:18:16.786Z",
+      "callId": "call_00_4VEvT4XolBAc4ttE7JHK1503",
+      "error": "Unauthorized"
+    },
+    {
+      "at": "2026-11-16T15:21:38.413Z",
+      "callId": "call_00_09EMpgkrQCihmzJtf5xy7964",
+      "error": "Unauthorized"
+    }
+  ],
+  "nativeLogMatches": [],
+  "credentialEvidence": "Historical tokens are intentionally neither read nor recorded. Source issues a per-task capability, releases it on delivery, then loaded resume ignores replacements; isolated native protocol and actual MCP tests reproduce this chain. 401 is the task-tools HTTP response propagated in MCP tool content, not an stderr exception."
+}

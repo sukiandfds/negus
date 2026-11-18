@@ -89,11 +89,13 @@ export const createConversationRoutes = ({
     if (binding.conversationKind === "group") return readGroupAgentSession(binding, source, pagination);
     if (isEmployeeDirectBinding(binding)) return employeeRuntime.readSession(binding.agentId, pagination);
     const session = await conversations.findSession(binding.runtimeSessionId, source, pagination);
-    return binding.conversationKind === "task" ? agentTasks?.decorateTaskSession?.(binding.runtimeSessionId, session) ?? session : session;
+    return binding.conversationKind === "task"
+      ? agentTasks?.decorateTaskSession?.(binding.runtimeSessionId, session) ?? session
+      : agentTasks?.decorateConversationSession?.(binding.runtimeSessionId, session) ?? session;
   };
   const readOrdinarySession = async (threadId, source, pagination) => {
     const session = await conversations.findSession(threadId, source, pagination);
-    return agentTasks?.decorateTaskSession?.(threadId, session) ?? session;
+    return agentTasks?.decorateConversationSession?.(threadId, session) ?? session;
   };
 
   const context = { conversations, execution, followUpQueue, contextManagement, media, submissionStore, publishThreadEvent, agentConversationStore, employeeRuntime, roomDirectory, modelProviders, agentTasks, authorizeAgentThread, isEmployeeDirectBinding, sessionSource, readAgentSession, readOrdinarySession, publicUserInputRequest, publicAttachment };

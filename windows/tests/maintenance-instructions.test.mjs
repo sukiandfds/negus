@@ -29,6 +29,12 @@ test("employee and group instruction builder preserves role and context and incl
   assert.match(prompt, /scheduled 仅代表已安排/);
   assert.match(prompt, /::file\{path="文件的服务器绝对路径"\}/);
 });
+test("employee replies use the unconditional prohibited-wording ban and answer the latest question first", () => {
+  const prompt = employeeTurnInstructions("角色职责");
+  assert.match(prompt, /任何最终回复都严禁使用.*本条不设例外/u);
+  assert.match(prompt, /第一句必须直接回答用户最后一条问题/u);
+  assert.match(prompt, /原始任务停在技术修复，质量复核后继续发布/u);
+});
 test("maintenance instructions identify host platform and keep unsupported recovery explicit", () => {
   const mac = maintenanceInstructions({ platform: "darwin", root: "/apps/Negus" });
   assert.match(mac, /node scripts\/negus.mjs rebuild/);

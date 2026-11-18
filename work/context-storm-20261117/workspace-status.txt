@@ -1,0 +1,26 @@
+ M docs/project-management/INDEX.md
+ M docs/project-management/items/FEAT-001/item.md
+ M docs/project-management/items/FEAT-001/updates.md
+ M docs/project-management/items/FEAT-002/item.md
+ M docs/project-management/items/FEAT-002/updates.md
+ M docs/project-management/items/FEAT-003/item.md
+ M docs/project-management/items/FEAT-003/updates.md
+ M ui-feishu/package.json
+ M ui-feishu/pnpm-lock.yaml
+ M ui-feishu/shared/features/context-management/hooks/useContextManagement.ts
+ M ui-feishu/shared/features/conversations/hooks/useProjectConversations.ts
+ M ui-feishu/shared/features/conversations/rendering/ContentRenderer.tsx
+ M ui-feishu/shared/features/conversations/state/conversationStore.ts
+ M ui-feishu/shared/shared/components/CodeBlock.module.css
+ M ui-feishu/src/usePageSnapshot.ts
+ M ui-feishu/validation/conversation-refresh-policy-browser.test.mjs
+ M windows/server/context-management-service.mjs
+ M windows/tests/context-management-service.test.mjs
+ M windows/tests/conversation-send-state.test.mjs
+?? ui-feishu/shared/shared/components/DiagramViewer.tsx
+?? ui-feishu/shared/shared/components/MermaidBlock.tsx
+?? ui-feishu/validation/mermaid-browser.test.mjs
+?? ui-feishu/validation/mermaid.fixture.tsx
+?? ui-feishu/validation/mermaid.html
+?? work/context-storm-20261117/
+?? work/mermaid-20261116/

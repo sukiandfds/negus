@@ -1,0 +1,25 @@
+{
+  "baselineFiles": 646,
+  "unchangedFiles": 631,
+  "changedExistingFiles": [
+    "docs/project-management/items/FEAT-001/item.md",
+    "docs/project-management/items/FEAT-001/updates.md",
+    "docs/project-management/items/FEAT-002/item.md",
+    "docs/project-management/items/FEAT-002/updates.md",
+    "docs/project-management/items/FEAT-017/item.md",
+    "docs/project-management/items/FEAT-017/updates.md",
+    "ui-feishu/shared/features/context-management/hooks/useContextManagement.ts",
+    "ui-feishu/shared/features/context-management/model/types.ts",
+    "ui-feishu/shared/features/conversations/state/conversationStore.ts",
+    "ui-feishu/shared/features/project-directory/data/projectDirectoryApi.ts",
+    "ui-feishu/shared/shared/api/http.ts",
+    "ui-feishu/src/usePageSnapshot.ts",
+    "ui-feishu/validation/four-usage-fixes-browser.test.mjs",
+    "windows/server/context-management-service.mjs",
+    "windows/tests/context-management-service.test.mjs"
+  ],
+  "newFiles": [
+    "windows/tests/project-directory-recovery.test.mjs"
+  ],
+  "deletedFiles": 0
+}

@@ -1,0 +1,949 @@
+--- a/docs/project-management/items/FEAT-001/item.md
++++ b/docs/project-management/items/FEAT-001/item.md
+@@ -1676,3 +1676,40 @@
+ 证据：当前发布前端为 `feishu-mwixifba`（2026-11-16 15:15:26 CST），发布产物包含上述链路；相关入口见 `useContextManagement.ts:35`、`conversationStore.ts:143`、`usePageSnapshot.ts:33`、`conversation-history-routes.mjs:228`、`context-management-service.mjs:127`。历史决定见本条目 2026-11-12 和 2026-11-13 记录，详细更新见 [updates.md](updates.md#2026-11-16-记录上下文事件风暴与打字卡死修复需求)。
+ 
+ 证据边界：真实手机当时加载的 build ID、群聊与普通后台任务各自贡献的 `context_status` 比例，以及每条事件对应的 Codex 子进程尚未单独追踪；这些缺口不改变已确认的前端自激回路。
++
++
++### 2026-11-17 压缩时间与打开对话的上下文用量（本轮工作区修复）
++
++来源：本轮修复任务原文；未提供原始对话消息标识。
++
++用户原话：
++> 1.现在，压缩上下文的过程，依然不是实时更新时间。理论上应该是前端展示时间，等到后端更新完成后，再有一个完成时间的更新。
++> 2.现在，点开对话，对话框中的上下文总是要在发送了消息之后才更新。而不是像模型和思考等级一样都存储上一次回答完的数据。
++
++当前有效决定：点击压缩立即在现有列表时间显示前端开始时间；服务端开始/完成状态到达后使用服务端时间，不编造完成时间，不恢复每秒走钟。此项明确替代 11 月 4 日“压缩开始不改变列表时间”的本次体验范围；其他消息时间和滚动规则保持。以独立的 compactionUpdatedAt 表示压缩活动时间，普通用量、模型选择、快照读取 updatedAt 不改变列表排序。
++
++打开普通或员工主对话时，已有正文但上下文缺失（包括 updatedAt 为空或有回复而 usedTokens 缺失）须通过已有聚合读取校准；携带正文 sourceRevision 复用正文。此项补充 11 月 13 日缓存切换规则的缺失上下文例外，完整缓存仍零重复请求；纯 context_status 仍零正文读取。服务启动后的普通用量沿用 rollout 读取；员工主对话补接同一供应商的只读历史用量读取，不 resume/start，不跨模型套用旧用量。快照 load 的 updatedAt 是读取状态时间，不冒充回答完成或压缩时间。
++
++操作变化：点击“立即压缩”→立即看到开始时间→服务端开始和完成分别覆盖；打开已有回答的普通/员工对话→先显示缓存→缺失用量在发送前校准；完整缓存切换直接显示。
++
++根因与改动：compact 原先等待 POST 才更新；目录只读消息时间；选中缓存正文不检查上下文缺失；员工 runtimeContextForThread 只返回模型设置。现复用 Store、聚合读取、目录映射、provider 历史读取器；压缩 POST 迟到不覆盖更新 SSE，客户端时钟不参与服务端事件先后比较。
++
++验证：185 项定向单测通过；隔离 Chrome 覆盖两类对话、缺时间戳/有时间戳但无用量、完整缓存 A/B 零请求、压缩本机→服务端→完成及迟到 POST；三档 100/1,000/10,000 context_status 零新增正文请求。详细命令、逐文件增减及证据见 [本轮验证记录](../../../../work/four-usage-fixes-20261117/verification.md)。本轮只改源码并自测，独立验收由来源对话安排；未提交、推送、发布或重启。
++
++
++### 2026-11-17 独立审核 FAIL 后仅补分页校准与压缩序号
++
++来源：本轮用户转交的 DeepSeek Flash High 独立审核结果；原交付185项局部自测未覆盖以下两项阻断，不能据其宣称所有边界通过。
++
++用户原话：
++> 长对话分页缓存仍不校准上下文用量（阻断）
++> 改为依据“已有正文但上下文用量缺失”决定校准，不能再依赖 messageCount 真值。
++> 同一对话在服务端确认没有可用 usage 时，不得每次 A/B 切换都重复请求。
++> 同毫秒压缩状态迟到 POST 会把 completed 回退到 compacting（阻断）
++> 在后端压缩生命周期增加单调序号（例如 compactionRevision/sequence），开始、失败、完成、中断、新一次压缩的每次真实阶段转换均递增。
++
++有效决定与补修：正文存在依据 messages，不依据分页 messageCount；聚合读取成功后在原 contextStatus 保存 usageSourceRevision，对同一正文版本已确认无用量不反复校准。实时状态保留该标记，显式换模型时清除，校准继续携带 sourceRevision；不新增状态事件正文读取。后端真实压缩 phase 转换递增 compactionRevision，普通用量/load/重复同阶段不递增且不改变 compactionUpdatedAt；SSE/POST 共用。前端先按序号拒绝旧事件，同序号或无序号不能从 completed/failed 回到 compacting/queued，更高序号的新压缩可正常开始。
++
++操作变化：普通/员工长对话切回→发送前得到用量；服务端确实没有用量→保持现有空用量展示，后续相同正文 A/B 不再请求。点击压缩→已完成→迟到的同毫秒 POST 不再重新显示正在压缩；下一次压缩正常开始。
++
++本轮补修自测：115项定向测试、四项浏览器、三档状态风暴、TypeScript及语法/差异检查结果统一见 [复审补修证据](../../../../work/four-usage-fixes-20261117/verification.md#第二轮补修独立审核-fail-后)。独立复审由来源对话安排；未提交、推送、发布或重启。
+--- a/docs/project-management/items/FEAT-001/updates.md
++++ b/docs/project-management/items/FEAT-001/updates.md
+@@ -1086,3 +1086,18 @@
+ - 本轮增量：业务+24/-9、测试+40/-1；[第2轮证据及边界](../../../../work/context-storm-20261117/verification.md#第2次修复尝试审核两项补修2026-11-17)。
+ - 独立复审：DeepSeek Flash High 最终 PASS。标题单独变化在列表、当前标题和重命名框同步，正文请求0；目标线程通知取消且其他线程不受影响；100/1,000/10,000状态事件零新增正文请求、输入无 long task，受保护文件零差异。
+ - 当前状态：源码修复、独立审核和受控发布完成。发布结果 jobId `1794850200246-69963` 为 started，运行快照 `1794850193600-27e8db44`、pid `70019`；重启构建前端 `feishu-mwjjgqj6`，公网 `/version.json` 一致。watchdog 返回 backend/frontend/tunnel healthy；运行快照关键后端文件与工作区 SHA-256 一致。
++
++
++### 2026-11-17 四项真实使用问题源码修复与定向自测
++
++- 用户本轮明确授权修复；原话、现状及有效决定追加在同条目 item.md，既有记录和已发布改动保留。
++- 覆盖压缩活动时间、普通及员工主对话打开用量校准、员工页新建普通对话、跨设备完成目录同步；员工历史用量复用既有只读供应商历史路径，目录落盘后再失效，失败补读有界。
++- 185 项定向单测通过；隔离浏览器四项操作及缓存/发送回归通过；100/1,000/10,000 状态事件零新增正文请求。精确命令、增减、保护检查及证据见 [验证记录](../../../../work/four-usage-fixes-20261117/verification.md)。
++- 状态：仅 develop 工作区修改与自测；未提交、推送、发布、重启、截图或发送真实消息；运行服务没有因本轮加载新代码。来源对话后续安排 DeepSeek Flash High 独立验收；真实公网、手机和供应商端到端留到发布后。
++
++
++### 2026-11-17 第二轮：独立审核 FAIL 后三个漏项补修
++
++- 按用户限定仅补分页缓存上下文校准、同毫秒压缩序号和目录可恢复错误重试；不重做已通过四路主体，保留既有改动。
++- 本条目对应原话、有效决定与保留范围已追加在item.md。115项定向单测及四项浏览器、100/1,000/10,000纯状态事件零正文请求通过；完整命令、统计和最终检查见 [本轮验证记录](../../../../work/four-usage-fixes-20261117/verification.md#第二轮补修独立审核-fail-后)。
++- 上轮185项通过记录保留为历史局部证据，独立审核FAIL结论不覆盖或改写为PASS；本轮补修由来源对话复审。未提交、推送、发布、重启、截图或发送真实消息。
+--- a/docs/project-management/items/FEAT-002/item.md
++++ b/docs/project-management/items/FEAT-002/item.md
+@@ -909,3 +909,35 @@
+ 实现：集中修改 `windows/server/computer-control/runtime.mjs`，已有前台与员工/当前后台组装自动继承；旧 `background-tasks/service.mjs` 的覆盖提示补接同一函数。验证与证据见本条 updates 的同日记录。
+ 
+ 当前状态：DeepSeek 独立审核 PASS。14 份实际生成提示覆盖前台、6 位员工和后台创建/resume/turn 链路；文件、代码、日志、API、Git、运行状态直接使用只读数据，computer 仅用于必要界面或视觉验收。没有阻断或中风险问题。受控发布已完成，公网前端 `feishu-mwjjgqj6`，运行快照 `1794850193600-27e8db44`，watchdog 全链路 healthy。
++
++
++### 2026-11-17 跨设备员工目录完成内容同步（本轮工作区修复）
++
++来源：本轮修复任务原文；未提供原始对话消息标识。
++
++用户原话：
++> 4.现在 偶尔，我在跨设备时，员工对话的内容没有同步更新在所有对话的列表中，不过我不敢肯定现在还有没有。
++
++有效决定：设备 A 员工回答完成后，设备 B 不发送消息、不刷新页面即可更新“所有对话”的员工摘要和活动时间；单次慢请求/失败应有有限恢复，保持共享资源和 SSE，不新增高频轮询。此项授权目录读取失败的一次有限补读，不恢复此前否定的员工 readAuthoritativeStatus 定时兜底或正文反复读取。
++
++根因证据：前端漏接 employee_turn_completed；目录请求仍为 10 秒且失败只保留缓存；employee_message_completed 与 sessions_changed 原先在 recordRuntimeEvent 落盘前广播，目录可能先读旧摘要。公网请求取消仅为放大证据，不认定唯一根因。
++
++最小修复：完成事件纳入现有 directory-changed；共享目录请求统一 60 秒，失败仅再读一次，持续失败保留旧值并停止，后续事件/恢复仍可重试；sessions_changed 改在记录落盘成功后发布，原实时正文事件保持。继续使用既有目录权威合并与父行状态，不新增另一份缓存。员工重启后历史上下文用量修复同时见 FEAT-001 本日条目。
++
++操作变化：设备 B 留在列表→收到 A 员工完成→更新摘要、时间及父行；首次请求超时后有限补读，恢复后不继续请求。验证含完成事件、单次 timedout、连续失败停止、保留旧值、下一次完成事件恢复、实际记录保存 gate。185 项定向单测及隔离浏览器通过，证据见 [本轮验证记录](../../../../work/four-usage-fixes-20261117/verification.md)。真实公网、手机和供应商流程按本轮边界留到发布后验收；未提交、推送、发布或重启。
++
++
++### 2026-11-17 独立审核 FAIL 后收紧目录补读
++
++来源：本轮用户转交的 DeepSeek Flash High 独立审核结果。
++
++用户原话：
++> 目录补读应只针对可恢复错误（低风险）
++> 改成只对网络错误、超时和 5xx 补读一次；401、403、404 每次失效只请求一次，保留旧目录，不循环。
++> 复用现有 fetchJson/HttpError 或最小增加 HTTP status 信息，避免扩大无关调用方行为。
++
++有效决定：替代上一轮“所有错误都补读一次”的实现。GET错误保留原文案并携带HttpError.status，POST/PATCH/DELETE错误行为不变；共享目录仅网络TypeError、超时/AbortError、500–599补读一次，401/403/404和其他不可恢复错误不补读。连续可恢复失败最多两次，旧目录保留，下一次已有事件仍可重新尝试；不新增轮询。
++
++操作变化：设备B目录更新遇到网络/服务端临时故障→一次补读后恢复；遇到权限拒绝或不存在→保留旧目录且只发一次请求。已通过的完成事件接线、落盘后失效、父行合并保持原样。
++
++定向覆盖网络、超时、500/501/503/599、401/403/404/429、连续失败停止及下次失效恢复；四项浏览器目录场景继续通过。员工分页上下文缺失的补修见FEAT-001本日同轮记录。证据见 [复审补修证据](../../../../work/four-usage-fixes-20261117/verification.md#第二轮补修独立审核-fail-后)。未提交、推送、发布或重启；独立复审由来源对话安排。
+--- a/docs/project-management/items/FEAT-002/updates.md
++++ b/docs/project-management/items/FEAT-002/updates.md
+@@ -420,3 +420,18 @@
+ - 本轮改动：生产逻辑沿用当前 `dfe8bcf` 的正确实现，无定时器或轮询新增。`ui-feishu/validation/employee-provider.test.mjs` 补充旧 Provider 不同 turnId 的 delta 被拒绝、旧 final answer 被拒绝、当前 Provider final answer 被接受且随后 completed 立即 idle 的断言。
+ - 验证：`windows/tests/employee-runtime.test.mjs` 33/33、`ui-feishu/validation/employee-provider.test.mjs`、`ui-feishu/validation/realtime-regression.test.mjs` 及相关 MJS 语法、`git diff --check` 结果见本次交付。
+ - 状态：当前工作区基线为 `develop / dfe8bcf`，与任务描述中的 `340baaa` 不一致；本次按实际工作区继续并保留全部既有改动。未提交、未推送、未发布、未重启，运行服务未由本轮加载验证。
++
++
++### 2026-11-17 四项真实使用问题源码修复与定向自测
++
++- 用户本轮明确授权修复；原话、现状及有效决定追加在同条目 item.md，既有记录和已发布改动保留。
++- 覆盖压缩活动时间、普通及员工主对话打开用量校准、员工页新建普通对话、跨设备完成目录同步；员工历史用量复用既有只读供应商历史路径，目录落盘后再失效，失败补读有界。
++- 185 项定向单测通过；隔离浏览器四项操作及缓存/发送回归通过；100/1,000/10,000 状态事件零新增正文请求。精确命令、增减、保护检查及证据见 [验证记录](../../../../work/four-usage-fixes-20261117/verification.md)。
++- 状态：仅 develop 工作区修改与自测；未提交、推送、发布、重启、截图或发送真实消息；运行服务没有因本轮加载新代码。来源对话后续安排 DeepSeek Flash High 独立验收；真实公网、手机和供应商端到端留到发布后。
++
++
++### 2026-11-17 第二轮：独立审核 FAIL 后三个漏项补修
++
++- 按用户限定仅补分页缓存上下文校准、同毫秒压缩序号和目录可恢复错误重试；不重做已通过四路主体，保留既有改动。
++- 本条目对应原话、有效决定与保留范围已追加在item.md。115项定向单测及四项浏览器、100/1,000/10,000纯状态事件零正文请求通过；完整命令、统计和最终检查见 [本轮验证记录](../../../../work/four-usage-fixes-20261117/verification.md#第二轮补修独立审核-fail-后)。
++- 上轮185项通过记录保留为历史局部证据，独立审核FAIL结论不覆盖或改写为PASS；本轮补修由来源对话复审。未提交、推送、发布、重启、截图或发送真实消息。
+--- a/docs/project-management/items/FEAT-017/item.md
++++ b/docs/project-management/items/FEAT-017/item.md
+@@ -42,3 +42,26 @@
+ - `windows/server/business-project-config.mjs`
+ - `windows/server/employee-project-directory.mjs`
+ - `windows/server/routes/conversation-history-routes.mjs`
++
++
++### 2026-11-17 从员工主对话新建普通项目对话
++
++来源：本轮修复任务原文；未提供原始对话消息标识。
++
++用户原话：
++> 3.现在，打开一个员工对话，然后再点击创建新对话，变成了创建这个员工的新对话，而不是这个项目的新对话。原因可能是把员工也当成项目了。
++
++有效决定：员工页点击“新建对话”离开员工上下文，进入个人项目普通对话；普通业务项目会话中新建沿用其 cwd。员工私有 root 不作个人项目 root；个人目录未就绪时沿用 /api/project 的普通项目 root。员工在项目列表的展示身份不改变既有会话归属。未发送前仍只有 pending 临时对话，不创建真实 Thread。
++
++根因：create 清除了 URL 的 agent/employee/conversation，但未清 React agentId，员工标题与员工身份推导继续残留。修改 FeishuApp 的现有新建入口：清 agentId、自动打开员工标记及旧群/详情状态；普通会话采用当前 cwd，员工会话采用 personal root，沿用原 deferred 创建和普通发送。
++
++操作变化：打开员工主对话→添加→新建对话→看到“新对话”且无员工标题；输入后发送→创建请求使用个人项目 root，无员工 conversationId，随后调用普通会话发送 API。普通业务对话→新建→临时会话保留原业务 root。
++
++隔离 Chrome 已核对 URL、标题、正文缓存身份、创建 root、延迟创建、普通发送和无员工 scope；所有 API 被夹具拦截，无真实消息。证据见 [本轮验证记录](../../../../work/four-usage-fixes-20261117/verification.md)。本轮仅源码和自测，未提交、推送、发布或重启，独立验收由来源对话安排。
++
++
++### 2026-11-17 独立审核后的保留范围与回归
++
++来源：本轮用户原话：“只补以下三个缺项”“不要重做已验证通过的四路主体”。独立审核为FAIL的缺项属于FEAT-001上下文/压缩和FEAT-002目录错误分类；员工页新建普通对话主体保持上一轮实现，本轮未改FeishuApp、项目归属或发送入口。
++
++四项浏览器仍覆盖员工→新建→个人root→普通发送、URL/标题离开员工身份，以及普通业务会话新建保留cwd；所有消息由隔离API夹具处理。对应证据见 [复审补修记录](../../../../work/four-usage-fixes-20261117/verification.md#第二轮补修独立审核-fail-后)。工作区已通过部分保留；未提交、推送、发布或重启，来源对话安排独立复审。
+--- a/docs/project-management/items/FEAT-017/updates.md
++++ b/docs/project-management/items/FEAT-017/updates.md
+@@ -14,3 +14,18 @@
+ - 用户原话：“negus本来就是一个全面的项目管理系统，管理多个项目应该挺正常。如果你说的是项目对话的存放位置不对还可能是错误。你先记下来，后续再找时间和我对齐。咱不列为异常。”
+ - 用户影响：需求表不再将该现象登记为待修异常；若后续确认是对话存放位置错误，再按归属错误处理。
+ - 证据：当前对话；`docs/project-management/items/FEAT-017/item.md`。
++
++
++### 2026-11-17 四项真实使用问题源码修复与定向自测
++
++- 用户本轮明确授权修复；原话、现状及有效决定追加在同条目 item.md，既有记录和已发布改动保留。
++- 覆盖压缩活动时间、普通及员工主对话打开用量校准、员工页新建普通对话、跨设备完成目录同步；员工历史用量复用既有只读供应商历史路径，目录落盘后再失效，失败补读有界。
++- 185 项定向单测通过；隔离浏览器四项操作及缓存/发送回归通过；100/1,000/10,000 状态事件零新增正文请求。精确命令、增减、保护检查及证据见 [验证记录](../../../../work/four-usage-fixes-20261117/verification.md)。
++- 状态：仅 develop 工作区修改与自测；未提交、推送、发布、重启、截图或发送真实消息；运行服务没有因本轮加载新代码。来源对话后续安排 DeepSeek Flash High 独立验收；真实公网、手机和供应商端到端留到发布后。
++
++
++### 2026-11-17 第二轮：独立审核 FAIL 后三个漏项补修
++
++- 按用户限定仅补分页缓存上下文校准、同毫秒压缩序号和目录可恢复错误重试；不重做已通过四路主体，保留既有改动。
++- 本条目对应原话、有效决定与保留范围已追加在item.md。115项定向单测及四项浏览器、100/1,000/10,000纯状态事件零正文请求通过；完整命令、统计和最终检查见 [本轮验证记录](../../../../work/four-usage-fixes-20261117/verification.md#第二轮补修独立审核-fail-后)。
++- 上轮185项通过记录保留为历史局部证据，独立审核FAIL结论不覆盖或改写为PASS；本轮补修由来源对话复审。未提交、推送、发布、重启、截图或发送真实消息。
+--- a/ui-feishu/shared/features/context-management/hooks/useContextManagement.ts
++++ b/ui-feishu/shared/features/context-management/hooks/useContextManagement.ts
+@@ -34,7 +34,12 @@
+   }, [store, threadId]);
+   const handleEvent = useCallback((event: ContextStatus) => {
+     const current = store.get(event.threadId, !store.synced.has(event.threadId)).contextStatus;
+-    if (current.updatedAt && event.updatedAt && Date.parse(event.updatedAt) < Date.parse(current.updatedAt)) return;
++    const newerCompaction = event.compactionRevision != null && event.compactionRevision > (current.compactionRevision ?? -1);
++    if (event.compactionRevision != null && current.compactionRevision != null && event.compactionRevision < current.compactionRevision) return;
++    if (!newerCompaction && ['completed', 'failed'].includes(current.phase) && ['queued', 'compacting'].includes(event.phase)) return;
++    if (!newerCompaction && current.updatedAt && event.updatedAt && Date.parse(event.updatedAt) < Date.parse(current.updatedAt)) return;
++    event = { ...event, compactionRevision: event.compactionRevision ?? current.compactionRevision,
++      usageSourceRevision: current.usageSourceRevision };
+     const keepSettings = Boolean(current.selectedSettings || store.synced.has(event.threadId) || store.modelChoices.has(event.threadId));
+     const completed = event.phase === "completed" && current.phase !== "completed";
+     if (completed) store.invalidate(event.threadId, false);
+@@ -50,23 +55,29 @@
+     const modelChanged = Boolean(visible.model && current.model && visible.model !== current.model);
+     store.update(changedThreadId, { contextStatus: { ...current, ...visible,
+       selectedSettings: { model: visible.model, reasoningEffort: visible.reasoningEffort },
+-      ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null } : {}), updatedAt: new Date().toISOString() } });
++      ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null, usageSourceRevision: undefined } : {}), updatedAt: new Date().toISOString() } });
+   }, [store]);
+ 
+   const compact = useCallback(async () => {
+-    if (!threadId || status.phase === "compacting") return false;
++    if (!threadId || store.get(threadId).contextStatus.phase === "compacting") return false;
++    const previous = store.get(threadId).contextStatus;
++    const startedAt = new Date().toISOString();
++    setStatus({ ...previous, phase: "compacting", message: "正在压缩上下文", compactionUpdatedAt: startedAt });
+     try {
+-      setStatus(await contextApi.compact(threadId));
++      handleEvent(await contextApi.compact(threadId));
+       return true;
+     } catch (reason) {
++      // A late transport failure must not overwrite an authoritative SSE start/completion.
++      if (store.get(threadId).contextStatus.compactionUpdatedAt !== startedAt) return false;
+       setStatus((current) => ({
+         ...current,
+         phase: "failed",
++        compactionUpdatedAt: previous.compactionUpdatedAt,
+         message: reason instanceof Error ? reason.message : String(reason),
+       }));
+       return false;
+     }
+-  }, [status.phase, threadId]);
++  }, [store, threadId, setStatus, handleEvent]);
+ 
+   const setThreshold = useCallback(async (threshold: number | null) => {
+     if (!threadId) return false;
+--- a/ui-feishu/shared/features/context-management/model/types.ts
++++ b/ui-feishu/shared/features/context-management/model/types.ts
+@@ -14,4 +14,7 @@
+   phase: ContextPhase;
+   message: string;
+   updatedAt: string | null;
++  compactionUpdatedAt?: string | null;
++  compactionRevision?: number;
++  usageSourceRevision?: string;
+ }
+--- a/ui-feishu/shared/features/conversations/hooks/useProjectConversations.ts
++++ b/ui-feishu/shared/features/conversations/hooks/useProjectConversations.ts
+@@ -705,7 +705,7 @@
+       selection.store.freshBodies.add(event.threadId);
+       selection.store.invalidate(event.threadId, false);
+     }
+-    if ((event as { type: string }).type === 'employee_status' || (event as { type: string }).type === 'employee_message_completed') window.dispatchEvent(new Event('negus:directory-changed'));
++    if (['employee_status', 'employee_message_completed', 'employee_turn_completed'].includes(event.type)) window.dispatchEvent(new Event('negus:directory-changed'));
+     const acceptedQueueItem = followUpQueue.handleEvent(event);
+     goal.handleEvent(event);
+     if (event.type === "context_status") contextManagement.handleEvent(event);
+--- a/ui-feishu/shared/features/conversations/state/conversationStore.ts
++++ b/ui-feishu/shared/features/conversations/state/conversationStore.ts
+@@ -248,7 +248,8 @@
+       const model = saved ? resolveVisibleModel(models, defaults, saved.model, '') : result.context.model;
+       const contextStatus = saved ? { ...result.context, model, selectedSettings,
+         reasoningEffort: resolveVisibleEffort(models, defaults, model, saved.reasoningEffort) } : result.context;
+-      return { session: { ...session, ...(incoming && result.historyFormatVersion ? { historyFormatVersion: result.historyFormatVersion } : {}), sourceRevision: result.sourceRevision || session.sourceRevision }, contextStatus,
++      return { session: { ...session, ...(incoming && result.historyFormatVersion ? { historyFormatVersion: result.historyFormatVersion } : {}), sourceRevision: result.sourceRevision || session.sourceRevision },
++        contextStatus: { ...contextStatus, usageSourceRevision: result.sourceRevision || session.sourceRevision || '' },
+         executionStatus: result.status, goal: result.goal, queueItems: result.queue, userInputRequest: result.input };
+     });
+     const entry = { signal, promise };
+--- a/ui-feishu/shared/features/project-directory/data/projectDirectoryApi.ts
++++ b/ui-feishu/shared/features/project-directory/data/projectDirectoryApi.ts
+@@ -1,4 +1,4 @@
+-import { fetchJson } from "../../../shared/api/http";
++import { fetchJson, HttpError } from "../../../shared/api/http";
+ import { createCachedResource } from "../../../shared/state/localCache";
+ import type { DirectoryProject, ProjectDirectoryResponse } from "../model/types";
+ 
+@@ -9,7 +9,13 @@
+ export const projectDirectoryApi = {
+   list: (_signal?: AbortSignal, invalidate = false): Promise<DirectoryProject[]> =>
+     projectDirectoryResource.refresh(async () => {
+-      const response = await fetchJson<ProjectDirectoryResponse>("/api/project-directory", AbortSignal.timeout(10000));
++      const read = () => fetchJson<ProjectDirectoryResponse>("/api/project-directory", AbortSignal.timeout(60000));
++      // One bounded recovery per invalidation; shared resource still coalesces concurrent callers.
++      const response = await read().catch(error => {
++        if (error instanceof HttpError ? error.status >= 500 && error.status < 600
++          : error instanceof TypeError || ['TimeoutError', 'AbortError'].includes(error?.name)) return read();
++        throw error;
++      });
+       if (!validProjects(response?.projects)) throw new Error("Invalid project directory response");
+       return response.projects;
+     }, invalidate),
+--- a/ui-feishu/shared/features/project-directory/hooks/useProjectDirectory.ts
++++ b/ui-feishu/shared/features/project-directory/hooks/useProjectDirectory.ts
+@@ -25,5 +25,6 @@
+   return { projects, goalRecovery, loading: cached.data === null && !cached.error, error: cached.error, refresh,
+     statusByThread: Object.fromEntries(entries.map(([id, view]) => [id, view.executionStatus])),
+     contextByThread: Object.fromEntries(entries.map(([id, view]) => [id, view.contextStatus.phase])),
++    contextTimeByThread: Object.fromEntries(entries.map(([id, view]) => [id, view.contextStatus.compactionUpdatedAt])),
+     goalByThread: Object.fromEntries(entries.map(([id, view]) => [id, view.goal])) };
+ }
+--- a/ui-feishu/shared/shared/api/http.ts
++++ b/ui-feishu/shared/shared/api/http.ts
+@@ -63,12 +63,12 @@
+   });
+   const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+   if (!response.ok) {
+-    if (method === "GET" && response.status === 401) throw new Error("访问令牌无效，请使用启动命令输出的完整链接");
++    if (method === "GET" && response.status === 401) throw new HttpError("访问令牌无效，请使用启动命令输出的完整链接", response.status);
+     if (method === "GET" && response.status === 404) throw new HttpError("请求的项目会话不存在", response.status);
+     const message = typeof payload?.error === "string" && payload.error.trim()
+       ? payload.error
+       : method === "GET" ? `项目数据服务暂不可用（${response.status}）` : `${errorMessage}（${response.status}）`;
+-    throw new Error(message);
++    throw method === "GET" ? new HttpError(message, response.status) : new Error(message);
+   }
+   if (requireJsonContentType && !(response.headers.get("content-type") || "").toLowerCase().includes("application/json")) {
+     throw new Error("当前链接未连接到项目数据服务，请使用 pnpm start:demo 输出的 9360 链接");
+--- a/ui-feishu/src/FeishuApp.tsx
++++ b/ui-feishu/src/FeishuApp.tsx
+@@ -136,7 +136,7 @@
+       const children = [...(project.children || []), ...rooms.filter(room => room.projectId === project.projectId)].sort(byLatest);
+       return { ...project, time: children[0]?.time || project.time, children };
+     }).sort(byLatest) };
+-  }, [viewDirectory.projects, viewDirectory.statusByThread, viewDirectory.contextByThread, viewC.sessions, viewC.session, viewC.cachedSessions, viewC.archivedByThread, viewC.archivedView, viewC.project?.root, groups.rooms]);
++  }, [viewDirectory.projects, viewDirectory.statusByThread, viewDirectory.contextByThread, viewDirectory.contextTimeByThread, viewC.sessions, viewC.session, viewC.cachedSessions, viewC.archivedByThread, viewC.archivedView, viewC.project?.root, groups.rooms]);
+   const filterOrigins = (items: Conversation[]): Conversation[] => items.flatMap(item => {
+     const children = item.children ? filterOrigins(item.children) : undefined;
+     return origins.includes(item.origin === 'assistant' ? 'assistant' : item.main && item.agentId ? 'employee' : 'user') || children?.length ? [{ ...item, children }] : [];
+@@ -179,10 +179,11 @@
+     finally { setOpening(''); }
+   };
+   const create = () => {
+-    const root = directory.projects.find(p => p.kind === 'personal')?.root || c.project?.root || '';
++    const root = (!employee && c.session?.cwd) || directory.projects.find(p => p.kind === 'personal')?.root || c.project?.root || '';
+     const url = new URL(location.href);
+     for (const key of ['roomId', 'agent', 'conversation', 'thread', 'employee', 'employeeId', 'managerProjectId', 'managerProjectTitle', 'managerProjectPhase', 'managerProjectGoal']) url.searchParams.delete(key);
+     url.searchParams.set('view', 'conversation'); history.pushState({}, '', `${url.pathname}${url.search}`);
++    setAgentId(''); autoOpenedAgent.current = ''; setLegacyGroup(false); setDetails(false);
+     c.openNewSession(root, '', '', { deferred: true }); setRoomId(''); setMobileChat(true); setSection('messages'); setTab('messages');
+   };
+   return <div className={`feishu-app ${mobileChat ? 'show-chat' : ''} ${railOpen ? 'rail-open' : ''} ${section === 'border' ? 'border-tool-open' : ''}`} style={{ '--agent-initial': JSON.stringify(selectedName.slice(0, 1)), '--agent-color': avatarColor(employee?.employeeId || agentId) } as CSSProperties}>
+--- a/ui-feishu/src/conversationDirectory.ts
++++ b/ui-feishu/src/conversationDirectory.ts
+@@ -55,6 +55,10 @@
+       latestMessage: summary.latestMessage || latestMessagePreview(cached.messages) || cached.latestMessage } : summary;
+   });
+   const summaries = new Map(sessions.map(s => [s.threadId, s]));
++  const activityTime = (id: string, time?: string | null) => {
++    const compaction = directory.contextTimeByThread?.[id];
++    return compaction && Date.parse(compaction) > (Date.parse(time || '') || 0) ? compaction : time;
++  };
+   const previewFromCache = (id = '') => latestMessagePreview(cachedSessions?.get(id)?.messages);
+   const toConversation = (project: DirectoryProject, entry: Entry): Conversation => {
+     const listed = summaries.get(entry.threadId || '');
+@@ -76,7 +80,7 @@
+       origin: isTask || entry.nativeSubagent ? 'assistant' : session?.createdBy || (session && !project.employeeId ? 'codex' : undefined),
+       nativeSubagent: entry.nativeSubagent || session?.nativeSubagent,
+       projectId: entry.targetProjectId || project.projectId || project.id,
+-      time: directoryIsNewer ? directoryTime : sessionTime || entry.lastActivityAt || entry.updatedAt,
++      time: activityTime(entry.threadId || '', directoryIsNewer ? directoryTime : sessionTime || entry.lastActivityAt || entry.updatedAt),
+       active: Boolean(status?.active), label: conversationStatus(status, directory.contextByThread[entry.threadId || '']),
+       preview: (directoryIsNewer ? visibleTaskPreview(entry.latestMessage) : '') || session?.latestMessage || previewFromCache(entry.threadId || ''), session,
+     };
+@@ -133,7 +137,7 @@
+     if (Boolean(archivedByThread[session.threadId] ?? session.archived) !== archived) continue;
+     if (session.conversationKind === 'group' || all.some(row => row.threadId === session.threadId)) continue;
+     all.push({ id: session.threadId, name: session.title || '未命名对话', subtitle: '项目对话',
+-      threadId: session.threadId, time: cachedSessions?.get(session.threadId)?.messages.filter(message => message.role === 'user' || message.role === 'assistant').map(message => message.createdAt).filter(Boolean).sort((a, b) => Date.parse(b!) - Date.parse(a!))[0] || session.updatedAt, session,
++      threadId: session.threadId, time: activityTime(session.threadId, cachedSessions?.get(session.threadId)?.messages.filter(message => message.role === 'user' || message.role === 'assistant').map(message => message.createdAt).filter(Boolean).sort((a, b) => Date.parse(b!) - Date.parse(a!))[0] || session.updatedAt), session,
+       origin: session.nativeSubagent ? 'assistant' : session.createdBy || 'codex', nativeSubagent: session.nativeSubagent,
+       active: Boolean(directory.statusByThread[session.threadId]?.active),
+       label: conversationStatus(directory.statusByThread[session.threadId], directory.contextByThread[session.threadId]), preview: session.latestMessage || previewFromCache(session.threadId) });
+--- a/ui-feishu/src/usePageSnapshot.ts
++++ b/ui-feishu/src/usePageSnapshot.ts
+@@ -37,7 +37,11 @@
+   const selectedThread = useRef(c.selectedId);
+   if (selectedThread.current !== c.selectedId) {
+     selectedThread.current = c.selectedId;
+-    if (!store.committed.get(c.selectedId)?.session || store.errors.has(c.selectedId)
++    const cached = store.committed.get(c.selectedId);
++    const missingContext = !cached?.contextStatus.updatedAt
++      || (cached.contextStatus.usedTokens == null && Boolean(cached.session?.messages.length));
++    if (!cached?.session || store.errors.has(c.selectedId)
++      || (missingContext && cached?.contextStatus.usageSourceRevision !== (cached?.session?.sourceRevision || ''))
+       || store.dirty.has(c.selectedId) || store.freshBodies.has(c.selectedId)) observed.current.delete(c.selectedId);
+   }
+   const archiveView = useRef(c.archivedView);
+@@ -229,5 +233,6 @@
+   return { committed: shown.committed, conversations: display, directory: { ...directory, projects: shown.projects,
+     statusByThread,
+     contextByThread: Object.fromEntries(states.map(([id, view]) => [id, view.contextStatus.phase])),
++    contextTimeByThread: Object.fromEntries(states.map(([id, view]) => [id, view.contextStatus.compactionUpdatedAt])),
+     goalByThread: Object.fromEntries(states.map(([id, view]) => [id, view.goal])) } };
+ }
+--- a/ui-feishu/validation/conversation-summary.test.mjs
++++ b/ui-feishu/validation/conversation-summary.test.mjs
+@@ -752,3 +752,16 @@
+   store.commit(taskThread, { ...store.empty(taskThread), executionStatus: old }, revision);
+   assert.equal(store.get(taskThread).executionStatus.active, false);
+ });
++
++test('compaction lifecycle timestamps update ordinary and employee rows without altering message preview', () => {
++  const d = directory(), a = session('A', 'saved answer', '08'), b = session('ordinary', 'ordinary answer', '08');
++  d.contextTimeByThread = { A: time('10'), ordinary: time('11') };
++  let rows = buildConversationDirectory(d, [a, b], false, '', new Map([['A', a], ['ordinary', b]]));
++  assert.equal(rows.all.find(row => row.threadId === 'A').time, time('10'));
++  assert.equal(rows.employees.find(row => row.threadId === 'A').time, time('10'));
++  assert.equal(rows.all.find(row => row.threadId === 'ordinary').time, time('11'));
++  assert.equal(rows.all.find(row => row.threadId === 'A').preview, '助手：saved answer');
++  d.contextTimeByThread.A = time('09'); // authoritative server clock replaces a fast client clock
++  rows = buildConversationDirectory(d, [a], false);
++  assert.equal(rows.all.find(row => row.threadId === 'A').time, time('09'));
++});
+--- /dev/null
++++ b/ui-feishu/validation/four-usage-fixes-browser.test.mjs
+@@ -0,0 +1,211 @@
++import assert from 'node:assert/strict';
++import { createRequire } from 'node:module';
++const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_PATH || '/Users/hans/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
++const browser = await chromium.launch({ headless: true, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' });
++const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
++page.setDefaultTimeout(10000);
++const stamp = '2026-11-01T00:00:00Z', calls = [], errors = [];
++const summaries = ['ordinary', 'employee'].map(threadId => ({ threadId, source: 'codex', sourceRevision: 'r1', title: threadId,
++  cwd: threadId === 'employee' ? '/employee-private' : '/business', updatedAt: stamp, messageCount: null,
++  latestMessage: `old ${threadId}`, latestUser: '', latestAssistant: `old ${threadId}`, model: 'model-a' }));
++const details = id => ({ ...summaries.find(s => s.threadId === id), messages: [{ id: `m-${id}`, role: 'assistant', text: `old ${id}`, createdAt: stamp }] });
++const idle = id => ({ type: 'execution_status', threadId: id, phase: 'idle', active: false, turnId: '', activities: [], updatedAt: stamp });
++const contexts = new Map(summaries.map(s => [s.threadId, { type: 'context_status', threadId: s.threadId, model: 'model-a', reasoningEffort: 'high',
++  usedTokens: s.threadId === 'employee' ? 230 : 120, contextWindow: 1000, percentage: s.threadId === 'employee' ? 23 : 12, phase: 'idle', updatedAt: stamp, autoCompactThreshold: 80, message: '' }]));
++let employeeTime = stamp, employeePreview = 'old employee', directoryFailures = 0, directoryReads = 0, releaseCompact;
++const projects = () => [{ id: 'personal', kind: 'personal', root: '/personal', name: '个人项目', conversations: [] },
++  { id: 'employee-project', kind: 'employee', employeeId: 'developer', root: '/employee-private', name: '开发员工', mainThreadId: 'employee', mainConversationId: 'employee-direct',
++    lastActivityAt: employeeTime, conversations: [{ id: 'employee', threadId: 'employee', conversationId: 'employee-direct', main: true, title: '开发员工', latestMessage: employeePreview, latestMessageAt: employeeTime, status: idle('employee') }] }];
++page.on('pageerror', e => errors.push(e.message));
++await page.addInitScript(({ summaries, details, stamp }) => {
++  const sources = [];
++  window.EventSource = class { constructor() { sources.push(this); setTimeout(() => this.onopen?.(), 0); } close() {} };
++  window.emitFixture = event => sources.forEach(s => s.onmessage?.({ data: JSON.stringify(event) }));
++  localStorage.setItem('negus-conversation-snapshot-v1', JSON.stringify({ version: 1, savedAt: stamp, selectedId: 'ordinary', sessions: summaries,
++    session: details[0], recentSessions: [{ savedAt: stamp, session: details[1] }] }));
++}, { summaries, details: summaries.map(s => details(s.threadId)), stamp });
++// Test-only access to the real store lets us remove context while keeping warmed body/signatures.
++await page.route('**/useProjectConversations.ts*', async route => {
++  const response = await route.fetch();
++  const body = (await response.text()).replace('store: selection.store,', 'store: (window.fixtureStore = selection.store),');
++  await route.fulfill({ response, body });
++});
++await page.route('**/api/**', async route => {
++  const request = route.request(), url = new URL(request.url()), path = url.pathname;
++  if (!path.startsWith('/api/')) return route.continue();
++  const body = request.method() === 'POST' ? request.postDataJSON() : null;
++  const id = url.searchParams.get('threadId') || body?.threadId || 'ordinary';
++  calls.push({ path, method: request.method(), id, query: url.search, body });
++  let data = {};
++  if (path === '/api/project') data = { name: '个人项目', root: '/personal', mode: 'interactive' };
++  else if (path === '/api/project-directory') {
++    directoryReads++;
++    if (directoryFailures-- > 0) return route.abort('timedout');
++    data = { projects: projects() };
++  } else if (path === '/api/sessions') data = summaries;
++  else if (path === '/api/models') data = [{ id: 'model-a', model: 'model-a', displayName: '模型A', available: true, isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'high' }] }];
++  else if (path === '/api/model-defaults') data = { providerId: 'current', model: 'model-a', effort: 'high', archivedProviderIds: [] };
++  else if (path === '/api/model-channels') data = { channels: [] };
++  else if (path === '/api/group/rooms') data = { rooms: [] };
++  else if (path === '/api/session/context/compact') { data = await new Promise(resolve => { releaseCompact = resolve; }); }
++  else if (path === '/api/session' && request.method() === 'POST') {
++    data = { ...summaries[0], threadId: 'created', title: '新对话', cwd: body.projectRoot, messageCount: 0 };
++    summaries.push(data); contexts.set('created', { ...contexts.get('ordinary'), threadId: 'created' });
++  } else if (path === '/api/session/message') data = { threadId: id, turnId: 'fixture-turn', status: 'accepted' };
++  else if (path === '/api/session') data = { session: url.searchParams.get('sourceRevision') === 'r1' ? null : details(id), sourceRevision: 'r1', historyFormatVersion: 3,
++    context: contexts.get(id), status: idle(id), goal: null, queue: [], input: null };
++  await route.fulfill({ json: data });
++});
++const bodyReads = () => calls.filter(c => c.path === '/api/session' && c.method === 'GET').length;
++const row = name => page.getByRole('button', { name, exact: true });
++const settle = () => page.waitForTimeout(500);
++try {
++  await page.goto('http://127.0.0.1:5201/?thread=ordinary');
++  await page.getByRole('button', { name: '上下文 0.1k / 1k（12%）', exact: true }).waitFor();
++  await page.waitForFunction(() => window.fixtureStore?.synced.has('employee'));
++  await settle();
++  assert.equal(calls.some(c => c.method === 'POST'), false);
++  for (const [id, name, usage] of [['employee', '打开开发员工单聊', '上下文 0.2k / 1k（23%）'], ['ordinary', '打开ordinary', '上下文 0.1k / 1k（12%）']]) {
++    await page.evaluate(id => {
++      const store = window.fixtureStore, view = store.committed.get(id);
++      store.update(id, { contextStatus: { ...view.contextStatus, usageSourceRevision: undefined, usedTokens: null, percentage: null, updatedAt: id === 'ordinary' ? view.contextStatus.updatedAt : null } });
++    }, id);
++    const before = bodyReads();
++    await row(name).click();
++    await page.getByRole('button', { name: usage, exact: true }).waitFor();
++    await settle();
++    assert.equal(bodyReads(), before + 1, 'missing context gets one selection calibration');
++    assert.match(calls.filter(c => c.path === '/api/session').at(-1).query, /sourceRevision=r1/);
++    assert.equal(calls.some(c => c.method === 'POST'), false, 'usage appears before any send');
++  }
++  const warmed = bodyReads();
++  await row('打开开发员工单聊').click(); await settle();
++  await row('打开ordinary').click(); await settle();
++  assert.equal(bodyReads(), warmed, 'complete context and body caches need no selection reads');
++  console.log('PASS ordinary + employee missing context with cached body: one calibration each; complete cache A/B: zero reads');
++
++  const savedContexts = new Map(contexts);
++  for (const [id, name] of [['employee', '打开开发员工单聊'], ['ordinary', '打开ordinary']]) {
++    contexts.set(id, { ...contexts.get(id), usedTokens: null, percentage: null });
++    await page.evaluate(id => {
++      const store = window.fixtureStore, view = store.committed.get(id);
++      if (view.session.messageCount !== null || !view.session.messages.length) throw Error('must exercise paginated cached body');
++      store.update(id, { contextStatus: { ...view.contextStatus, usedTokens: null, percentage: null, usageSourceRevision: undefined } });
++    }, id);
++    const before = bodyReads(); await row(name).click(); await settle();
++    assert.equal(bodyReads(), before + 1, 'server without usage is calibrated once');
++    assert.equal(await page.evaluate(id => window.fixtureStore.get(id).contextStatus.usageSourceRevision, id), 'r1');
++    assert.match(calls.filter(c => c.path === '/api/session').at(-1).query, /sourceRevision=r1/);
++  }
++  const noUsageReads = bodyReads();
++  for (let n = 0; n < 2; n++) {
++    await row('打开开发员工单聊').click(); await settle();
++    await row('打开ordinary').click(); await settle();
++  }
++  assert.equal(bodyReads(), noUsageReads, 'confirmed absence of usage must survive repeated A/B switching');
++  for (const [id, value] of savedContexts) { contexts.set(id, value); await page.evaluate(event => window.emitFixture(event), value); }
++  await settle();
++  console.log('PASS messageCount:null cached ordinary/employee body; usage absent -> exactly one calibration each, repeated A/B zero reads');
++
++  await page.getByRole('button', { name: '上下文 0.1k / 1k（12%）', exact: true }).click();
++  const clickedAt = Date.now(), beforeCompact = bodyReads();
++  await page.getByRole('button', { name: '立即压缩', exact: true }).click();
++  await page.getByRole('button', { name: '正在压缩', exact: true }).waitFor();
++  const started = await page.evaluate(() => window.fixtureStore.get('ordinary').contextStatus);
++  assert.ok(Date.parse(started.compactionUpdatedAt) >= clickedAt);
++  assert.equal(started.updatedAt, stamp, 'client start must not impersonate a server timestamp');
++  const localClock = await page.evaluate(value => new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value)), started.compactionUpdatedAt);
++  assert.equal(await row('打开ordinary').locator('time').textContent(), localClock);
++  const serverStart = { ...contexts.get('ordinary'), phase: 'compacting', compactionRevision: 1, updatedAt: '2026-11-05T08:00:00Z', compactionUpdatedAt: '2026-11-05T08:00:00Z' };
++  await page.evaluate(event => window.emitFixture(event), serverStart); await settle();
++  assert.equal(await page.evaluate(() => window.fixtureStore.get('ordinary').contextStatus.compactionUpdatedAt), serverStart.updatedAt);
++  assert.equal(await row('打开ordinary').locator('time').textContent(), '11/5');
++  assert.equal(bodyReads(), beforeCompact, 'click and server start do not read body');
++  const completed = { ...serverStart, phase: 'completed', compactionRevision: 2, usedTokens: 40, percentage: 4 };
++  contexts.set('ordinary', completed);
++  await page.evaluate(event => window.emitFixture(event), completed);
++  await settle();
++  releaseCompact(serverStart); // deliberately late POST response must not roll back completion
++  await settle();
++  assert.equal(await page.evaluate(() => window.fixtureStore.get('ordinary').contextStatus.phase), 'completed');
++  assert.equal(await row('打开ordinary').locator('time').textContent(), '11/5');
++  assert.equal(bodyReads(), beforeCompact + 1, 'completion retains exactly one existing body calibration');
++  for (const revision of [undefined, 2, 1]) {
++    await page.evaluate(event => window.emitFixture(event), { ...serverStart, compactionRevision: revision }); await settle();
++    assert.equal(await page.evaluate(() => window.fixtureStore.get('ordinary').contextStatus.phase), 'completed');
++  }
++  assert.equal(bodyReads(), beforeCompact + 1, 'same/lower/missing revision starts cannot add reads or roll back terminal');
++  await page.evaluate(event => window.emitFixture(event), { ...serverStart, compactionRevision: 3 }); await settle();
++  assert.equal(await page.evaluate(() => window.fixtureStore.get('ordinary').contextStatus.phase), 'compacting');
++  assert.equal(bodyReads(), beforeCompact + 1, 'higher revision new start still adds no body read');
++  contexts.set('ordinary', { ...completed, compactionRevision: 4 });
++  await page.evaluate(event => window.emitFixture(event), contexts.get('ordinary')); await settle();
++  assert.equal(bodyReads(), beforeCompact + 2, 'second completion adds only its one calibration');
++  await page.evaluate(event => window.emitFixture(event), { ...serverStart, compactionRevision: 5 }); await settle();
++  const failed = { ...serverStart, phase: 'failed', message: 'fixture compaction failed', compactionRevision: 6 };
++  contexts.set('ordinary', failed); await page.evaluate(event => window.emitFixture(event), failed); await settle();
++  for (const revision of [undefined, 5, 6]) {
++    await page.evaluate(event => window.emitFixture(event), { ...serverStart, compactionRevision: revision }); await settle();
++    assert.equal(await page.evaluate(() => window.fixtureStore.get('ordinary').contextStatus.phase), 'failed');
++  }
++  assert.equal(bodyReads(), beforeCompact + 2, 'failure and rejected starts add no body reads');
++  await page.evaluate(event => window.emitFixture(event), { ...serverStart, compactionRevision: 7 }); await settle();
++  assert.equal(await page.evaluate(() => window.fixtureStore.get('ordinary').contextStatus.phase), 'compacting');
++  contexts.set('ordinary', { ...completed, compactionRevision: 8 });
++  await page.evaluate(event => window.emitFixture(event), contexts.get('ordinary')); await settle();
++  assert.equal(bodyReads(), beforeCompact + 3, 'higher revision after failure completes with one calibration');
++  await page.keyboard.press('Escape');
++  console.log('PASS same-millisecond completion beats delayed POST and equal/missing revision; higher revision starts next compaction');
++  console.log('PASS immediate client start -> server clock -> completed; delayed POST cannot roll back; zero start reads, one terminal read');
++
++  await page.getByRole('button', { name: '添加', exact: true }).click();
++  await page.getByText('新建对话', { exact: true }).click();
++  await page.waitForFunction(() => [...window.fixtureStore.committed.keys()].some(id => id.startsWith('pending:')));
++  assert.equal(await page.evaluate(() => [...window.fixtureStore.committed].find(([id]) => id.startsWith('pending:'))[1].session.cwd), '/business');
++  assert.equal(calls.filter(c => c.path === '/api/session' && c.method === 'POST').length, 0);
++  await row('打开ordinary').click(); await settle();
++  console.log('PASS ordinary business conversation -> new draft retains its business root without creating a thread');
++
++  const beforeDirectory = directoryReads;
++  directoryFailures = 1; employeeTime = '2026-11-09T00:00:00Z'; employeePreview = '设备A保存的新回答';
++  await page.evaluate(() => window.emitFixture({ type: 'employee_turn_completed', employeeId: 'developer', threadId: 'employee', turnId: 'done', status: 'completed' }));
++  await row('打开开发员工单聊').getByText('设备A保存的新回答', { exact: true }).waitFor();
++  assert.equal(await row('打开开发员工单聊').locator('time').textContent(), '11/9');
++  await settle();
++  assert.equal(directoryReads, beforeDirectory + 2, 'one failed refresh + one recovery');
++  await page.waitForTimeout(1200);
++  assert.equal(directoryReads, beforeDirectory + 2, 'no continuing polling');
++  // Repeated total failure stops; a later completion recovers through the same shared resource.
++  directoryFailures = 2;
++  await page.evaluate(() => window.emitFixture({ type: 'employee_turn_completed', employeeId: 'developer', threadId: 'employee', turnId: 'failure', status: 'completed' }));
++  await settle(); const stopped = directoryReads;
++  await settle(); assert.equal(directoryReads, stopped);
++  assert.equal(await row('打开开发员工单聊').getByText('设备A保存的新回答', { exact: true }).count(), 1);
++  employeePreview = '恢复后回答'; employeeTime = '2026-11-10T00:00:00Z';
++  await page.evaluate(() => window.emitFixture({ type: 'employee_turn_completed', employeeId: 'developer', threadId: 'employee', turnId: 'recovered', status: 'completed' }));
++  await row('打开开发员工单聊').getByText('恢复后回答', { exact: true }).waitFor();
++  console.log('PASS device B completion + timeout recovery: latest preview/time; total failure bounded, cache retained, later completion recovers');
++
++  await row('打开开发员工单聊').click();
++  await page.locator('.chat-workspace h1').getByText('开发员工', { exact: true }).waitFor();
++  await page.getByRole('button', { name: '添加', exact: true }).click();
++  await page.getByText('新建对话', { exact: true }).click();
++  await page.waitForFunction(() => !new URLSearchParams(location.search).has('agent'));
++  await page.locator('.chat-workspace').getByText('新对话', { exact: true }).waitFor();
++  const params = new URL(page.url()).searchParams;
++  for (const key of ['agent', 'employee', 'employeeId', 'conversation']) assert.equal(params.has(key), false);
++  assert.equal(await page.locator('.chat-workspace').getByText('开发员工', { exact: true }).count(), 0);
++  assert.equal(calls.filter(c => c.path === '/api/session' && c.method === 'POST').length, 0, 'new conversation remains deferred');
++  const composer = page.locator('.chat-composer > div:visible textarea');
++  await composer.fill('isolated fixture send'); await composer.press('Enter');
++  await page.waitForFunction(() => new URLSearchParams(location.search).get('thread') === 'created');
++  await settle();
++  const creation = calls.find(c => c.path === '/api/session' && c.method === 'POST');
++  assert.equal(creation.body.projectRoot, '/personal');
++  assert.equal(creation.body.conversationId, undefined);
++  const sent = calls.find(c => c.path === '/api/session/message');
++  assert.equal(sent?.body.threadId, 'created'); assert.equal(sent?.body.conversationId, undefined);
++  assert.equal(calls.some(c => c.path.includes('/employees/') && c.method === 'POST'), false);
++  assert.deepEqual(errors, []);
++  console.log('PASS employee -> new ordinary conversation: clean URL/header, personal root, deferred create, ordinary send without employee scope');
++} catch (error) { console.log(JSON.stringify({ calls, errors, text: await page.locator('body').innerText(), context: await page.evaluate(() => window.fixtureStore?.get('ordinary').contextStatus) })); throw error; } finally { await browser.close(); }
+--- a/windows/scripts/remote-room-demo.mjs
++++ b/windows/scripts/remote-room-demo.mjs
+@@ -424,6 +424,7 @@
+     });
+ employeeRuntime = createEmployeeRuntimeService({
+   readHistory: appServerConversations.findSessionForProvider,
++  readRuntimeContext: appServerConversations.getRuntimeContextForProvider,
+   readRevision: appServerConversations.getSourceRevisionForProvider,
+   registerSession: appServerConversations.registerSession,
+   taskService: agentTasks,
+--- a/windows/server/context-management-service.mjs
++++ b/windows/server/context-management-service.mjs
+@@ -19,6 +19,7 @@
+   phase: "idle",
+   message: "",
+   updatedAt: null,
++  compactionRevision: 0,
+ });
+ 
+ export const createContextManagementService = async ({
+@@ -52,7 +53,12 @@
+   };
+ 
+   const publish = (threadId, patch = {}) => {
+-    const next = { ...statusFor(threadId), ...patch, updatedAt: now() };
++    const current = statusFor(threadId);
++    const next = { ...current, ...patch, updatedAt: now() };
++    if (patch.phase && patch.phase !== current.phase) {
++      next.compactionUpdatedAt = next.updatedAt;
++      next.compactionRevision = current.compactionRevision + 1;
++    }
+     states.set(threadId, next);
+     broadcast(publicStatus(next));
+     return next;
+@@ -142,6 +148,7 @@
+     const modelChanged = Boolean(model && statusFor(threadId).model && model !== statusFor(threadId).model);
+     const verifiedWindow = verifiedContextWindow(model);
+     states.set(threadId, { ...before,
++      updatedAt: before.updatedAt || now(),
+       model,
+       reasoningEffort: runtime.reasoningEffort || statusFor(threadId).reasoningEffort,
+       ...(runtime.lastSuccessfulSettings !== undefined ? { lastSuccessfulSettings: runtime.lastSuccessfulSettings } : {}),
+--- a/windows/server/employee-runtime-service.mjs
++++ b/windows/server/employee-runtime-service.mjs
+@@ -46,6 +46,7 @@
+   registry,
+   conversationStore,
+   readHistory,
++  readRuntimeContext,
+   readRevision,
+   projectRoot,
+   broadcast = () => {},
+@@ -633,7 +634,9 @@
+       const turnId = turnIdFromMessage(message);
+       const current = statusFor(employeeId);
+       if (item.type === "agentMessage" && (!turnId || !current.active || current.turnId !== turnId)) return;
+-      void conversationStore.recordRuntimeEvent(message).catch(() => {});
++      void conversationStore.recordRuntimeEvent(message).then(() => {
++        execution?.publishThreadEvent?.(threadId, { type: "sessions_changed", threadId });
++      }).catch(() => {});
+       const text = textFromItem(item);
+       if (!text.trim()) return;
+       const role = item.type === "agentMessage" ? "assistant" : "user";
+@@ -649,7 +652,6 @@
+           itemId: item.id,
+         }),
+       });
+-      execution?.publishThreadEvent?.(threadId, { type: "sessions_changed", threadId });
+       return;
+     }
+     if (method.endsWith("/requestApproval")) {
+@@ -924,10 +926,12 @@
+     if (!employeeId) throw statusError("员工 Thread 不存在", 404);
+     const saved = registry.require(employeeId);
+     const employee = saved.pendingModelSettings || saved;
++    const runtime = await readRuntimeContext?.(saved.modelProviderId || CURRENT_MODEL_PROVIDER_ID, cleanThreadId);
+     return {
+       model: employee.modelProviderId?.startsWith("ccswitch_") ? employee.modelProviderId + "::" + employee.model : employee.model || "",
+       modelProvider: employee.modelProviderId || CURRENT_MODEL_PROVIDER_ID,
+       reasoningEffort: employee.reasoningEffort || "",
++      ...(runtime?.usage && runtime.model === employee.model && employee.modelProviderId === saved.modelProviderId ? { usage: runtime.usage } : {}),
+     };
+   };
+ 
+--- a/windows/server/provider-conversation-store.mjs
++++ b/windows/server/provider-conversation-store.mjs
+@@ -119,6 +119,10 @@
+     return (await storeFor(owner(id))).getSessionResumeInfo(id, { ...options, historyFile: routes[id]?.resumeInfo?.path });
+   };
+   service.findSessionForProvider = async (providerId, ...args) => (await storeFor(providerId)).findSession(...args);
++  service.getRuntimeContextForProvider = async (providerId, id) => {
++    await ready;
++    return (await storeFor(providerId)).getRuntimeContext(id, { historyFile: routes[id]?.resumeInfo?.path });
++  };
+   service.getSourceRevisionForProvider = async (providerId, id) => {
+     const info = await (await storeFor(providerId)).getSessionResumeInfo(id, { readOnly: true, historyFile: routes[id]?.resumeInfo?.path });
+     return info?.path ? latestRolloutFile(info.path)
+--- a/windows/tests/context-management-service.test.mjs
++++ b/windows/tests/context-management-service.test.mjs
+@@ -173,3 +173,66 @@
+   assert.equal(loaded.lastSuccessfulSettings.model, 'saved-model');
+   await service.close();
+ });
++
++test('compaction activity time only changes at lifecycle transitions, not usage or reads', async () => {
++  const { service } = await createService();
++  await service.requestCompaction('timed');
++  const started = service.getStatus('timed');
++  assert.equal(started.compactionUpdatedAt, started.updatedAt);
++  await new Promise(resolve => setTimeout(resolve, 5));
++  service.handleProtocolMessage({ method: 'thread/compacted', params: { threadId: 'timed' } });
++  const completed = service.getStatus('timed');
++  assert.equal(completed.phase, 'completed');
++  assert.ok(Date.parse(completed.compactionUpdatedAt) > Date.parse(started.compactionUpdatedAt));
++  service.handleProtocolMessage({ method: 'thread/tokenUsage/updated', params: { threadId: 'timed', tokenUsage: { last: { totalTokens: 10 }, modelContextWindow: 1000 } } });
++  await service.load('timed');
++  assert.equal(service.getStatus('timed').compactionUpdatedAt, completed.compactionUpdatedAt);
++  await service.close();
++});
++
++test('fresh service restores saved usage without a send or a state broadcast', async () => {
++  for (const threadId of ['ordinary', 'employee-main']) {
++    const events = [];
++    const service = await createContextManagementService({
++      stateFile: path.join(os.tmpdir(), `absent-context-${process.pid}-${threadId}.json`),
++      broadcast: event => events.push(event), getExecutionStatus: () => ({ active: false }),
++      getRuntimeContext: async () => ({ model: 'fixture-model', reasoningEffort: 'high', usage: { usedTokens: 120, contextWindow: 1000 } }),
++      compactContext: async () => { throw Error('must not compact'); },
++    });
++    const result = await service.load(threadId);
++    assert.equal(result.usedTokens, 120);
++    assert.equal(result.percentage, 12);
++    assert.ok(Date.parse(result.updatedAt));
++    assert.equal((await service.load(threadId)).updatedAt, result.updatedAt);
++    assert.equal(result.compactionUpdatedAt, undefined);
++    assert.deepEqual(events, []);
++    await service.close();
++  }
++});
++
++test('same-millisecond compaction transitions have increasing revisions; usage/read/duplicate completion do not', async t => {
++  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-17T00:00:00Z') });
++  const { service, events } = await createService();
++  const start = await service.requestCompaction('sequence');
++  assert.equal(start.compactionRevision, 1);
++  service.handleProtocolMessage({ method: 'thread/compacted', params: { threadId: 'sequence' } });
++  const completed = service.getStatus('sequence');
++  assert.equal(completed.updatedAt, start.updatedAt);
++  assert.equal(completed.compactionRevision, 2);
++  t.mock.timers.tick(1000);
++  service.handleProtocolMessage({ method: 'thread/compacted', params: { threadId: 'sequence' } });
++  service.handleProtocolMessage({ method: 'thread/tokenUsage/updated', params: { threadId: 'sequence', tokenUsage: { last: { totalTokens: 1 }, modelContextWindow: 1000 } } });
++  await service.load('sequence');
++  assert.equal(service.getStatus('sequence').compactionRevision, 2);
++  assert.equal(service.getStatus('sequence').compactionUpdatedAt, completed.compactionUpdatedAt);
++  assert.equal((await service.requestCompaction('sequence')).compactionRevision, 3);
++  service.handleProtocolMessage({ method: 'error', params: { threadId: 'sequence', error: { message: 'fixture failure' } } });
++  assert.equal(service.getStatus('sequence').phase, 'failed');
++  assert.equal(service.getStatus('sequence').compactionRevision, 4);
++  assert.equal((await service.requestCompaction('sequence')).compactionRevision, 5);
++  service.handleProtocolMessage({ method: 'turn/completed', params: { threadId: 'sequence', turn: { status: 'interrupted' } } });
++  assert.equal(service.getStatus('sequence').compactionRevision, 6);
++  assert.equal(service.getStatus('sequence').phase, 'failed');
++  assert.equal(events.filter(e => e.type === 'context_status').at(-1).compactionRevision, 6);
++  await service.close();
++});
+--- a/windows/tests/employee-runtime.test.mjs
++++ b/windows/tests/employee-runtime.test.mjs
+@@ -8,7 +8,7 @@
+ import { createEmployeeRuntimeService } from "../server/employee-runtime-service.mjs";
+ import { createEmployeeProjectDirectoryRoutes } from "../server/routes/employee-project-directory-routes.mjs";
+ 
+-const fixture = async (t, { execution = null, onTurnCompleted = null, taskService = null, growthService = null, readHistory, registerSession } = {}) => {
++const fixture = async (t, { execution = null, onTurnCompleted = null, taskService = null, growthService = null, readHistory, readRuntimeContext, registerSession } = {}) => {
+   const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-employee-runtime-"));
+   t.after(() => fs.rm(root, { recursive: true, force: true }));
+   const registry = await createEmployeeProjectRegistry({
+@@ -43,6 +43,7 @@
+     registry,
+     conversationStore,
+     readHistory,
++    readRuntimeContext,
+     registerSession,
+     projectRoot: "D:\\project",
+     client,
+@@ -828,3 +829,44 @@
+   const completions = f.events.filter((event) => event.type === "employee_turn_completed");
+   assert.equal(completions.length, 1);
+ });
++
++test('employee directory invalidation follows durable final-message storage', async t => {
++  const threadEvents = [];
++  const f = await fixture(t, { execution: { publishThreadEvent: (id, event) => threadEvents.push(event) } });
++  await f.runtime.sendMessage({ employeeId: 'developer', text: 'fixture', requestId: 'persist-before-directory' });
++  let finish;
++  f.conversationStore.recordRuntimeEvent = () => new Promise(resolve => { finish = resolve; });
++  threadEvents.length = 0;
++  f.listener({ method: 'item/completed', params: { threadId: 'employee-thread', turnId: 'employee-turn',
++    item: { id: 'final-stored', type: 'agentMessage', phase: 'final_answer', text: 'saved final' } } });
++  f.listener({ method: 'turn/completed', params: { threadId: 'employee-thread', turn: { id: 'employee-turn', status: 'completed' } } });
++  assert.equal(f.events.at(-1).type, 'employee_turn_completed');
++  assert.equal(threadEvents.filter(e => e.type === 'sessions_changed').length, 0);
++  finish();
++  await new Promise(resolve => setImmediate(resolve));
++  assert.deepEqual(threadEvents.filter(e => e.type === 'sessions_changed'), [{ type: 'sessions_changed', threadId: 'employee-thread' }]);
++});
++
++
++test('employee context restores provider history usage without opening or sending, and does not reuse another model', async t => {
++  const reads = [];
++  const f = await fixture(t, { readRuntimeContext: async (...args) => {
++    reads.push(args); return { model: 'history-model', usage: { usedTokens: 321, contextWindow: 1000 } };
++  } });
++  await f.registry.bindMainThread('developer', 'employee-thread');
++  await f.registry.setModelSettings('developer', { model: 'history-model', modelProviderId: 'current', reasoningEffort: 'high' });
++  f.runtime.close();
++  const restored = createEmployeeRuntimeService({ registry: f.registry, conversationStore: f.conversationStore, client: f.client,
++    projectRoot: 'D:\\project', readRuntimeContext: async (...args) => {
++      reads.push(args); return { model: 'history-model', usage: { usedTokens: 321, contextWindow: 1000 } };
++    } });
++  t.after(() => restored.close());
++  assert.equal(restored.ownsThread('employee-thread'), true);
++  const context = await restored.getRuntimeContext('employee-thread');
++  assert.deepEqual(context.usage, { usedTokens: 321, contextWindow: 1000 });
++  assert.deepEqual(reads, [['current', 'employee-thread']]);
++  assert.deepEqual(f.calls, []);
++  await f.registry.setModelSettings('developer', { model: 'other-model', modelProviderId: 'current' });
++  assert.equal((await restored.getRuntimeContext('employee-thread')).usage, undefined);
++  assert.deepEqual(f.calls, []);
++});
+--- /dev/null
++++ b/windows/tests/project-directory-recovery.test.mjs
+@@ -0,0 +1,62 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { realpathSync } from 'node:fs';
++import { createRequire } from 'node:module';
++const require = createRequire(realpathSync(new URL('../../ui-feishu/node_modules/vite/package.json', import.meta.url)));
++const { build } = require('esbuild');
++const storage = new Map();
++globalThis.window = { location: { search: '' }, localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) } };
++const bundle = await build({ stdin: { contents: `export { projectDirectoryApi, projectDirectoryResource } from './shared/features/project-directory/data/projectDirectoryApi';
++  export { HttpError, fetchJson, postJson } from './shared/shared/api/http';`, resolveDir: new URL('../../ui-feishu', import.meta.url).pathname, loader: 'ts' },
++  bundle: true, platform: 'node', format: 'cjs', write: false });
++const loaded = { exports: {} };
++new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(loaded, loaded.exports, require);
++const { projectDirectoryApi: api, projectDirectoryResource: resource, HttpError, fetchJson, postJson } = loaded.exports;
++const success = id => new Response(JSON.stringify({ projects: [{ id }] }), { headers: { 'content-type': 'application/json' } });
++const failure = status => new Response(JSON.stringify({ error: `fixture ${status}` }), { status, headers: { 'content-type': 'application/json' } });
++
++test('directory retries only recoverable failures, retains cache and stops after two attempts', async t => {
++  const originalFetch = globalThis.fetch;
++  t.after(() => { globalThis.fetch = originalFetch; });
++  globalThis.fetch = async () => success('seed'); await api.list();
++  for (const [name, error, retry] of [
++    ['network', new TypeError('Failed to fetch'), true], ['timeout', new DOMException('timeout', 'TimeoutError'), true],
++    ['abort', new DOMException('aborted', 'AbortError'), true],
++    ...[500, 501, 503, 599].map(status => [String(status), status, true]),
++    ...[401, 403, 404, 429].map(status => [String(status), status, false]),
++    ['invalid JSON', new Error('项目数据返回格式错误'), false],
++  ]) await t.test(name, async () => {
++    const before = resource.getSnapshot().data;
++    let calls = 0;
++    globalThis.fetch = async () => {
++      calls++;
++      assert.equal(resource.getSnapshot().data, before, 'old directory remains visible during recovery');
++      if (calls === 1) { if (typeof error === 'number') return failure(error); throw error; }
++      return success(name);
++    };
++    if (retry) { await api.list(undefined, true); assert.deepEqual(resource.getSnapshot().data, [{ id: name }]); }
++    else { await assert.rejects(api.list(undefined, true)); assert.equal(resource.getSnapshot().data, before); }
++    assert.equal(calls, retry ? 2 : 1);
++    await new Promise(resolve => setTimeout(resolve, 20));
++    assert.equal(calls, retry ? 2 : 1, 'no background retry loop');
++  });
++  const previous = resource.getSnapshot().data;
++  let calls = 0;
++  globalThis.fetch = async () => { calls++; return failure(503); };
++  await assert.rejects(api.list(undefined, true), e => e instanceof HttpError && e.status === 503);
++  assert.equal(calls, 2); assert.equal(resource.getSnapshot().data, previous);
++  await new Promise(resolve => setTimeout(resolve, 30)); assert.equal(calls, 2);
++  globalThis.fetch = async () => { calls++; return success('next-event'); };
++  await api.list(undefined, true);
++  assert.equal(calls, 3); assert.deepEqual(resource.getSnapshot().data, [{ id: 'next-event' }]);
++});
++
++test('GET status metadata preserves messages and POST error behavior', async t => {
++  const originalFetch = globalThis.fetch; t.after(() => { globalThis.fetch = originalFetch; });
++  globalThis.fetch = async () => failure(401);
++  await assert.rejects(fetchJson('/api/project-directory'), e => e.status === 401 && e.message === '访问令牌无效，请使用启动命令输出的完整链接');
++  globalThis.fetch = async () => failure(404);
++  await assert.rejects(fetchJson('/api/project-directory'), e => e.status === 404 && e.message === '请求的项目会话不存在');
++  globalThis.fetch = async () => failure(403);
++  await assert.rejects(postJson('/fixture', {}), e => e.name === 'Error' && e.message === 'fixture 403' && e.status === undefined);
++});
+--- a/windows/tests/rollout-file.test.mjs
++++ b/windows/tests/rollout-file.test.mjs
+@@ -46,3 +46,36 @@
+   assert.equal((await latestAssistantReplyAtFromRollout(original,'latest')).usage.usedTokens,212348);
+  } finally {await fs.rm(root,{recursive:true,force:true});}
+ });
++
++test('restarted employee context reads persisted usage through the provider history reader without a writer', async t => {
++  const { createProviderConversationStore } = await import('../server/provider-conversation-store.mjs');
++  const { createEmployeeRuntimeService } = await import('../server/employee-runtime-service.mjs');
++  const { createContextManagementService } = await import('../server/context-management-service.mjs');
++  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-employee-usage-'));
++  t.after(() => fs.rm(root, { recursive: true, force: true }));
++  const file = path.join(root, 'rollout.jsonl'), calls = [];
++  await fs.writeFile(file, [
++    { type: 'turn_context', payload: { model: 'saved-model', effort: 'high' } },
++    { type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { total_tokens: 321 }, model_context_window: 1000 } } },
++  ].map(JSON.stringify).join('\n'));
++  const client = { close() {}, subscribe: () => () => {}, request: async method => {
++    calls.push(method); assert.equal(method, 'thread/read');
++    return { thread: { id: 'saved-thread', cwd: root, path: file } };
++  } };
++  const native = createAppServerConversationStore({ projectRoot: root, client, autoTitleEnabled: false });
++  t.after(() => native.close());
++  const providers = createProviderConversationStore({ current: native, providers: { getClient: async () => client },
++    createStore: () => native, stateFile: path.join(root, 'routes.json') });
++  const employee = { id: 'test', mainThreadId: 'saved-thread', model: 'saved-model', modelProviderId: 'current', reasoningEffort: 'high' };
++  const runtime = createEmployeeRuntimeService({ registry: { list: () => [employee], require: () => employee },
++    client, conversationStore: {}, projectRoot: root, readRuntimeContext: providers.getRuntimeContextForProvider });
++  t.after(() => runtime.close());
++  const events = [];
++  const context = await createContextManagementService({ stateFile: path.join(root, 'context.json'), broadcast: event => events.push(event),
++    getExecutionStatus: () => ({ active: false }), getRuntimeContext: runtime.getRuntimeContext, compactContext: () => assert.fail('no compact') });
++  t.after(() => context.close());
++  const result = await context.load('saved-thread');
++  assert.equal(result.usedTokens, 321); assert.equal(result.percentage, 32);
++  assert.ok(result.updatedAt); assert.deepEqual(events, []);
++  assert.deepEqual(calls, ['thread/read']);
++});

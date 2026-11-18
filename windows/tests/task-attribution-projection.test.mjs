@@ -23,14 +23,18 @@ test('queued assistant reports retain their native actor before and after dispat
 });
 
 const viewFixture = () => {
-  let revision = 'native'; let actorRevision = 'actor-a'; let reads = 0;
+  let revision = 'native'; let actorRevision = 'actor-a'; let reads = 0; let actorReads = 0;
   const route = createConversationRoutes({
     conversations: { getSourceRevision: async () => revision,
       findSession: async () => { reads++; return { threadId: 'thread', messages: [] }; },
       getGoal: async () => ({ goal: null }), getPendingUserInput: async () => null },
     execution: { getStatus: () => ({ phase: 'idle' }) }, followUpQueue: { list: () => [] },
-    contextManagement: { load: async () => ({}) }, agentTasks: { actorRevisionFor: () => actorRevision } });
+    contextManagement: { load: async () => ({}) }, agentTasks: { actorRevisionFor: async () => {
+      actorReads++;
+      return actorRevision;
+    } } });
   return { setNative: value => { revision = value; }, setActor: value => { actorRevision = value; }, reads: () => reads,
+    actorReads: () => actorReads,
     read: async previous => {
       let body;
       const response = { writeHead() {}, end: value => { body = JSON.parse(value); } };
@@ -43,6 +47,7 @@ const viewFixture = () => {
 test('actor changes refresh cached bodies while unchanged native and actor versions reuse them', async () => {
   const view = viewFixture();
   const first = await view.read();
+  assert.equal(view.actorReads(), 1, 'first load derives one stable final actor revision');
   assert.equal((await view.read(first.sourceRevision)).session, null);
   view.setActor('actor-b');
   const changed = await view.read(first.sourceRevision);

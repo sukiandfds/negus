@@ -324,3 +324,81 @@ test("directory never assigns employee Runtime threads to a business project", a
   const project = listing.projects.find((item) => item.kind === "personal");
   assert.deepEqual(project.conversations.map((item) => item.threadId), ["project-thread"]);
 });
+
+test("directory projects trusted native subagent ancestry onto employee work without duplicate or fork entries", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-native-subagent-directory-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const manager = employee(root, {
+    id: "manager",
+    name: "运营管理",
+    projectKey: "employee-manager",
+    mainThreadId: "manager-main",
+    conversationId: "manager-conversation",
+  });
+  const developer = employee(root, {
+    id: "developer",
+    name: "技术研发",
+    projectKey: "employee-developer",
+    mainThreadId: "developer-main",
+    conversationId: "developer-conversation",
+  });
+  const statuses = new Map([
+    ["active-child", { phase: "working", label: "正在运行", active: true }],
+    ["nested-child", { phase: "working", label: "正在运行", active: true }],
+    ["group-child", { phase: "working", label: "正在运行", active: true }],
+  ]);
+  const sessions = [
+    { threadId: "manager-main", title: "运营主对话", cwd: root, updatedAt: "2026-11-17T01:00:00Z" },
+    { threadId: "developer-main", title: "研发主对话", cwd: root, updatedAt: "2026-11-17T01:01:00Z" },
+    { threadId: "developer-group", title: "研发群会话", cwd: root, updatedAt: "2026-11-17T01:02:00Z" },
+    { threadId: "active-child", title: "检查现状", parentThreadId: "manager-main", nativeSubagent: true, cwd: root,
+      updatedAt: "2026-11-17T02:00:00Z" },
+    { threadId: "nested-child", title: "继续检查", parentThreadId: "active-child", nativeSubagent: true, cwd: root,
+      updatedAt: "2026-11-17T02:01:00Z" },
+    { threadId: "group-child", title: "群内子任务", parentThreadId: "developer-group", nativeSubagent: true, cwd: root,
+      updatedAt: "2026-11-17T02:02:00Z" },
+    { threadId: "unknown-child", title: "未知来源", parentThreadId: "missing-parent", nativeSubagent: true, cwd: root,
+      updatedAt: "2026-11-17T02:03:00Z" },
+    { threadId: "ordinary-fork", title: "普通分支", parentThreadId: "manager-main", nativeSubagent: false, cwd: root,
+      updatedAt: "2026-11-17T02:04:00Z" },
+  ];
+  const directory = createEmployeeProjectDirectory({
+    project: "negus",
+    projectRoot: root,
+    registry: { list: () => [manager, developer] },
+    employeeRuntime: { getStatus: async () => ({ status: { phase: "idle", label: "等待任务", active: false } }) },
+    employeeConversations: {
+      findByRuntimeSession: (_runtimeKind, threadId) => threadId === "developer-group"
+        ? { conversationKind: "group", agentId: "developer", runtimeSessionId: threadId }
+        : null,
+    },
+    execution: { getStatus: threadId => statuses.get(threadId) || { phase: "idle", active: false } },
+    agentTasks: { directoryEntries: () => [], providerForThread: () => "fixture" },
+    conversations: {
+      listSessions: async () => sessions,
+      findSession: async threadId => sessions.find(session => session.threadId === threadId) || null,
+    },
+  });
+
+  const first = await directory.list();
+  const managerProject = first.projects.find(project => project.employeeId === "manager");
+  const developerProject = first.projects.find(project => project.employeeId === "developer");
+  assert.deepEqual(managerProject.conversations.filter(item => item.nativeSubagent).map(item => item.threadId),
+    ["active-child", "nested-child"]);
+  assert.deepEqual(developerProject.conversations.filter(item => item.nativeSubagent).map(item => item.threadId), ["group-child"]);
+  assert.equal(managerProject.status.label, "正在进行 2 项工作");
+  assert.equal(developerProject.status.label, "正在处理后台任务");
+  assert.equal(first.projects.flatMap(project => project.conversations).filter(item => item.threadId === "active-child").length, 1);
+  assert.equal(managerProject.conversations.some(item => item.threadId === "ordinary-fork"), false);
+  assert.equal(first.projects.find(project => project.kind === "personal").conversations.some(item => item.threadId === "unknown-child"), true);
+
+  statuses.clear();
+  const refreshed = await directory.list();
+  const completedManager = refreshed.projects.find(project => project.employeeId === "manager");
+  const completedDeveloper = refreshed.projects.find(project => project.employeeId === "developer");
+  assert.equal(completedManager.status.active, false);
+  assert.equal(completedDeveloper.status.active, false);
+  assert.deepEqual(completedManager.conversations.filter(item => item.nativeSubagent).map(item => item.threadId),
+    ["active-child", "nested-child"]);
+  assert.equal(refreshed.projects.flatMap(project => project.conversations).filter(item => item.threadId === "active-child").length, 1);
+});

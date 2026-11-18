@@ -1,0 +1,137 @@
+--- a/docs/project-management/items/FEAT-001/item.md
++++ b/docs/project-management/items/FEAT-001/item.md
+@@ -1730,3 +1730,16 @@
+ 用户操作变化：打开无用量的普通/员工长对话→慢读取期间收到实时状态→读取后再 A/B 切换不反复请求；模型或正文改变后仍允许一次校准。点击压缩→看到完成或再次开始压缩→旧请求迟到失败不再把当前状态显示成失败。
+ 
+ 定向测试、四项浏览器、风暴回归及检查见 [第三轮证据](../../../../work/four-usage-fixes-20261117/verification.md#第三轮补修第二轮独立复审-fail-后)。仅工作区修改和自测，复审由来源对话安排；未发布、未重启。
++
++
++### 2026-11-17 第四轮：陈旧压缩错误不得污染 execution
++
++来源：用户转交第三轮 DeepSeek 复审。慢读校准与 context_status 阶段保护 PASS，但整体仍 FAIL：生产 onError 将陈旧失败继续投递 execution，页面显示矛盾的“Codex 执行失败”。前3轮 FAIL 证据保留。
++
++用户原话：
++> onError 继续收到 threadId、原 error，并增加不含凭据的结构化元数据，例如 `{ current: isCurrent, compactionRevision: started.compactionRevision }`；默认调用者兼容。
++> production remote-room-demo 的 onError 仅在 `meta.current === true` 时把错误转给 execution.handleProtocolMessage；陈旧请求只记录明确日志（不得伪造 context/execution 阶段），原 POST 仍 throw 原 error。
++
++有效决定：先判断本轮仍为 compacting 且开始序号等于当前序号，再将判断结果作为第三参数交 onError。生产回调仅转发 current=true；陈旧错误只记录固定说明、线程ID和压缩序号，不输出原错误文本或凭据。context 阶段保护及原错误抛出保持。旧两参数调用者保持兼容。
++
++体验：点击压缩→已完成或已开始下一次→旧请求迟到失败不再出现执行失败提示，context/execution/列表时间保持；当前压缩自身失败则正常显示错误。用实际 bootstrap 回调与真实 createExecutionTracker 验证，结果见 [第四轮证据](../../../../work/four-usage-fixes-20261117/verification.md#第四轮补修第三轮复审-fail-后)。仅源码修改和自测，未发布或重启。
+--- a/docs/project-management/items/FEAT-001/updates.md
++++ b/docs/project-management/items/FEAT-001/updates.md
+@@ -1108,3 +1108,10 @@
+ - 第二轮 DeepSeek 复审 FAIL；HTTP 重试分类已 PASS，保持原实现。仅修改 Store 校准标记合并和服务端压缩失败归属判断，保留其余已通过主体和前两轮证据。
+ - 共用 Store 覆盖普通/员工、慢读 live 覆盖、后续状态、模型和正文失效；服务端覆盖自身失败、完成后旧失败、新压缩期间旧失败及后续序号。验证结果及逐文件增减见 [验证记录](../../../../work/four-usage-fixes-20261117/verification.md#第三轮补修第二轮独立复审-fail-后)。
+ - 未提交、推送、发布、重启、截图或发送真实消息；运行服务未加载本轮改动，来源对话继续独立复审。
++
++
++### 2026-11-17 第四轮：生产执行状态污染补修
++
++- 第三轮复审确认慢读与 context 阶段保护 PASS，整体因 execution 污染仍 FAIL；仅补生产错误回调，不重做已通过主体。
++- 服务端 onError 增加 current/compactionRevision；实际 remote-room-demo 仅把当前压缩失败送入 execution，陈旧错误记录安全元数据并仍抛给原 POST。
++- 新测试执行实际 bootstrap 回调并连接真实 execution tracker，覆盖当前失败、完成后旧失败、新压缩期间旧失败、已失败及下一轮自身失败。定向单测/浏览器/storm/类型/语法/保护检查见 [验证记录](../../../../work/four-usage-fixes-20261117/verification.md#第四轮补修第三轮复审-fail-后)。未提交、推送、发布、重启、截图或发送真实消息。
+--- a/windows/scripts/remote-room-demo.mjs
++++ b/windows/scripts/remote-room-demo.mjs
+@@ -230,7 +230,10 @@
+ });
+ 
+ contextManagement = await createContextManagementService({
+-  onError: (threadId, error) => execution.handleProtocolMessage({ method: "error", params: { threadId, error: { message: error.message || String(error) }, willRetry: false } }),
++  onError: (threadId, error, meta) => {
++    if (meta?.current === true) execution.handleProtocolMessage({ method: "error", params: { threadId, error: { message: error.message || String(error) }, willRetry: false } });
++    else console.warn("[context-management] stale compaction request failed; execution unchanged", { threadId, compactionRevision: meta?.compactionRevision });
++  },
+   stateFile: path.join(projectRoot, "runtime", "context-settings.json"),
+   broadcast: realtime.broadcast,
+   getExecutionStatus: execution.getStatus,
+--- a/windows/server/context-management-service.mjs
++++ b/windows/server/context-management-service.mjs
+@@ -83,9 +83,10 @@
+       await compactContext(threadId);
+       return publicStatus(statusFor(threadId));
+     } catch (error) {
+-      onError(threadId, error);
+       const latest = statusFor(threadId);
+-      if (latest.phase === "compacting" && latest.compactionRevision === started.compactionRevision) publish(threadId, {
++      const isCurrent = latest.phase === "compacting" && latest.compactionRevision === started.compactionRevision;
++      onError(threadId, error, { current: isCurrent, compactionRevision: started.compactionRevision });
++      if (isCurrent) publish(threadId, {
+         phase: "failed",
+         message: error instanceof Error ? error.message : String(error),
+       });
+--- a/windows/tests/context-management-service.test.mjs
++++ b/windows/tests/context-management-service.test.mjs
+@@ -1,3 +1,5 @@
++import { readFile } from 'node:fs/promises';
++import { createExecutionTracker } from '../server/execution-tracker.mjs';
+ import assert from "node:assert/strict";
+ import os from "node:os";
+ import path from "node:path";
+@@ -278,3 +280,67 @@
+     await service.close();
+   }
+ });
++
++
++test('production compaction error adapter preserves execution for stale requests', async t => {
++  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-17T00:00:00Z') });
++  // Execute the actual bootstrap callback, without starting the production server.
++  const bootstrap = await readFile(new URL('../scripts/remote-room-demo.mjs', import.meta.url), 'utf8');
++  const callback = bootstrap.match(/contextManagement = await createContextManagementService\(\{\s*onError: ([\s\S]*?),\n  stateFile:/)?.[1];
++  assert.ok(callback, 'production onError adapter exists');
++  for (const scenario of ['own-failure', 'completed', 'next-start', 'already-failed']) {
++    const executionEvents = [], logs = [], errors = [], pending = [], contextEvents = [];
++    const execution = createExecutionTracker({ broadcast: event => executionEvents.push(event) });
++    const adapter = new Function('execution', 'console', `return (${callback});`)(execution, { warn: (...args) => logs.push(args) });
++    const service = await createContextManagementService({
++      stateFile: path.join(os.tmpdir(), `missing-execution-race-${process.pid}-${scenario}.json`),
++      broadcast: event => contextEvents.push(event), getExecutionStatus: execution.getStatus,
++      getRuntimeContext: async () => ({ model: 'fixture' }),
++      onError: (id, error, meta) => { errors.push({ id, error, meta }); adapter(id, error, meta); },
++      compactContext: () => new Promise((resolve, reject) => pending.push({ resolve, reject })),
++    });
++    await service.load('t');
++    const first = service.requestCompaction('t');
++    if (scenario === 'already-failed') service.handleProtocolMessage({ method: 'error', params: { threadId: 't', error: { message: 'earlier failure' } } });
++    else if (scenario !== 'own-failure') service.handleProtocolMessage({ method: 'thread/compacted', params: { threadId: 't' } });
++    const second = scenario === 'next-start' ? service.requestCompaction('t') : null;
++    const beforeExecution = structuredClone(execution.getStatus('t'));
++    const beforeContext = service.getStatus('t'), broadcasts = executionEvents.length, contextBroadcasts = contextEvents.length;
++    t.mock.timers.tick(1000);
++    const error = new Error('late failure with sensitive text omitted from log');
++    pending[0].reject(error); await assert.rejects(first, e => e === error);
++    assert.deepEqual(errors, [{ id: 't', error, meta: { current: scenario === 'own-failure', compactionRevision: 1 } }]);
++    if (scenario === 'own-failure') {
++      assert.equal(service.getStatus('t').phase, 'failed');
++      assert.equal(service.getStatus('t').compactionRevision, 2);
++      assert.equal(execution.getStatus('t').phase, 'failed');
++      assert.ok(JSON.stringify(execution.getStatus('t')).includes(error.message));
++      assert.ok(executionEvents.length > broadcasts); assert.equal(logs.length, 0);
++    } else {
++      assert.deepEqual(execution.getStatus('t'), beforeExecution, 'phase/error/updatedAt unchanged');
++      assert.equal(executionEvents.length, broadcasts, 'no execution broadcast');
++      assert.deepEqual(service.getStatus('t'), beforeContext);
++      assert.equal(contextEvents.length, contextBroadcasts);
++      assert.equal(logs.length, 1); assert.match(logs[0][0], /stale compaction/);
++      assert.deepEqual(logs[0][1], { threadId: 't', compactionRevision: 1 });
++      assert.ok(!JSON.stringify(logs).includes(error.message));
++    }
++    if (second) {
++      assert.equal(service.getStatus('t').compactionRevision, 3);
++      service.handleProtocolMessage({ method: 'thread/compacted', params: { threadId: 't' } });
++      pending[1].resolve(); await second;
++      assert.equal(service.getStatus('t').compactionRevision, 4);
++      assert.deepEqual(execution.getStatus('t'), beforeExecution);
++      const third = service.requestCompaction('t');
++      assert.equal(service.getStatus('t').compactionRevision, 5);
++      const currentError = new Error('current failure');
++      pending[2].reject(currentError); await assert.rejects(third, e => e === currentError);
++      assert.deepEqual(errors.at(-1).meta, { current: true, compactionRevision: 5 });
++      assert.equal(service.getStatus('t').compactionRevision, 6);
++      assert.equal(service.getStatus('t').phase, 'failed');
++      assert.equal(execution.getStatus('t').phase, 'failed');
++      assert.ok(JSON.stringify(execution.getStatus('t')).includes(currentError.message));
++    }
++    await service.close();
++  }
++});

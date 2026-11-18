@@ -1,0 +1,189 @@
+--- a/ui-feishu/src/usePageSnapshot.ts
++++ b/ui-feishu/src/usePageSnapshot.ts
+@@ -31,9 +31,9 @@
+   const controller = useRef<AbortController | null>(null);
+   const [wakeVersion, wake] = useState(0);
+   const revisionKey = JSON.stringify([...store.bodyRevisions]);
+-  const source = useMemo(() => JSON.stringify([c.sessions, directory.projects, revisionKey],
++  const source = useMemo(() => JSON.stringify([c.sessions, c.sessions.map(item => [item.threadId, item.title, item.updatedAt]), directory.projects, revisionKey],
+     (key, value) => ['updatedAt', 'lastProbeAt', 'lastEventAt', 'eventEpoch', 'eventSeq', 'durationMs'].includes(key) ? undefined : value),
+-  [c.sessions, directory.projects, revisionKey]);
++  [c.sessions, c.sessions.map(item => [item.threadId, item.title, item.updatedAt]), directory.projects, revisionKey]);
+   const selectedThread = useRef(c.selectedId);
+   if (selectedThread.current !== c.selectedId) {
+     selectedThread.current = c.selectedId;
+@@ -86,7 +86,13 @@
+     // Directory membership is visible immediately; body reads fill the same row later.
+     setShown(previous => {
+       const projects = mergeDirectoryProjects(previous.projects, directory.projects);
+-      return JSON.stringify(projects) === JSON.stringify(previous.projects) ? previous : { ...previous, projects };
++      const sessions = previous.sessions.map(item => {
++        const summary = c.sessions.find(next => next.threadId === item.threadId);
++        return !summary || (item.title === summary.title && item.updatedAt === summary.updatedAt) ? item
++          : { ...item, title: summary.title, updatedAt: summary.updatedAt };
++      });
++      return JSON.stringify(projects) === JSON.stringify(previous.projects)
++        && sessions.every((item, index) => item === previous.sessions[index]) ? previous : { ...previous, projects, sessions };
+     });
+     if (!entries.length) {
+       initialLoading.current = false;
+@@ -125,7 +131,7 @@
+             const detail = store.committed.get(summary.threadId)?.session;
+             const latestMessage = latestMessagePreview(detail?.messages) || '';
+             const { messages: _messages, sourceSignature: _signature, ...fields } = detail || { ...summary, messages: [], sourceSignature: undefined };
+-            const next = { ...summary, ...fields, updatedAt: summary.updatedAt, latestMessage };
++            const next = { ...summary, ...fields, title: summary.title, updatedAt: summary.updatedAt, latestMessage };
+             return existing && JSON.stringify(existing) === JSON.stringify(next) ? existing : next;
+           });
+           const projects = mergeDirectoryProjects(previous.projects, live.current.directory.projects);
+@@ -178,7 +184,10 @@
+     });
+   }, [source, wakeVersion, c.initialSyncReady, directory.loading, c.selectedId, c.archivedView, c.historyEdit, c.archivedByThread, c.project]);
+ 
+-  const selected = store.get(c.selectedId, false), session = selected.session;
++  const selected = store.get(c.selectedId, false), summary = c.sessions.find(item => item.threadId === c.selectedId);
++  const session = selected.session && summary
++    && (selected.session.title !== summary.title || selected.session.updatedAt !== summary.updatedAt)
++    ? { ...selected.session, title: summary.title, updatedAt: summary.updatedAt } : selected.session;
+   // FEAT-001: execution events render immediately, independently of history reads.
+   const executionStatus = store.get(c.selectedId).executionStatus;
+   const model = resolveVisibleModel(c.models, readModelDefaults(), selected.contextStatus.model, session?.model || '');
+--- a/ui-feishu/shared/features/conversations/state/conversationStore.ts
++++ b/ui-feishu/shared/features/conversations/state/conversationStore.ts
+@@ -74,6 +74,10 @@
+   modelChoices = new Map<string, { model: string; reasoningEffort: string }>();
+   revisions = new Map<string, number>();
+   bodyRevisions = new Map<string, number>();
++  cancelContextNotification = (id: string) => {
++    clearTimeout(this.contextNotifications.get(id));
++    this.contextNotifications.delete(id);
++  };
+   private contextNotifications = new Map<string, ReturnType<typeof setTimeout>>();
+   synced = new Set<string>();
+   dirty = new Set<string>();
+@@ -166,8 +170,7 @@
+           this.notify();
+         }, 180));
+       } else {
+-        if (pending) clearTimeout(pending);
+-        this.contextNotifications.delete(id);
++        this.cancelContextNotification(id);
+         this.notify();
+       }
+     };
+@@ -319,7 +322,7 @@
+     this.committed.delete(from); this.live.delete(from); this.localPending.delete(from); this.modelChoices.delete(from);
+     this.dirty.delete(from); this.revisions.delete(from); this.errors.delete(from); this.synced.delete(from);
+     this.fieldRevisions.delete(from); this.freshBodies.delete(from); this.bodyRevisions.delete(from);
+-    clearTimeout(this.contextNotifications.get(from)); this.contextNotifications.delete(from);
++    this.cancelContextNotification(from);
+     ++this.persistVersion;
+     this.notify();
+   };
+--- a/ui-feishu/shared/features/conversations/hooks/useConversationCatalog.ts
++++ b/ui-feishu/shared/features/conversations/hooks/useConversationCatalog.ts
+@@ -9,6 +9,7 @@
+ import { providerIdOf, readModelDefaults, resolveVisibleModel } from "../../models/model/modelDefaults";
+ 
+ interface ConversationSelection {
++  cancelContextNotification: (threadId: string) => void;
+   setArchived: (threadId: string, archived: boolean) => void;
+   selectedIdRef: MutableRefObject<string>;
+   loadSession: (threadId: string, options?: { older?: boolean; retry?: boolean; recovery?: boolean; prefetch?: boolean }) => Promise<boolean>;
+@@ -297,6 +298,7 @@
+   }, []);
+ 
+   const removeSessionOptimistically = useCallback((threadId: string): RemovedSession | null => {
++    selection.cancelContextNotification(threadId);
+     const index = sessionsRef.current.findIndex((item) => item.threadId === threadId);
+     if (index < 0) return null;
+     const removed = { session: sessionsRef.current[index], index, archivedView: archivedViewRef.current };
+@@ -304,7 +306,7 @@
+     sessionsRef.current = next;
+     setSessions(next);
+     return removed;
+-  }, []);
++  }, [selection.cancelContextNotification]);
+ 
+   const restoreRemovedSession = useCallback((removed: RemovedSession | null) => {
+     if (!removed || removed.archivedView !== archivedViewRef.current) return;
+--- a/ui-feishu/shared/features/conversations/hooks/useProjectConversations.ts
++++ b/ui-feishu/shared/features/conversations/hooks/useProjectConversations.ts
+@@ -84,6 +84,7 @@
+   const contextManagement = useContextManagement(serverThreadId, selection.store);
+   const catalog = useConversationCatalog(initial, {
+     setArchived: selection.store.setArchived,
++    cancelContextNotification: selection.store.cancelContextNotification,
+     selectedIdRef: selection.selectedIdRef,
+     loadSession: selection.loadSession,
+     adoptSelection: selection.adoptSelection,
+--- a/ui-feishu/validation/conversation-refresh-policy-browser.test.mjs
++++ b/ui-feishu/validation/conversation-refresh-policy-browser.test.mjs
+@@ -72,6 +72,16 @@
+   await page.waitForTimeout(700);
+   const warmReads = calls.length;
+   assert.equal(warmReads, 20);
++  summaries[0].title = '仅标题更新';
++  await page.evaluate(() => window.emitFixture({ type: 'sessions_changed', threadId: 't0' }));
++  await page.getByRole('button', { name: '打开仅标题更新', exact: true }).waitFor();
++  await page.locator('.chat-workspace').getByText('仅标题更新', { exact: true }).waitFor();
++  await page.getByRole('button', { name: '重命名对话', exact: true }).click();
++  assert.equal(await page.getByRole('textbox', { name: '对话名称', exact: true }).inputValue(), '仅标题更新');
++  await page.getByRole('button', { name: '取消重命名', exact: true }).click();
++  await page.waitForTimeout(900);
++  assert.equal(calls.length, warmReads, 'title-only metadata must update all surfaces without body reads or follow-up waves');
++  console.log('PASS title-only update: header, list, rename input; added session requests=0');
+   const composer = page.locator('.chat-composer > div:visible textarea');
+   await composer.focus();
+   await composer.evaluate(el => { window.fixtureComposer = el; window.inputFrames = []; window.longTasks = [];
+@@ -101,6 +111,7 @@
+     assert.equal(calls.length, warmReads, `${count} usage events must add zero session requests`);
+   }
+   assert.equal(await composer.inputValue(), 'a中文a中文a中文ccc');
++  assert.equal(await page.evaluate(() => window.longTasks.length), 0);
+   console.log(JSON.stringify(await page.evaluate(() => ({ inputFrames: window.inputFrames, longTasks: window.longTasks }))));
+   console.log(JSON.stringify({ contextStorms: [100, 1000, 10000], warmReads, addedSessionRequests: calls.length - warmReads }));
+ 
+--- a/windows/tests/conversation-send-state.test.mjs
++++ b/windows/tests/conversation-send-state.test.mjs
+@@ -22,7 +22,7 @@
+   delete globalThis[key];
+   globalThis.window = { setTimeout, clearTimeout };
+   const store = new ConversationStore({ cachedSessions: [], partialSessionIds: [] });
+-  const render = (name, id) => { cursor = 0; return module[name](id, store); };
++  const render = (name, ...args) => { cursor = 0; return module[name](...args, store); };
+   render.store = store;
+   return render;
+ }
+@@ -432,3 +432,31 @@
+     assert.equal(result.session.messages[0].text, 'latest');
+   } finally { conversationApi.snapshot = original; }
+ });
++
++
++test('optimistic archive cancels only its pending context notification before the API resolves', async () => {
++  const gate = deferred();
++  const render = await harness('features/conversations/hooks/useConversationCatalog.ts', {
++    conversationApi: { archive: () => gate.promise },
++  });
++  window.location = { search: '' };
++  window.dispatchEvent = () => {};
++  const store = render.store;
++  const initial = { sessions: [{ threadId: 'a', title: 'archive' }, { threadId: 'b', title: 'keep' }] };
++  let confirmations = 0, notifications = 0;
++  const selection = { cancelContextNotification: store.cancelContextNotification,
++    selectedIdRef: { current: 'b' }, setArchived: () => confirmations++, clearSelection() {} };
++  const hook = render('useConversationCatalog', initial, selection, '');
++  store.subscribe(() => notifications++);
++  for (const id of ['a', 'b']) store.update(id, { contextStatus: { ...store.empty(id).contextStatus, usedTokens: 1 } }, false, true);
++  const archiving = hook.archiveSession('a');
++  await new Promise(resolve => setTimeout(resolve, 220));
++  assert.equal(confirmations, 0, 'archive API is still pending');
++  assert.deepEqual(render('useConversationCatalog', initial, selection, '').sessions.map(item => item.threadId), ['b']);
++  assert.equal(notifications, 1, 'only the other thread timer fires after optimistic removal');
++  await new Promise(resolve => setTimeout(resolve, 200));
++  assert.equal(notifications, 1, 'removed thread has no delayed notification');
++  gate.resolve({ threadId: 'a', archived: true });
++  assert.equal(await archiving, true);
++  assert.equal(confirmations, 1);
++});

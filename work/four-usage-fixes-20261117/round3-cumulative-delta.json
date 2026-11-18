@@ -1,0 +1,137 @@
+[
+  {
+    "path": "docs/project-management/items/FEAT-001/item.md",
+    "added": 54,
+    "removed": 0
+  },
+  {
+    "path": "docs/project-management/items/FEAT-001/updates.md",
+    "added": 22,
+    "removed": 0
+  },
+  {
+    "path": "docs/project-management/items/FEAT-002/item.md",
+    "added": 32,
+    "removed": 0
+  },
+  {
+    "path": "docs/project-management/items/FEAT-002/updates.md",
+    "added": 15,
+    "removed": 0
+  },
+  {
+    "path": "docs/project-management/items/FEAT-017/item.md",
+    "added": 23,
+    "removed": 0
+  },
+  {
+    "path": "docs/project-management/items/FEAT-017/updates.md",
+    "added": 15,
+    "removed": 0
+  },
+  {
+    "path": "ui-feishu/shared/features/context-management/hooks/useContextManagement.ts",
+    "added": 16,
+    "removed": 5
+  },
+  {
+    "path": "ui-feishu/shared/features/context-management/model/types.ts",
+    "added": 3,
+    "removed": 0
+  },
+  {
+    "path": "ui-feishu/shared/features/conversations/hooks/useProjectConversations.ts",
+    "added": 1,
+    "removed": 1
+  },
+  {
+    "path": "ui-feishu/shared/features/conversations/state/conversationStore.ts",
+    "added": 9,
+    "removed": 1
+  },
+  {
+    "path": "ui-feishu/shared/features/project-directory/data/projectDirectoryApi.ts",
+    "added": 8,
+    "removed": 2
+  },
+  {
+    "path": "ui-feishu/shared/features/project-directory/hooks/useProjectDirectory.ts",
+    "added": 1,
+    "removed": 0
+  },
+  {
+    "path": "ui-feishu/shared/shared/api/http.ts",
+    "added": 2,
+    "removed": 2
+  },
+  {
+    "path": "ui-feishu/src/FeishuApp.tsx",
+    "added": 3,
+    "removed": 2
+  },
+  {
+    "path": "ui-feishu/src/conversationDirectory.ts",
+    "added": 6,
+    "removed": 2
+  },
+  {
+    "path": "ui-feishu/src/usePageSnapshot.ts",
+    "added": 6,
+    "removed": 1
+  },
+  {
+    "path": "ui-feishu/validation/conversation-summary.test.mjs",
+    "added": 13,
+    "removed": 0
+  },
+  {
+    "path": "ui-feishu/validation/four-usage-fixes-browser.test.mjs",
+    "added": 242,
+    "removed": 0
+  },
+  {
+    "path": "windows/scripts/remote-room-demo.mjs",
+    "added": 1,
+    "removed": 0
+  },
+  {
+    "path": "windows/server/context-management-service.mjs",
+    "added": 11,
+    "removed": 3
+  },
+  {
+    "path": "windows/server/employee-runtime-service.mjs",
+    "added": 6,
+    "removed": 2
+  },
+  {
+    "path": "windows/server/provider-conversation-store.mjs",
+    "added": 4,
+    "removed": 0
+  },
+  {
+    "path": "windows/tests/context-management-service.test.mjs",
+    "added": 105,
+    "removed": 0
+  },
+  {
+    "path": "windows/tests/employee-runtime.test.mjs",
+    "added": 43,
+    "removed": 1
+  },
+  {
+    "path": "windows/tests/project-directory-recovery.test.mjs",
+    "added": 62,
+    "removed": 0
+  },
+  {
+    "path": "windows/tests/rollout-file.test.mjs",
+    "added": 33,
+    "removed": 0
+  },
+  {
+    "path": "windows/tests/conversation-send-state.test.mjs",
+    "added": 40,
+    "removed": 0
+  }
+]

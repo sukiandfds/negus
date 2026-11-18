@@ -1,4 +1,5 @@
 import { previewText } from "./content-blocks.mjs";
+import { createNativeSubagentResolver } from "./native-subagent-source.mjs";
 
 const clean = (value, maxLength = 240) => String(value || "").trim().slice(0, maxLength);
 
@@ -163,8 +164,55 @@ export const createEmployeeProjectDirectory = ({
         runtime: { provider: "codex" },
       });
     }
+    let sessions = [];
+    try { sessions = await conversations?.listSessions?.("all", false) || []; } catch {}
+    sessions = await Promise.all(sessions.map(async (session) => {
+      if (clean(session?.title, 240) && session.title !== "未命名会话") return session;
+      try {
+        const detail = await conversations?.findSession?.(session.threadId, "all", { limit: 1 });
+        return detail?.title ? { ...session, title: detail.title } : session;
+      } catch {
+        return session;
+      }
+    }));
+    const sessionsById = new Map(sessions.map(session => [clean(session?.threadId, 120), session]));
+    const nativeResolver = createNativeSubagentResolver({ registry, employeeConversations });
+    const nativeOwners = new Map();
+    await Promise.all(sessions.filter(session => session?.nativeSubagent === true).map(async (session) => {
+      const owner = await nativeResolver.resolve(session, { sessionsById });
+      if (owner?.employee?.id) nativeOwners.set(clean(session.threadId, 120), owner);
+    }));
+    const nativeEntryFor = (session, owner) => {
+      const threadId = clean(session?.threadId, 120);
+      let status = idleStatus();
+      try { status = publicStatus(execution?.getStatus?.(threadId)); } catch {}
+      return {
+        id: threadId,
+        threadId,
+        conversationId: null,
+        projectId: null,
+        role: "standard",
+        runtimeKind: "codex",
+        runtimeSessionId: threadId,
+        title: clean(session?.title, 240) || "未命名会话",
+        main: false,
+        updatedAt: session?.updatedAt || null,
+        lastActivityAt: session?.updatedAt || null,
+        messageCount: Number.isSafeInteger(session?.messageCount) ? session.messageCount : null,
+        archived: session?.archived === true,
+        nativeSubagent: true,
+        parentThreadId: clean(session?.parentThreadId, 120) || null,
+        ownerEmployeeId: owner.employee.id,
+        status,
+      };
+    };
     const conversationStatuses = {};
     const entriesByEmployee = new Map(employees.map(employee => [employee.id, agentTasks?.directoryEntries(employee.id) || []]));
+    for (const [threadId, owner] of nativeOwners) {
+      const entries = entriesByEmployee.get(owner.employee.id);
+      const session = sessionsById.get(threadId);
+      if (entries && session) entries.push(nativeEntryFor(session, owner));
+    }
     const taskEntries = [...entriesByEmployee.values()].flat();
     const providerIds = [...new Set(taskEntries.map(entry => agentTasks?.providerForThread?.(entry.threadId) || "current"))];
     const summaries = new Map((await Promise.all(providerIds.map(async providerId => {
@@ -240,17 +288,6 @@ export const createEmployeeProjectDirectory = ({
         conversations: employeeConversationEntries,
       };
     }));
-    let sessions = [];
-    try { sessions = await conversations?.listSessions?.("all", false) || []; } catch {}
-    sessions = await Promise.all(sessions.map(async (session) => {
-      if (clean(session?.title, 240) && session.title !== "未命名会话") return session;
-      try {
-        const detail = await conversations?.findSession?.(session.threadId, "all", { limit: 1 });
-        return detail?.title ? { ...session, title: detail.title } : session;
-      } catch {
-        return session;
-      }
-    }));
     const employeeThreadIds = new Set([
       ...employees.map((employee) => clean(employee.mainThreadId, 120)),
       ...(roomDirectory?.threadIds?.() || []),
@@ -258,6 +295,7 @@ export const createEmployeeProjectDirectory = ({
     sessions = sessions.filter((session) => {
       const threadId = clean(session?.threadId, 120);
       if (!threadId || employeeThreadIds.has(threadId)) return false;
+      if (nativeOwners.has(threadId)) return false;
       if (employeeRuntime?.ownsThread?.(threadId)) return false;
       return !employeeConversations?.findByRuntimeSession?.("codex", threadId);
     });

@@ -8,6 +8,7 @@ import { employeeTurnInstructions } from '../../windows/server/employee-definiti
 import { backgroundToolConfig, executionPolicy, turnExecutionPolicy } from './execution-policy.mjs';
 import { createEmployeeHierarchy } from '../kernel/employee-hierarchy.mjs';
 import { followupTask } from './task-followup.mjs';
+import { createNativeSubagentResolver } from '../../windows/server/native-subagent-source.mjs';
 
 // Adapts the same kernel to employee conversations and existing task conversations.
 export async function extendEmployeeTasks(original, { stateRoot, registry, modelProviders, appServerClient,
@@ -16,6 +17,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
   let closing = false;
   const taskProviders = new Map();
   const hierarchy = createEmployeeHierarchy({ employees: registry.list(), hierarchy: employeeHierarchy });
+  const nativeResolver = createNativeSubagentResolver({ registry, employeeConversations: bindings });
   const log = event => console.log(JSON.stringify({ scope: 'negus-tasks', channel: 'employee', at: new Date().toISOString(), ...event }));
   const clientFor = employee => modelProviders ? modelProviders.getClient(modelProviders.resolveRoute({ modelProviderId: employee.modelProviderId || 'current', model: employee.model || '' })) : appServerClient;
   const ordinaryScope = threadId => `ordinary:${threadId}`;
@@ -218,11 +220,39 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     const actor = original.actorFor?.(threadId, submissionId);
     return actor?.id && actor.name ? { authorId: actor.id, authorName: actor.name, displaySourceAgentId: actor.id } : null;
   };
-  const actorRevisionFor = threadId => {
+  const nativeSourceFor = async (threadId, session = null) => {
+    let child = session;
+    if (child?.nativeSubagent !== true && conversations?.findSession) {
+      try {
+        child = await conversations.findSession(threadId, 'all', { limit: 1 });
+      } catch {
+        child = null;
+      }
+    }
+    if (!child?.nativeSubagent || child.threadId !== threadId) return null;
+    const owner = await nativeResolver.resolve(child, {
+      findSession: (parentThreadId, source, options) => conversations.findSession(parentThreadId, source, options),
+    });
+    return { child, owner };
+  };
+  const actorRevisionFor = async threadId => {
     const tasks = [...kernel.list(), ...[...taskProviders.values()].flatMap(provider => provider.tasks())];
     const inputs = tasks.filter(task => task.runtime?.threadId === threadId).flatMap(task => task.inputs || [])
       .filter(input => input.submissionId && input.actor?.id).map(input => [input.submissionId, input.actor.id, input.actor.name]);
-    return inputs.length ? createHash('sha256').update(JSON.stringify(inputs.sort((a, b) => a[0].localeCompare(b[0])))).digest('hex').slice(0, 16) : '';
+    const native = await nativeSourceFor(threadId);
+    const nativeIdentity = native
+      ? {
+          source: native.owner ? 'employee' : 'unknown',
+          employeeId: native.owner?.employee?.id || '',
+          employeeName: native.owner?.employee?.name || '',
+          parentThreadId: native.child.parentThreadId || '',
+        }
+      : null;
+    if (!inputs.length && !nativeIdentity) return '';
+    return createHash('sha256').update(JSON.stringify({
+      inputs: inputs.sort((a, b) => a[0].localeCompare(b[0])),
+      nativeIdentity,
+    })).digest('hex').slice(0, 16);
   };
   const decorateTaskSession = (threadId, session) => {
     if (!session) return session;
@@ -238,6 +268,37 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     };
     return { ...session, ...(session.messages ? { messages: session.messages.map(decorate) } : {}),
       ...(session.upserts ? { upserts: session.upserts.map(decorate) } : {}) };
+  };
+  const decorateConversationSession = async (threadId, session) => {
+    if (!session) return session;
+    const native = await nativeSourceFor(threadId, session);
+    if (!native) return decorateTaskSession(threadId, session);
+    const identity = native.owner
+      ? {
+          authorId: native.owner.employee.id,
+          authorName: native.owner.employee.name,
+          displaySourceAgentId: native.owner.employee.id,
+        }
+      : {
+          authorId: 'native-subagent:unknown',
+          authorName: '来源待确认',
+          displaySourceAgentId: 'native-subagent:unknown',
+        };
+    const completePrefix = session.hasMore !== true
+      || (Number.isSafeInteger(session.messageCount) && session.messageCount === session.messages?.length);
+    let decoratedFirstUser = false;
+    const decorateNative = message => {
+      if (!completePrefix || decoratedFirstUser || message?.role !== 'user') return message;
+      decoratedFirstUser = true;
+      return { ...message, ...identity };
+    };
+    return {
+      ...session,
+      nativeSubagent: true,
+      parentThreadId: native.child.parentThreadId || null,
+      ...(Array.isArray(session.messages) ? { messages: session.messages.map(decorateNative) } : {}),
+      ...(Array.isArray(session.upserts) ? { upserts: session.upserts.map(decorateNative) } : {}),
+    };
   };
   kernel = await createTaskKernel({ stateFile: path.join(stateRoot, 'tasks.json'), runtime, broadcast, log,
     validate: input => { if (input.source?.kind === 'conversation' && !input.agentId) {
@@ -394,7 +455,8 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       status: execution.getStatus(task.threadId).active ? execution.getStatus(task.threadId)
         : { ...execution.getStatus(task.threadId), active: !terminalStates.has(task.state), phase: task.state, label: task.state, detail: task.error || '' },
     }))],
-    tasks: publicTasks, deliveries: kernel.deliveries, cancelTask: kernel.cancel, reconcileTask: kernel.reconcile, retryDelivery: kernel.retryDelivery, decorateTaskSession, sourceActorFor, actorRevisionFor,
+    tasks: publicTasks, deliveries: kernel.deliveries, cancelTask: kernel.cancel, reconcileTask: kernel.reconcile, retryDelivery: kernel.retryDelivery,
+    decorateTaskSession, decorateConversationSession, sourceActorFor, actorRevisionFor,
     providerForThread: threadId => conversationTasks().find(task => task.threadId === threadId)?.runtime.modelProviderId,
     registerTaskProvider: (id, provider) => taskProviders.set(id, provider),
     hasPendingWork: () => original.hasPendingWork() || kernel.hasPendingWork(),

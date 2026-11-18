@@ -1,0 +1,16 @@
+[
+  {
+    "id": "a3f85cd1-9d6f-4fde-be41-a2a653fb5466",
+    "kind": "delegation",
+    "background": true,
+    "state": "completed",
+    "updatedAt": "2026-11-16T15:42:09.925Z"
+  },
+  {
+    "id": "21e34d04-3b2f-4655-9356-df939fc895f1",
+    "kind": "external",
+    "background": null,
+    "state": "completed",
+    "updatedAt": "2026-11-16T15:40:41.781Z"
+  }
+]

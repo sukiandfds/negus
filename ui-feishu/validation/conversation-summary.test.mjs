@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { createEmployeeProjectDirectory } from '../../windows/server/employee-project-directory.mjs';
 
 const require = createRequire(realpathSync(new URL('../node_modules/vite/package.json', import.meta.url)));
 const { build } = require('esbuild');
@@ -125,6 +126,71 @@ test('employee rows show aggregate work status instead of only the main conversa
   assert.equal(employee.label, '正在处理后台任务');
   assert.equal(rows.all.find(entry => entry.threadId === 'A').active, true);
   assert.equal(rows.all.find(entry => entry.threadId === 'A').label, '正在处理后台任务');
+});
+
+test('backend native subagent directory output renders as background work through the real frontend projection', async () => {
+  const root = '/workspace/negus';
+  const employees = [
+    { id: 'manager', name: '运营管理', projectKey: 'employee-manager', projectRoot: root,
+      mainThreadId: 'manager-main', conversationId: 'manager-conversation' },
+    { id: 'developer', name: '技术研发', projectKey: 'employee-developer', projectRoot: root,
+      mainThreadId: 'developer-main', conversationId: 'developer-conversation' },
+  ];
+  const statuses = new Map([
+    ['manager-child', { phase: 'working', label: '正在处理后台任务', active: true, indicator: 'green' }],
+    ['group-child', { phase: 'working', label: '正在处理后台任务', active: true, indicator: 'green' }],
+  ]);
+  const sessions = [
+    { threadId: 'manager-main', title: '运营主对话', cwd: root, updatedAt: time('08') },
+    { threadId: 'developer-main', title: '研发主对话', cwd: root, updatedAt: time('08') },
+    { threadId: 'manager-child', title: '原生检查', nativeSubagent: true, parentThreadId: 'manager-main',
+      cwd: root, updatedAt: time('09') },
+    { threadId: 'group-child', title: '群内原生任务', nativeSubagent: true, parentThreadId: 'developer-group',
+      cwd: root, updatedAt: time('10') },
+  ];
+  const backendDirectory = createEmployeeProjectDirectory({
+    project: 'negus', projectRoot: root, registry: { list: () => employees },
+    employeeRuntime: { getStatus: async () => ({ status: { phase: 'idle', label: '等待任务', active: false } }) },
+    employeeConversations: {
+      findByRuntimeSession: (_runtimeKind, threadId) => threadId === 'developer-group'
+        ? { conversationKind: 'group', agentId: 'developer', runtimeSessionId: threadId }
+        : null,
+    },
+    execution: { getStatus: threadId => statuses.get(threadId) || { phase: 'idle', active: false } },
+    agentTasks: { directoryEntries: () => [], providerForThread: () => 'fixture' },
+    conversations: {
+      listSessions: async () => sessions,
+      findSession: async threadId => sessions.find(item => item.threadId === threadId) || null,
+    },
+  });
+  const backend = await backendDirectory.list();
+  const managerNative = backend.projects.find(project => project.employeeId === 'manager').conversations
+    .find(item => item.threadId === 'manager-child');
+  const groupNative = backend.projects.find(project => project.employeeId === 'developer').conversations
+    .find(item => item.threadId === 'group-child');
+  assert.equal(managerNative.role, 'standard');
+  assert.equal(groupNative.role, 'standard');
+
+  const frontDirectory = (state) => buildConversationDirectory({
+    statusByThread: state.conversationStatuses, contextByThread: {}, projects: state.projects,
+  }, sessions, false);
+  const active = frontDirectory(backend);
+  const activeManager = active.employees.find(item => item.agentId === 'manager');
+  const activeDeveloper = active.employees.find(item => item.agentId === 'developer');
+  assert.equal(activeManager.label, '正在处理后台任务');
+  assert.equal(activeDeveloper.label, '正在处理后台任务');
+  assert.equal(activeManager.children.some(item => item.threadId === 'manager-child'), true);
+  assert.equal(activeDeveloper.children.some(item => item.threadId === 'group-child'), true);
+
+  statuses.clear();
+  const completedBackend = await backendDirectory.list();
+  const completed = frontDirectory(completedBackend);
+  const completedManager = completed.employees.find(item => item.agentId === 'manager');
+  const completedDeveloper = completed.employees.find(item => item.agentId === 'developer');
+  assert.equal(completedManager.active, false);
+  assert.equal(completedDeveloper.active, false);
+  assert.equal(completedManager.label, '');
+  assert.equal(completedDeveloper.label, '');
 });
 
 test('an idle live status does not mark the employee main conversation as working', () => {

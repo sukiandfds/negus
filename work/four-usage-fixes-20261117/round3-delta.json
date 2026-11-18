@@ -1,0 +1,37 @@
+[
+  {
+    "path": "docs/project-management/items/FEAT-001/item.md",
+    "added": 17,
+    "removed": 0
+  },
+  {
+    "path": "docs/project-management/items/FEAT-001/updates.md",
+    "added": 7,
+    "removed": 0
+  },
+  {
+    "path": "ui-feishu/shared/features/conversations/state/conversationStore.ts",
+    "added": 7,
+    "removed": 0
+  },
+  {
+    "path": "ui-feishu/validation/four-usage-fixes-browser.test.mjs",
+    "added": 33,
+    "removed": 2
+  },
+  {
+    "path": "windows/server/context-management-service.mjs",
+    "added": 3,
+    "removed": 2
+  },
+  {
+    "path": "windows/tests/context-management-service.test.mjs",
+    "added": 42,
+    "removed": 0
+  },
+  {
+    "path": "windows/tests/conversation-send-state.test.mjs",
+    "added": 40,
+    "removed": 0
+  }
+]

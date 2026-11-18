@@ -1,0 +1,628 @@
+--- a/ui-feishu/kernel/task-kernel.mjs
++++ b/ui-feishu/kernel/task-kernel.mjs
+@@ -3,6 +3,7 @@
+ import { randomUUID } from 'node:crypto';
+ 
+ export const terminalStates = new Set(['completed', 'failed', 'interrupted']);
++const maxReconciliationFailures = 3;
+ const copy = value => structuredClone(value);
+ const fail = (message, statusCode = 409) => Object.assign(new Error(message), { statusCode });
+ 
+@@ -68,6 +69,18 @@
+       return current;
+     });
+     emit({ event: 'task_terminal', taskId: id, state: task.state, conversationId: task.conversationId });
++  };
++  const reconciliationFailed = async (id, error) => {
++    const task = await mutate(data => {
++      const current = requireTask(data, id);
++      current.reconciliationFailures = (current.reconciliationFailures || 0) + 1;
++      current.state = 'needs-reconciliation';
++      current.error = error || '执行状态待核对';
++      return current;
++    });
++    if (task.reconciliationFailures >= maxReconciliationFailures) {
++      await complete(id, { status: 'interrupted', error: task.error });
++    } else emit({ event: 'task_reconciliation_required', taskId: id });
+   };
+   const checkpoint = (id, patch) => mutate(data => {
+     const task = requireTask(data, id);
+@@ -135,6 +148,7 @@
+               if (terminalStates.has(current.state)) return;
+               Object.assign(current.runtime, copy(patch));
+               current.state = current.cancelRequested ? 'stopping' : 'running';
++              current.reconciliationFailures = 0;
+               if (!recovering) current.updatedAt = now();
+             });
+             if (!recovering) emit({ event: 'task_started', taskId: id, conversationId: task.conversationId });
+@@ -143,15 +157,13 @@
+         };
+         const result = recovering ? await runtime.observe(task, controls) : await runtime.execute(task, controls);
+         if (result?.status === 'unknown') {
+-          await mutate(data => { const current = requireTask(data, id); current.state = 'needs-reconciliation'; current.error = result.error || '执行状态待核对'; return current; });
+-          emit({ event: 'task_reconciliation_required', taskId: id });
++          await reconciliationFailed(id, result.error);
+         } else if (!closed) await complete(id, result);
+       } catch (error) {
+         if (closed) return;
+         // Adapter must identify ambiguous side effects; unknown starts cannot be called failed or replayed.
+         if (error.ambiguous || recovering) {
+-          await mutate(data => { const task = requireTask(data, id); task.state = 'needs-reconciliation'; task.error = error.message; });
+-          emit({ event: 'task_reconciliation_required', taskId: id });
++          await reconciliationFailed(id, error.message);
+         } else await complete(id, { status: 'failed', error: error.message });
+       }
+     })().catch(error => emit({ event: 'task_storage_failed', taskId: id, code: error.code || 'unknown' }))
+@@ -281,10 +293,11 @@
+     for (const task of data.tasks) {
+       if (terminalStates.has(task.state)) continue;
+       const lastActivity = Date.parse(task.updatedAt || task.createdAt);
+-      const verifiable = hasRecoveryEvidence(task)
++      const exhausted = task.reconciliationFailures >= maxReconciliationFailures;
++      const verifiable = !exhausted && hasRecoveryEvidence(task)
+         && Number.isFinite(lastActivity) && currentTime - lastActivity <= 30 * 60 * 1000;
+       task.state = verifiable ? 'recovering' : 'interrupted';
+-      if (!verifiable) task.error = task.runtime?.threadId && task.runtime?.turnId
++      if (!verifiable && !exhausted) task.error = task.runtime?.threadId && task.runtime?.turnId
+         ? '服务重启时任务已超过 30 分钟没有活动'
+         : '服务重启时没有可核对的运行证据';
+     }
+--- a/ui-feishu/shared/features/conversations/state/conversationStore.ts
++++ b/ui-feishu/shared/features/conversations/state/conversationStore.ts
+@@ -21,6 +21,19 @@
+       || (omitStream && (['streamingItemId', 'streamingText', 'commentary'].includes(key)
+         || (key === 'detail' && this.phase === 'working' && (this.type === 'execution_status' || this.id === 'reasoning-current')))) ? undefined : field;
+   });
++// FEAT-002: body revisions are not evidence that execution is newer.
++type ExecutionEvidence = { phase?: string; active?: boolean; turnId?: string | null;
++  eventEpoch?: string; eventSeq?: number; updatedAt?: string | null; startedAt?: string | null };
++export const terminalExecution = (status?: ExecutionEvidence) => Boolean(status && !status.active
++  && ['completed', 'failed', 'interrupted', 'systemError'].includes(status.phase || ''));
++const executionOrder = (candidate: ExecutionEvidence, baseline: ExecutionEvidence): number | null => {
++  if (candidate.eventEpoch && candidate.eventEpoch === baseline.eventEpoch
++    && candidate.eventSeq != null && baseline.eventSeq != null) return candidate.eventSeq - baseline.eventSeq;
++  const before = Date.parse(baseline.updatedAt || '');
++  const after = Date.parse(candidate.updatedAt || candidate.startedAt || '');
++  return Number.isFinite(before) && Number.isFinite(after) ? after - before : null;
++};
++export const newerExecution = (candidate: ExecutionEvidence, baseline: ExecutionEvidence) => (executionOrder(candidate, baseline) ?? 0) > 0;
+ export const withStreamingStatus = (status: ThreadSnapshot['executionStatus'], live?: ThreadSnapshot['executionStatus']) =>
+   status.active && status.turnId && live?.turnId === status.turnId ? { ...status,
+     streamingItemId: live.streamingItemId ?? status.streamingItemId, streamingText: live.streamingText ?? status.streamingText,
+@@ -148,7 +161,16 @@
+   };
+   update = (id: string, patch: Patch | ((current: ThreadSnapshot) => Patch), remote = false, deferContext = false) => {
+     if (!id) return;
+-    const next = typeof patch === 'function' ? patch(this.get(id)) : patch;
++    let next = typeof patch === 'function' ? patch(this.get(id)) : patch;
++    const execution = this.get(id).executionStatus;
++    if (remote && next.executionStatus?.active && terminalExecution(execution)
++      && (next.executionStatus.turnId === execution.turnId
++        || (next.executionStatus.eventEpoch && next.executionStatus.eventEpoch === execution.eventEpoch))
++      && !newerExecution(next.executionStatus, execution)) {
++      const { executionStatus: _stale, ...rest } = next;
++      next = rest;
++      if (!Object.keys(next).length) return;
++    }
+     this.rememberQueue(id, next.queueItems || []);
+     const current = remote ? this.get(id) : (this.committed.get(id) || this.empty(id));
+     const keys = Object.keys(next) as (keyof Patch)[];
+@@ -158,6 +180,10 @@
+       if (next.contextStatus?.updatedAt && Date.parse(next.contextStatus.updatedAt) > (Date.parse(current.contextStatus.updatedAt || '') || 0)) {
+         const target = remote ? this.live.get(id) : this.committed.get(id);
+         if (target?.contextStatus) target.contextStatus = { ...target.contextStatus, updatedAt: next.contextStatus.updatedAt };
++      }
++      if (next.executionStatus && newerExecution(next.executionStatus, current.executionStatus)) {
++        const target = this.live.get(id) || this.committed.get(id);
++        if (target) target.executionStatus = { ...current.executionStatus, ...next.executionStatus };
+       }
+       return;
+     }
+@@ -174,7 +200,7 @@
+         this.notify();
+       }
+     };
+-    if (!remote || next.contextStatus) {
++    if (!remote || next.contextStatus || next.executionStatus) {
+       this.revisions.set(id, (this.revisions.get(id) || 0) + 1);
+       this.fieldRevisions.set(id, { ...this.fieldRevisions.get(id),
+         ...Object.fromEntries(keys.map(key => [key, this.revisions.get(id)])) });
+@@ -242,8 +268,20 @@
+     snapshot = { ...snapshot, queueItems: this.visibleQueue(id, snapshot.queueItems) };
+     if (snapshot.goal?.status === 'complete' && this.dismissedGoals.get(id) === goalCompletionKey(snapshot.goal)) snapshot = { ...snapshot, goal: null };
+     const latest = this.committed.get(id);
++    const liveExecution = this.live.get(id)?.executionStatus;
++    const executionChangedDuringRead = (this.fieldRevisions.get(id)?.executionStatus || 0) > revision;
++    const keepExecution = liveExecution && (terminalExecution(snapshot.executionStatus) || snapshot.executionStatus.active || executionChangedDuringRead)
++      && (newerExecution(liveExecution, snapshot.executionStatus)
++      || (executionChangedDuringRead
++        && snapshot.executionStatus.turnId && liveExecution.turnId !== snapshot.executionStatus.turnId
++        && executionOrder(liveExecution, snapshot.executionStatus) === null));
+     for (const [key, changedAt] of Object.entries(this.fieldRevisions.get(id) || {}) as [keyof ThreadSnapshot, number][]) {
+       if (changedAt <= revision) continue;
++      if (key === 'executionStatus') {
++        if (!liveExecution && latest && terminalExecution(latest.executionStatus)
++          && !newerExecution(snapshot.executionStatus, latest.executionStatus)) snapshot = { ...snapshot, executionStatus: latest.executionStatus };
++        continue;
++      }
+       const context = key === 'contextStatus' ? this.live.get(id)?.contextStatus : undefined;
+       if (context) snapshot = { ...snapshot, contextStatus: { ...context,
+         model: snapshot.contextStatus.model, reasoningEffort: snapshot.contextStatus.reasoningEffort,
+@@ -254,6 +292,7 @@
+         else if (latest) snapshot = { ...snapshot, [key]: latest[key] };
+       }
+     }
++    if (keepExecution) snapshot = { ...snapshot, executionStatus: liveExecution };
+     const current = latest?.session;
+     if (current && snapshot.session) snapshot = { ...snapshot, session: refreshSession(current, snapshot.session) };
+     const pending = this.localPending.get(id);
+@@ -272,21 +311,27 @@
+     if (live?.contextStatus) live.contextStatus = { ...live.contextStatus,
+       model: snapshot.contextStatus.model, reasoningEffort: snapshot.contextStatus.reasoningEffort };
+     this.synced.add(id);
++    if (live?.executionStatus && !keepExecution) {
++      const status = withStreamingStatus(snapshot.executionStatus, live.executionStatus);
++      if (status !== snapshot.executionStatus) live.executionStatus = status;
++      else delete live.executionStatus;
++    }
+     if (live && (this.bodyRevisions.get(id) || 0) <= revision) {
+-      const executionStatus = withStreamingStatus(snapshot.executionStatus, live.executionStatus);
+       for (const key of Object.keys(live) as (keyof Patch)[]) {
+-        if ((this.fieldRevisions.get(id)?.[key] || 0) <= revision) delete live[key];
+-      }
+-      if (executionStatus !== snapshot.executionStatus) live.executionStatus = executionStatus;
+-      if (!Object.keys(live).length) this.live.delete(id);
+-    }
++        if (key !== 'executionStatus' && (this.fieldRevisions.get(id)?.[key] || 0) <= revision) delete live[key];
++      }
++    }
++    if (live && !Object.keys(live).length) this.live.delete(id);
+     if ((this.bodyRevisions.get(id) || 0) <= revision) {
+       this.dirty.delete(id); this.freshBodies.delete(id);
+     }
+     this.finish(id);
+     const dataChanged = signature(previousCommitted, true) !== signature(this.committed.get(id), true)
+       || signature(previousPending, true) !== signature(this.localPending.get(id), true);
+-    if (!dataChanged && previousCommitted) this.committed.set(id, previousCommitted);
++    if (!dataChanged && previousCommitted) {
++      previousCommitted.executionStatus = snapshot.executionStatus;
++      this.committed.set(id, previousCommitted);
++    }
+     const stateChanged = hadError !== this.errors.has(id) || wasDirty !== this.dirty.has(id)
+       || wasSynced !== this.synced.has(id) || previousLive !== signature(this.live.get(id), true);
+     if (dataChanged) ++this.persistVersion;
+--- a/ui-feishu/src/conversationDirectory.ts
++++ b/ui-feishu/src/conversationDirectory.ts
+@@ -1,6 +1,8 @@
++import { newerExecution, terminalExecution } from '../shared/features/conversations/state/conversationStore';
++import { idleStatus } from '../shared/features/execution/hooks/useCodexExecution';
+ import { conversationStatus } from './presentation';
+ import { latestMessagePreview, visibleTaskPreview } from './taskNotice';
+-import type { DirectoryConversation, DirectoryProject } from '../shared/features/project-directory/model/types';
++import type { DirectoryConversation, DirectoryProject, ProjectRuntimeStatus } from '../shared/features/project-directory/model/types';
+ import type { ConversationStore, ThreadSnapshot } from '../shared/features/conversations/state/conversationStore';
+ import type { Conversation, ConversationState, DirectoryState } from './types';
+ 
+@@ -9,20 +11,26 @@
+ export const conversationKey = (item: Conversation) => item.roomId ? `group:${item.roomId}` : item.threadId || item.conversationId || item.id;
+ export const uniqueConversations = (items: Conversation[]) => [...new Map(items.map(item => [conversationKey(item), item])).values()].sort(byLatest);
+ export const snapshotStatusByThread = (store: Pick<ConversationStore, 'committed' | 'live' | 'get'>,
+-  selectedId: string, projects: DirectoryState['projects']) => {
++  _selectedId: string, projects: DirectoryState['projects']) => {
+   const statuses: Record<string, ThreadSnapshot['executionStatus']> = {};
+-  const directoryStatus = new Map<string, { active?: boolean; turnId?: string | null }>();
++  const directoryStatus = new Map<string, ProjectRuntimeStatus>();
+   for (const project of projects) for (const item of project.conversations || []) {
+-    if (item.threadId && item.status) directoryStatus.set(item.threadId, item.status);
++    if (item.threadId && item.status) {
++      directoryStatus.set(item.threadId, item.status);
++      if (terminalExecution(item.status)) statuses[item.threadId] = { ...idleStatus(item.threadId), ...item.status,
++        phase: item.status.phase as ThreadSnapshot['executionStatus']['phase'], turnId: item.status.turnId || '' };
++    }
+   }
+   for (const [id, view] of store.committed) {
+     const status = view.executionStatus, directory = directoryStatus.get(id);
+-    if (!directory || (status.active && directory.active && status.turnId && directory.turnId === status.turnId)) statuses[id] = status;
++    if (!directory || (status.active && directory.active && status.turnId && directory.turnId === status.turnId)
++      || (terminalExecution(status) && (newerExecution(status, directory)
++        || (status.turnId && status.turnId === directory.turnId && !newerExecution(directory, status))))) statuses[id] = status;
+   }
+   for (const [id, patch] of store.live) {
+-    if (patch.executionStatus) statuses[id] = patch.executionStatus;
++    const status = patch.executionStatus, directory = directoryStatus.get(id);
++    if (status && (!terminalExecution(directory) || !status.active || newerExecution(status, directory!))) statuses[id] = status;
+   }
+-  if (selectedId && store.live.get(selectedId)?.executionStatus) statuses[selectedId] = store.get(selectedId).executionStatus;
+   return statuses;
+ };
+ 
+@@ -91,7 +99,7 @@
+         pendingOpen: !project.mainThreadId, status: project.status,
+       }) : null);
+       if (!main) continue;
+-      const mainActive = Boolean(directory.statusByThread[main.threadId || '']?.active || mainEntry?.status?.active);
++      const mainActive = Boolean((directory.statusByThread[main.threadId || ''] || mainEntry?.status)?.active);
+       const workRows = [...rows.filter(row => !row.main), ...groupRows];
+       const activeWork = workRows.filter(row => row.active);
+       const activeCount = Number(mainActive) + activeWork.length;
+--- a/ui-feishu/src/usePageSnapshot.ts
++++ b/ui-feishu/src/usePageSnapshot.ts
+@@ -3,7 +3,7 @@
+ import { writeConversationSnapshot } from '../shared/features/conversations/data/conversationSnapshot';
+ import { isPendingThread } from '../shared/features/conversations/model/pendingThread';
+ import { readConversationBatches } from '../shared/features/conversations/state/conversationBatch';
+-import { type ThreadSnapshot } from '../shared/features/conversations/state/conversationStore';
++import { terminalExecution, type ThreadSnapshot } from '../shared/features/conversations/state/conversationStore';
+ import { readModelDefaults, resolveVisibleModel, resolveVisibleEffort } from '../shared/features/models/model/modelDefaults';
+ import { buildConversationDirectory, mergeDirectoryProjects, snapshotStatusByThread } from './conversationDirectory';
+ import { latestMessagePreview } from './taskNotice';
+@@ -189,7 +189,14 @@
+     && (selected.session.title !== summary.title || selected.session.updatedAt !== summary.updatedAt)
+     ? { ...selected.session, title: summary.title, updatedAt: summary.updatedAt } : selected.session;
+   // FEAT-001: execution events render immediately, independently of history reads.
+-  const executionStatus = store.get(c.selectedId).executionStatus;
++  const statusByThread = snapshotStatusByThread(store, c.selectedId, shown.projects);
++  const executionStatus = statusByThread[c.selectedId] || store.get(c.selectedId).executionStatus;
++  useEffect(() => {
++    // The same authoritative terminal also clears the state used by send/queue controls.
++    for (const [id, status] of Object.entries(statusByThread)) {
++      if (terminalExecution(status) && store.get(id).executionStatus.active) store.update(id, { executionStatus: status });
++    }
++  }, [store, shown.projects, store.getSnapshot()]);
+   const model = resolveVisibleModel(c.models, readModelDefaults(), selected.contextStatus.model, session?.model || '');
+   const effort = resolveVisibleEffort(c.models, readModelDefaults(), model, selected.contextStatus.reasoningEffort);
+   const states = [...store.committed];
+@@ -220,7 +227,7 @@
+       presentation: Object.fromEntries(states.map(([id, { session: _session, ...view }]) => [id, { ...view, visibleModel: '', visibleEffort: '', usageModel: '', streamingText: '', commentaryText: '' }])) });
+   }, [shown, c.sessions, c.selectedId, store.getPersistSnapshot()]);
+   return { committed: shown.committed, conversations: display, directory: { ...directory, projects: shown.projects,
+-    statusByThread: snapshotStatusByThread(store, c.selectedId, shown.projects),
++    statusByThread,
+     contextByThread: Object.fromEntries(states.map(([id, view]) => [id, view.contextStatus.phase])),
+     goalByThread: Object.fromEntries(states.map(([id, view]) => [id, view.goal])) } };
+ }
+--- a/ui-feishu/validation/conversation-store-browser.test.mjs
++++ b/ui-feishu/validation/conversation-store-browser.test.mjs
+@@ -8,6 +8,7 @@
+ const summaries = ['a', 'b'].map(id => ({ threadId: id, source: 'codex', sourceRevision: 'r0', title: `对话${id}`, updatedAt: stamp,
+   messageCount: 1, latestUser: '', latestAssistant: '', latestMessage: `历史${id}`, model: 'model-a' }));
+ const messages = new Map(summaries.map(s => [s.threadId, [{ id: `history-${s.threadId}`, role: 'assistant', text: `历史${s.threadId}`, createdAt: stamp }]]));
++let directoryProjects = [];
+ const queues = new Map(), statuses = new Map(), settings = new Map(), goals = new Map(), inputs = new Map();
+ const idle = id => ({ type: 'execution_status', threadId: id, phase: 'idle', active: false, turnId: '', activities: [], startedAt: null, updatedAt: stamp, label: '', detail: '', commentary: '' });
+ const context = id => ({ type: 'context_status', threadId: id, model: 'model-a', reasoningEffort: 'high', phase: 'idle', percentage: 10, usedTokens: 10, contextWindow: 100, autoCompactThreshold: 80, updatedAt: stamp, message: '', ...settings.get(id) });
+@@ -43,7 +44,7 @@
+   calls.push({ path, method, id, view: url.searchParams.get('view'), sourceRevision: url.searchParams.get('sourceRevision'), body });
+   let data = {};
+   if (path === '/api/project') data = { name: '项目', root: '/fixture', mode: 'interactive' };
+-  else if (path === '/api/project-directory') data = { projects: [] };
++  else if (path === '/api/project-directory') data = { projects: directoryProjects };
+   else if (path === '/api/sessions') data = summaries;
+   else if (path === '/api/models') data = [{ id: 'model-a', model: 'model-a', displayName: '模型A', available: true, isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'high' }] }, { id: 'model-b', model: 'model-b', displayName: '模型B', available: true, supportedReasoningEfforts: [{ reasoningEffort: 'high' }] }];
+   else if (path === '/api/model-defaults') data = { providerId: 'current', model: 'model-a', effort: 'high', archivedProviderIds: [] };
+@@ -132,6 +133,67 @@
+     await browser.close(); process.exit(0);
+   }
+   await page.waitForFunction(() => document.querySelector('button[aria-label="刷新会话"]')?.getAttribute('aria-busy') === 'false');
++  if (process.env.NEGUS_TEST_TERMINAL_LIVE === '1') {
++    const active = { ...idle('a'), phase: 'working', active: true, turnId: 'old-turn', label: '运行',
++      eventEpoch: 'fixture', eventSeq: 1, updatedAt: '2026-11-01T00:00:01Z' };
++    const completed = { ...active, phase: 'completed', active: false, eventSeq: 2, updatedAt: '2026-11-01T00:00:02Z' };
++    directoryProjects = [{ id: 'employee', kind: 'employee', employeeId: 'fixture', name: '测试员工', mainThreadId: 'b',
++      conversations: [{ id: 'b', threadId: 'b', title: '测试员工', main: true, status: idle('b') },
++        { id: 'a', threadId: 'a', conversationId: 'handoff-fixture', title: '对话a', status: active }] }];
++    statuses.set('a', active);
++    await page.evaluate(event => { window.emit(event); window.dispatchEvent(new Event('negus:directory-changed')); }, active);
++    const parent = page.getByRole('button', { name: '打开测试员工单聊', exact: true });
++    await parent.getByText('正在处理后台任务').waitFor();
++    heldId = 'a'; holdRead = true; readGate = new Promise(resolve => releaseRead = resolve);
++    const before = calls.length;
++    await page.getByRole('button', { name: '刷新会话', exact: true }).click();
++    await wait(() => calls.slice(before).some(call => call.path === '/api/session' && call.id === 'a'));
++    await page.evaluate(status => { for (let i = 0; i < 1000; i++) window.emit({ ...status, usedTokens: i }); }, context('a'));
++    statuses.set('a', completed);
++    messages.get('a').push({ id: 'final', role: 'assistant', text: '终态最终正文', createdAt: completed.updatedAt });
++    summaries[0].sourceRevision = 'terminal';
++    // No completion SSE: only the authoritative read supplies terminal evidence.
++    holdRead = false; releaseRead();
++    await bubble('终态最终正文').waitFor();
++    await page.waitForFunction(() => !document.body.innerText.includes('正在处理后台任务') && !document.body.innerText.includes('助手正在运行'));
++    console.log('PASS terminal read after 1000 context events: title and employee idle, final text retained');
++
++    // A missed terminal event with only a fresh directory must also beat old live.
++    const next = { ...active, turnId: 'next-turn', eventSeq: 3, updatedAt: '2026-11-01T00:00:03Z' };
++    await page.evaluate(event => window.emit(event), next);
++    await parent.getByText('正在处理后台任务').waitFor();
++    directoryProjects[0].conversations[1].status = { ...completed, turnId: 'next-turn', eventSeq: 4, updatedAt: '2026-11-01T00:00:04Z' };
++    await page.evaluate(() => window.dispatchEvent(new Event('negus:directory-changed')));
++    await page.waitForFunction(() => !document.body.innerText.includes('正在处理后台任务') && !document.body.innerText.includes('助手正在运行'));
++    const sendsBefore = sends.length;
++    await send('目录完成后立即发送');
++    await wait(() => sends.length === sendsBefore + 1);
++    console.log('PASS directory-only terminal suppresses stale live in title/employee and permits immediate send');
++
++    // Old completed read must not clear a new turn that started while it was pending.
++    heldId = 'a'; holdRead = true; readGate = new Promise(resolve => releaseRead = resolve);
++    const readStart = calls.length;
++    await page.getByRole('button', { name: '刷新会话', exact: true }).click();
++    await wait(() => calls.slice(readStart).some(call => call.path === '/api/session' && call.id === 'a'));
++    const newer = { ...active, turnId: 'newer-turn', eventSeq: 5, updatedAt: '2026-11-01T00:00:05Z' };
++    await page.evaluate(event => window.emit(event), newer);
++    holdRead = false; releaseRead();
++    await page.waitForTimeout(350);
++    await parent.getByText('正在处理后台任务').waitFor();
++    assert.ok((await page.locator('body').innerText()).includes('助手正在运行'));
++    console.log('PASS newer active turn survives an old terminal response');
++    statuses.set('a', { ...newer, active: false, phase: 'completed', eventSeq: 6, updatedAt: '2026-11-01T00:00:06Z' });
++    directoryProjects[0].conversations[1].status = statuses.get('a');
++    for (const event of ['negus:directory-changed', 'negus:realtime-recovered', 'visibilitychange', 'pageshow']) {
++      await page.evaluate(name => window.dispatchEvent(new Event(name)), event);
++    }
++    await page.reload();
++    await bubble('终态最终正文').waitFor();
++    await page.waitForFunction(() => !document.body.innerText.includes('正在处理后台任务') && !document.body.innerText.includes('助手正在运行'));
++    assert.deepEqual(errors, []);
++    console.log('PASS refresh, reconnect/page restore and cached reload keep terminal idle');
++    await browser.close(); process.exit(0);
++  }
+   if (process.env.NEGUS_TEST_LIST_TERMINAL === '1') {
+     const running = { ...idle('a'), phase: 'working', active: true, turnId: 'compact-turn', startedAt: stamp, label: '运行' };
+     statuses.set('a', running);
+--- a/ui-feishu/validation/conversation-summary.test.mjs
++++ b/ui-feishu/validation/conversation-summary.test.mjs
+@@ -190,7 +190,7 @@
+   state.projects[0].conversations.push({
+     id: taskThread, threadId: taskThread, conversationId: taskConversation, title,
+     lastActivityAt: time(hour), latestMessageAt: time(hour), latestMessage,
+-    status: { phase, label, active, indicator: active ? 'green' : null },
++    status: { phase, label, active, updatedAt: time(hour), indicator: active ? 'green' : null },
+   });
+   return state;
+ };
+@@ -336,7 +336,7 @@
+ 
+ test('uncommitted live task status reaches both task and employee parent through store wiring', () => {
+   const store = conversationStore();
+-  store.update(taskThread, { executionStatus: liveStatus('running', true) }, true);
++  store.update(taskThread, { executionStatus: { ...liveStatus('running', true), updatedAt: time('13') } }, true);
+   const directoryState = taskDirectory('completed', '已完成', '10', '目录任务标题', '目录已完成');
+   directoryState.projects[0].status = { phase: 'idle', label: 'idle', active: false, indicator: null };
+   const statuses = snapshotStatusByThread(store, taskThread, directoryState.projects);
+@@ -371,7 +371,7 @@
+   const state = taskDirectory('completed', '已完成', '12', '目录完成标题', '目录完成摘要');
+   state.projects[0].status = { phase: 'running', label: '正在处理后台任务', active: true, indicator: 'green' };
+   const statuses = snapshotStatusByThread(store, 'other-selected-task', state.projects);
+-  assert.equal(statuses[taskThread], undefined);
++  assert.equal(statuses[taskThread].active, false);
+   const rows = taskRows(state.projects, [], new Map(), statuses);
+   assert.equal(rows.all.find(row => row.threadId === taskThread).active, false);
+   const employee = rows.employees.find(row => row.agentId === 'A');
+@@ -399,16 +399,16 @@
+   const secondThread = '01a1c0d8-eff4-7b52-aade-e15d421a206f';
+   state.projects[0].conversations.push({
+     id: secondThread, threadId: secondThread, conversationId: 'handoff-second',
+-    title: '另一活动任务', status: { phase: 'completed', label: '已完成', active: false },
++    title: '另一活动任务', status: { phase: 'completed', label: '已完成', active: false, updatedAt: time('12') },
+   });
+   const selectedStore = conversationStore();
+-  selectedStore.update(taskThread, { executionStatus: liveStatus('running', true) }, true);
++  selectedStore.update(taskThread, { executionStatus: { ...liveStatus('running', true), updatedAt: time('13') } }, true);
+   let rows = taskRows(state.projects, [], new Map(), snapshotStatusByThread(selectedStore, taskThread, state.projects));
+   assert.equal(rows.all.find(row => row.threadId === taskThread).active, true);
+   assert.equal(rows.employees.find(row => row.agentId === 'A').active, true);
+ 
+   const backgroundStore = conversationStore();
+-  backgroundStore.update(secondThread, { executionStatus: { ...liveStatus('running', true), threadId: secondThread } }, true);
++  backgroundStore.update(secondThread, { executionStatus: { ...liveStatus('running', true), threadId: secondThread, updatedAt: time('13') } }, true);
+   rows = taskRows(state.projects, [], new Map(), snapshotStatusByThread(backgroundStore, taskThread, state.projects));
+   assert.equal(rows.all.find(row => row.threadId === secondThread).active, true);
+   assert.equal(rows.employees.find(row => row.agentId === 'A').active, true);
+@@ -670,3 +670,85 @@
+     }
+   }
+ });
++
++test('terminal read clears old execution despite context storm and body invalidation, preserving final text', () => {
++  for (const count of [100, 1000, 10000]) {
++    const store = conversationStore();
++    const active = { ...liveStatus('working', true), eventEpoch: 'epoch', eventSeq: 1, updatedAt: time('10') };
++    store.update(taskThread, { executionStatus: active }, true);
++    const revision = store.revisions.get(taskThread);
++    for (let i = 0; i < count; i++) store.update(taskThread, { contextStatus: { ...store.get(taskThread).contextStatus, usedTokens: i } });
++    store.invalidate(taskThread);
++    store.commit(taskThread, { ...store.empty(taskThread), session: session(taskThread, '最终正文', '12'),
++      executionStatus: { ...active, phase: 'completed', active: false, eventSeq: 2, updatedAt: time('12') } }, revision);
++    assert.equal(store.get(taskThread).executionStatus.active, false);
++    assert.equal(store.get(taskThread).session.messages[0].text, '最终正文');
++    assert.equal(store.get(taskThread).contextStatus.usedTokens, count - 1);
++    assert.equal(store.dirty.has(taskThread), true, 'new body demand remains dirty');
++    store.update(taskThread, { executionStatus: active }, true);
++    assert.equal(store.get(taskThread).executionStatus.active, false, 'late old active cannot revive terminal');
++  }
++});
++
++test('slow terminal snapshot retains newer same-epoch evidence and new-turn active, including metadata-only events', () => {
++  for (const turnId of ['turn-live', 'new-turn']) {
++    const store = conversationStore();
++    const active = { ...liveStatus('working', true), eventEpoch: 'epoch', eventSeq: 1, updatedAt: time('10') };
++    store.update(taskThread, { executionStatus: active }, true);
++    const revision = store.revisions.get(taskThread);
++    store.update(taskThread, { executionStatus: { ...active, turnId, eventSeq: 3, updatedAt: time('13') } }, true);
++    store.commit(taskThread, { ...store.empty(taskThread), session: session(taskThread, '上一轮最终正文', '12'),
++      executionStatus: { ...active, phase: 'completed', active: false, eventSeq: 2, updatedAt: time('12') } }, revision);
++    assert.equal(store.get(taskThread).executionStatus.active, true);
++    assert.equal(store.get(taskThread).executionStatus.turnId, turnId);
++    assert.equal(store.get(taskThread).executionStatus.eventSeq, 3);
++  }
++});
++
++test('directory terminal defeats stale live or cached active for selected and unselected employees', () => {
++  for (const selected of [taskThread, 'other']) for (const remote of [false, true]) {
++    const store = conversationStore();
++    store.update(taskThread, { executionStatus: { ...liveStatus('working', true), updatedAt: time('10') } }, remote);
++    const state = taskDirectory('completed', '已完成', '12', '任务', '最终正文');
++    const statuses = snapshotStatusByThread(store, selected, state.projects);
++    assert.equal(statuses[taskThread].active, false);
++    assert.equal(taskRows(state.projects, [], new Map(), statuses).employees[0].active, false);
++  }
++});
++
++test('new turn observed during read survives missing event clocks, but an old turn does not', () => {
++  for (const duringRead of [false, true]) {
++    const store = conversationStore();
++    const old = { ...liveStatus('working', true), turnId: 'old' };
++    store.update(taskThread, { executionStatus: old }, true);
++    const revision = store.revisions.get(taskThread);
++    if (duringRead) store.update(taskThread, { executionStatus: { ...old, turnId: 'new' } }, true);
++    store.update(taskThread, { contextStatus: { ...store.get(taskThread).contextStatus, usedTokens: 999 } });
++    store.commit(taskThread, { ...store.empty(taskThread), executionStatus: {
++      ...old, active: false, phase: 'completed', updatedAt: time('12') } }, revision);
++    assert.equal(store.get(taskThread).executionStatus.active, duringRead);
++  }
++});
++
++test('fresh authoritative completion overrides older active directory and clears main employee work', () => {
++  const store = conversationStore();
++  const state = taskDirectory('working', '正在处理后台任务', '10', '任务', '运行');
++  store.commit(taskThread, { ...store.empty(taskThread), executionStatus: {
++    ...liveStatus('completed', false), turnId: 'turn', updatedAt: time('12') } }, 0);
++  let statuses = snapshotStatusByThread(store, taskThread, state.projects);
++  assert.equal(taskRows(state.projects, [], new Map(), statuses).employees[0].active, false);
++  state.projects[0].conversations[0].status = { active: true, phase: 'working', turnId: 'main', updatedAt: time('10') };
++  store.update('A', { executionStatus: { ...liveStatus('completed', false), threadId: 'A', turnId: 'main', updatedAt: time('12') } }, true);
++  statuses = snapshotStatusByThread(store, 'A', state.projects);
++  assert.equal(taskRows(state.projects, [], new Map(), statuses).employees[0].active, false);
++});
++
++test('directory completion during slow read is not overwritten by its older active response', () => {
++  const store = conversationStore();
++  const old = { ...liveStatus('working', true), updatedAt: time('10'), eventEpoch: 'epoch', eventSeq: 1 };
++  store.update(taskThread, { executionStatus: old }, true);
++  const revision = store.revisions.get(taskThread);
++  store.update(taskThread, { executionStatus: { ...old, active: false, phase: 'completed', updatedAt: time('12'), eventSeq: 2 } });
++  store.commit(taskThread, { ...store.empty(taskThread), executionStatus: old }, revision);
++  assert.equal(store.get(taskThread).executionStatus.active, false);
++});
+--- a/ui-feishu/validation/employee-task-extension.test.mjs
++++ b/ui-feishu/validation/employee-task-extension.test.mjs
+@@ -420,3 +420,41 @@
+   t.after(async () => { await extension.close(); await fs.rm(root, { recursive: true, force: true }); });
+   assert.deepEqual(extension.directoryEntries('a').map(entry => entry.threadId), ['native-thread']);
+ });
++
++test('public task API and employee children exclude recovering/completed external while retaining real background', async t => {
++  const { createTaskRoutes } = await import('../server/task-routes.mjs');
++  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-public-tasks-'));
++  const now = new Date().toISOString();
++  const task = (id, kind, state) => ({ id, requestKey: id, kind, state, background: kind !== 'external',
++    agentId: 'a', conversationId: `handoff-${id}`, lane: id, title: id, instructions: '',
++    runtime: { threadId: id, turnId: `turn-${id}`, modelProviderId: 'fixture' }, createdAt: now, updatedAt: now });
++  await fs.writeFile(path.join(root, 'tasks.json'), JSON.stringify({ version: 1, deliveries: [], tasks: [
++    task('external-recovering', 'external', 'recovering'), task('external-completed', 'external', 'completed'),
++    task('background', 'delegation', 'running'),
++  ] }));
++  let release; const gate = new Promise(resolve => release = resolve); const listeners = new Set();
++  const client = { subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); }, request: async (method, params) => {
++    assert.equal(method, 'thread/read');
++    if (params.threadId === 'external-recovering') await gate;
++    return { thread: { status: { type: 'active' }, turns: [{ id: `turn-${params.threadId}`, status: 'inProgress' }] } };
++  } };
++  const employee = { id: 'a', name: '助手', projectRoot: root };
++  const extension = await extendEmployeeTasks({ directoryEntries: () => [], close: async () => {} }, {
++    stateRoot: root, registry: { list: () => [employee], require: () => employee }, registerSession: async () => {},
++    modelProviders: { resolveRoute: route => route, getClient: async () => client }, providerForThread: async () => 'fixture',
++    bindings: { bindRuntime: async () => {} }, execution: { getStatus: () => ({ active: false }) }, queue: {},
++  });
++  t.after(async () => { release(); await extension.close(); await fs.rm(root, { recursive: true, force: true }); });
++  await until(() => extension.tasks().find(item => item.id === 'background')?.state === 'running');
++  const persisted = JSON.parse(await fs.readFile(path.join(root, 'tasks.json'), 'utf8'));
++  assert.equal(persisted.tasks.find(item => item.id === 'external-recovering').state, 'recovering');
++  const route = createTaskRoutes({ roomDirectory: { list: () => [] }, agentTasks: extension });
++  let body;
++  await route({ method: 'GET' }, { writeHead: status => assert.equal(status, 200), end: value => body = JSON.parse(value) }, new URL('http://fixture/api/tasks'));
++  assert.deepEqual(body.tasks.map(item => item.id), ['background']);
++  assert.deepEqual(extension.directoryEntries('a').map(item => item.threadId), ['background']);
++  assert.equal(extension.directoryEntries('a').filter(item => item.status.active).length, 1);
++  listeners.forEach(fn => fn({ method: 'turn/completed', params: { threadId: 'background', turn: { id: 'turn-background', status: 'completed', items: [] } } }));
++  await until(() => extension.tasks()[0].state === 'completed');
++  assert.equal(extension.directoryEntries('a').filter(item => item.status.active).length, 0);
++});
+--- a/ui-feishu/validation/task-kernel.test.mjs
++++ b/ui-feishu/validation/task-kernel.test.mjs
+@@ -285,3 +285,45 @@
+   const revised = await kernel.delegate(source.id, { requestId: 'revision', agentId: 'b', title: '补充', instructions: '补充公开来源' });
+   assert.equal(revised.instructions, '补充公开来源');
+ });
++
++test('reconciliation failures persist across restart and exhaust after three unknown results', async t => {
++  let observations = 0;
++  const { kernel, args, root } = await setup(t, { recoveryIntervalMs: 100000, runtime: {
++    execute: async () => assert.fail('must only observe'),
++    observe: async () => { observations++; return { status: 'unknown', error: 'provider unavailable' }; },
++  } });
++  const task = await kernel.enqueue({ ...input('bounded'), kind: 'external', runtime: { threadId: 'thread', turnId: 'turn' } });
++  await until(() => kernel.get(task.id).state === 'needs-reconciliation');
++  assert.equal(kernel.get(task.id).reconciliationFailures, 1);
++  await kernel.close();
++  const restarted = await createTaskKernel({ ...args, recoveryIntervalMs: 10 });
++  try {
++    await until(() => restarted.get(task.id).state === 'interrupted');
++    assert.equal(observations, 3);
++    assert.equal(restarted.get(task.id).error, 'provider unavailable');
++    assert.equal(restarted.hasPendingWork(), false);
++    await new Promise(resolve => setTimeout(resolve, 60));
++    assert.equal(observations, 3);
++    const saved = JSON.parse(await fs.readFile(path.join(root, 'tasks.json'), 'utf8'));
++    assert.equal(saved.tasks[0].reconciliationFailures, 3);
++    assert.equal(saved.tasks[0].state, 'interrupted');
++  } finally { await restarted.close(); }
++});
++
++test('confirmed active recovery resets consecutive failures and stays running until actual completion', async t => {
++  let attempt = 0; const completion = deferred();
++  const { kernel } = await setup(t, { recoveryIntervalMs: 10, runtime: {
++    observe: async (task, controls) => {
++      if (++attempt < 3) throw Error('temporary read error');
++      await controls.started(task.runtime);
++      return completion.promise;
++    },
++  } });
++  const task = await kernel.enqueue({ ...input('active'), kind: 'external', runtime: { threadId: 'thread', turnId: 'turn' } });
++  await until(() => kernel.get(task.id).state === 'running');
++  await new Promise(resolve => setTimeout(resolve, 60));
++  assert.equal(kernel.get(task.id).state, 'running');
++  assert.equal(kernel.get(task.id).reconciliationFailures, 0);
++  completion.resolve({ status: 'completed', text: 'actual final' });
++  await until(() => kernel.get(task.id).state === 'completed');
++});
+--- a/docs/project-management/items/FEAT-002/item.md
++++ b/docs/project-management/items/FEAT-002/item.md
+@@ -797,6 +797,14 @@
+ 
+ 状态：已按用户要求登记为待修复 BUG；业务代码 0 行，未发布、未重启、未提交、未发送测试消息，工作区已有改动全部保留。当前运行服务版本 `1794475480957-705e25f4` 与本次只读结论一致，代码尚未修改或上线。
+ 
++#### 2026-11-17 本项源码修复，待独立审核
++
++本轮用户明确授权修复上述完成态与有限恢复核对问题，替代“暂缓/仅登记”的执行状态；禁止提交、推送、发布、重启、真实测试消息和截图。保留 FEAT-001 context_status 修复及 Mermaid 等既有改动，不修改受保护滚动文件。
++
++复核：开工工作区已包含第一项正文/字段版本分离，但正文失效期间旧 live 仍可压过 completed，目录仍无条件接受 live active；隔离对照复现见 `work/terminal-live-20261117/baseline-repro.log`。现按同 epoch 序号、时间及读取期间的新 turn 证据合并运行态，目录终态与当前标题共用判断并回写现有 Store，避免显示空闲而发送仍进入旧运行队列。核对失败持久化计数连续三次后 interrupted，保留错误；真实 active 清零计数。external 现有过滤保持原样并补 API/目录测试。
++
++验证：200 项相关测试通过；终态、目录丢失事件、新 turn 慢读、刷新/重连/恢复、发送确认、附件、缓存 A/B、Goal/提问和分页浏览器夹具通过；100/1,000/10,000 context_status 均零新增正文请求；TypeScript 和 diff 检查通过。详细逐文件增减、命令及边界见 [本次验证记录](../../../../work/terminal-live-20261117/verification.md)。状态为源码修复与自测完成，待来源对话安排 DeepSeek 审核；运行服务没有加载本次修改。
++
+ ### 2026-11-16 群聊与普通对话的协作体验差异（问题登记）
+ 
+ 来源：当前维护对话以及用户对已核实反馈的评价，2026-11-16。
+--- a/docs/project-management/items/FEAT-002/updates.md
++++ b/docs/project-management/items/FEAT-002/updates.md
+@@ -380,3 +380,11 @@
+ - 最小方案：修正 terminal snapshot 对旧 live execution 的清理，并让目录 terminal 状态压过无更新证据的 live active；保留确有更新证据的新 active。给恢复核对设置有限次数，耗尽后使用现有 `interrupted`。补单元和浏览器验收，覆盖 completed 即空闲、慢读/重连/缓存不复活、external 不显示后台任务、真实运行不误清、recovering 不无限重试。
+ - 当前版本：运行快照 `1794475480957-705e25f4`；只读健康检查为 healthy。文档修改尚未由任何功能代码生效。
+ - 验证：仅针对本次两份文档运行 `git diff --check`，结果见本次交付。
++
++### 2026-11-17 完成态与有限恢复核对源码修复（待独立审核）
++
++- 用户本轮明确授权实际修复；沿用本项 11 月 16 日问题，保留历史“暂缓”和登记记录，不增加其他功能。
++- Store 独立按事件证据合并执行状态；目录完成态压过无更新证据的 active，标题、员工父行与发送控制共用完成态；较新的同 epoch/新 turn 保持活动。保留 bodyRevisions/fieldRevisions，不恢复正文请求风暴。
++- needs-reconciliation 连续失败上限三次，计数持久化，耗尽进入 interrupted 并保留实际错误；真实运行证据清零失败次数。external 的公开任务与目录排除规则未改。
++- 本项业务 +99/-26，测试 +231/-7。200 项相关测试、TypeScript、完成态专项及既有浏览器回归、diff 检查通过；三档 context_status 均零正文请求，受保护文件零差异。
++- [证据、逐文件原因、命令与覆盖边界](../../../../work/terminal-live-20261117/verification.md)。仅文件修改及隔离验证；未提交、推送、发布、重启、截图或发送真实测试消息。DeepSeek 审核由来源对话安排。

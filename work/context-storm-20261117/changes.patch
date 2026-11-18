@@ -1,0 +1,515 @@
+diff --git a/ui-feishu/shared/features/context-management/hooks/useContextManagement.ts b/ui-feishu/shared/features/context-management/hooks/useContextManagement.ts
+index 7ceb563..4bc9b6a 100644
+--- a/ui-feishu/shared/features/context-management/hooks/useContextManagement.ts
++++ b/ui-feishu/shared/features/context-management/hooks/useContextManagement.ts
+@@ -33,11 +33,13 @@ export function useContextManagement(threadId: string, store: ConversationStore)
+     return store.get(threadId).contextStatus;
+   }, [store, threadId]);
+   const handleEvent = useCallback((event: ContextStatus) => {
+-    const current = store.get(event.threadId, false).contextStatus;
++    const current = store.get(event.threadId, !store.synced.has(event.threadId)).contextStatus;
+     if (current.updatedAt && event.updatedAt && Date.parse(event.updatedAt) < Date.parse(current.updatedAt)) return;
+     const keepSettings = Boolean(current.selectedSettings || store.synced.has(event.threadId) || store.modelChoices.has(event.threadId));
++    const completed = event.phase === "completed" && current.phase !== "completed";
++    if (completed) store.invalidate(event.threadId, false);
+     store.update(event.threadId, { contextStatus: keepSettings
+-      ? { ...event, model: current.model, reasoningEffort: current.reasoningEffort, selectedSettings: current.selectedSettings } : event }, !keepSettings);
++      ? { ...event, model: current.model, reasoningEffort: current.reasoningEffort, selectedSettings: current.selectedSettings } : event }, !keepSettings, !(completed || (event.phase === "failed" && (current.phase !== event.phase || current.message !== event.message))));
+   }, [store]);
+ 
+   const applyModelSettings = useCallback((changedThreadId: string, settings: { model: string; reasoningEffort: string; committed?: boolean }) => {
+diff --git a/ui-feishu/shared/features/conversations/hooks/useProjectConversations.ts b/ui-feishu/shared/features/conversations/hooks/useProjectConversations.ts
+index dcfeb84..33e8613 100644
+--- a/ui-feishu/shared/features/conversations/hooks/useProjectConversations.ts
++++ b/ui-feishu/shared/features/conversations/hooks/useProjectConversations.ts
+@@ -695,8 +695,8 @@ export function useProjectConversations() {
+   const handleEvent = useCallback((event: ProjectEvent) => {
+     if (!selection.store.acceptEvent(event)) return;
+     if (event.type === "assistant_message_completed") selection.store.completeMessage(event.threadId, event.message);
+-    execution.handleEvent(event);
+     const previousStatus = event.type === 'execution_status' ? selection.store.get(event.threadId).executionStatus : null;
++    execution.handleEvent(event);
+     if (event.type === 'execution_status' && event.threadId !== selection.selectedIdRef.current) selection.store.update(event.threadId, { executionStatus: event }, true);
+     if (event.type === 'execution_status' && event.threadId !== selection.selectedIdRef.current
+       && ['completed', 'failed', 'interrupted', 'systemError'].includes(event.phase)
+@@ -717,7 +717,8 @@ export function useProjectConversations() {
+       reconciledSubmissionsRef.current.add(event.submissionId);
+       selection.updateOptimisticMessage(event.threadId, `optimistic-${event.submissionId}`, { deliveryState: undefined, deliveryError: undefined, turnId: event.turnId, protocolTurnId: event.turnId });
+     }
+-    if (event.type === "execution_status" && event.phase === "completed") contextManagement.completeSettings(event.threadId);
++    if (event.type === "execution_status" && event.phase === "completed"
++      && (previousStatus?.phase !== event.phase || previousStatus?.turnId !== event.turnId)) contextManagement.completeSettings(event.threadId);
+     if (event.type === "user_message_submitted") {
+       if (event.queueSubmissionId) selection.store.linkQueuedMessage(event.threadId, event.queueSubmissionId, event.submissionId);
+       selection.updateOptimisticMessage(event.threadId, event.messageId || `optimistic-${event.submissionId}`, { createdAt: event.createdAt, serverTimestamp: true });
+diff --git a/ui-feishu/shared/features/conversations/state/conversationStore.ts b/ui-feishu/shared/features/conversations/state/conversationStore.ts
+index 7727eb4..06c896a 100644
+--- a/ui-feishu/shared/features/conversations/state/conversationStore.ts
++++ b/ui-feishu/shared/features/conversations/state/conversationStore.ts
+@@ -73,6 +73,8 @@ export class ConversationStore {
+   });
+   modelChoices = new Map<string, { model: string; reasoningEffort: string }>();
+   revisions = new Map<string, number>();
++  bodyRevisions = new Map<string, number>();
++  private contextNotifications = new Map<string, ReturnType<typeof setTimeout>>();
+   synced = new Set<string>();
+   dirty = new Set<string>();
+   errors = new Map<string, string>();
+@@ -140,29 +142,55 @@ export class ConversationStore {
+     if (item) this.rememberAccepted(id, item.submissionId);
+     return item;
+   };
+-  update = (id: string, patch: Patch | ((current: ThreadSnapshot) => Patch), remote = false) => {
++  update = (id: string, patch: Patch | ((current: ThreadSnapshot) => Patch), remote = false, deferContext = false) => {
+     if (!id) return;
+     const next = typeof patch === 'function' ? patch(this.get(id)) : patch;
+     this.rememberQueue(id, next.queueItems || []);
++    const current = remote ? this.get(id) : (this.committed.get(id) || this.empty(id));
++    const keys = Object.keys(next) as (keyof Patch)[];
++    if ((remote || keys.every(key => key === 'contextStatus'))
++      && keys.every(key => signature(current[key]) === signature(next[key]))) {
++      // Retain event ordering even when only its timestamp advanced, without notifying or persisting.
++      if (next.contextStatus?.updatedAt && Date.parse(next.contextStatus.updatedAt) > (Date.parse(current.contextStatus.updatedAt || '') || 0)) {
++        const target = remote ? this.live.get(id) : this.committed.get(id);
++        if (target?.contextStatus) target.contextStatus = { ...target.contextStatus, updatedAt: next.contextStatus.updatedAt };
++      }
++      return;
++    }
++    const notify = () => {
++      const pending = this.contextNotifications.get(id);
++      if (deferContext) {
++        // Fixed window: continued usage events never postpone the trailing notification.
++        if (!pending) this.contextNotifications.set(id, setTimeout(() => {
++          this.contextNotifications.delete(id);
++          this.notify();
++        }, 180));
++      } else {
++        if (pending) clearTimeout(pending);
++        this.contextNotifications.delete(id);
++        this.notify();
++      }
++    };
++    if (!remote || next.contextStatus) {
++      this.revisions.set(id, (this.revisions.get(id) || 0) + 1);
++      this.fieldRevisions.set(id, { ...this.fieldRevisions.get(id),
++        ...Object.fromEntries(keys.map(key => [key, this.revisions.get(id)])) });
++    }
+     if (remote) {
+-      const current = this.get(id);
+-      const keys = Object.keys(next) as (keyof Patch)[];
+-      if (keys.every(key => signature(current[key]) === signature(next[key]))) return;
+       this.live.set(id, { ...this.live.get(id), ...next });
+-      this.notify();
++      notify();
+     } else {
+-      this.revisions.set(id, (this.revisions.get(id) || 0) + 1);
+-      this.fieldRevisions.set(id, { ...this.fieldRevisions.get(id),
+-        ...Object.fromEntries(Object.keys(next).map(key => [key, this.revisions.get(id)])) });
+       this.committed.set(id, { ...(this.committed.get(id) || this.empty(id)), ...next });
++      if (next.session) this.bodyRevisions.set(id, this.revisions.get(id)!);
+       ++this.persistVersion;
+       const live = this.live.get(id);
+       if (live) for (const key of Object.keys(next) as (keyof Patch)[]) delete live[key];
+-      this.notify();
++      notify();
+     }
+   };
+   invalidate = (id: string, notify = true) => {
+     this.revisions.set(id, (this.revisions.get(id) || 0) + 1);
++    this.bodyRevisions.set(id, this.revisions.get(id)!);
+     this.dirty.add(id);
+     if (notify) this.notify();
+   };
+@@ -212,7 +240,16 @@ export class ConversationStore {
+     if (snapshot.goal?.status === 'complete' && this.dismissedGoals.get(id) === goalCompletionKey(snapshot.goal)) snapshot = { ...snapshot, goal: null };
+     const latest = this.committed.get(id);
+     for (const [key, changedAt] of Object.entries(this.fieldRevisions.get(id) || {}) as [keyof ThreadSnapshot, number][]) {
+-      if (latest && changedAt > revision) snapshot = { ...snapshot, [key]: latest[key] };
++      if (changedAt <= revision) continue;
++      const context = key === 'contextStatus' ? this.live.get(id)?.contextStatus : undefined;
++      if (context) snapshot = { ...snapshot, contextStatus: { ...context,
++        model: snapshot.contextStatus.model, reasoningEffort: snapshot.contextStatus.reasoningEffort,
++        selectedSettings: snapshot.contextStatus.selectedSettings } };
++      else {
++        const patch = this.live.get(id);
++        if (patch && key in patch) snapshot = { ...snapshot, [key]: patch[key] };
++        else if (latest) snapshot = { ...snapshot, [key]: latest[key] };
++      }
+     }
+     const current = latest?.session;
+     if (current && snapshot.session) snapshot = { ...snapshot, session: refreshSession(current, snapshot.session) };
+@@ -232,10 +269,16 @@ export class ConversationStore {
+     if (live?.contextStatus) live.contextStatus = { ...live.contextStatus,
+       model: snapshot.contextStatus.model, reasoningEffort: snapshot.contextStatus.reasoningEffort };
+     this.synced.add(id);
+-    if ((this.revisions.get(id) || 0) === revision) {
+-      this.live.delete(id); this.dirty.delete(id); this.freshBodies.delete(id);
+-      const executionStatus = withStreamingStatus(snapshot.executionStatus, live?.executionStatus);
+-      if (executionStatus !== snapshot.executionStatus) this.live.set(id, { executionStatus });
++    if (live && (this.bodyRevisions.get(id) || 0) <= revision) {
++      const executionStatus = withStreamingStatus(snapshot.executionStatus, live.executionStatus);
++      for (const key of Object.keys(live) as (keyof Patch)[]) {
++        if ((this.fieldRevisions.get(id)?.[key] || 0) <= revision) delete live[key];
++      }
++      if (executionStatus !== snapshot.executionStatus) live.executionStatus = executionStatus;
++      if (!Object.keys(live).length) this.live.delete(id);
++    }
++    if ((this.bodyRevisions.get(id) || 0) <= revision) {
++      this.dirty.delete(id); this.freshBodies.delete(id);
+     }
+     this.finish(id);
+     const dataChanged = signature(previousCommitted, true) !== signature(this.committed.get(id), true)
+@@ -275,7 +318,8 @@ export class ConversationStore {
+     if (choice) this.modelChoices.set(to, choice);
+     this.committed.delete(from); this.live.delete(from); this.localPending.delete(from); this.modelChoices.delete(from);
+     this.dirty.delete(from); this.revisions.delete(from); this.errors.delete(from); this.synced.delete(from);
+-    this.fieldRevisions.delete(from); this.freshBodies.delete(from);
++    this.fieldRevisions.delete(from); this.freshBodies.delete(from); this.bodyRevisions.delete(from);
++    clearTimeout(this.contextNotifications.get(from)); this.contextNotifications.delete(from);
+     ++this.persistVersion;
+     this.notify();
+   };
+diff --git a/ui-feishu/src/usePageSnapshot.ts b/ui-feishu/src/usePageSnapshot.ts
+index e941096..646b113 100644
+--- a/ui-feishu/src/usePageSnapshot.ts
++++ b/ui-feishu/src/usePageSnapshot.ts
+@@ -30,7 +30,7 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
+   const mounted = useRef(true), generation = useRef(0);
+   const controller = useRef<AbortController | null>(null);
+   const [wakeVersion, wake] = useState(0);
+-  const revisionKey = JSON.stringify([...store.revisions]);
++  const revisionKey = JSON.stringify([...store.bodyRevisions]);
+   const source = useMemo(() => JSON.stringify([c.sessions, directory.projects, revisionKey],
+     (key, value) => ['updatedAt', 'lastProbeAt', 'lastEventAt', 'eventEpoch', 'eventSeq', 'durationMs'].includes(key) ? undefined : value),
+   [c.sessions, directory.projects, revisionKey]);
+@@ -74,7 +74,8 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
+     const entries = rows.filter(row => eligible.has(row.threadId!)).map(row => {
+       const id = row.threadId!, revision = store.revisions.get(id) || 0;
+       return { id, revision, conversationId: row.conversationId || undefined,
+-        signature: JSON.stringify([row.name, row.time, row.preview, row.session, revision]), priority: priority.has(id) };
++        signature: JSON.stringify([row.session?.sourceRevision, row.session?.messageCount, row.preview,
++          store.bodyRevisions.get(id) || 0]), priority: priority.has(id) };
+     }).filter(entry => observed.current.get(entry.id) !== entry.signature);
+     for (const id of store.errors.keys()) if (!rows.some(row => row.threadId === id)) store.errors.delete(id);
+     for (const [id, read] of independentReads.current) {
+@@ -194,6 +195,7 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
+     loadingSession: c.loadingSession,
+     refresh: () => {
+       controller.current?.abort(); ++generation.current; running.current = false; observed.current.clear(); cancelIndependent();
++      wake(value => value + 1);
+       return c.refresh();
+     } };
+   useEffect(() => {
+diff --git a/ui-feishu/validation/conversation-refresh-policy-browser.test.mjs b/ui-feishu/validation/conversation-refresh-policy-browser.test.mjs
+index 3bce71f..f18cee6 100644
+--- a/ui-feishu/validation/conversation-refresh-policy-browser.test.mjs
++++ b/ui-feishu/validation/conversation-refresh-policy-browser.test.mjs
+@@ -8,7 +8,7 @@ const page = await browser.newPage();
+ page.setDefaultTimeout(8000);
+ 
+ const stamp = '2026-11-13T00:00:00Z';
+-const summaries = Array.from({ length: 6 }, (_, index) => ({
++const summaries = Array.from({ length: 20 }, (_, index) => ({
+   threadId: `t${index}`, sourceRevision: 'r1', source: 'codex', title: `对话${index}`,
+   updatedAt: new Date(Date.parse(stamp) - index * 1000).toISOString(), messageCount: 1,
+   latestMessage: `摘要${index}`, latestUser: '', latestAssistant: '',
+@@ -18,6 +18,8 @@ const detail = id => ({
+   messages: [{ id: `m-${id}`, role: 'assistant', text: `正文${id}`, createdAt: stamp }],
+ });
+ const calls = [], errors = [], statuses = new Map();
++let heldRead = null, releaseRead, rejectRead = false;
++const inFlight = new Map(), peaks = new Map();
+ page.on('pageerror', error => errors.push(error.message));
+ page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+ await page.addInitScript(() => {
+@@ -38,6 +40,8 @@ await page.route('**/api/**', async route => {
+   else if (path === '/api/sessions') data = summaries;
+   else if (path === '/api/session') {
+     calls.push({ id, revision: url.searchParams.get('sourceRevision') });
++    inFlight.set(id, (inFlight.get(id) || 0) + 1);
++    peaks.set(id, Math.max(peaks.get(id) || 0, inFlight.get(id)));
+     data = {
+       session: url.searchParams.get('sourceRevision') === summaries[Number(id.slice(1))].sourceRevision ? null : detail(id),
+       sourceRevision: summaries[Number(id.slice(1))].sourceRevision,
+@@ -48,7 +52,15 @@ await page.route('**/api/**', async route => {
+   } else if (path === '/api/models') data = [];
+   else if (path === '/api/model-channels') data = { channels: [] };
+   else if (path === '/api/group/rooms') data = { rooms: [] };
++  if (path === '/api/session' && id === 't1' && rejectRead) {
++    rejectRead = false;
++    await route.fulfill({ status: 409, json: { error: 'fixture version conflict' } });
++    inFlight.set(id, inFlight.get(id) - 1);
++    return;
++  }
++  if (path === "/api/session" && id === "t1" && heldRead) await heldRead;
+   await route.fulfill({ json: data });
++  if (path === "/api/session") inFlight.set(id, inFlight.get(id) - 1);
+ });
+ 
+ const sessionReads = () => calls.filter(call => call.id === 't1').length;
+@@ -56,6 +68,41 @@ try {
+   await page.goto('http://127.0.0.1:5201/?thread=t0');
+   await page.waitForFunction(() => document.querySelector('button[aria-label="刷新会话"]')?.getAttribute('aria-busy') === 'false');
+   assert.equal(sessionReads(), 1);
++  await page.waitForFunction(() => document.querySelectorAll('button[aria-label^="打开对话"]').length >= 20);
++  await page.waitForTimeout(700);
++  const warmReads = calls.length;
++  assert.equal(warmReads, 20);
++  const composer = page.locator('.chat-composer > div:visible textarea');
++  await composer.focus();
++  await composer.evaluate(el => { window.fixtureComposer = el; window.inputFrames = []; window.longTasks = [];
++    new PerformanceObserver(list => window.longTasks.push(...list.getEntries().map(entry => entry.duration))).observe({ type: 'longtask' });
++    el.addEventListener('input', () => { const start = performance.now(); requestAnimationFrame(() => window.inputFrames.push(performance.now() - start)); });
++  });
++  for (const count of [100, 1000, 10000]) {
++    await page.evaluate(count => {
++      let i = 0;
++      window.stormDone = false;
++      const timer = setInterval(() => {
++        const end = Math.min(i + 50, count);
++        for (; i < end; i++) window.emitFixture({ type: 'context_status', threadId: `t${i % 20}`,
++          model: '', reasoningEffort: '', phase: 'idle', usedTokens: i, updatedAt: new Date(i).toISOString() });
++        if (i === count) { clearInterval(timer); window.stormDone = true; }
++      }, 10);
++    }, count);
++    await composer.pressSequentially('abc');
++    await composer.press('ArrowLeft'); await composer.press('Backspace');
++    const cdp = await page.context().newCDPSession(page);
++    await cdp.send('Input.imeSetComposition', { text: '中文', selectionStart: 2, selectionEnd: 2 });
++    await cdp.send('Input.insertText', { text: '中文' });
++    await cdp.detach();
++    await page.waitForFunction(() => window.stormDone);
++    await page.waitForTimeout(400);
++    assert.equal(await composer.evaluate(el => el === window.fixtureComposer && document.activeElement === el), true);
++    assert.equal(calls.length, warmReads, `${count} usage events must add zero session requests`);
++  }
++  assert.equal(await composer.inputValue(), 'a中文a中文a中文ccc');
++  console.log(JSON.stringify(await page.evaluate(() => ({ inputFrames: window.inputFrames, longTasks: window.longTasks }))));
++  console.log(JSON.stringify({ contextStorms: [100, 1000, 10000], warmReads, addedSessionRequests: calls.length - warmReads }));
+ 
+   const running = { type: 'execution_status', threadId: 't1', phase: 'working', active: true, turnId: 'turn-t1', activities: [] };
+   statuses.set('t1', running);
+@@ -82,7 +129,51 @@ try {
+   await page.evaluate(() => window.emitFixture({ type: 'sessions_changed', threadId: 't1' }));
+   await page.waitForTimeout(1200);
+   assert.equal(sessionReads(), 3, 'new content revision must reread the body');
++  const message = { id: 'fixture-complete', role: 'assistant', text: '完整消息即时到达', createdAt: stamp };
++  const beforeMessage = calls.length;
++  await page.evaluate(message => { for (let i = 0; i < 2; i++) window.emitFixture({
++    type: 'assistant_message_completed', threadId: 't0', message }); }, message);
++  await page.locator('[data-message-id="fixture-complete"]').waitFor();
++  assert.equal(await page.locator('[data-message-id="fixture-complete"]').count(), 1);
++  assert.equal(calls.length, beforeMessage);
++
++  const beforeSlow = sessionReads();
++  heldRead = new Promise(resolve => { releaseRead = resolve; });
++  for (const version of [3, 4, 5]) {
++    summaries[1].sourceRevision = `r${version}`;
++    await page.evaluate(() => window.emitFixture({ type: 'sessions_changed', threadId: 't1' }));
++    await page.waitForTimeout(700);
++  }
++  assert.equal(sessionReads(), beforeSlow + 1, 'one in-flight read despite three content changes');
++  heldRead = null; releaseRead();
++  await page.waitForTimeout(700);
++  assert.equal(sessionReads(), beforeSlow + 2, 'exactly one follow-up reads the latest demand');
++  assert.equal(peaks.get('t1'), 1);
++  assert.equal(calls.at(-1).revision, 'r3');
++
++  const selectedTerminal = { ...completed, threadId: 't0', turnId: 'selected-turn' };
++  statuses.set('t0', selectedTerminal);
++  await page.evaluate(event => window.emitFixture(event), selectedTerminal);
++  await page.waitForTimeout(400);
++  const terminalReads = calls.length;
++  await page.evaluate(event => window.emitFixture(event), selectedTerminal);
++  await page.waitForTimeout(400);
++  assert.equal(calls.length, terminalReads, 'selected duplicate terminal does not reread');
+   assert.deepEqual(errors, []);
++  rejectRead = true;
++  summaries[1].sourceRevision = 'r6';
++  await page.evaluate(() => window.emitFixture({ type: 'sessions_changed', threadId: 't1' }));
++  await page.waitForTimeout(800);
++  const conflictReads = calls.length;
++  await page.evaluate(() => { for (let i = 0; i < 100; i++) window.emitFixture({ type: 'context_status',
++    threadId: 't1', phase: 'idle', usedTokens: i, updatedAt: new Date().toISOString() }); });
++  await page.waitForTimeout(400);
++  assert.equal(calls.length, conflictReads, '409 followed by usage must not create a retry loop');
++  await page.getByRole('button', { name: '刷新会话', exact: true }).click();
++  await page.waitForTimeout(900);
++  assert.ok(calls.length > conflictReads, 'manual refresh recovers the conflict');
++  assert.ok(errors.length > 0 && errors.every(error => /409|fixture version conflict|conversation-sync/.test(error)));
++  console.log('PASS 409 stays bounded and manual refresh recovers');
+   console.log(JSON.stringify({ result: 'PASS', sessionReads: calls }));
+ } finally {
+   console.log(JSON.stringify({ errors, calls, body: (await page.locator('body').innerText()).slice(0, 1500) }));
+diff --git a/windows/server/context-management-service.mjs b/windows/server/context-management-service.mjs
+index 9bd3645..32016c3 100644
+--- a/windows/server/context-management-service.mjs
++++ b/windows/server/context-management-service.mjs
+@@ -127,10 +127,21 @@ export const createContextManagementService = async ({
+   const load = async (threadId) => {
+     const before = statusFor(threadId);
+     const runtime = await getRuntimeContext(threadId);
++    // A read must not publish its own next invalidation or overwrite a newer runtime event.
++    if (statusFor(threadId) !== before) {
++      const current = statusFor(threadId);
++      states.set(threadId, { ...current,
++        model: current.model || runtime.model || '',
++        reasoningEffort: current.reasoningEffort || runtime.reasoningEffort || '',
++        ...(current.lastSuccessfulSettings === undefined && runtime.lastSuccessfulSettings !== undefined
++          ? { lastSuccessfulSettings: runtime.lastSuccessfulSettings } : {}),
++      });
++      return publicStatus(statusFor(threadId));
++    }
+     const model = runtime.model || statusFor(threadId).model;
+     const modelChanged = Boolean(model && statusFor(threadId).model && model !== statusFor(threadId).model);
+     const verifiedWindow = verifiedContextWindow(model);
+-    publish(threadId, {
++    states.set(threadId, { ...before,
+       model,
+       reasoningEffort: runtime.reasoningEffort || statusFor(threadId).reasoningEffort,
+       ...(runtime.lastSuccessfulSettings !== undefined ? { lastSuccessfulSettings: runtime.lastSuccessfulSettings } : {}),
+diff --git a/windows/tests/context-management-service.test.mjs b/windows/tests/context-management-service.test.mjs
+index c34c740..5a20d51 100644
+--- a/windows/tests/context-management-service.test.mjs
++++ b/windows/tests/context-management-service.test.mjs
+@@ -141,3 +141,35 @@ test('DeepSeek replaces legacy fallback capacity while preserving measured token
+   assert.equal(service.getStatus('deepseek').percentage, 2);
+   await service.close();
+ });
++
++test('snapshot loads do not broadcast; real usage events survive a slow runtime read', async () => {
++  const events = [];
++  let resolve;
++  const service = await createContextManagementService({
++    stateFile: path.join(os.tmpdir(), `context-read-${process.pid}.json`),
++    broadcast: event => events.push(event), getExecutionStatus: () => ({ active: false }),
++    getRuntimeContext: () => new Promise(done => { resolve = done; }), compactContext: async () => {},
++  });
++  const first = service.load('t');
++  resolve({ model: 'model', usage: { usedTokens: 10, contextWindow: 1000 } });
++  assert.equal((await first).usedTokens, 10);
++  assert.equal(events.length, 0);
++  const slow = service.load('t');
++  service.handleProtocolMessage({ method: 'thread/tokenUsage/updated', params: {
++    threadId: 't', tokenUsage: { last: { totalTokens: 20 }, modelContextWindow: 1000 },
++  } });
++  resolve({ model: 'old-model', usage: { usedTokens: 1, contextWindow: 1000 } });
++  assert.equal((await slow).usedTokens, 20);
++  assert.equal(service.getStatus('t').model, 'model');
++  assert.equal(events.length, 1);
++  const initial = service.load('new');
++  service.handleProtocolMessage({ method: 'thread/tokenUsage/updated', params: {
++    threadId: 'new', tokenUsage: { last: { totalTokens: 30 }, modelContextWindow: 1000 },
++  } });
++  resolve({ model: 'saved-model', lastSuccessfulSettings: { model: 'saved-model', reasoningEffort: 'high' } });
++  const loaded = await initial;
++  assert.equal(loaded.usedTokens, 30);
++  assert.equal(loaded.model, 'saved-model');
++  assert.equal(loaded.lastSuccessfulSettings.model, 'saved-model');
++  await service.close();
++});
+diff --git a/windows/tests/conversation-send-state.test.mjs b/windows/tests/conversation-send-state.test.mjs
+index def438c..7f6e508 100644
+--- a/windows/tests/conversation-send-state.test.mjs
++++ b/windows/tests/conversation-send-state.test.mjs
+@@ -1,7 +1,7 @@
+ import test from 'node:test';
+ import assert from 'node:assert/strict';
+ import fs from 'node:fs/promises';
+-import { ConversationStore } from "./frontend-conversation-store.mjs";
++import { ConversationStore, conversationApi } from "./frontend-conversation-store.mjs";
+ import ts from '../../ui-feishu/node_modules/typescript/lib/typescript.js';
+ 
+ const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+@@ -344,3 +344,91 @@ test('accepted new turn drops old failure notices without erasing steering progr
+   assert.deepEqual(h.status.notices,['current warning']);
+   assert.equal(h.status.phase,'tool');
+ });
++
++test('context storms keep body revisions stable, coalesce in fixed windows and retain latest usage', async () => {
++  const render = await harness('features/context-management/hooks/useContextManagement.ts', { contextApi: {} });
++  const store = render.store, hook = render('useContextManagement', 't0');
++  for (let i = 0; i < 20; i++) store.commit(`t${i}`, store.empty(`t${i}`), 0);
++  let notifications = 0;
++  store.subscribe(() => notifications++);
++  const base = store.empty('t0').contextStatus;
++  const persisted = store.getPersistSnapshot();
++  for (let i = 0; i < 1000; i++) hook.handleEvent({ ...base, updatedAt: new Date(i).toISOString() });
++  assert.equal(store.getPersistSnapshot(), persisted);
++  assert.equal(store.revisions.size, 0);
++  for (let i = 0; i < 10000; i++) hook.handleEvent({ ...base, threadId: `t${i % 20}`, usedTokens: i });
++  assert.equal(store.bodyRevisions.size, 0);
++  assert.equal(notifications, 0);
++  await new Promise(resolve => setTimeout(resolve, 200));
++  assert.equal(notifications, 20);
++  for (let i = 0; i < 20; i++) assert.equal(store.get(`t${i}`).contextStatus.usedTokens, 9980 + i);
++  const timer = setInterval(() => hook.handleEvent({ ...base, usedTokens: Date.now() }), 20);
++  await new Promise(resolve => setTimeout(resolve, 240));
++  clearInterval(timer);
++  assert.ok(notifications > 20, 'continuous events must flush before they stop');
++  await new Promise(resolve => setTimeout(resolve, 200));
++});
++
++test('slow snapshots preserve newer usage, dirty invalidations and model choices', async () => {
++  const render = await harness('features/context-management/hooks/useContextManagement.ts', { contextApi: {} });
++  const store = render.store, hook = render('useContextManagement', 't');
++  const snapshot = { ...store.empty('t'), session: { threadId: 't', messages: [] } };
++  store.commit('t', snapshot, 0);
++  store.invalidate('t');
++  const revision = store.revisions.get('t');
++  hook.handleEvent({ ...snapshot.contextStatus, usedTokens: 999 });
++  store.commit('t', snapshot, revision);
++  assert.equal(store.get('t').contextStatus.usedTokens, 999);
++  assert.equal(store.dirty.has('t'), false, 'usage must not hold a completed body read dirty');
++  store.invalidate('t');
++  store.invalidate('t');
++  store.commit('t', snapshot, revision);
++  assert.equal(store.dirty.has('t'), true);
++  hook.applyModelSettings('t', { model: 'chosen', reasoningEffort: 'high' });
++  store.commit('t', snapshot, revision);
++  assert.equal(store.get('t').contextStatus.model, 'chosen');
++  hook.handleEvent({ ...snapshot.contextStatus, phase: 'completed' });
++  assert.equal(store.dirty.has('t'), true, 'compaction completion requires calibration');
++});
++
++test('usage updates during calibration do not retain an old running overlay', async () => {
++  const render = await harness('features/context-management/hooks/useContextManagement.ts', { contextApi: {} });
++  const store = render.store, hook = render('useContextManagement', 't');
++  const initial = store.empty('t');
++  store.commit('t', initial, 0);
++  store.update('t', { executionStatus: { ...initial.executionStatus, active: true, phase: 'working' } }, true);
++  store.invalidate('t');
++  const revision = store.revisions.get('t');
++  hook.handleEvent({ ...initial.contextStatus, usedTokens: 10, updatedAt: '2026-11-17T00:00:01Z' });
++  const persist = store.getPersistSnapshot(), fields = store.revisions.get('t');
++  hook.handleEvent({ ...initial.contextStatus, usedTokens: 10, updatedAt: '2026-11-17T00:00:03Z' });
++  assert.equal(store.getPersistSnapshot(), persist);
++  assert.equal(store.revisions.get('t'), fields);
++  hook.handleEvent({ ...initial.contextStatus, usedTokens: 1, updatedAt: '2026-11-17T00:00:02Z' });
++  assert.equal(store.get('t').contextStatus.usedTokens, 10);
++  store.commit('t', { ...initial, executionStatus: { ...initial.executionStatus, active: false, phase: 'completed' } }, revision);
++  assert.equal(store.get('t').executionStatus.active, false);
++  assert.equal(store.get('t').contextStatus.usedTokens, 10);
++});
++
++
++test('a delayed older contentVersion cannot replace a newer body and concurrent readers share one request', async () => {
++  window.location = { search: '' };
++  const store = new ConversationStore({ cachedSessions: [], partialSessionIds: [] });
++  const latest = { ...store.empty('t'), session: { threadId: 't', contentVersion: 5, messages: [{ id: 'new', role: 'assistant', text: 'latest' }] } };
++  store.commit('t', latest, 0);
++  const original = conversationApi.snapshot, gate = deferred();
++  let requests = 0;
++  conversationApi.snapshot = () => { requests++; return gate.promise; };
++  try {
++    const signal = new AbortController().signal;
++    const first = store.read('t', '', signal), second = store.read('t', '', signal);
++    assert.equal(first, second);
++    gate.resolve({ session: { ...latest.session, contentVersion: 4, messages: [] }, context: latest.contextStatus,
++      status: latest.executionStatus, goal: null, queue: [], input: null });
++    const result = await first;
++    assert.equal(requests, 1);
++    assert.equal(result.session.contentVersion, 5);
++    assert.equal(result.session.messages[0].text, 'latest');
++  } finally { conversationApi.snapshot = original; }
++});

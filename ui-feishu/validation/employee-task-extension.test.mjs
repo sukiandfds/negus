@@ -418,6 +418,85 @@ test('registration-pending task without a verified turn is interrupted instead o
   assert.equal(methods.filter(method => method === 'turn/start').length, 0);
 });
 
+test('native subagent history attributes only the first dispatch to its trusted employee; unknown and forks remain distinct', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-native-subagent-source-'));
+  const employees = [
+    { id: 'manager', name: '运营管理', projectRoot: root, mainThreadId: 'manager-main' },
+    { id: 'developer', name: '技术研发', projectRoot: root, mainThreadId: 'developer-main' },
+  ];
+  const sessions = new Map([
+    ['manager-main', { threadId: 'manager-main', messages: [] }],
+    ['developer-main', { threadId: 'developer-main', messages: [] }],
+    ['developer-group', { threadId: 'developer-group', messages: [] }],
+    ['active-child', { threadId: 'active-child', nativeSubagent: true, parentThreadId: 'manager-main', messages: [] }],
+    ['nested-child', { threadId: 'nested-child', nativeSubagent: true, parentThreadId: 'active-child', messages: [] }],
+    ['group-child', { threadId: 'group-child', nativeSubagent: true, parentThreadId: 'developer-group', messages: [] }],
+    ['unknown-child', { threadId: 'unknown-child', nativeSubagent: true, parentThreadId: 'missing', messages: [] }],
+    ['ordinary-fork', { threadId: 'ordinary-fork', nativeSubagent: false, parentThreadId: 'manager-main', messages: [] }],
+  ]);
+  const extension = await extendEmployeeTasks({ directoryEntries: () => [], close: async () => {} }, {
+    stateRoot: root,
+    registry: {
+      list: () => employees,
+      require: id => employees.find(employee => employee.id === id) || (() => { throw Error('missing employee'); })(),
+    },
+    bindings: {
+      bindRuntime: async () => {},
+      findByRuntimeSession: (_runtimeKind, threadId) => threadId === 'developer-group'
+        ? { conversationKind: 'group', agentId: 'developer', runtimeSessionId: threadId }
+        : null,
+    },
+    conversations: {
+      findSession: async threadId => sessions.get(threadId) || null,
+      listSessions: async () => [...sessions.values()],
+    },
+    execution: { getStatus: () => ({ active: false }) },
+    queue: {},
+  });
+  t.after(async () => { await extension.close(); await fs.rm(root, { recursive: true, force: true }); });
+
+  const history = (threadId, parentThreadId) => ({
+    threadId,
+    nativeSubagent: true,
+    parentThreadId,
+    messages: [
+      { id: `${threadId}-assistant`, role: 'assistant', text: '先收到' },
+      { id: `${threadId}-dispatch`, role: 'user', text: '派工内容' },
+      { id: `${threadId}-human`, role: 'user', text: '后续真人输入' },
+    ],
+  });
+  for (const [threadId, parentThreadId, authorName, authorId] of [
+    ['active-child', 'manager-main', '运营管理', 'manager'],
+    ['nested-child', 'active-child', '运营管理', 'manager'],
+    ['group-child', 'developer-group', '技术研发', 'developer'],
+  ]) {
+    const decorated = await extension.decorateConversationSession(threadId, history(threadId, parentThreadId));
+    assert.equal(decorated.nativeSubagent, true);
+    assert.equal(decorated.messages[1].authorName, authorName);
+    assert.equal(decorated.messages[1].authorId, authorId);
+    assert.equal(decorated.messages[1].displaySourceAgentId, authorId);
+    assert.equal(decorated.messages[2].authorName, undefined);
+  }
+  const unknown = await extension.decorateConversationSession('unknown-child', history('unknown-child', 'missing'));
+  assert.equal(unknown.messages[1].authorName, '来源待确认');
+  assert.equal(unknown.messages[1].displaySourceAgentId, 'native-subagent:unknown');
+  const partial = await extension.decorateConversationSession('active-child', {
+    ...history('active-child', 'manager-main'),
+    hasMore: true,
+    messageCount: 90,
+  });
+  assert.equal(partial.messages[1].authorName, undefined, 'a middle history page must not label a later human input as the original dispatch');
+  const fork = await extension.decorateConversationSession('ordinary-fork',
+    { ...history('ordinary-fork', 'manager-main'), nativeSubagent: false });
+  assert.equal(fork.messages[1].authorName, undefined);
+  assert.equal(fork.messages[1].displaySourceAgentId, undefined);
+
+  const firstRevision = await extension.actorRevisionFor('active-child');
+  assert.equal(await extension.actorRevisionFor('active-child'), firstRevision);
+  assert.notEqual(await extension.actorRevisionFor('unknown-child'), firstRevision);
+  assert.equal(await extension.actorRevisionFor('ordinary-fork'), '');
+});
+
 test('task directory excludes records without a native thread identity', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-task-directory-'));
   const now = new Date().toISOString();

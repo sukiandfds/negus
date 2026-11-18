@@ -1,0 +1,422 @@
+--- a/docs/project-management/items/FEAT-001/item.md
++++ b/docs/project-management/items/FEAT-001/item.md
+@@ -1695,3 +1695,21 @@
+ 根因与改动：compact 原先等待 POST 才更新；目录只读消息时间；选中缓存正文不检查上下文缺失；员工 runtimeContextForThread 只返回模型设置。现复用 Store、聚合读取、目录映射、provider 历史读取器；压缩 POST 迟到不覆盖更新 SSE，客户端时钟不参与服务端事件先后比较。
+ 
+ 验证：185 项定向单测通过；隔离 Chrome 覆盖两类对话、缺时间戳/有时间戳但无用量、完整缓存 A/B 零请求、压缩本机→服务端→完成及迟到 POST；三档 100/1,000/10,000 context_status 零新增正文请求。详细命令、逐文件增减及证据见 [本轮验证记录](../../../../work/four-usage-fixes-20261117/verification.md)。本轮只改源码并自测，独立验收由来源对话安排；未提交、推送、发布或重启。
++
++
++### 2026-11-17 独立审核 FAIL 后仅补分页校准与压缩序号
++
++来源：本轮用户转交的 DeepSeek Flash High 独立审核结果；原交付185项局部自测未覆盖以下两项阻断，不能据其宣称所有边界通过。
++
++用户原话：
++> 长对话分页缓存仍不校准上下文用量（阻断）
++> 改为依据“已有正文但上下文用量缺失”决定校准，不能再依赖 messageCount 真值。
++> 同一对话在服务端确认没有可用 usage 时，不得每次 A/B 切换都重复请求。
++> 同毫秒压缩状态迟到 POST 会把 completed 回退到 compacting（阻断）
++> 在后端压缩生命周期增加单调序号（例如 compactionRevision/sequence），开始、失败、完成、中断、新一次压缩的每次真实阶段转换均递增。
++
++有效决定与补修：正文存在依据 messages，不依据分页 messageCount；聚合读取成功后在原 contextStatus 保存 usageSourceRevision，对同一正文版本已确认无用量不反复校准。实时状态保留该标记，显式换模型时清除，校准继续携带 sourceRevision；不新增状态事件正文读取。后端真实压缩 phase 转换递增 compactionRevision，普通用量/load/重复同阶段不递增且不改变 compactionUpdatedAt；SSE/POST 共用。前端先按序号拒绝旧事件，同序号或无序号不能从 completed/failed 回到 compacting/queued，更高序号的新压缩可正常开始。
++
++操作变化：普通/员工长对话切回→发送前得到用量；服务端确实没有用量→保持现有空用量展示，后续相同正文 A/B 不再请求。点击压缩→已完成→迟到的同毫秒 POST 不再重新显示正在压缩；下一次压缩正常开始。
++
++本轮补修自测：115项定向测试、四项浏览器、三档状态风暴、TypeScript及语法/差异检查结果统一见 [复审补修证据](../../../../work/four-usage-fixes-20261117/verification.md#第二轮补修独立审核-fail-后)。独立复审由来源对话安排；未提交、推送、发布或重启。
+--- a/docs/project-management/items/FEAT-001/updates.md
++++ b/docs/project-management/items/FEAT-001/updates.md
+@@ -1094,3 +1094,10 @@
+ - 覆盖压缩活动时间、普通及员工主对话打开用量校准、员工页新建普通对话、跨设备完成目录同步；员工历史用量复用既有只读供应商历史路径，目录落盘后再失效，失败补读有界。
+ - 185 项定向单测通过；隔离浏览器四项操作及缓存/发送回归通过；100/1,000/10,000 状态事件零新增正文请求。精确命令、增减、保护检查及证据见 [验证记录](../../../../work/four-usage-fixes-20261117/verification.md)。
+ - 状态：仅 develop 工作区修改与自测；未提交、推送、发布、重启、截图或发送真实消息；运行服务没有因本轮加载新代码。来源对话后续安排 DeepSeek Flash High 独立验收；真实公网、手机和供应商端到端留到发布后。
++
++
++### 2026-11-17 第二轮：独立审核 FAIL 后三个漏项补修
++
++- 按用户限定仅补分页缓存上下文校准、同毫秒压缩序号和目录可恢复错误重试；不重做已通过四路主体，保留既有改动。
++- 本条目对应原话、有效决定与保留范围已追加在item.md。115项定向单测及四项浏览器、100/1,000/10,000纯状态事件零正文请求通过；完整命令、统计和最终检查见 [本轮验证记录](../../../../work/four-usage-fixes-20261117/verification.md#第二轮补修独立审核-fail-后)。
++- 上轮185项通过记录保留为历史局部证据，独立审核FAIL结论不覆盖或改写为PASS；本轮补修由来源对话复审。未提交、推送、发布、重启、截图或发送真实消息。
+--- a/docs/project-management/items/FEAT-002/item.md
++++ b/docs/project-management/items/FEAT-002/item.md
+@@ -925,3 +925,19 @@
+ 最小修复：完成事件纳入现有 directory-changed；共享目录请求统一 60 秒，失败仅再读一次，持续失败保留旧值并停止，后续事件/恢复仍可重试；sessions_changed 改在记录落盘成功后发布，原实时正文事件保持。继续使用既有目录权威合并与父行状态，不新增另一份缓存。员工重启后历史上下文用量修复同时见 FEAT-001 本日条目。
+ 
+ 操作变化：设备 B 留在列表→收到 A 员工完成→更新摘要、时间及父行；首次请求超时后有限补读，恢复后不继续请求。验证含完成事件、单次 timedout、连续失败停止、保留旧值、下一次完成事件恢复、实际记录保存 gate。185 项定向单测及隔离浏览器通过，证据见 [本轮验证记录](../../../../work/four-usage-fixes-20261117/verification.md)。真实公网、手机和供应商流程按本轮边界留到发布后验收；未提交、推送、发布或重启。
++
++
++### 2026-11-17 独立审核 FAIL 后收紧目录补读
++
++来源：本轮用户转交的 DeepSeek Flash High 独立审核结果。
++
++用户原话：
++> 目录补读应只针对可恢复错误（低风险）
++> 改成只对网络错误、超时和 5xx 补读一次；401、403、404 每次失效只请求一次，保留旧目录，不循环。
++> 复用现有 fetchJson/HttpError 或最小增加 HTTP status 信息，避免扩大无关调用方行为。
++
++有效决定：替代上一轮“所有错误都补读一次”的实现。GET错误保留原文案并携带HttpError.status，POST/PATCH/DELETE错误行为不变；共享目录仅网络TypeError、超时/AbortError、500–599补读一次，401/403/404和其他不可恢复错误不补读。连续可恢复失败最多两次，旧目录保留，下一次已有事件仍可重新尝试；不新增轮询。
++
++操作变化：设备B目录更新遇到网络/服务端临时故障→一次补读后恢复；遇到权限拒绝或不存在→保留旧目录且只发一次请求。已通过的完成事件接线、落盘后失效、父行合并保持原样。
++
++定向覆盖网络、超时、500/501/503/599、401/403/404/429、连续失败停止及下次失效恢复；四项浏览器目录场景继续通过。员工分页上下文缺失的补修见FEAT-001本日同轮记录。证据见 [复审补修证据](../../../../work/four-usage-fixes-20261117/verification.md#第二轮补修独立审核-fail-后)。未提交、推送、发布或重启；独立复审由来源对话安排。
+--- a/docs/project-management/items/FEAT-002/updates.md
++++ b/docs/project-management/items/FEAT-002/updates.md
+@@ -428,3 +428,10 @@
+ - 覆盖压缩活动时间、普通及员工主对话打开用量校准、员工页新建普通对话、跨设备完成目录同步；员工历史用量复用既有只读供应商历史路径，目录落盘后再失效，失败补读有界。
+ - 185 项定向单测通过；隔离浏览器四项操作及缓存/发送回归通过；100/1,000/10,000 状态事件零新增正文请求。精确命令、增减、保护检查及证据见 [验证记录](../../../../work/four-usage-fixes-20261117/verification.md)。
+ - 状态：仅 develop 工作区修改与自测；未提交、推送、发布、重启、截图或发送真实消息；运行服务没有因本轮加载新代码。来源对话后续安排 DeepSeek Flash High 独立验收；真实公网、手机和供应商端到端留到发布后。
++
++
++### 2026-11-17 第二轮：独立审核 FAIL 后三个漏项补修
++
++- 按用户限定仅补分页缓存上下文校准、同毫秒压缩序号和目录可恢复错误重试；不重做已通过四路主体，保留既有改动。
++- 本条目对应原话、有效决定与保留范围已追加在item.md。115项定向单测及四项浏览器、100/1,000/10,000纯状态事件零正文请求通过；完整命令、统计和最终检查见 [本轮验证记录](../../../../work/four-usage-fixes-20261117/verification.md#第二轮补修独立审核-fail-后)。
++- 上轮185项通过记录保留为历史局部证据，独立审核FAIL结论不覆盖或改写为PASS；本轮补修由来源对话复审。未提交、推送、发布、重启、截图或发送真实消息。
+--- a/docs/project-management/items/FEAT-017/item.md
++++ b/docs/project-management/items/FEAT-017/item.md
+@@ -58,3 +58,10 @@
+ 操作变化：打开员工主对话→添加→新建对话→看到“新对话”且无员工标题；输入后发送→创建请求使用个人项目 root，无员工 conversationId，随后调用普通会话发送 API。普通业务对话→新建→临时会话保留原业务 root。
+ 
+ 隔离 Chrome 已核对 URL、标题、正文缓存身份、创建 root、延迟创建、普通发送和无员工 scope；所有 API 被夹具拦截，无真实消息。证据见 [本轮验证记录](../../../../work/four-usage-fixes-20261117/verification.md)。本轮仅源码和自测，未提交、推送、发布或重启，独立验收由来源对话安排。
++
++
++### 2026-11-17 独立审核后的保留范围与回归
++
++来源：本轮用户原话：“只补以下三个缺项”“不要重做已验证通过的四路主体”。独立审核为FAIL的缺项属于FEAT-001上下文/压缩和FEAT-002目录错误分类；员工页新建普通对话主体保持上一轮实现，本轮未改FeishuApp、项目归属或发送入口。
++
++四项浏览器仍覆盖员工→新建→个人root→普通发送、URL/标题离开员工身份，以及普通业务会话新建保留cwd；所有消息由隔离API夹具处理。对应证据见 [复审补修记录](../../../../work/four-usage-fixes-20261117/verification.md#第二轮补修独立审核-fail-后)。工作区已通过部分保留；未提交、推送、发布或重启，来源对话安排独立复审。
+--- a/docs/project-management/items/FEAT-017/updates.md
++++ b/docs/project-management/items/FEAT-017/updates.md
+@@ -22,3 +22,10 @@
+ - 覆盖压缩活动时间、普通及员工主对话打开用量校准、员工页新建普通对话、跨设备完成目录同步；员工历史用量复用既有只读供应商历史路径，目录落盘后再失效，失败补读有界。
+ - 185 项定向单测通过；隔离浏览器四项操作及缓存/发送回归通过；100/1,000/10,000 状态事件零新增正文请求。精确命令、增减、保护检查及证据见 [验证记录](../../../../work/four-usage-fixes-20261117/verification.md)。
+ - 状态：仅 develop 工作区修改与自测；未提交、推送、发布、重启、截图或发送真实消息；运行服务没有因本轮加载新代码。来源对话后续安排 DeepSeek Flash High 独立验收；真实公网、手机和供应商端到端留到发布后。
++
++
++### 2026-11-17 第二轮：独立审核 FAIL 后三个漏项补修
++
++- 按用户限定仅补分页缓存上下文校准、同毫秒压缩序号和目录可恢复错误重试；不重做已通过四路主体，保留既有改动。
++- 本条目对应原话、有效决定与保留范围已追加在item.md。115项定向单测及四项浏览器、100/1,000/10,000纯状态事件零正文请求通过；完整命令、统计和最终检查见 [本轮验证记录](../../../../work/four-usage-fixes-20261117/verification.md#第二轮补修独立审核-fail-后)。
++- 上轮185项通过记录保留为历史局部证据，独立审核FAIL结论不覆盖或改写为PASS；本轮补修由来源对话复审。未提交、推送、发布、重启、截图或发送真实消息。
+--- a/ui-feishu/shared/features/context-management/hooks/useContextManagement.ts
++++ b/ui-feishu/shared/features/context-management/hooks/useContextManagement.ts
+@@ -34,7 +34,12 @@
+   }, [store, threadId]);
+   const handleEvent = useCallback((event: ContextStatus) => {
+     const current = store.get(event.threadId, !store.synced.has(event.threadId)).contextStatus;
+-    if (current.updatedAt && event.updatedAt && Date.parse(event.updatedAt) < Date.parse(current.updatedAt)) return;
++    const newerCompaction = event.compactionRevision != null && event.compactionRevision > (current.compactionRevision ?? -1);
++    if (event.compactionRevision != null && current.compactionRevision != null && event.compactionRevision < current.compactionRevision) return;
++    if (!newerCompaction && ['completed', 'failed'].includes(current.phase) && ['queued', 'compacting'].includes(event.phase)) return;
++    if (!newerCompaction && current.updatedAt && event.updatedAt && Date.parse(event.updatedAt) < Date.parse(current.updatedAt)) return;
++    event = { ...event, compactionRevision: event.compactionRevision ?? current.compactionRevision,
++      usageSourceRevision: current.usageSourceRevision };
+     const keepSettings = Boolean(current.selectedSettings || store.synced.has(event.threadId) || store.modelChoices.has(event.threadId));
+     const completed = event.phase === "completed" && current.phase !== "completed";
+     if (completed) store.invalidate(event.threadId, false);
+@@ -50,7 +55,7 @@
+     const modelChanged = Boolean(visible.model && current.model && visible.model !== current.model);
+     store.update(changedThreadId, { contextStatus: { ...current, ...visible,
+       selectedSettings: { model: visible.model, reasoningEffort: visible.reasoningEffort },
+-      ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null } : {}), updatedAt: new Date().toISOString() } });
++      ...(modelChanged ? { usedTokens: null, contextWindow: null, percentage: null, usageSourceRevision: undefined } : {}), updatedAt: new Date().toISOString() } });
+   }, [store]);
+ 
+   const compact = useCallback(async () => {
+--- a/ui-feishu/shared/features/context-management/model/types.ts
++++ b/ui-feishu/shared/features/context-management/model/types.ts
+@@ -15,4 +15,6 @@
+   message: string;
+   updatedAt: string | null;
+   compactionUpdatedAt?: string | null;
++  compactionRevision?: number;
++  usageSourceRevision?: string;
+ }
+--- a/ui-feishu/shared/features/conversations/state/conversationStore.ts
++++ b/ui-feishu/shared/features/conversations/state/conversationStore.ts
+@@ -248,7 +248,8 @@
+       const model = saved ? resolveVisibleModel(models, defaults, saved.model, '') : result.context.model;
+       const contextStatus = saved ? { ...result.context, model, selectedSettings,
+         reasoningEffort: resolveVisibleEffort(models, defaults, model, saved.reasoningEffort) } : result.context;
+-      return { session: { ...session, ...(incoming && result.historyFormatVersion ? { historyFormatVersion: result.historyFormatVersion } : {}), sourceRevision: result.sourceRevision || session.sourceRevision }, contextStatus,
++      return { session: { ...session, ...(incoming && result.historyFormatVersion ? { historyFormatVersion: result.historyFormatVersion } : {}), sourceRevision: result.sourceRevision || session.sourceRevision },
++        contextStatus: { ...contextStatus, usageSourceRevision: result.sourceRevision || session.sourceRevision || '' },
+         executionStatus: result.status, goal: result.goal, queueItems: result.queue, userInputRequest: result.input };
+     });
+     const entry = { signal, promise };
+--- a/ui-feishu/shared/features/project-directory/data/projectDirectoryApi.ts
++++ b/ui-feishu/shared/features/project-directory/data/projectDirectoryApi.ts
+@@ -1,4 +1,4 @@
+-import { fetchJson } from "../../../shared/api/http";
++import { fetchJson, HttpError } from "../../../shared/api/http";
+ import { createCachedResource } from "../../../shared/state/localCache";
+ import type { DirectoryProject, ProjectDirectoryResponse } from "../model/types";
+ 
+@@ -11,7 +11,11 @@
+     projectDirectoryResource.refresh(async () => {
+       const read = () => fetchJson<ProjectDirectoryResponse>("/api/project-directory", AbortSignal.timeout(60000));
+       // One bounded recovery per invalidation; shared resource still coalesces concurrent callers.
+-      const response = await read().catch(() => read());
++      const response = await read().catch(error => {
++        if (error instanceof HttpError ? error.status >= 500 && error.status < 600
++          : error instanceof TypeError || ['TimeoutError', 'AbortError'].includes(error?.name)) return read();
++        throw error;
++      });
+       if (!validProjects(response?.projects)) throw new Error("Invalid project directory response");
+       return response.projects;
+     }, invalidate),
+--- a/ui-feishu/shared/shared/api/http.ts
++++ b/ui-feishu/shared/shared/api/http.ts
+@@ -63,12 +63,12 @@
+   });
+   const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+   if (!response.ok) {
+-    if (method === "GET" && response.status === 401) throw new Error("访问令牌无效，请使用启动命令输出的完整链接");
++    if (method === "GET" && response.status === 401) throw new HttpError("访问令牌无效，请使用启动命令输出的完整链接", response.status);
+     if (method === "GET" && response.status === 404) throw new HttpError("请求的项目会话不存在", response.status);
+     const message = typeof payload?.error === "string" && payload.error.trim()
+       ? payload.error
+       : method === "GET" ? `项目数据服务暂不可用（${response.status}）` : `${errorMessage}（${response.status}）`;
+-    throw new Error(message);
++    throw method === "GET" ? new HttpError(message, response.status) : new Error(message);
+   }
+   if (requireJsonContentType && !(response.headers.get("content-type") || "").toLowerCase().includes("application/json")) {
+     throw new Error("当前链接未连接到项目数据服务，请使用 pnpm start:demo 输出的 9360 链接");
+--- a/ui-feishu/src/usePageSnapshot.ts
++++ b/ui-feishu/src/usePageSnapshot.ts
+@@ -37,9 +37,11 @@
+   const selectedThread = useRef(c.selectedId);
+   if (selectedThread.current !== c.selectedId) {
+     selectedThread.current = c.selectedId;
+-    if (!store.committed.get(c.selectedId)?.session || store.errors.has(c.selectedId)
+-      || !store.committed.get(c.selectedId)?.contextStatus.updatedAt
+-      || (store.committed.get(c.selectedId)?.contextStatus.usedTokens == null && Boolean(store.committed.get(c.selectedId)?.session?.messageCount))
++    const cached = store.committed.get(c.selectedId);
++    const missingContext = !cached?.contextStatus.updatedAt
++      || (cached.contextStatus.usedTokens == null && Boolean(cached.session?.messages.length));
++    if (!cached?.session || store.errors.has(c.selectedId)
++      || (missingContext && cached?.contextStatus.usageSourceRevision !== (cached?.session?.sourceRevision || ''))
+       || store.dirty.has(c.selectedId) || store.freshBodies.has(c.selectedId)) observed.current.delete(c.selectedId);
+   }
+   const archiveView = useRef(c.archivedView);
+--- a/ui-feishu/validation/four-usage-fixes-browser.test.mjs
++++ b/ui-feishu/validation/four-usage-fixes-browser.test.mjs
+@@ -6,7 +6,7 @@
+ page.setDefaultTimeout(10000);
+ const stamp = '2026-11-01T00:00:00Z', calls = [], errors = [];
+ const summaries = ['ordinary', 'employee'].map(threadId => ({ threadId, source: 'codex', sourceRevision: 'r1', title: threadId,
+-  cwd: threadId === 'employee' ? '/employee-private' : '/business', updatedAt: stamp, messageCount: 1,
++  cwd: threadId === 'employee' ? '/employee-private' : '/business', updatedAt: stamp, messageCount: null,
+   latestMessage: `old ${threadId}`, latestUser: '', latestAssistant: `old ${threadId}`, model: 'model-a' }));
+ const details = id => ({ ...summaries.find(s => s.threadId === id), messages: [{ id: `m-${id}`, role: 'assistant', text: `old ${id}`, createdAt: stamp }] });
+ const idle = id => ({ type: 'execution_status', threadId: id, phase: 'idle', active: false, turnId: '', activities: [], updatedAt: stamp });
+@@ -68,7 +68,7 @@
+   for (const [id, name, usage] of [['employee', '打开开发员工单聊', '上下文 0.2k / 1k（23%）'], ['ordinary', '打开ordinary', '上下文 0.1k / 1k（12%）']]) {
+     await page.evaluate(id => {
+       const store = window.fixtureStore, view = store.committed.get(id);
+-      store.update(id, { contextStatus: { ...view.contextStatus, usedTokens: null, percentage: null, updatedAt: id === 'ordinary' ? view.contextStatus.updatedAt : null } });
++      store.update(id, { contextStatus: { ...view.contextStatus, usageSourceRevision: undefined, usedTokens: null, percentage: null, updatedAt: id === 'ordinary' ? view.contextStatus.updatedAt : null } });
+     }, id);
+     const before = bodyReads();
+     await row(name).click();
+@@ -83,6 +83,29 @@
+   await row('打开ordinary').click(); await settle();
+   assert.equal(bodyReads(), warmed, 'complete context and body caches need no selection reads');
+   console.log('PASS ordinary + employee missing context with cached body: one calibration each; complete cache A/B: zero reads');
++
++  const savedContexts = new Map(contexts);
++  for (const [id, name] of [['employee', '打开开发员工单聊'], ['ordinary', '打开ordinary']]) {
++    contexts.set(id, { ...contexts.get(id), usedTokens: null, percentage: null });
++    await page.evaluate(id => {
++      const store = window.fixtureStore, view = store.committed.get(id);
++      if (view.session.messageCount !== null || !view.session.messages.length) throw Error('must exercise paginated cached body');
++      store.update(id, { contextStatus: { ...view.contextStatus, usedTokens: null, percentage: null, usageSourceRevision: undefined } });
++    }, id);
++    const before = bodyReads(); await row(name).click(); await settle();
++    assert.equal(bodyReads(), before + 1, 'server without usage is calibrated once');
++    assert.equal(await page.evaluate(id => window.fixtureStore.get(id).contextStatus.usageSourceRevision, id), 'r1');
++    assert.match(calls.filter(c => c.path === '/api/session').at(-1).query, /sourceRevision=r1/);
++  }
++  const noUsageReads = bodyReads();
++  for (let n = 0; n < 2; n++) {
++    await row('打开开发员工单聊').click(); await settle();
++    await row('打开ordinary').click(); await settle();
++  }
++  assert.equal(bodyReads(), noUsageReads, 'confirmed absence of usage must survive repeated A/B switching');
++  for (const [id, value] of savedContexts) { contexts.set(id, value); await page.evaluate(event => window.emitFixture(event), value); }
++  await settle();
++  console.log('PASS messageCount:null cached ordinary/employee body; usage absent -> exactly one calibration each, repeated A/B zero reads');
+ 
+   await page.getByRole('button', { name: '上下文 0.1k / 1k（12%）', exact: true }).click();
+   const clickedAt = Date.now(), beforeCompact = bodyReads();
+@@ -93,21 +116,46 @@
+   assert.equal(started.updatedAt, stamp, 'client start must not impersonate a server timestamp');
+   const localClock = await page.evaluate(value => new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value)), started.compactionUpdatedAt);
+   assert.equal(await row('打开ordinary').locator('time').textContent(), localClock);
+-  const serverStart = { ...contexts.get('ordinary'), phase: 'compacting', updatedAt: '2026-11-05T08:00:00Z', compactionUpdatedAt: '2026-11-05T08:00:00Z' };
++  const serverStart = { ...contexts.get('ordinary'), phase: 'compacting', compactionRevision: 1, updatedAt: '2026-11-05T08:00:00Z', compactionUpdatedAt: '2026-11-05T08:00:00Z' };
+   await page.evaluate(event => window.emitFixture(event), serverStart); await settle();
+   assert.equal(await page.evaluate(() => window.fixtureStore.get('ordinary').contextStatus.compactionUpdatedAt), serverStart.updatedAt);
+   assert.equal(await row('打开ordinary').locator('time').textContent(), '11/5');
+   assert.equal(bodyReads(), beforeCompact, 'click and server start do not read body');
+-  const completed = { ...serverStart, phase: 'completed', usedTokens: 40, percentage: 4, updatedAt: '2026-11-06T08:00:00Z', compactionUpdatedAt: '2026-11-06T08:00:00Z' };
++  const completed = { ...serverStart, phase: 'completed', compactionRevision: 2, usedTokens: 40, percentage: 4 };
+   contexts.set('ordinary', completed);
+   await page.evaluate(event => window.emitFixture(event), completed);
+   await settle();
+   releaseCompact(serverStart); // deliberately late POST response must not roll back completion
+   await settle();
+   assert.equal(await page.evaluate(() => window.fixtureStore.get('ordinary').contextStatus.phase), 'completed');
+-  assert.equal(await row('打开ordinary').locator('time').textContent(), '11/6');
++  assert.equal(await row('打开ordinary').locator('time').textContent(), '11/5');
+   assert.equal(bodyReads(), beforeCompact + 1, 'completion retains exactly one existing body calibration');
++  for (const revision of [undefined, 2, 1]) {
++    await page.evaluate(event => window.emitFixture(event), { ...serverStart, compactionRevision: revision }); await settle();
++    assert.equal(await page.evaluate(() => window.fixtureStore.get('ordinary').contextStatus.phase), 'completed');
++  }
++  assert.equal(bodyReads(), beforeCompact + 1, 'same/lower/missing revision starts cannot add reads or roll back terminal');
++  await page.evaluate(event => window.emitFixture(event), { ...serverStart, compactionRevision: 3 }); await settle();
++  assert.equal(await page.evaluate(() => window.fixtureStore.get('ordinary').contextStatus.phase), 'compacting');
++  assert.equal(bodyReads(), beforeCompact + 1, 'higher revision new start still adds no body read');
++  contexts.set('ordinary', { ...completed, compactionRevision: 4 });
++  await page.evaluate(event => window.emitFixture(event), contexts.get('ordinary')); await settle();
++  assert.equal(bodyReads(), beforeCompact + 2, 'second completion adds only its one calibration');
++  await page.evaluate(event => window.emitFixture(event), { ...serverStart, compactionRevision: 5 }); await settle();
++  const failed = { ...serverStart, phase: 'failed', message: 'fixture compaction failed', compactionRevision: 6 };
++  contexts.set('ordinary', failed); await page.evaluate(event => window.emitFixture(event), failed); await settle();
++  for (const revision of [undefined, 5, 6]) {
++    await page.evaluate(event => window.emitFixture(event), { ...serverStart, compactionRevision: revision }); await settle();
++    assert.equal(await page.evaluate(() => window.fixtureStore.get('ordinary').contextStatus.phase), 'failed');
++  }
++  assert.equal(bodyReads(), beforeCompact + 2, 'failure and rejected starts add no body reads');
++  await page.evaluate(event => window.emitFixture(event), { ...serverStart, compactionRevision: 7 }); await settle();
++  assert.equal(await page.evaluate(() => window.fixtureStore.get('ordinary').contextStatus.phase), 'compacting');
++  contexts.set('ordinary', { ...completed, compactionRevision: 8 });
++  await page.evaluate(event => window.emitFixture(event), contexts.get('ordinary')); await settle();
++  assert.equal(bodyReads(), beforeCompact + 3, 'higher revision after failure completes with one calibration');
+   await page.keyboard.press('Escape');
++  console.log('PASS same-millisecond completion beats delayed POST and equal/missing revision; higher revision starts next compaction');
+   console.log('PASS immediate client start -> server clock -> completed; delayed POST cannot roll back; zero start reads, one terminal read');
+ 
+   await page.getByRole('button', { name: '添加', exact: true }).click();
+--- a/windows/server/context-management-service.mjs
++++ b/windows/server/context-management-service.mjs
+@@ -19,6 +19,7 @@
+   phase: "idle",
+   message: "",
+   updatedAt: null,
++  compactionRevision: 0,
+ });
+ 
+ export const createContextManagementService = async ({
+@@ -52,8 +53,12 @@
+   };
+ 
+   const publish = (threadId, patch = {}) => {
+-    const next = { ...statusFor(threadId), ...patch, updatedAt: now() };
+-    if (patch.phase) next.compactionUpdatedAt = next.updatedAt;
++    const current = statusFor(threadId);
++    const next = { ...current, ...patch, updatedAt: now() };
++    if (patch.phase && patch.phase !== current.phase) {
++      next.compactionUpdatedAt = next.updatedAt;
++      next.compactionRevision = current.compactionRevision + 1;
++    }
+     states.set(threadId, next);
+     broadcast(publicStatus(next));
+     return next;
+--- a/windows/tests/context-management-service.test.mjs
++++ b/windows/tests/context-management-service.test.mjs
+@@ -209,3 +209,30 @@
+     await service.close();
+   }
+ });
++
++test('same-millisecond compaction transitions have increasing revisions; usage/read/duplicate completion do not', async t => {
++  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-17T00:00:00Z') });
++  const { service, events } = await createService();
++  const start = await service.requestCompaction('sequence');
++  assert.equal(start.compactionRevision, 1);
++  service.handleProtocolMessage({ method: 'thread/compacted', params: { threadId: 'sequence' } });
++  const completed = service.getStatus('sequence');
++  assert.equal(completed.updatedAt, start.updatedAt);
++  assert.equal(completed.compactionRevision, 2);
++  t.mock.timers.tick(1000);
++  service.handleProtocolMessage({ method: 'thread/compacted', params: { threadId: 'sequence' } });
++  service.handleProtocolMessage({ method: 'thread/tokenUsage/updated', params: { threadId: 'sequence', tokenUsage: { last: { totalTokens: 1 }, modelContextWindow: 1000 } } });
++  await service.load('sequence');
++  assert.equal(service.getStatus('sequence').compactionRevision, 2);
++  assert.equal(service.getStatus('sequence').compactionUpdatedAt, completed.compactionUpdatedAt);
++  assert.equal((await service.requestCompaction('sequence')).compactionRevision, 3);
++  service.handleProtocolMessage({ method: 'error', params: { threadId: 'sequence', error: { message: 'fixture failure' } } });
++  assert.equal(service.getStatus('sequence').phase, 'failed');
++  assert.equal(service.getStatus('sequence').compactionRevision, 4);
++  assert.equal((await service.requestCompaction('sequence')).compactionRevision, 5);
++  service.handleProtocolMessage({ method: 'turn/completed', params: { threadId: 'sequence', turn: { status: 'interrupted' } } });
++  assert.equal(service.getStatus('sequence').compactionRevision, 6);
++  assert.equal(service.getStatus('sequence').phase, 'failed');
++  assert.equal(events.filter(e => e.type === 'context_status').at(-1).compactionRevision, 6);
++  await service.close();
++});
+--- /dev/null
++++ b/windows/tests/project-directory-recovery.test.mjs
+@@ -0,0 +1,62 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { realpathSync } from 'node:fs';
++import { createRequire } from 'node:module';
++const require = createRequire(realpathSync(new URL('../../ui-feishu/node_modules/vite/package.json', import.meta.url)));
++const { build } = require('esbuild');
++const storage = new Map();
++globalThis.window = { location: { search: '' }, localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) } };
++const bundle = await build({ stdin: { contents: `export { projectDirectoryApi, projectDirectoryResource } from './shared/features/project-directory/data/projectDirectoryApi';
++  export { HttpError, fetchJson, postJson } from './shared/shared/api/http';`, resolveDir: new URL('../../ui-feishu', import.meta.url).pathname, loader: 'ts' },
++  bundle: true, platform: 'node', format: 'cjs', write: false });
++const loaded = { exports: {} };
++new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(loaded, loaded.exports, require);
++const { projectDirectoryApi: api, projectDirectoryResource: resource, HttpError, fetchJson, postJson } = loaded.exports;
++const success = id => new Response(JSON.stringify({ projects: [{ id }] }), { headers: { 'content-type': 'application/json' } });
++const failure = status => new Response(JSON.stringify({ error: `fixture ${status}` }), { status, headers: { 'content-type': 'application/json' } });
++
++test('directory retries only recoverable failures, retains cache and stops after two attempts', async t => {
++  const originalFetch = globalThis.fetch;
++  t.after(() => { globalThis.fetch = originalFetch; });
++  globalThis.fetch = async () => success('seed'); await api.list();
++  for (const [name, error, retry] of [
++    ['network', new TypeError('Failed to fetch'), true], ['timeout', new DOMException('timeout', 'TimeoutError'), true],
++    ['abort', new DOMException('aborted', 'AbortError'), true],
++    ...[500, 501, 503, 599].map(status => [String(status), status, true]),
++    ...[401, 403, 404, 429].map(status => [String(status), status, false]),
++    ['invalid JSON', new Error('项目数据返回格式错误'), false],
++  ]) await t.test(name, async () => {
++    const before = resource.getSnapshot().data;
++    let calls = 0;
++    globalThis.fetch = async () => {
++      calls++;
++      assert.equal(resource.getSnapshot().data, before, 'old directory remains visible during recovery');
++      if (calls === 1) { if (typeof error === 'number') return failure(error); throw error; }
++      return success(name);
++    };
++    if (retry) { await api.list(undefined, true); assert.deepEqual(resource.getSnapshot().data, [{ id: name }]); }
++    else { await assert.rejects(api.list(undefined, true)); assert.equal(resource.getSnapshot().data, before); }
++    assert.equal(calls, retry ? 2 : 1);
++    await new Promise(resolve => setTimeout(resolve, 20));
++    assert.equal(calls, retry ? 2 : 1, 'no background retry loop');
++  });
++  const previous = resource.getSnapshot().data;
++  let calls = 0;
++  globalThis.fetch = async () => { calls++; return failure(503); };
++  await assert.rejects(api.list(undefined, true), e => e instanceof HttpError && e.status === 503);
++  assert.equal(calls, 2); assert.equal(resource.getSnapshot().data, previous);
++  await new Promise(resolve => setTimeout(resolve, 30)); assert.equal(calls, 2);
++  globalThis.fetch = async () => { calls++; return success('next-event'); };
++  await api.list(undefined, true);
++  assert.equal(calls, 3); assert.deepEqual(resource.getSnapshot().data, [{ id: 'next-event' }]);
++});
++
++test('GET status metadata preserves messages and POST error behavior', async t => {
++  const originalFetch = globalThis.fetch; t.after(() => { globalThis.fetch = originalFetch; });
++  globalThis.fetch = async () => failure(401);
++  await assert.rejects(fetchJson('/api/project-directory'), e => e.status === 401 && e.message === '访问令牌无效，请使用启动命令输出的完整链接');
++  globalThis.fetch = async () => failure(404);
++  await assert.rejects(fetchJson('/api/project-directory'), e => e.status === 404 && e.message === '请求的项目会话不存在');
++  globalThis.fetch = async () => failure(403);
++  await assert.rejects(postJson('/fixture', {}), e => e.name === 'Error' && e.message === 'fixture 403' && e.status === undefined);
++});

@@ -282,6 +282,8 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
       latestMessage: messagePreview(state.messages.at(-1)),
       archived: Boolean(header.archived),
       cwd: header.cwd || null,
+      nativeSubagent: header.nativeSubagent === true,
+      parentThreadId: header.parentThreadId || null,
       messages: state.messages,
     };
   };

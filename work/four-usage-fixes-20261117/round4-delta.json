@@ -1,0 +1,27 @@
+[
+  {
+    "path": "docs/project-management/items/FEAT-001/item.md",
+    "added": 13,
+    "removed": 0
+  },
+  {
+    "path": "docs/project-management/items/FEAT-001/updates.md",
+    "added": 7,
+    "removed": 0
+  },
+  {
+    "path": "windows/scripts/remote-room-demo.mjs",
+    "added": 4,
+    "removed": 1
+  },
+  {
+    "path": "windows/server/context-management-service.mjs",
+    "added": 3,
+    "removed": 2
+  },
+  {
+    "path": "windows/tests/context-management-service.test.mjs",
+    "added": 66,
+    "removed": 0
+  }
+]
