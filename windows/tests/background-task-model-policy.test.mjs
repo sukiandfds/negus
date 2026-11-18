@@ -1,9 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { basePrompt, communicationInstructions } from '../server/base-prompt.mjs';
 import {
   backgroundTaskRoute,
   employeeTaskRoute,
+  loadTaskRoutingPolicy,
+  modelDefaultsFromRoute,
   requestedBackgroundRoute,
 } from '../server/background-tasks/model-policy.mjs';
 
@@ -16,6 +21,30 @@ test('global communication and assembled prompts default background work to Deep
     assert.match(prompt, /startup\.confirmed=true/);
     assert.doesNotMatch(prompt, /gpt-6\.1-terra|\bTerra\b/);
   }
+});
+
+test('routing config loads without models and ignores legacy model lists', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-routing-policy-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const current = path.join(root, 'current.json');
+  const legacy = path.join(root, 'legacy.json');
+  const base = { version: 1, defaultModel: 'deepseek-flash', reasoningEffort: 'high',
+    channels: [{ name: 'DeepSeek' }, { name: 'vip' }, { name: '折扣' }, { name: 'astr' }, { name: 'grok' }] };
+  await fs.writeFile(current, JSON.stringify(base));
+  await fs.writeFile(legacy, JSON.stringify({ ...base,
+    channels: base.channels.map(channel => ({ ...channel, models: ['removed-from-policy'] })) }));
+  const currentPolicy = await loadTaskRoutingPolicy({ file: current });
+  const legacyPolicy = await loadTaskRoutingPolicy({ file: legacy });
+  assert.deepEqual(currentPolicy, { version: 1, defaultModel: 'deepseek-flash', reasoningEffort: 'high',
+    channels: base.channels });
+  assert.deepEqual(legacyPolicy, currentPolicy);
+  for (const channel of currentPolicy.channels) assert.equal('models' in channel, false);
+  const bundled = JSON.parse(await fs.readFile(path.resolve('windows/server/model-routing.default.json'), 'utf8'));
+  assert.ok(bundled.channels.every(channel => !('models' in channel)));
+  await fs.writeFile(current, JSON.stringify({ ...base, defaultModel: '' }));
+  await assert.rejects(loadTaskRoutingPolicy({ file: current }), /默认模型或思考等级/);
+  await fs.writeFile(current, JSON.stringify({ ...base, reasoningEffort: '' }));
+  await assert.rejects(loadTaskRoutingPolicy({ file: current }), /默认模型或思考等级/);
 });
 
 test('default background route selects the configured DeepSeek provider at high effort', async () => {
@@ -63,6 +92,55 @@ test('default background route tries another configured channel and model before
   assert.equal(route.taskRouting.selectedModel, 'gpt-6.1-terra');
   assert.match(route.taskRouting.reason, /改用其他/);
   assert.equal(resolved.some(item => item.model === 'deepseek-flash'), false);
+});
+
+test('direct channel names use each provider default model and keep the preferred channel', async () => {
+  const providers = {
+    providers: () => [
+      { id: 'current', displayName: 'vip', defaultModel: 'current-vip-default', models: [{ model: 'current-vip-default' }] },
+      { id: 'ccswitch_vip', displayName: 'vip', defaultModel: 'gpt-6.2-sol', models: [{ model: 'gpt-6.2-sol' }, { model: 'gpt-6.2-astra' }] },
+      { id: 'ccswitch_discount', displayName: '折扣', defaultModel: 'discount-sol', models: [{ model: 'discount-sol' }] },
+      { id: 'ccswitch_astr', displayName: 'astr', defaultModel: 'gpt-6.2-astra', models: [{ model: 'gpt-6.2-astra' }] },
+      { id: 'fusheng-grok', displayName: 'grok', defaultModel: 'grok-4.7', models: [{ model: 'grok-4.7' }] },
+    ],
+    isProviderConfigured: async () => true,
+    resolveRoute: ({ modelProviderId, model }) => ({ modelProviderId, model }),
+  };
+  const policy = { version: 1, defaultModel: 'deepseek-flash', reasoningEffort: 'high',
+    channels: [{ name: 'DeepSeek' }, { name: 'vip' }, { name: '折扣' }, { name: 'astr' }, { name: 'grok' }] };
+  for (const [channel, providerId, model] of [
+    ['vip', 'ccswitch_vip', 'gpt-6.2-sol'],
+    ['折扣', 'ccswitch_discount', 'discount-sol'],
+    ['astr', 'ccswitch_astr', 'gpt-6.2-astra'],
+    ['grok', 'fusheng-grok', 'grok-4.7'],
+  ]) {
+    const route = await requestedBackgroundRoute(providers, { model: channel }, [], policy);
+    assert.equal(route.modelProviderId, providerId);
+    assert.equal(route.model, model);
+    assert.equal(route.taskRouting.requestedModel, model);
+    assert.equal(route.taskRouting.requestedProviderId, channel);
+    assert.equal(route.taskRouting.reason, '使用配置渠道');
+  }
+});
+
+test('the same requested model is tried across channels before the next model', async () => {
+  const resolved = [];
+  const providers = {
+    providers: () => [
+      { id: 'ccswitch_vip', displayName: 'vip', defaultModel: 'vip-next', models: [{ model: 'shared-model' }, { model: 'vip-next' }] },
+      { id: 'ccswitch_discount', displayName: '折扣', defaultModel: 'discount-next', models: [{ model: 'shared-model' }, { model: 'discount-next' }] },
+    ],
+    isProviderConfigured: async id => id !== 'ccswitch_vip',
+    resolveRoute: request => { resolved.push(request); return request; },
+  };
+  const policy = { version: 1, defaultModel: 'deepseek-flash', reasoningEffort: 'high',
+    channels: [{ name: 'vip' }, { name: '折扣' }] };
+  const route = await requestedBackgroundRoute(providers, { model: 'shared-model' }, [], policy);
+  assert.equal(route.modelProviderId, 'ccswitch_discount');
+  assert.equal(route.model, 'shared-model');
+  assert.deepEqual(resolved, [{ modelProviderId: 'ccswitch_discount', model: 'shared-model' }]);
+  assert.deepEqual(route.taskRouting.attempted,
+    [{ providerId: 'ccswitch_vip', displayName: 'vip', model: 'shared-model', reason: '渠道未配置' }]);
 });
 
 test('employee task route retries another channel for the same model before changing models', async () => {
@@ -129,7 +207,7 @@ test('explicit background model and provider requests retain their selected rout
   ]);
 });
 
-test('task routing reads ordered channels and models from configuration and skips recently failed routes', async () => {
+test('task routing reads ordered channels from configuration and skips recently failed routes', async () => {
   const providers = {
     providers: () => [
       { id: 'vip', displayName: 'VIP', models: [{ model: 'gpt-6.1-terra' }] },
@@ -143,8 +221,8 @@ test('task routing reads ordered channels and models from configuration and skip
     defaultModel: 'deepseek-flash',
     reasoningEffort: 'high',
     channels: [
-      { name: 'DeepSeek', models: ['deepseek-flash', 'deepseek-v4-pro'] },
-      { name: 'VIP', models: ['gpt-6.1-terra'] },
+      { name: 'DeepSeek' },
+      { name: 'VIP' },
     ],
   };
   const failed = {
@@ -182,7 +260,7 @@ test('task routing reads ordered channels and models from configuration and skip
   assert.equal(recovered.reasoningEffort, 'high');
 });
 
-test('configured default model controls background routing and full failure returns attempted details', async () => {
+test('configured default model can be outside the catalog and full failure returns attempted details', async () => {
   const providers = {
     providers: () => [
       { id: 'deepseek', displayName: 'DeepSeek', models: [{ model: 'deepseek-flash' }, { model: 'third-model' }] },
@@ -194,17 +272,41 @@ test('configured default model controls background routing and full failure retu
     version: 1,
     defaultModel: 'third-model',
     reasoningEffort: 'high',
-    channels: [{ name: 'DeepSeek', models: ['deepseek-flash', 'third-model'] }],
+    channels: [{ name: 'DeepSeek' }],
   };
   const route = await backgroundTaskRoute(providers, policy);
   assert.equal(route.model, 'third-model');
   assert.equal(route.reasoningEffort, 'high');
+  const defaults = modelDefaultsFromRoute(route);
+  assert.equal(defaults.providerId, 'deepseek');
+  assert.equal(defaults.model, 'deepseek::third-model');
+  assert.equal(defaults.effort, 'high');
 
   const unavailable = { ...providers, isProviderConfigured: async () => false };
   await assert.rejects(backgroundTaskRoute(unavailable, policy), error => {
     assert.match(error.message, /尝试记录：DeepSeek\/third-model：渠道未配置/);
     assert.equal(error.details.requestedModel, 'third-model');
     assert.equal(error.details.attempts[0].reason, '渠道未配置');
+    return true;
+  });
+});
+
+test('a default model missing from every catalog reports real attempted routes', async () => {
+  const providers = {
+    providers: () => [
+      { id: 'ccswitch_vip', displayName: 'vip', defaultModel: 'vip-default', models: [{ model: 'vip-default' }] },
+      { id: 'ccswitch_discount', displayName: '折扣', defaultModel: 'discount-default', models: [{ model: 'discount-default' }] },
+    ],
+    isProviderConfigured: async () => false,
+    resolveRoute: ({ modelProviderId, model }) => ({ modelProviderId, model }),
+  };
+  const policy = { version: 1, defaultModel: 'missing-default', reasoningEffort: 'high',
+    channels: [{ name: 'vip' }, { name: '折扣' }] };
+  await assert.rejects(backgroundTaskRoute(providers, policy), error => {
+    assert.equal(error.details.requestedModel, 'missing-default');
+    assert.ok(error.details.attempts.some(item => item.model === 'missing-default' && item.providerId === 'ccswitch_vip'));
+    assert.ok(error.details.attempts.some(item => item.model === 'missing-default' && item.providerId === 'ccswitch_discount'));
+    assert.match(error.message, /vip\/missing-default：渠道模型目录不包含该模型/);
     return true;
   });
 });

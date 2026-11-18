@@ -96,6 +96,42 @@ test("manual provider discovery adds new Grok models, persists routing and retai
   });
 });
 
+test("refreshing one provider makes its new models routable without exposing them on another channel", async () => {
+  await withTemporaryRoot(async (root) => {
+    const sharedConfig = {
+      runtimeProviders: async () => [
+        { id: 'ccswitch_alpha', displayName: 'Alpha', baseUrl: 'https://alpha.test/v1', wireApi: 'responses',
+          defaultModel: 'alpha-base', models: [{ model: 'alpha-base' }] },
+        { id: 'ccswitch_beta', displayName: 'Beta', baseUrl: 'https://beta.test/v1', wireApi: 'responses',
+          defaultModel: 'beta-base', models: [{ model: 'beta-base' }] },
+      ],
+      readCredential: async () => 'synthetic',
+    };
+    const service = createModelProviderService({ projectRoot: root, currentApiConfiguration: async () => null,
+      sharedConfig,
+      fetchModels: async url => ({
+        ok: true,
+        json: async () => ({ data: url.hostname === 'alpha.test'
+          ? [{ id: 'alpha-base' }, { id: 'alpha-new' }]
+          : [{ id: 'beta-base' }, { id: 'beta-new' }] }),
+      }),
+    });
+    try {
+      await service.refreshProviderModels('ccswitch_alpha');
+      const afterAlpha = Object.fromEntries(service.providers().map(provider => [provider.id, provider]));
+      assert.deepEqual(afterAlpha.ccswitch_alpha.models.map(model => model.model), ['alpha-base', 'alpha-new']);
+      assert.deepEqual(afterAlpha.ccswitch_beta.models.map(model => model.model), ['beta-base']);
+      assert.equal(service.resolveRoute({ modelProviderId: 'ccswitch_alpha', model: 'alpha-new' }).model, 'alpha-new');
+      assert.throws(() => service.resolveRoute({ modelProviderId: 'ccswitch_beta', model: 'beta-new' }), /does not belong/);
+
+      await service.refreshProviderModels('ccswitch_beta');
+      assert.equal(service.resolveRoute({ modelProviderId: 'ccswitch_beta', model: 'beta-new' }).model, 'beta-new');
+    } finally {
+      service.close();
+    }
+  });
+});
+
 test("all provider environments share GitHub tools and login while isolating model secrets", () => {
   const base = {
     PATH: "C:\\tools",

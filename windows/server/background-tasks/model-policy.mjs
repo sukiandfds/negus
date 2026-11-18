@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 const installRoot = process.env.NEGUS_INSTALL_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 export const TASK_ROUTING_CONFIG_FILE = path.join(installRoot, 'runtime', 'model-routing.json');
 const bundledRoutingConfig = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../model-routing.default.json');
-const reasoningEfforts = new Set(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+const reasoningEfforts = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
 
 const normalizeRoutingPolicy = value => {
   if (value?.version !== 1 || !Array.isArray(value?.channels) || !value.channels.length)
@@ -14,16 +14,13 @@ const normalizeRoutingPolicy = value => {
   const names = new Set();
   for (const channel of value.channels) {
     const name = String(channel?.name || '').trim();
-    const models = [...new Set((Array.isArray(channel?.models) ? channel.models : [])
-      .map(model => String(model || '').trim()).filter(Boolean))];
-    if (!name || !models.length || names.has(name.toLowerCase())) continue;
+    if (!name || names.has(name.toLowerCase())) continue;
     names.add(name.toLowerCase());
-    channels.push({ name, models });
+    channels.push({ name });
   }
-  const allModels = [...new Set(channels.flatMap(channel => channel.models))];
-  const defaultModel = String(value.defaultModel || allModels[0] || '').trim();
-  const reasoningEffort = String(value.reasoningEffort || 'high').trim();
-  if (!channels.length || !allModels.includes(defaultModel) || !reasoningEfforts.has(reasoningEffort))
+  const defaultModel = String(value.defaultModel || '').trim();
+  const reasoningEffort = String(value.reasoningEffort || '').trim();
+  if (!channels.length || !defaultModel || !reasoningEfforts.has(reasoningEffort))
     throw new Error('任务模型路由配置没有有效的默认模型或思考等级');
   return { version: 1, defaultModel, reasoningEffort, channels };
 };
@@ -63,11 +60,13 @@ const requestedRouteRequest = (request, policy) => {
     model = exactModel;
   }
   const namedChannel = policy.channels.find(channel => channel.name.toLowerCase() === model.toLowerCase());
+  let requestedChannel = false;
   if (namedChannel) {
     modelProviderId ||= namedChannel.name;
-    model = namedChannel.models[0];
+    model = '';
+    requestedChannel = true;
   }
-  return { requestedModel: model || policy.defaultModel, preferredProviderId: modelProviderId };
+  return { requestedModel: model, preferredProviderId: modelProviderId, requestedChannel };
 };
 
 export const selectTaskRoute = async (providers, request = {}, {
@@ -99,18 +98,49 @@ export const selectTaskRoute = async (providers, request = {}, {
   const recentFailures = new Map([...latestTerminalRoutes]
     .filter(([, task]) => task.state !== 'completed' && routeFailurePattern.test(String(task.error || '')))
     .map(([key, task]) => [key, task.error]));
-  const { requestedModel, preferredProviderId } = requestedRouteRequest(request, routing);
+  const routeRequest = requestedRouteRequest(request, routing);
+  const preferredProviderId = routeRequest.preferredProviderId;
   const configuredChannels = routing.channels.map(channel => channel.name);
   const rank = provider => {
-    const preferredIndex = preferredProviderId && matchesChannel(provider, preferredProviderId) ? -1 : 0;
+    const preferredRank = !preferredProviderId ? 2
+      : provider.id === preferredProviderId ? 0
+        : matchesChannel(provider, preferredProviderId) ? 1 : 2;
     const channelIndex = configuredChannels.findIndex(name => matchesChannel(provider, name));
-    return `${preferredIndex}:${channelIndex < 0 ? 999 : channelIndex}:${provider.displayName || provider.id}`;
+    const currentRank = channelIndex >= 0 && provider.id === 'current' ? 1 : 0;
+    return `${preferredRank}:${channelIndex < 0 ? 1 : 0}:${channelIndex < 0 ? 999 : channelIndex}:${currentRank}:${provider.displayName || provider.id}`;
   };
   const orderedProviders = [...catalog].sort((left, right) => rank(left).localeCompare(rank(right)));
-  const configuredModels = [...new Set(routing.channels.flatMap(channel => channel.models))];
-  const discoveredModels = [...new Set(catalog.flatMap(provider => (provider.models || []).map(model => model.model)))];
-  const modelOrder = [...new Set([requestedModel, ...configuredModels, ...discoveredModels])];
   const attempted = [];
+  const preferredProvider = preferredProviderId
+    ? orderedProviders.find(provider => matchesChannel(provider, preferredProviderId)) : null;
+  let requestedModel = routeRequest.requestedModel;
+  if ((routeRequest.requestedChannel || (!requestedModel && preferredProviderId)) && preferredProvider?.defaultModel) {
+    requestedModel = String(preferredProvider.defaultModel).trim();
+  }
+  if (routeRequest.requestedChannel && !preferredProvider) {
+    attempted.push({ providerId: preferredProviderId, displayName: preferredProviderId, model: '',
+      reason: '配置渠道当前不可用' });
+  } else if (routeRequest.requestedChannel && !requestedModel) {
+    attempted.push({ providerId: preferredProvider.id, displayName: preferredProvider.displayName || preferredProvider.id,
+      model: '', reason: '渠道没有默认模型' });
+  }
+  requestedModel ||= routing.defaultModel;
+  const modelOrder = [];
+  const addModel = model => {
+    const value = String(model || '').trim();
+    if (value && !modelOrder.includes(value)) modelOrder.push(value);
+  };
+  addModel(requestedModel);
+  for (const provider of orderedProviders) {
+    addModel(provider.defaultModel);
+    for (const entry of provider.models || []) addModel(entry.model);
+  }
+  for (const channel of routing.channels) {
+    if (!orderedProviders.some(provider => matchesChannel(provider, channel.name))) {
+      attempted.push({ providerId: channel.name, displayName: channel.name, model: requestedModel,
+        reason: '配置渠道当前不可用' });
+    }
+  }
   const consider = async (provider, model, channel = '') => {
     if (attempted.some(item => item.providerId === provider.id && item.model === model)) return null;
     const previousFailure = recentFailures.get(`${provider.id}::${model}`);
@@ -119,7 +149,7 @@ export const selectTaskRoute = async (providers, request = {}, {
         reason: `最近一次执行失败：${previousFailure}` });
       return null;
     }
-    const supported = provider.models?.some(entry => entry.model === model);
+    const supported = model === provider.defaultModel || provider.models?.some(entry => entry.model === model);
     if (!supported) {
       attempted.push({ providerId: provider.id, displayName: provider.displayName || provider.id, model,
         reason: '渠道模型目录不包含该模型' });
@@ -164,27 +194,14 @@ export const selectTaskRoute = async (providers, request = {}, {
     }
   };
 
-  const preferredProvider = preferredProviderId
-    ? orderedProviders.find(provider => matchesChannel(provider, preferredProviderId)) : null;
   if (preferredProvider) {
     const preferredRoute = await consider(preferredProvider, requestedModel, preferredProviderId);
     if (preferredRoute) return preferredRoute;
   }
   for (const model of modelOrder) {
-    for (const channel of routing.channels) {
-      if (!channel.models.includes(model)) continue;
-      const provider = orderedProviders.find(candidate => matchesChannel(candidate, channel.name));
-      if (!provider) {
-        attempted.push({ providerId: channel.name, displayName: channel.name, model, reason: '配置渠道当前不可用' });
-        continue;
-      }
-      const route = await consider(provider, model, channel.name);
-      if (route) return route;
-    }
-  }
-  for (const model of modelOrder) {
     for (const provider of orderedProviders) {
-      const route = await consider(provider, model);
+      const channel = routing.channels.find(item => matchesChannel(provider, item.name))?.name || '';
+      const route = await consider(provider, model, channel);
       if (route) return route;
     }
   }
