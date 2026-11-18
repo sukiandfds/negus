@@ -13,6 +13,8 @@
     {
       "name": "vip",
       "models": [
+        "gpt-6.2-sol",
+        "gpt-6.2-astra",
         "gpt-6.1-sol",
         "gpt-6-astra",
         "gpt-6-sol",
@@ -23,6 +25,8 @@
     {
       "name": "折扣",
       "models": [
+        "gpt-6.2-sol",
+        "gpt-6.2-astra",
         "gpt-6.1-sol",
         "gpt-6-astra",
         "gpt-6-sol",
@@ -33,6 +37,7 @@
     {
       "name": "astr",
       "models": [
+        "gpt-6.2-astra",
         "gpt-6-astra"
       ]
     },

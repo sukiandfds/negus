@@ -40,3 +40,13 @@ related: [FEAT-001, FEAT-002, PM-004]
 - `windows/server/cc-switch-config-service.mjs`
 - `windows/server/model-provider-service.mjs`
 - `windows/server/provider-conversation-store.mjs`
+
+### 2026-11-18 更新 Sol 6.2 与 Astr 6.2 模型目录
+
+用户原话：
+
+> 更新一下模型选择列表，供应商反馈 6.2 sol 和 6.2 astr 已经可用
+
+有效决定：向 vip、折扣和 astr 三个供应商目录实际读取可用模型后，仅加入供应商返回的模型。vip 与折扣加入 `gpt-6.2-sol`、`gpt-6.2-astra`；astr 专用渠道加入 `gpt-6.2-astra`。默认模型保持 `deepseek-flash`，现有模型和渠道顺序保留，新增模型列在同渠道旧版 GPT 模型之前。
+
+用户操作变化：打开模型选择列表后，可以在 vip 和折扣渠道看到两个 6.2 模型，在 astr 渠道看到 `gpt-6.2-astra`；选择后沿用现有模型与推理强度选择流程。任务路由也能识别这些模型并按渠道可用性回退。
