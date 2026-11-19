@@ -1,3 +1,4 @@
+import { retainSentImage, sentImage } from "../../attachments/data/sentImagePreviews";
 import { createContext, useContext, Children, isValidElement, forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Download, FileText, ImageOff, X } from "lucide-react";
@@ -50,15 +51,20 @@ function RenderedImage({
   width,
   height,
   layout = "default",
+  submissionId, imageIndex,
 }: {
   source: string;
   alt: string;
   width?: number;
   height?: number;
   layout?: ImageLayout;
+  submissionId?: string;
+  imageIndex?: number;
 }) {
   const url = withAccessToken(source);
-  const thumbnailUrl = withAccessToken(source, source.startsWith("/api/media/") ? { preview: "1" } : undefined);
+  const preview = sentImage(submissionId, imageIndex);
+  useLayoutEffect(() => retainSentImage(preview), [preview]);
+  const thumbnailUrl = preview?.url || withAccessToken(source, source.startsWith("/api/media/") ? { preview: "1" } : undefined);
   const [dimensions, setDimensions] = useState<ImageDimensions | null>(() => {
     if (validDimension(width) && validDimension(height)) return { width, height };
     return getSourceDimensions(source) || imageDimensionsCache.get(source) || null;
@@ -121,7 +127,7 @@ function RenderedImage({
           <img
             src={thumbnailUrl}
             alt={alt}
-            loading="lazy"
+            loading={preview || source.startsWith("blob:") ? "eager" : "lazy"}
             width={dimensions?.width}
             height={dimensions?.height}
             onLoad={(event) => {
@@ -156,7 +162,7 @@ function RenderedImage({
           >
             <X aria-hidden="true" />
           </button>
-          <img src={url} alt={alt} onClick={(event) => event.stopPropagation()} />
+          <img src={preview?.url || url} alt={alt} onClick={(event) => event.stopPropagation()} />
         </div>,
         document.body,
       )}
@@ -233,13 +239,15 @@ export function CollapsedMarkdown({ text, lines = 2, characterLimit }: { text: s
   );
 }
 
-function ImageGallery({ blocks }: { blocks: ImageBlock[] }) {
+function ImageGallery({ blocks, submissionId, offset }: { blocks: ImageBlock[]; submissionId?: string; offset: number }) {
   const single = blocks.length === 1;
   return (
     <div className={`${styles.imageGallery} ${single ? styles.imageGallerySingle : ""}`}>
-      {blocks.map((block) => (
+      {blocks.map((block, index) => (
         <RenderedImage
           key={block.id}
+          submissionId={submissionId}
+          imageIndex={offset + index}
           source={block.source}
           alt={block.alt || block.file?.name || "对话图片"}
           width={block.width || block.file?.width}
@@ -304,6 +312,7 @@ export function ContentRenderer({ message, threadId = "" }: { message: SessionMe
   const userText = message.role === "user" ? blocks.filter((block) => block.type === "markdown").map((block) => block.text).join("\n") : "";
   const quotedReply = userText.match(/^(> 引用 [^\n]*\n(?:> [^\n]*(?:\n|$))*)\n([\s\S]*)$/u);
   let renderedUserText = false;
+  let imageOffset = 0;
   for (let index = 0; index < blocks.length;) {
     const block = blocks[index];
     if (message.role === "user" && block.type === "markdown") {
@@ -326,7 +335,8 @@ export function ContentRenderer({ message, threadId = "" }: { message: SessionMe
       images.push(blocks[index] as ImageBlock);
       index += 1;
     }
-    content.push(<ImageGallery key={`gallery-${images[0].id}`} blocks={images} />);
+    content.push(<ImageGallery key={`gallery-${images[0].id}`} blocks={images} submissionId={message.role === "user" ? message.submissionId : undefined} offset={imageOffset} />);
+    imageOffset += images.length;
   }
   return <FileLinkContext.Provider value={linkContext}><div className={styles.content}>{content}</div></FileLinkContext.Provider>;
 }

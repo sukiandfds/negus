@@ -1,3 +1,4 @@
+import { moveSentImages } from "../../attachments/data/sentImagePreviews";
 import { currentConversationId } from "../../../shared/api/conversationScope";
 import { canonicalChannelId } from "../../models/components/ChannelManager";
 import { modelApi } from "../../models/data/modelApi";
@@ -335,7 +336,7 @@ export function useProjectConversations() {
     }
   }, [selection.store, selection.updateCurrentSession, selection.loadSession, catalog.updateSessionSummary]);
 
-  const sendDirectMessage = useCallback(async (text: string, attachments: MediaFile[] = [], existingSubmissionId = "", replacingMessageId = "", retryModel = "", preparedThread?: string) => {
+  const sendDirectMessage = useCallback(async (text: string, attachments: MediaFile[] = [], existingSubmissionId = "", replacingMessageId = "", retryModel = "", preparedThread?: string, finishUpload?: (submissionId: string) => Promise<MediaFile[]>) => {
     const messageText = text.trim();
     const requestedThreadId = preparedThread || selection.selectedId;
     if ((!messageText && !attachments.length) || !requestedThreadId || submittingThreads.current.has(requestedThreadId)) return false;
@@ -349,11 +350,14 @@ export function useProjectConversations() {
     const scope = conversationScope;
     let threadId = requestedThreadId;
     const submissionId = existingSubmissionId || createSubmissionId();
-    const optimisticMessage: SessionMessage = {
-      ...createOptimisticMessage(messageText, attachments, submissionId), deliveryState: "preparing",
+    let optimisticMessage: SessionMessage = {
+      ...createOptimisticMessage(messageText, attachments, submissionId), deliveryState: finishUpload ? "sending" : "preparing",
       ...(switchingProvider ? { modelSwitch: settings.model, modelSwitchState: "switching" } : {}),
     };
-    if (replacingMessageId) selection.removeOptimisticMessage(threadId, replacingMessageId);
+    if (replacingMessageId) {
+      moveSentImages(current.session?.messages.find(item => item.id === replacingMessageId)?.submissionId, submissionId);
+      selection.removeOptimisticMessage(threadId, replacingMessageId);
+    }
     reconciledSubmissionsRef.current.delete(submissionId);
     selection.addOptimisticMessage(threadId, optimisticMessage);
     setLocalSendVersion(value => value + 1);
@@ -375,6 +379,12 @@ export function useProjectConversations() {
         threadId = created;
         submittingThreads.current.add(threadId);
         selection.addOptimisticMessage(threadId, optimisticMessage);
+      }
+      if (finishUpload) {
+        attachments = await finishUpload(submissionId);
+        optimisticMessage = { ...optimisticMessage, blocks: createOptimisticMessage(messageText, attachments, submissionId).blocks };
+        selection.updateOptimisticMessage(threadId, optimisticMessage.id, { blocks: optimisticMessage.blocks });
+        finishUpload = undefined;
       }
       if ((!preparedThread || preparedThread === selection.selectedId) && !selection.store.get(threadId).executionStatus.active) {
         try {
@@ -412,6 +422,10 @@ export function useProjectConversations() {
       void selection.loadSession(threadId, { retry: false, conversationId: scope });
       return true;
     } catch (error) {
+      if (finishUpload) {
+        selection.removeOptimisticMessage(threadId, optimisticMessage.id);
+        throw error;
+      }
       const reason = error instanceof Error ? error.message : String(error);
       updateDelivery(/already has an active writer/iu.test(reason) ? "occupied" : "failed", undefined, reason);
       return true;
@@ -442,11 +456,11 @@ export function useProjectConversations() {
     }
   }, [retryingMessageId, sendDirectMessage]);
 
-  const sendMessage = useCallback(async (text: string, attachments: MediaFile[] = [], preparedThread?: string) => {
+  const sendMessage = useCallback(async (text: string, attachments: MediaFile[] = [], preparedThread?: string, finishUpload?: (submissionId: string) => Promise<MediaFile[]>) => {
     const sendThread = preparedThread || await prepareSend();
     if (!sendThread) return false;
     const target = editingMessageRef.current;
-    if (!target) return sendDirectMessage(text, attachments, "", "", "", sendThread);
+    if (!target) return sendDirectMessage(text, attachments, "", "", "", sendThread, finishUpload);
     const threadId = selection.selectedIdRef.current;
     if (!threadId || !target.turnId || target.role !== "user" || execution.status.active || selection.session?.archived) return false;
     setForkingMessageId(target.id);

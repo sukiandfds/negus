@@ -109,9 +109,9 @@ export function useAttachmentDraft() {
     setError("");
   }, []);
 
-  const clear = useCallback(() => {
+  const clear = useCallback((retained?: Set<string>) => {
     for (const attachment of attachmentsRef.current) {
-      if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+      if (attachment.previewUrl && !retained?.has(attachment.previewUrl)) URL.revokeObjectURL(attachment.previewUrl);
     }
     attachmentsRef.current = [];
     for (const transfer of transfers.current.values()) transfer.controller.abort();
