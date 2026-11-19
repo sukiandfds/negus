@@ -12,16 +12,16 @@ try {
       await page.getByText('隔离附件测试群', { exact: true }).first().click();
       await page.locator('.group-workspace textarea').waitFor();
       if (name === 'desktop') {
+        const uploaded = page.waitForResponse(response => new URL(response.url()).pathname === '/api/uploads' && response.request().method() === 'POST');
         await page.locator('.group-workspace input[type=file]').setInputFiles({ name: 'isolation.txt', mimeType: 'text/plain', buffer: Buffer.from('隔离附件内容') });
         await page.locator('.group-workspace textarea').fill('隔离上传测试');
-        const uploaded = page.waitForResponse(response => new URL(response.url()).pathname === '/api/uploads' && response.request().method() === 'POST');
         const sent = page.waitForResponse(response => new URL(response.url()).pathname === '/api/group/message' && response.request().method() === 'POST');
         await page.getByRole('button', { name: '发送', exact: true }).click();
         assert.equal((await uploaded).ok(), true); assert.equal((await sent).ok(), true);
         await page.getByText('isolation.txt', { exact: true }).first().waitFor();
       }
-      const ownMessage = page.locator('article[class*="ownMessage"]').filter({ hasText: '隔离上传测试' }).last();
-      assert.equal(await ownMessage.evaluate(element => element.className.includes('ownMessage')), true);
+      const ownMessage = page.locator('[data-message-id] article').filter({ hasText: '隔离上传测试' }).last();
+      await ownMessage.waitFor();
       assert.equal(await ownMessage.locator('[class*="userBubble"]').count(), 1);
       storageState = await page.context().storageState();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);

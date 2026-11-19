@@ -1,3 +1,4 @@
+import { resolveIncoming } from "../cos-attachments.mjs";
 import { readJson, sendJson } from "../http/request-utils.mjs";
 import { resolveAgentRouting } from "../multi-agent/agent-routing.mjs";
 
@@ -210,7 +211,7 @@ export const createGroupRoutes = ({ groupRoom, roomDirectory, media, multiAgent,
   const service = resolveAgentService(room.snapshot().room.id);
   const member = room.touchMember(body.memberId, body.authorName);
   const text = String(body.text || "").trim();
-  const attachments = media.resolveMany(body.attachmentIds);
+  const attachments = await resolveIncoming(media, body.attachmentIds);
   if (!text && !attachments.length) {
     sendJson(response, { error: "消息不能为空" }, 400);
     return true;

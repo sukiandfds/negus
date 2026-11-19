@@ -1,3 +1,4 @@
+import { resolveIncoming } from "../cos-attachments.mjs";
 import { randomUUID } from "node:crypto";
 import { readJson, sendJson } from "../http/request-utils.mjs";
 
@@ -50,7 +51,7 @@ export const createConversationMessageRoutes = ({ conversations, execution, foll
     const body = await readJson(request);
     const threadId = String(body.threadId || "").trim();
     const text = String(body.text || "").trim();
-    const attachments = media.resolveMany(body.attachmentIds);
+    const attachments = await resolveIncoming(media, body.attachmentIds);
     if (!threadId || (!text && !attachments.length)) {
       sendJson(response, { error: "threadId and message content are required" }, 400);
       return true;

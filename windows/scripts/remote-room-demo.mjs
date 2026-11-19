@@ -1,3 +1,4 @@
+import { loadCosAttachments } from "../server/cos-attachments.mjs";
 import { extendGroupRooms } from "../../ui-feishu/server/group-extension.mjs";
 import { extendEmployeeTasks } from "../../ui-feishu/server/employee-task-extension.mjs";
 import { existingProjects, withExistingConversations } from "../../ui-feishu/server/existing-projects.mjs";
@@ -74,7 +75,7 @@ const refreshBusinessProjects = async () => {
   return projects;
 };
 const attachmentContent = createAttachmentContentService();
-const media = createMediaService({ uploadRoot: path.join(projectRoot, "runtime", "uploads"), attachmentContent });
+const media = createMediaService({ cos: loadCosAttachments(), uploadRoot: path.join(projectRoot, "runtime", "uploads"), attachmentContent });
 await media.restoreUploads();
 const imageGenerationRuns = createImageGenerationRunStore({
   stateFile: path.join(projectRoot, "runtime", "image-generation-runs.json"),

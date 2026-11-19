@@ -53,3 +53,7 @@ related: [FEAT-004, FEAT-009]
 ## 当前证据
 
 - `docs/negus-knowledge/features/feature-records/FEAT-006-stable-remote-access.md`
+
+### 2026-11-20 公网上传线路
+
+本次对话确认采用上海 COS 承载附件字节，Negus 公网入口继续承载身份验证和消息。公网传输和原件交付的有效决定见 [FEAT-003](../FEAT-003/item.md)。后端通过 NEGUS_COS_CONFIG 或用户目录 .config/negus/cos-uploads.json 读取 bucket、region、origin、secretId、secretKey。存储桶保持私有，CORS 仅放行 Negus 来源的 PUT 和 content-type，临时对象前缀为 negus/drafts/。

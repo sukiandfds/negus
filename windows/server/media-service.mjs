@@ -92,7 +92,7 @@ const readUpload = async (request) => {
   return Buffer.concat(chunks);
 };
 
-export const createMediaService = ({ uploadRoot, attachmentContent } = {}) => {
+export const createMediaService = ({ uploadRoot, attachmentContent, cos } = {}) => {
   const entries = new Map();
   const previewJobs = new Map();
   const previewRoot = uploadRoot ? path.join(path.dirname(uploadRoot), "media-previews") : "";
@@ -190,12 +190,13 @@ export const createMediaService = ({ uploadRoot, attachmentContent } = {}) => {
     }
   };
 
-  const upload = async (request, { name, mimeType }) => {
+  const upload = async (request, { name, mimeType, digest }) => {
     if (!uploadRoot) throw new Error("附件上传服务未配置");
     const displayName = safeUploadName(name);
     const body = await readUpload(request);
     await fsp.mkdir(uploadRoot, { recursive: true });
     const contentHash = createHash("sha256").update(body).digest("hex");
+    if (digest && digest !== contentHash) throw Object.assign(new Error("附件完整性校验失败，请重新选择文件"), { statusCode: 422 });
     const storedName = `${contentHash}__${displayName}`;
     const file = path.join(uploadRoot, storedName);
     try {
@@ -295,5 +296,10 @@ export const createMediaService = ({ uploadRoot, attachmentContent } = {}) => {
     fs.createReadStream(servedPath, { start, end }).pipe(response);
   };
 
-  return { register, restoreUploads, upload, resolveMany, serve };
+  function findUpload({ name, digest }) {
+    const file = path.join(uploadRoot, digest + "__" + safeUploadName(name));
+    const id = createHash("sha256").update(path.resolve(file).toLowerCase()).digest("hex").slice(0, 32);
+    return resolveMany([id])[0];
+  }
+  return { register, restoreUploads, upload, resolveMany, findUpload, serve, cos };
 };

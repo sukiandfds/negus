@@ -51,3 +51,8 @@
 - Terra 补验通过：1000px/390px 画布初始完整适应六节点宽图；按钮/图形两种入口搭配关闭按钮/遮罩/Esc三种退出，焦点均恢复至原触发控件。首次其余拖动、滚轮、缩放按钮、单指拖动与双指缩放通过项继续有效。
 - 证据 `work/mermaid-20261116/viewer-reaccept.mjs` 及同目录 `viewer-reaccept-1000.png`、`viewer-reaccept-390.png`。验收后受控发布结果 published，版本 `feishu-mwixifba`，时间 `2026-11-16T07:15:26.164Z`；后端未重启。
 - 证据：`work/mermaid-20261116/viewer-reaccept.mjs`、`viewer-reaccept-1000.png`、`viewer-reaccept-390.png`（同目录）。按用户要求验收通过后执行受控前端发布，无需后端重启。
+
+### 2026-11-20 公网附件交付
+
+- 正式发布 1795107809916-8b5f5414。移动宽度 Chrome 在隔离群聊使用真实 COS 上传 5 MiB，用时 5.55 秒；上传完成后点击发送，0.93 秒内消息返回 202 且 Mac 保存逐字节相同的原件。隔离本地群聊的桌面和移动宽度发送/查看验证通过。
+- Astra low 独立审核及复验覆盖正式群聊入口、放弃本地草稿、重复交付和 COS 删除方法。自动化覆盖在 windows/tests/cos-attachments.test.mjs。

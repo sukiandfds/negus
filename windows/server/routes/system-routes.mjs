@@ -239,6 +239,11 @@ export const createSystemRoutes = ({ token, project, projectRoot, device, observ
       sendJson(response, await readProjectManagementEntry({ projectRoot, entryId: projectManagementEntryMatch[1] }));
       return true;
     }
+    if (url.pathname === "/api/uploads/plan" && request.method === "POST") {
+      const enabled = media.cos && request.headers.origin === media.cos.origin;
+      sendJson(response, enabled ? media.cos.plan(await readJson(request, 4096)) : { direct: true });
+      return true;
+    }
     if (url.pathname === "/api/uploads" && request.method === "POST") {
       const upload = await media.upload(request, {
         name: url.searchParams.get("name") || "attachment",
@@ -248,7 +253,9 @@ export const createSystemRoutes = ({ token, project, projectRoot, device, observ
       return true;
     }
     if (url.pathname.startsWith("/api/media/")) {
-      await media.serve(request, response, url.pathname.slice("/api/media/".length), {
+      const id = url.pathname.slice("/api/media/".length);
+      const local = id.startsWith("cos.") && media.cos ? await media.cos.resolve(id, media) : null;
+      await media.serve(request, response, local?.id || id, {
         download: url.searchParams.get("download") === "1",
         preview: url.searchParams.get("preview") === "1",
       });

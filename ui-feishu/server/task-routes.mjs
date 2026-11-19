@@ -1,3 +1,4 @@
+import { resolveIncoming } from "../../windows/server/cos-attachments.mjs";
 import { randomUUID } from 'node:crypto';
 import { readJson, sendJson } from '../../windows/server/http/request-utils.mjs';
 
@@ -43,7 +44,7 @@ export function createTaskRoutes({ roomDirectory, multiAgentDirectory, groupRoom
     const service = multiAgentDirectory.get(room.snapshot().room.id);
     const member = room.touchMember(body.memberId, body.authorName);
     const text = String(body.text || '').trim();
-    const attachments = media.resolveMany(body.attachmentIds);
+    const attachments = await resolveIncoming(media, body.attachmentIds);
     if (!text && !attachments.length) throw Object.assign(Error('消息不能为空'), { statusCode: 400 });
     const requestId = String(body.clientMessageId || randomUUID());
     if (requestId.length > 80) throw Object.assign(Error('消息重试标识过长'), { statusCode: 400 });

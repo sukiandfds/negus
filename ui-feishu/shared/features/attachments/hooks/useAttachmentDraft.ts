@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { prepareAttachmentForUpload, uploadAttachment } from "../data/attachmentApi";
+import { uploadAttachment } from "../data/attachmentApi";
 import { withAccessToken } from "../../../shared/api/http";
 import type { MediaFile } from "../../../shared/model/media";
 
@@ -7,6 +7,7 @@ export interface DraftAttachment {
   id: string;
   file: File | MediaFile;
   previewUrl: string;
+  phase?: "上传中" | "已上传" | "上传失败";
 }
 
 const maxFiles = 6;
@@ -19,18 +20,51 @@ export function useAttachmentDraft() {
   const [uploading, setUploading] = useState(false);
   const [uploadSlow, setUploadSlow] = useState(false);
   const attachmentsRef = useRef(attachments);
-  const uploadedRef = useRef(new Map<string, MediaFile>());
+  const transfers = useRef(new Map<string, { controller: AbortController; submit: () => void; result: Promise<MediaFile> }>());
   const uploadPromiseRef = useRef<Promise<MediaFile[]> | null>(null);
-  const uploadControllerRef = useRef<AbortController | null>(null);
+
   const uploadSlowTimerRef = useRef(0);
   attachmentsRef.current = attachments;
 
   useEffect(() => () => {
     window.clearTimeout(uploadSlowTimerRef.current);
-    uploadControllerRef.current?.abort();
+    for (const transfer of transfers.current.values()) transfer.controller.abort();
+    transfers.current.clear();
     for (const attachment of attachmentsRef.current) {
       if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
     }
+  }, []);
+
+  const start = useCallback((attachment: DraftAttachment, sending = false): Promise<MediaFile> => {
+    if (!(attachment.file instanceof File)) return Promise.resolve(attachment.file);
+    const existing = transfers.current.get(attachment.id);
+    if (existing) {
+      if (sending) existing.submit();
+      return existing.result;
+    }
+    const controller = new AbortController();
+    const phase = (value: DraftAttachment["phase"]) => {
+      if (!attachmentsRef.current.some(item => item.id === attachment.id)) return;
+      const next = attachmentsRef.current.map(item => item.id === attachment.id ? { ...item, phase: value } : item);
+      attachmentsRef.current = next;
+      setAttachments(next);
+    };
+    let submit!: () => void;
+    const submitted = new Promise<void>(resolve => { submit = resolve; });
+    controller.signal.addEventListener("abort", submit, { once: true });
+    if (sending) submit();
+    const result = uploadAttachment(attachment.file, controller.signal, submitted, () => phase("上传中")).then(file => {
+      if (!controller.signal.aborted) phase("已上传");
+      return file;
+    }).catch(reason => {
+      if (transfers.current.get(attachment.id)?.controller === controller) {
+        transfers.current.delete(attachment.id);
+        phase("上传失败");
+      }
+      throw reason;
+    });
+    transfers.current.set(attachment.id, { result, controller, submit });
+    return result;
   }, []);
 
   const addFiles = useCallback((files: FileList | File[]) => {
@@ -52,7 +86,8 @@ export function useAttachmentDraft() {
       }))];
     attachmentsRef.current = next;
     setAttachments(next);
-  }, []);
+    for (const item of next.slice(current.length)) void start(item).catch(() => {});
+  }, [start]);
 
   const restoreFiles = useCallback((files: MediaFile[]) => {
     const next = files.map(file => ({ id: file.id, file, previewUrl: file.mimeType.startsWith("image/") ? withAccessToken(file.url) : "" }));
@@ -66,7 +101,8 @@ export function useAttachmentDraft() {
     const current = attachmentsRef.current;
     const removed = current.find((attachment) => attachment.id === id);
     if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
-    uploadedRef.current.delete(id);
+    transfers.current.get(id)?.controller.abort();
+    transfers.current.delete(id);
     const next = current.filter((attachment) => attachment.id !== id);
     attachmentsRef.current = next;
     setAttachments(next);
@@ -78,45 +114,39 @@ export function useAttachmentDraft() {
       if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
     }
     attachmentsRef.current = [];
-    uploadedRef.current.clear();
+    for (const transfer of transfers.current.values()) transfer.controller.abort();
+    transfers.current.clear();
     setAttachments([]);
     setError("");
   }, []);
 
   const uploadAll = useCallback(() => {
     if (uploadPromiseRef.current) return uploadPromiseRef.current;
-    const controller = new AbortController();
-    uploadControllerRef.current = controller;
+
     setUploading(true);
     setUploadSlow(false);
     setError("");
     uploadSlowTimerRef.current = window.setTimeout(() => setUploadSlow(true), 10000);
-    const operation = Promise.all(attachmentsRef.current.map(async (attachment) => {
-        if (!(attachment.file instanceof File)) return attachment.file;
-        const uploaded = uploadedRef.current.get(attachment.id);
-        if (uploaded) return uploaded;
-        const prepared = await prepareAttachmentForUpload(attachment.file, controller.signal);
-        const result = await uploadAttachment(prepared, controller.signal);
-        uploadedRef.current.set(attachment.id, result);
-        return result;
-      })).catch((reason) => {
+    const operation = Promise.all(attachmentsRef.current.map(item => start(item, true))).catch((reason) => {
       if (reason instanceof DOMException && reason.name === "AbortError") throw reason;
       setError(reason instanceof Error ? reason.message : "附件上传失败");
       throw reason;
     }).finally(() => {
       window.clearTimeout(uploadSlowTimerRef.current);
       uploadSlowTimerRef.current = 0;
-      uploadControllerRef.current = null;
+
       uploadPromiseRef.current = null;
       setUploading(false);
       setUploadSlow(false);
     });
     uploadPromiseRef.current = operation;
     return operation;
-  }, []);
+  }, [start]);
 
   const cancelUpload = useCallback(() => {
-    uploadControllerRef.current?.abort();
+    for (const item of attachmentsRef.current) {
+      if (item.phase !== "已上传") transfers.current.get(item.id)?.controller.abort();
+    }
   }, []);
 
   return {

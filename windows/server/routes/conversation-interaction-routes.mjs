@@ -1,3 +1,4 @@
+import { resolveIncoming } from "../cos-attachments.mjs";
 import { readJson, sendJson } from "../http/request-utils.mjs";
 
 export const createConversationInteractionRoutes = ({ execution, media, publishThreadEvent, authorizeAgentThread, sessionSource, publicUserInputRequest, publicAttachment }) => {
@@ -83,7 +84,7 @@ export const createConversationInteractionRoutes = ({ execution, media, publishT
     }
     const binding = await authorizeAgentThread({ threadId, conversationId });
     const source = sessionSource(binding);
-    const goalAttachments = media.resolveMany(body.attachmentIds);
+    const goalAttachments = await resolveIncoming(media, body.attachmentIds);
     if (Array.isArray(body.attachmentIds) && goalAttachments.length !== new Set(body.attachmentIds).size) {
       sendJson(response, { error: "目标附件已失效，请重新上传" }, 400);
       return true;

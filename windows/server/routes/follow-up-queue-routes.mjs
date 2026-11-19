@@ -1,3 +1,4 @@
+import { resolveIncoming } from "../cos-attachments.mjs";
 import { isReasoningEffort } from '../reasoning-efforts.mjs';
 import { randomUUID } from "node:crypto";
 import { readJson, sendJson } from "../http/request-utils.mjs";
@@ -33,7 +34,7 @@ export const createFollowUpQueueRoutes = ({ queue, media }) => async (request, r
   if (action === "enqueue") {
     const text = String(body.text || "").trim();
     const attachmentIds = [...new Set(Array.isArray(body.attachmentIds) ? body.attachmentIds.map(String) : [])].slice(0, 6);
-    const attachments = media.resolveMany(attachmentIds);
+    const attachments = await resolveIncoming(media, attachmentIds);
     if ((!text && !attachmentIds.length) || attachments.length !== attachmentIds.length) {
       sendJson(response, { error: "指令内容或附件无效" }, 400);
       return true;
@@ -54,7 +55,7 @@ export const createFollowUpQueueRoutes = ({ queue, media }) => async (request, r
       modelSettings,
       threadId,
       text,
-      attachmentIds,
+      attachmentIds: attachments.map(file => file.id),
       attachments: attachments.map(publicAttachment),
       submissionId: String(body.submissionId || "").trim().slice(0, 160) || randomUUID(),
     });
