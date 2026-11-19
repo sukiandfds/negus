@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isBroadcastRequest, resolveAgentRouting } from "./agent-routing.mjs";
+import { resolveAgentRouting } from "./agent-routing.mjs";
 
 const agents = [
   { id: "manager", name: "运营管理", aliases: ["项目经理"] },
@@ -8,29 +8,22 @@ const agents = [
   { id: "developer", name: "技术研发", aliases: ["开发"] },
 ];
 
-test("broadcast phrases address every employee", () => {
-  for (const text of ["各位看一下最近情况", "所有人一起讨论一下", "每个人都检查一遍"]) {
-    assert.equal(isBroadcastRequest(text), true);
-    const route = resolveAgentRouting({ text, agents });
-    assert.deepEqual(route.targetAgentIds, agents.map((agent) => agent.id));
-    assert.equal(route.broadcast, true);
-  }
-  assert.equal(isBroadcastRequest("这是大家庭的普通说明"), false);
+test("text alone never expands a target set", () => {
+  const route = resolveAgentRouting({ text: "各位看一下最近情况，请所有人都出来发言", agents });
+  assert.deepEqual(route.targetAgentIds, []);
+  assert.equal(route.broadcast, false);
 });
 
-test("directive prefixes do not hide an explicit broadcast", () => {
-  for (const text of ["先每个人都出来打招呼", "请大家一起检查", "让各位一起检查"]) {
-    assert.equal(isBroadcastRequest(text), true);
-    const route = resolveAgentRouting({ text, agents });
-    assert.deepEqual(route.targetAgentIds, agents.map((agent) => agent.id));
-    assert.equal(route.broadcast, true);
-  }
-});
-
-test("explicit mentions still win over broadcast wording", () => {
+test("explicit mentions remain authoritative", () => {
   const route = resolveAgentRouting({ text: "各位看看，@产品分析，先给意见", agents });
   assert.deepEqual(route.targetAgentIds, ["researcher"]);
   assert.equal(route.broadcast, false);
+});
+
+test("structured employee targets remain authoritative over message wording", () => {
+  const route = resolveAgentRouting({ text: "请不要让其他人参与，大家都休息", explicitAgentIds: ["developer"], agents });
+  assert.deepEqual(route.targetAgentIds, ["developer"]);
+  assert.deepEqual(route.explicitAgentIds, ["developer"]);
 });
 
 test("unaddressed messages remain visible without silently dispatching", () => {
@@ -45,8 +38,9 @@ test("a quoted employee can receive a follow-up without a second mention", () =>
   assert.equal(route.broadcast, false);
 });
 
-test("broadcast is not silently reduced to the output worker", () => {
-  const route = resolveAgentRouting({ text: "所有人一起讨论", agents, outputRequested: true });
-  assert.deepEqual(route.targetAgentIds, agents.map((agent) => agent.id));
-  assert.equal(route.broadcast, true);
+test("output routing applies only when no explicit target exists", () => {
+  const route = resolveAgentRouting({ text: "分析一下", agents, outputRequested: true });
+  assert.deepEqual(route.targetAgentIds, ["developer"]);
+  const explicit = resolveAgentRouting({ text: "分析一下", explicitAgentIds: ["researcher"], agents, outputRequested: true });
+  assert.deepEqual(explicit.targetAgentIds, ["researcher"]);
 });

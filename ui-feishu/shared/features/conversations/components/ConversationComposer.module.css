@@ -100,6 +100,7 @@
 
 .commandButton:hover,
 .commandButton[aria-expanded="true"],
+.commandButton[aria-pressed="true"],
 .commandButton:focus-visible {
   background: var(--color-control-hover);
   color: var(--color-text, #eee);

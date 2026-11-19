@@ -1,35 +1,43 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, MoreHorizontal, Plus, RefreshCw, Save, X } from 'lucide-react';
 import { fetchJson, postJson } from '../../../shared/api/http';
-import { readLocalCache, writeLocalCache } from '../../../shared/state/localCache';
+import { createCachedResource } from '../../../shared/state/localCache';
 import styles from './ChannelManager.module.css';
-import { channelProviderId, refreshModelDefaults, useModelDefaults, writeModelDefaults } from '../model/modelDefaults';
+import { channelProviderId, providerIdForModel, refreshModelDefaults, useModelDefaults, writeModelDefaults } from '../model/modelDefaults';
 import { formatReasoningEffort } from '../model/reasoningEffortLabels';
+import { ModelCatalogFeedback } from './ModelCatalogFeedback';
+import { refreshConfiguredModels, refreshModelCatalog, type CatalogResult } from '../data/modelCatalogRefresh';
 import type { CodexModel } from '../model/types';
 
-export type Channel = { hasCredential?: boolean; configured?: boolean; reasoningEffort?: string; sharedConfigId?: string; id: string; name: string; baseUrl?: string; model?: string; multiplier?: string; editable: boolean; switchable?: boolean; priceRatio?: number; priceGroup?: string; modelKey?: string; isCurrent?: boolean };
+export type Channel = { owner?: "shared" | "native" | "builtin"; codexInUse?: boolean; hasCredential?: boolean; configured?: boolean; reasoningEffort?: string; sharedConfigId?: string; id: string; name: string; baseUrl?: string; model?: string; availableModel?: string; multiplier?: string; editable: boolean; switchable?: boolean; priceRatio?: number; priceGroup?: string; modelKey?: string; isCurrent?: boolean };
 const channelCacheKey = 'negus-model-channels-v2';
 const validChannels = (value: unknown): value is Channel[] => Array.isArray(value)
   && value.every((entry) => Boolean(entry) && typeof entry === 'object'
     && typeof (entry as Channel).id === 'string' && typeof (entry as Channel).name === 'string');
-let cachedChannels: Channel[] = readLocalCache(channelCacheKey, validChannels) || [];
-let cachedAt = 0;
-let pendingChannels: Promise<Channel[]> | null = null;
+type ChannelList = { channels: Channel[]; pricing?: Record<string, number> };
+const channelCatalog = createCachedResource<ChannelList>(channelCacheKey + ':metadata', (value): value is ChannelList =>
+  Boolean(value) && validChannels((value as ChannelList).channels),
+  (next, previous) => ({ ...next, pricing: next.pricing || previous?.pricing }));
+export const canonicalChannelId = (id: string) => {
+  const rows = channelCatalog.getSnapshot().data?.channels || [];
+  const linked = rows.find(row => row.codexInUse)?.id || rows.find(row => row.id === "current")?.sharedConfigId;
+  return id === "current" && linked ? "ccswitch_" + linked : id;
+};
+let channelRevalidated = false;
 const refreshChannels = (force = false) => {
-  if (pendingChannels) return pendingChannels;
-  pendingChannels = fetchJson<{ channels: Channel[] }>(`/api/model-channels${force ? '?refresh=1' : ''}`, AbortSignal.timeout(15000))
-    .then((result) => {
-      cachedChannels = result.channels;
-      cachedAt = Date.now();
-      writeLocalCache(channelCacheKey, cachedChannels);
-      return cachedChannels;
-    })
-    .finally(() => { pendingChannels = null; });
-  return pendingChannels;
+  return channelCatalog.refresh(async () => {
+    const result = await fetchJson<{ channels: Channel[]; pricing?: Record<string, number> }>(
+      `/api/model-channels${force ? '?refresh=1' : ''}`,
+      AbortSignal.timeout(15000),
+    );
+    return result;
+  }, force).then(result => result.channels);
 };
 export const readChannels = (force = false) => {
-  if (!force && cachedChannels.length && Date.now() - cachedAt < 60000) return Promise.resolve(cachedChannels);
+  const cached = channelCatalog.getSnapshot().data;
+  if (!force && cached && channelRevalidated) return Promise.resolve(cached.channels);
+  if (!force) channelRevalidated = true;
   return refreshChannels(force);
 };
 export const buildBuiltInChannels = (models: CodexModel[], currentModel: string, channels: Channel[] = []): Channel[] => [...new Set(models.map((entry) => entry.modelProviderId || 'current'))]
@@ -39,31 +47,49 @@ export const buildBuiltInChannels = (models: CodexModel[], currentModel: string,
     const model = available.find((entry) => entry.model === currentModel) || available.find((entry) => entry.isDefault) || available[0];
     const pricing = channels.find((entry) => entry.id === id);
     return model ? [{ configured: pricing?.configured, reasoningEffort: pricing?.reasoningEffort, sharedConfigId: pricing?.sharedConfigId, baseUrl: pricing?.baseUrl, priceRatio: pricing?.priceRatio, priceGroup: pricing?.priceGroup, multiplier: pricing?.multiplier, id, name: model.providerDisplayName || (id === 'current' ? '当前运行配置' : id),
-      model: pricing?.model || model.model, modelKey: model.model, editable: false, switchable: true }] : [];
+      model: pricing?.model || model.model, availableModel: model.model, modelKey: model.model, editable: false, switchable: true }] : [];
   });
 
 export function useChannelCatalog(models: CodexModel[], currentModel: string) {
-  const [channels, setChannels] = useState<Channel[]>(cachedChannels);
+  const cached = useSyncExternalStore(channelCatalog.subscribe, channelCatalog.getSnapshot);
+  const channels = cached.data?.channels || [];
+  const pricing = cached.data?.pricing;
   const builtInChannels = buildBuiltInChannels(models, currentModel, channels);
   const load = async (force = false) => {
     const next = await readChannels(force);
-    setChannels(next);
     return next;
   };
   useEffect(() => {
-    let cancelled = false;
-    void readChannels().then((next) => { if (!cancelled) setChannels(next); }).catch(() => {});
-    const refresh = () => { void readChannels(true).then((next) => { if (!cancelled) setChannels(next); }).catch(() => {}); };
+    void readChannels().catch(() => {});
+    const refresh = () => { void readChannels(true).catch(() => {}); };
     window.addEventListener('negus-channels-updated', refresh);
-    return () => { cancelled = true; window.removeEventListener('negus-channels-updated', refresh); };
+    return () => window.removeEventListener('negus-channels-updated', refresh);
   }, []);
-  return { channels, allChannels: [...builtInChannels, ...channels.filter((entry) => !entry.modelKey && entry.id !== channels.find(c => c.id === 'current')?.sharedConfigId)], load };
+  const currentLink = channels.find(c => c.id === 'current')?.sharedConfigId;
+  const sharedChannels = channels.filter((entry) => !entry.modelKey && entry.id !== currentLink).map((entry) => {
+    const providerId = channelProviderId(entry);
+    const available = models.filter((model) => model.available !== false && (model.modelProviderId || 'current') === providerId);
+    const model = available.find((item) => item.model === currentModel)
+      || available.find((item) => item.model.split('::').at(-1) === entry.model)
+      || available.find((item) => item.isDefault) || available[0];
+    return { ...entry, availableModel: model?.model };
+  });
+  const canonical = canonicalChannelId;
+  const managed = channels.some(entry => entry.owner);
+  const allChannels = managed ? channels.map(entry => {
+    const id = channelProviderId(entry);
+    const available = models.filter(model => (model.modelProviderId || 'current') === id);
+    const preferred = available.find(model => model.model.split('::').at(-1) === entry.model)
+      || available.find(model => model.isDefault) || available[0];
+    return { ...entry, availableModel: preferred?.model };
+  }) : [...builtInChannels, ...sharedChannels];
+  return { channels, allChannels, load, pricing, canonical, managed };
 }
 
 export function ChannelManager({ onClose, currentModel, models }: { onClose: () => void; currentModel: string; models: CodexModel[] }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const defaults = useModelDefaults();
-  const { channels, allChannels, load } = useChannelCatalog(models, currentModel);
+  const { channels, allChannels, load, pricing, canonical, managed } = useChannelCatalog(models, currentModel);
   const [editing, setEditing] = useState(false);
   const [menu, setMenu] = useState('');
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
@@ -88,15 +114,15 @@ export function ChannelManager({ onClose, currentModel, models }: { onClose: () 
   const [testing, setTesting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [emptyResults, setEmptyResults] = useState<CatalogResult[]>([]);
   const [notice, setNotice] = useState('');
   const dirty = editing && !testing && JSON.stringify(draft) !== initial;
-  const defaultDirty = Boolean(pendingDefault && channelProviderId(pendingDefault) !== defaults.providerId);
-  const currentProvider = models.find(m => m.model === currentModel)?.modelProviderId || (currentModel.includes('::') ? currentModel.split('::')[0] : 'current');
+  const defaultDirty = Boolean(pendingDefault && canonical(channelProviderId(pendingDefault)) !== canonical(defaults.providerId));
+  const currentProvider = providerIdForModel(models, currentModel);
   const currentLink = channels.find(c => c.id === 'current')?.sharedConfigId;
-  const matches = (entry: Channel, id: string) => channelProviderId(entry) === id
-    || (entry.id === 'current' && Boolean(currentLink) && id === 'ccswitch_' + currentLink);
+  const matches = (entry: Channel, id: string) => canonical(channelProviderId(entry)) === canonical(id);
   const selectedEntry = channels.find(c => c.id === draft.id);
-  const protectedEntry = Boolean(draft.id && (selectedEntry?.isCurrent || selectedEntry?.editable === false));
+  const protectedEntry = Boolean(draft.id && (selectedEntry?.codexInUse || selectedEntry?.isCurrent || selectedEntry?.editable === false));
   const draftProvider = draft.id ? 'ccswitch_' + draft.id : draft.sourceId === 'current' ? 'current' : 'ccswitch_' + draft.sourceId;
   const sourceChannel = channels.find(channel => channel.id === (draft.id || draft.sourceId));
   const sameEndpoint = sourceChannel?.baseUrl?.replace(/\/$/u, '') === draft.baseUrl.replace(/\/$/u, '');
@@ -120,8 +146,8 @@ export function ChannelManager({ onClose, currentModel, models }: { onClose: () 
     const linked = entry?.id === 'current' && currentLink ? channels.find(c => c.id === currentLink) : entry;
     const source = linked || entry;
     const next = {
-      ...empty, id: copy ? '' : source?.modelKey ? '' : source?.id || '',
-      sourceId: copy || source?.modelKey ? source?.id || '' : '',
+      ...empty, id: copy ? '' : source?.modelKey || (source?.owner && source.owner !== 'shared') ? '' : source?.id || '',
+      sourceId: copy || source?.modelKey || (source?.owner && source.owner !== 'shared') ? source?.id || '' : '',
       name: (source?.name || '') + (copy ? ' 副本' : ''),
       baseUrl: source?.baseUrl || '', model: (source?.model || '').split('::').at(-1) || '',
       reasoningEffort: source?.reasoningEffort || '',
@@ -142,32 +168,29 @@ export function ChannelManager({ onClose, currentModel, models }: { onClose: () 
     } catch (reason) { setError(reason instanceof Error ? reason.message : '请求失败'); }
     finally { setBusy(false); }
   };
-  const defaultFor = (entry: Channel, model = entry.model || '', effort = entry.reasoningEffort || '') => {
+  const defaultFor = (entry: Channel, model = entry.availableModel || entry.model || '', effort = entry.reasoningEffort || '') => {
     const providerId = channelProviderId(entry);
     const raw = model.split('::').at(-1) || '';
-    return { providerId, model: entry.modelKey && providerId === 'current' ? 'current::' + raw : providerId + '::' + raw,
-      effort, archivedProviderIds: [] };
+    return { providerId, model: providerId + '::' + raw,
+      effort };
   };
   const setDefault = (entry: Channel) => {
     setMenu(''); resetFeedback();
-    if (!entry.model) {
-      open(entry);
-      setPendingDefault(entry);
-      setError('请选择默认模型');
-    } else setPendingDefault(entry);
+    setPendingDefault(entry);
   };
   const save = async () => {
-    if (pendingDefault && editing && !draft.model) { setError('请选择默认模型'); return; }
     setBusy(true); resetFeedback();
     try {
-      let target = pendingDefault;
+      const target = pendingDefault;
       if (editing && dirty) {
         const result = await postJson<{ id: string }>('/api/model-channels', requestBody());
-        if (pendingDefault) target = { ...pendingDefault, id: result.id, modelKey: undefined, model: draft.model, reasoningEffort: draft.reasoningEffort };
         setDraft(value => ({ ...value, id: result.id, sourceId: '', apiKey: '', keyMode: value.keyMode === 'clear' ? 'clear' : 'keep' }));
         window.dispatchEvent(new CustomEvent('negus-channels-updated', { detail: { providerId: 'ccswitch_' + result.id } }));
       }
-      if (target) await writeModelDefaults(defaultFor(target));
+      if (target) {
+        if (!managed) throw new Error('保存默认配置需要更新后端');
+        await writeModelDefaults(defaultFor(target));
+      }
       await load(true); await refreshModelDefaults();
       setPendingDefault(null); setEditing(false); setTesting(false); setDraft(empty); setInitial(JSON.stringify(empty)); setNotice('已保存');
     } catch (reason) { setError(reason instanceof Error ? reason.message : '保存失败'); }
@@ -186,34 +209,50 @@ export function ChannelManager({ onClose, currentModel, models }: { onClose: () 
     } catch (reason) { setError(reason instanceof Error ? reason.message : '删除失败'); }
     finally { setBusy(false); }
   };
+  const refreshConfiguration = async () => {
+    setBusy(true); resetFeedback();
+    try {
+      const results = await refreshConfiguredModels();
+      setError(results.filter(entry => entry.error).map(entry => entry.name + '：' + entry.error).join('；'));
+      setEmptyResults(results.filter(entry => entry.count === 0));
+      await Promise.all([load(true), refreshModelDefaults()]);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : '刷新失败'); }
+    finally { setBusy(false); }
+  };
   const back = () => { if (confirmLeave()) { setEditing(false); setTesting(false); setPendingDefault(null); setDraft(empty); setInitial(JSON.stringify(empty)); resetFeedback(); } };
   return createPortal(<dialog ref={dialog} className={styles.dialog} onCancel={event => { event.preventDefault(); close(); }}>
-    <header>{editing ? <button type="button" aria-label="返回" disabled={busy} onClick={back}><ArrowLeft size={18} /></button> : null}
+    <header><button type="button" aria-label="返回" disabled={busy} onClick={editing ? back : close}><ArrowLeft size={18} /></button>
       <h2>{editing ? testing ? '测试配置' : draft.id ? '编辑配置' : '添加配置' : '配置'}</h2>
       <button type="button" aria-label="关闭" disabled={busy} onClick={close}><X size={18} /></button></header>
     <div className={styles.toolbar}><span>{editing ? draft.name : allChannels.length + ' 个配置'}</span>
       <button type="button" title="添加配置" aria-label="添加配置" disabled={busy} onClick={() => open()}><Plus size={18} /></button>
-      <button type="button" title="刷新配置" aria-label="刷新配置" disabled={busy} onClick={() => { setBusy(true); void Promise.all([load(true), refreshModelDefaults()]).catch(e => setError(e.message)).finally(() => setBusy(false)); }}><RefreshCw size={18} /></button>
+      <button type="button" title="刷新配置" aria-label="刷新配置" disabled={busy} onClick={() => void refreshConfiguration()}><RefreshCw size={18} /></button>
       <button type="button" title="保存" aria-label="保存" disabled={busy || (!dirty && !defaultDirty)} onClick={() => void save()}><Save size={18} /></button>
     </div>
+    {!editing && pricing ? <section aria-label="供应商公开分组倍率"><strong>供应商公开分组倍率</strong>
+      <ul>{Object.entries(pricing).map(([group, ratio]) => <li key={group}>{group} {ratio.toFixed(2)}×</li>)}</ul>
+    </section> : null}
+    {emptyResults.length ? <ModelCatalogFeedback results={emptyResults} onClose={() => setEmptyResults([])}
+      onDeleted={() => { void load(true).catch(() => {}); void refreshModelCatalog().catch(() => {}); void refreshModelDefaults().catch(() => {}); }} /> : null}
     {!editing ? <div className={styles.channels}>{allChannels.map(entry => {
       const active = Boolean(currentModel) && matches(entry, currentProvider);
       const isDefault = matches(entry, pendingDefault ? channelProviderId(pendingDefault) : defaults.providerId);
       const linked = entry.id === 'current' ? channels.find(c => c.id === currentLink) : entry;
       return <div key={entry.id} className={styles.channel} >
         <div className={styles.channelInfo}><div className={styles.nameRow}><strong>{entry.name}</strong>
-          {linked?.isCurrent ? <span className={styles.badge}>CC Switch 占用中</span> : null}
+          {entry.owner === 'builtin' ? <span className={styles.badge}>Negus 内建</span> : null}
+          {entry.codexInUse ? <span className={styles.badge}>ccswitch供codex使用中</span> : linked?.isCurrent ? <span className={styles.badge}>CC Switch 占用中</span> : null}
           {isDefault ? <span className={styles.badge}>默认配置</span> : null}</div>
-          {entry.model ? <small>{entry.model.split('::').at(-1)}</small> : null}</div>
+          {entry.availableModel || entry.model ? <small>{(entry.availableModel || entry.model || '').split('::').at(-1)}</small> : null}</div>
         <span className={styles.ratio} title={entry.priceGroup || '供应商倍率'}>{entry.priceRatio !== undefined ? entry.priceRatio.toFixed(2) + '×' : '未获取'}</span>
         <div className={styles.actions} data-channel-menu>
           <button type="button" className={styles.iconButton} aria-label={'操作 ' + entry.name} aria-expanded={menu === entry.id} disabled={busy} onClick={event => { const box = event.currentTarget.getBoundingClientRect(); setMenuPosition({ left: Math.max(8, Math.min(box.right - 144, window.innerWidth - 152)), top: Math.max(8, Math.min(box.bottom + 4, window.innerHeight - 202)) }); setMenu(menu === entry.id ? '' : entry.id); }}><MoreHorizontal size={18} /></button>
           {menu === entry.id ? <div className={styles.actionMenu} style={menuPosition} role="menu">
             <button role="menuitem" onClick={() => open(entry)}>编辑</button>
             <button role="menuitem" onClick={() => open(entry, true)}>复制</button>
-            <button role="menuitem" onClick={() => setDefault(entry)}>设为默认</button>
+            <button role="menuitem" disabled={managed && !entry.availableModel} onClick={() => setDefault(entry)}>设为默认</button>
             <button role="menuitem" onClick={() => open(entry, false, true)}>测试配置</button>
-            <button role="menuitem" className={styles.danger} disabled={active || linked?.isCurrent || !linked || Boolean(linked.modelKey)} title={active || linked?.isCurrent ? '正在使用的配置暂不删除' : undefined} onClick={() => void remove(entry)}>删除</button>
+            <button role="menuitem" className={styles.danger} disabled={active || linked?.codexInUse || linked?.isCurrent || !linked || Boolean(linked.modelKey) || Boolean(entry.owner && entry.owner !== 'shared')} title={active || linked?.isCurrent ? '正在使用的配置暂不删除' : undefined} onClick={() => void remove(entry)}>删除</button>
           </div> : null}
         </div>
       </div>;

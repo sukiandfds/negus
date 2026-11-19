@@ -45,6 +45,9 @@ export const createConversationRoutes = ({
     if (!agentConversationStore) return null;
     const cleanThreadId = String(threadId || "").trim();
     const cleanConversationId = String(conversationId || "").trim();
+    if (employeeRuntime?.isRuntimeThread?.(cleanThreadId)) {
+      throw Object.assign(new Error("请通过员工主对话访问该记录"), { statusCode: 404 });
+    }
     const boundByThread = cleanThreadId
       ? agentConversationStore.findByRuntimeSession?.("codex", cleanThreadId)
       : null;

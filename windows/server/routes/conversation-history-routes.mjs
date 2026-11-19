@@ -2,6 +2,7 @@ import { resolveConversationFile } from "../conversation-file.mjs";
 import { paginationFrom, readJson, sendJson } from "../http/request-utils.mjs";
 
 export const createConversationHistoryRoutes = ({ conversations, execution, followUpQueue, contextManagement, media, publishThreadEvent, agentConversationStore, employeeRuntime, roomDirectory, agentTasks, authorizeAgentThread, isEmployeeDirectBinding, sessionSource, readAgentSession, readOrdinarySession, publicUserInputRequest }) => {
+  const providerCopies = new Map();
   return async (request, response, url) => {
   if (url.pathname === "/api/session/file" && request.method === "GET") {
     const threadId = url.searchParams.get("threadId") || "";
@@ -108,10 +109,24 @@ export const createConversationHistoryRoutes = ({ conversations, execution, foll
     const binding = await authorizeAgentThread({ threadId, conversationId });
     if (binding) throw Object.assign(new Error("员工对话请在员工详情中切换模型"), { statusCode: 409 });
     if (execution.getStatus(threadId).active) throw Object.assign(new Error("当前任务运行中，请完成后再切换配置"), { statusCode: 409 });
-    const result = await conversations.createFromProvider(threadId, model, {
-      reasoningEffort: String(body.reasoningEffort || "").trim(),
-    });
-    publishThreadEvent(result.session.threadId, { type: "sessions_changed", threadId: result.session.threadId });
+    const reasoningEffort = String(body.reasoningEffort || "").trim();
+    const requestId = String(body.requestId || "").trim().slice(0, 160);
+    const key = requestId && JSON.stringify([threadId, requestId, model, reasoningEffort]);
+    let copy = key && providerCopies.get(key);
+    if (!copy) {
+      copy = Promise.resolve(conversations.createFromProvider(threadId, model, { reasoningEffort })).then(result => {
+        publishThreadEvent(result.session.threadId, { type: "sessions_changed", threadId: result.session.threadId });
+        return result;
+      });
+      if (key) {
+        providerCopies.set(key, copy);
+        void copy.then(() => {
+          const expiry = setTimeout(() => providerCopies.delete(key), 10 * 60_000);
+          expiry.unref?.();
+        }, () => providerCopies.delete(key));
+      }
+    }
+    const result = await copy;
     sendJson(response, result, 201);
     return true;
   }

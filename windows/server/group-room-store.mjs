@@ -121,6 +121,11 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
       artifactIds: [...new Set((Array.isArray(message.artifactIds) ? message.artifactIds : [])
         .map((id) => cleanText(id, 80)).filter(Boolean))],
       failure: message.failure === true,
+      editedAt: cleanText(message.editedAt, 40) || null,
+      editHistory: (Array.isArray(message.editHistory) ? message.editHistory : [])
+        .map((edit) => ({ text: cleanText(edit?.text, 12000), editedAt: cleanText(edit?.editedAt, 40) }))
+        .filter((edit) => edit.text && edit.editedAt)
+        .slice(-20),
     }));
   const members = new Map();
   const activeWorks = new Map();
@@ -283,6 +288,7 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
     preserveText = false,
     replyTo = null,
     failure = false,
+    replaceExisting = false,
   }) => {
     const content = preserveText
       ? String(text || "").slice(0, 12000)
@@ -295,7 +301,7 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
       (cleanClientMessageId && message.authorId === cleanAuthorId && message.clientMessageId === cleanClientMessageId)
       || (cleanWorkId && message.workId === cleanWorkId && (message.itemId || null) === cleanItemId)
     ));
-    if (existing) return { message: existing, created: false };
+    if (existing && !replaceExisting) return { message: existing, created: false };
     const files = (Array.isArray(attachments) ? attachments : []).slice(0, 6).map((file) => ({
       id: cleanText(file.id, 80),
       name: cleanText(file.name, 160),
@@ -303,6 +309,14 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
       url: cleanText(file.url, 240),
     })).filter((file) => file.id && file.name && file.url);
     if (!content.trim() && !files.length) throw Object.assign(new Error("消息不能为空"), { statusCode: 400 });
+    if (existing) {
+      if (existing.text === content && existing.failure === (failure === true)) return { message: existing, created: false, updated: false };
+      existing.text = content;
+      existing.failure = failure === true;
+      await persist();
+      emit({ type: "group_message_updated", message: existing });
+      return { message: existing, created: false, updated: true };
+    }
     const targets = [...new Set((Array.isArray(targetAgentIds) ? targetAgentIds : [])
       .map((id) => cleanText(id, 80))
       .filter((id) => agents.has(id)))];
@@ -451,6 +465,27 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
     return message;
   };
 
+  const editMessage = async (messageId, { authorId, text, clientMessageId = "" }) => {
+    const message = getMessage(cleanText(messageId, 80));
+    if (!message || message.type !== "human") throw Object.assign(new Error("群消息不存在或不可编辑"), { statusCode: 404 });
+    if (!cleanText(authorId, 80) || message.authorId !== cleanText(authorId, 80)) {
+      throw Object.assign(new Error("只能编辑自己发送的群消息"), { statusCode: 403 });
+    }
+    if (clientMessageId && message.clientMessageId !== cleanText(clientMessageId, 80)) {
+      throw Object.assign(new Error("群消息已变化，请刷新后重试"), { statusCode: 409 });
+    }
+    const content = cleanText(text, 12000);
+    if (!content) throw Object.assign(new Error("消息不能为空"), { statusCode: 400 });
+    if (content === message.text) return message;
+    const editedAt = new Date().toISOString();
+    message.editHistory = [...(message.editHistory || []), { text: message.text, editedAt }].slice(-20);
+    message.text = content;
+    message.editedAt = editedAt;
+    await persist();
+    emit({ type: "group_message_updated", message: { ...message } });
+    return message;
+  };
+
   const updateAgent = async (agentId, patch) => {
     const current = agents.get(agentId);
     if (!current) throw Object.assign(new Error("Agent 不存在"), { statusCode: 404 });
@@ -477,6 +512,7 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
     finishAgentWork,
     attachArtifact,
     markMessageFailure,
+    editMessage,
     updateAgent,
     close: () => writeQueue,
   };

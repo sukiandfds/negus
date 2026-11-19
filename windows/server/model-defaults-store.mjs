@@ -14,7 +14,7 @@ export const createModelDefaultsStore = (file, { fallback = null } = {}) => {
       providerId = String(value?.providerId || '').trim();
       model = String(value?.model || '').trim();
       effort = String(value?.effort || '').trim();
-      archivedProviderIds = Array.isArray(value?.archivedProviderIds) ? value.archivedProviderIds : [];
+      archivedProviderIds = Array.isArray(input.archivedProviderIds) ? input.archivedProviderIds : value?.archivedProviderIds || [];
     }
     if (providerId.length > 100 || model.length > 240 || !['','none','minimal','low','medium','high','xhigh','max','ultra'].includes(effort)
       || (providerId && !model)) throw Object.assign(new Error('设为默认前请选择默认模型'), { statusCode: 400 });
@@ -24,9 +24,11 @@ export const createModelDefaultsStore = (file, { fallback = null } = {}) => {
     await writes;
     return normalize(await readJsonFile(file, EMPTY_DEFAULTS));
   };
-  const save = (input) => {
+  const save = (input, { selectionOnly = false, ifProvider } = {}) => {
     const task = writes.catch(() => {}).then(async () => {
-      const value = await normalize(input);
+      const previous = selectionOnly || ifProvider ? await readJsonFile(file, EMPTY_DEFAULTS) : EMPTY_DEFAULTS;
+      if (ifProvider && previous.providerId !== ifProvider) return normalize(previous);
+      const value = await normalize(selectionOnly ? { ...input, archivedProviderIds: previous.archivedProviderIds || [] } : input);
       await writeJsonFileAtomic(file, value, { space: 0, trailingNewline: false, mode: 0o600 });
       return value;
     });

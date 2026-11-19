@@ -1,5 +1,5 @@
 import { fetchJson, patchJson, postJson, withAccessToken } from "../../../shared/api/http";
-import type { GroupAgent, GroupInterruptResponse, GroupMessagePage, GroupRoom, GroupRoomListResponse, GroupSendResponse, GroupSnapshot, StoredMember } from "../model/types";
+import type { GroupAgent, GroupInterruptResponse, GroupMessage, GroupMessagePage, GroupRoom, GroupRoomListResponse, GroupSendResponse, GroupSnapshot, StoredMember } from "../model/types";
 
 const roomQuery = (roomId: string) => roomId ? `?roomId=${encodeURIComponent(roomId)}` : "";
 const messageQuery = (roomId: string, params: Record<string, string | number | undefined>) => {
@@ -37,6 +37,22 @@ export const groupApi = {
     "/api/group/message",
     { memberId: member.id, authorName: member.name, roomId, text, attachmentIds, clientMessageId, replyTo },
     signal,
+  ),
+  edit: (member: StoredMember, roomId: string, messageId: string, clientMessageId: string, text: string, signal?: AbortSignal) => patchJson<{ message: GroupMessage }>(
+    "/api/group/message",
+    { memberId: member.id, authorName: member.name, roomId, messageId, clientMessageId, text },
+    signal,
+  ),
+  forward: (member: StoredMember, sourceRoomId: string, targetRoomId: string, messageIds: string[], requestId: string) => postJson<GroupSendResponse>(
+    "/api/group/forward",
+    { memberId: member.id, authorName: member.name, sourceRoomId, targetRoomId, messageIds, requestId },
+  ),
+  shareTargets: (sourceRoomId: string, agentId: string) => fetchJson<{ agent: { id: string; name: string }; rooms: Array<{ id: string; name: string }> }>(
+    `/api/group/share-targets?sourceRoomId=${encodeURIComponent(sourceRoomId)}&agentId=${encodeURIComponent(agentId)}`,
+  ),
+  share: (sourceRoomId: string, targetRoomId: string, messageId: string, requestId: string) => postJson<{ message: GroupMessage; deduplicated?: boolean }>(
+    "/api/group/share",
+    { sourceRoomId, targetRoomId, messageId, requestId },
   ),
   interrupt: (roomId = "", signal?: AbortSignal) => postJson<GroupInterruptResponse>(
     "/api/group/interrupt",

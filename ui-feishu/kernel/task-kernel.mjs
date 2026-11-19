@@ -124,6 +124,20 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
     input.turnId = turnId;
     return input;
   });
+  const recordProgress = (id, item) => mutate(data => {
+    const task = requireTask(data, id);
+    task.progress ||= [];
+    const existing = item?.id ? task.progress.find(entry => entry.id === item.id) : null;
+    if (existing) {
+      if (existing.text !== item.text) throw fail('进度标识已用于其他内容', 409);
+      return existing;
+    }
+    const progress = { id: String(item.id), text: String(item.text || ''), phase: item.phase || 'commentary',
+      createdAt: item.createdAt || now() };
+    task.progress.push(progress);
+    task.updatedAt = progress.createdAt;
+    return progress;
+  });
   const attributeFollowup = (id, parentTaskId, submissionId, sourceTaskId) => mutate(data => {
     const task = requireTask(data, id);
     if (task.kind !== 'followup') throw fail('不是续派任务');
@@ -341,7 +355,7 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
   recoveryTimer.unref?.();
   schedule();
   return {
-    enqueue, delegate, waitForStart, recordInput, acceptInput, cancelInput, linkInput, attributeFollowup, cancel,
+    enqueue, delegate, waitForStart, recordInput, recordProgress, acceptInput, cancelInput, linkInput, attributeFollowup, cancel,
     list: () => copy(state.tasks), deliveries: () => copy(state.deliveries), get: id => copy(find(id)),
     hasPendingWork: () => state.tasks.some(task => !terminalStates.has(task.state)),
     retryDelivery: async id => { await mutate(data => {

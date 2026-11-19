@@ -27,6 +27,7 @@ const groupExecution = (id: string, label: string, text: string, startedAt: stri
 // A task's empty placeholder and persisted terminal message are the same visual
 // bubble. Keep that identity stable so realtime delivery updates it in place.
 const timelineMessageKey = (message: GroupMessage) => {
+  if (message.type === "human" && message.clientMessageId) return `client:${message.clientMessageId}`;
   if (!message.workId) return `message:${message.id}`;
   if (message.phase === "commentary") {
     return `work:${message.workId}:item:${message.itemId || message.id}`;
@@ -44,7 +45,7 @@ const attachmentBlocks = (message: GroupMessage): ContentBlock[] => (message.att
     : { id: file.id, type, source: file.url, file };
 });
 
-const sessionMessage = (message: GroupMessage, currentMemberId: string): SessionMessage => ({
+export const groupSessionMessage = (message: GroupMessage, currentMemberId: string): SessionMessage => ({
   id: message.id,
   role: message.type === "human" && message.authorId === currentMemberId ? "user" : "assistant",
   authorId: message.authorId,
@@ -65,27 +66,64 @@ const TimelineMessage = memo(function TimelineMessage({
   currentMemberId,
   liveText,
   onQuote,
+  onEdit,
+  editable,
+  editDisabled,
+  editing,
+  onSelect,
+  selectDisabled,
+  shareableRoomId,
+  onRetry,
+  retrying,
 }: {
   groupMessage: GroupMessage;
   currentMemberId: string;
   liveText: string;
   onQuote?: () => void;
+  onEdit?: () => void;
+  editable?: boolean;
+  editDisabled?: boolean;
+  editing?: boolean;
+  onSelect?: () => void;
+  selectDisabled?: boolean;
+  shareableRoomId?: string;
+  onRetry?: () => Promise<boolean>;
+  retrying?: boolean;
 }) {
   const pendingAgent = groupMessage.type === "agent" && groupMessage.pending;
   const executionId = groupMessage.workId || groupMessage.id;
   return <Message
-    message={sessionMessage(groupMessage, currentMemberId)}
+    message={groupSessionMessage(groupMessage, currentMemberId)}
     executionPlaceholder={Boolean(pendingAgent)}
     executionStatus={pendingAgent ? groupExecution(executionId, "正在回复", liveText, groupMessage.createdAt) : undefined}
     contextStatus={pendingAgent ? emptyStatus(executionId) : undefined}
     onQuote={onQuote}
-    onFork={async () => false}
-    onEdit={() => {}}
+    onSelect={onSelect}
+    selectDisabled={selectDisabled}
+    quoteDisabled={Boolean(groupMessage.pending)}
+    editable={editable}
+    editDisabled={editDisabled}
+    editing={editing}
+    onEdit={onEdit}
+    shareable={Boolean(shareableRoomId) && groupMessage.type === "agent" && !groupMessage.pending && Boolean(groupMessage.agentId) && Boolean(groupMessage.text.trim())}
+    groupShare={shareableRoomId && groupMessage.type === "agent" && groupMessage.agentId ? { roomId: shareableRoomId, agentId: groupMessage.agentId } : undefined}
+    retryable={groupMessage.type === "human" && groupMessage.failure === true}
+    retrying={retrying}
+    onRetry={onRetry}
   />;
 }, (previous, next) => previous.groupMessage === next.groupMessage
   && previous.currentMemberId === next.currentMemberId
   && previous.liveText === next.liveText
-  && Boolean(previous.onQuote) === Boolean(next.onQuote));
+  && Boolean(previous.onQuote) === Boolean(next.onQuote)
+  && Boolean(previous.onEdit) === Boolean(next.onEdit)
+  && previous.editable === next.editable
+  && previous.editDisabled === next.editDisabled
+  && previous.editing === next.editing
+  && Boolean(previous.onSelect) === Boolean(next.onSelect)
+  && previous.selectDisabled === next.selectDisabled
+  && previous.shareableRoomId === next.shareableRoomId
+  && Boolean(previous.onRetry) === Boolean(next.onRetry)
+  && previous.retrying === next.retrying);
 
 export function MessageTimeline({
   active,
@@ -102,6 +140,12 @@ export function MessageTimeline({
   onLoadNewer,
   onReturnToLatest,
   onQuote,
+  onEdit,
+  editingMessageId = "",
+  selectedMessages = null,
+  onSelectMessage,
+  onRetry,
+  retryingMessageId = "",
   unseenLiveCount = 0,
 }: {
   active: boolean;
@@ -118,6 +162,12 @@ export function MessageTimeline({
   onLoadNewer: () => Promise<boolean>;
   onReturnToLatest: () => Promise<boolean>;
   onQuote?: (message: GroupMessage) => void;
+  onEdit?: (message: GroupMessage) => void;
+  editingMessageId?: string;
+  selectedMessages?: ReadonlySet<string> | null;
+  onSelectMessage?: (id: string) => void;
+  onRetry?: (message: GroupMessage) => Promise<boolean>;
+  retryingMessageId?: string;
   unseenLiveCount?: number;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -228,6 +278,11 @@ export function MessageTimeline({
         ) : null}
         {messages.map((message) => {
           const liveStream = message.workId ? streaming[message.workId] : undefined;
+          const hasContent = Boolean(message.text.trim()) || Boolean(message.attachments?.length);
+          const contentAvailable = !message.pending && hasContent;
+          const selectActionAvailable = hasContent && message.type !== "system";
+          const selectable = contentAvailable && message.type !== "system";
+          const ownMessage = message.type === "human" && message.authorId === currentMemberId;
           return (
             <div
               key={timelineMessageKey(message)}
@@ -235,11 +290,21 @@ export function MessageTimeline({
               data-focused={highlightedId === message.id ? "" : undefined}
               style={{ "--agent-color": avatarColor(message.agentId || message.authorId) } as CSSProperties}
             >
+              {selectedMessages && selectable ? <label className={styles.selectMessage}><input type="checkbox" aria-label={`选择消息 ${message.id}`} checked={selectedMessages.has(message.id)} onChange={() => onSelectMessage?.(message.id)} />选择</label> : null}
               <TimelineMessage
                 groupMessage={message}
                 currentMemberId={currentMemberId}
                 liveText={liveStream?.text || message.text}
-                onQuote={onQuote && !message.pending && !message.id.startsWith("optimistic-") && (message.text.trim() || message.attachments?.length) ? () => onQuote(message) : undefined}
+                onQuote={onQuote && hasContent ? () => onQuote(message) : undefined}
+                editable={ownMessage && Boolean(onEdit)}
+                editDisabled={Boolean(message.pending)}
+                editing={editingMessageId === message.id}
+                onEdit={ownMessage && onEdit ? () => onEdit(message) : undefined}
+                onSelect={!selectedMessages && selectActionAvailable && onSelectMessage ? () => onSelectMessage(message.id) : undefined}
+                selectDisabled={Boolean(message.pending)}
+                onRetry={onRetry && message.type === "human" && message.failure === true ? () => onRetry(message) : undefined}
+                retrying={retryingMessageId === message.id}
+                shareableRoomId={roomId}
               />
             </div>
           );
@@ -252,8 +317,6 @@ export function MessageTimeline({
                 executionPlaceholder
                 executionStatus={groupExecution(workId, "正在回复", value.text, null)}
                 contextStatus={emptyStatus(workId)}
-                onFork={async () => false}
-                onEdit={() => {}}
               />
             </div>
           );

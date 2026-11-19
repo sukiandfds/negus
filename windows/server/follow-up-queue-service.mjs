@@ -67,10 +67,12 @@ export const createFollowUpQueueService = ({
         if (item.modelSettings?.model) {
           const settings = item.modelSettings;
           const result = await conversations.updateModel(threadId, settings.model, {
-            allowProviderSwitch: true, reasoningEffort: settings.reasoningEffort,
+            allowProviderSwitch: true, reasoningEffort: settings.reasoningEffort, allowRetired: true,
           });
           if (result?.threadId && result.threadId !== threadId) throw new Error("排队任务的会话发生变化，消息未发送");
-          if (settings.reasoningEffort) await conversations.updateReasoningEffort(threadId, settings.reasoningEffort);
+          if (settings.reasoningEffort && result?.reasoningEffort !== settings.reasoningEffort) {
+            await conversations.updateReasoningEffort(threadId, settings.reasoningEffort);
+          }
         }
         await conversations.sendMessage(threadId, item.text, attachments, submissionId);
       }

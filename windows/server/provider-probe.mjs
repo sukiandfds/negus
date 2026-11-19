@@ -1,3 +1,4 @@
+import { readProviderModels } from "./provider-model-catalog.mjs";
 import { withVerifiedReasoning } from './model-capabilities.mjs';
 const failure = (message, statusCode = 400) => Object.assign(new Error(message), { statusCode });
 
@@ -14,18 +15,16 @@ export const createProviderProbe = ({ resolveDraft, fetchImpl = globalThis.fetch
       signal: AbortSignal.timeout(testing ? 45000 : 10000),
       ...(testing ? { body: JSON.stringify({ model, input: "Reply only OK.", max_output_tokens: 128, store: false }) } : {}),
     });
+    if (!testing) {
+      const models = (await readProviderModels(response)).sort();
+      if (!models.length) throw failure("这个 Key 未查询到模型", 502);
+      return { models, capabilities: models.map(model => withVerifiedReasoning({ model })) };
+    }
     if (!response.ok) throw failure("供应商返回 HTTP " + response.status + (response.status === 403 ? "，当前 Key 无权访问此分组" : response.status === 401 ? "，请检查 API Key" : "，请检查地址、模型权限及接口支持"), 502);
     payload = await response.json();
   } catch (error) {
     if (error.statusCode) throw error;
-    throw failure(testing ? "模型测试超时或接口异常，未确认可用" : "模型目录查询失败，请检查地址和 Key", 502);
-  }
-  if (!testing) {
-    if (!Array.isArray(payload.data)) throw failure("供应商未返回兼容的模型目录", 502);
-    const models = [...new Set(payload.data.map(entry => entry?.id).filter(id =>
-      typeof id === "string" && id.length > 0 && id.length <= 120 && !id.includes("::") && !/[\r\n]/u.test(id)))].sort();
-    if (!models.length) throw failure("这个 Key 未查询到模型", 502);
-    return { models, capabilities: models.map(model => withVerifiedReasoning({ model })) };
+    throw failure(testing ? "模型测试超时或接口异常，未确认可用" : (error.name === "TimeoutError" ? "模型目录查询超时，请重试" : "模型目录查询失败，请检查地址和 Key"), 502);
   }
   const replied = Array.isArray(payload.output) && payload.output.some(item =>
     item.type === "message" && item.role === "assistant" && Array.isArray(item.content) && item.content.some(part =>

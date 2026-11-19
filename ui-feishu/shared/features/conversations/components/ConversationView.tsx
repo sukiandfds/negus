@@ -1,5 +1,5 @@
 import { executionHandoff } from "../state/executionHandoff";
-import { type ReactNode, type Ref, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, type ReactNode, type Ref, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { CalendarClock, Clock3, LoaderCircle, Target } from "lucide-react";
 import { JumpToLatest } from "../../../components/JumpToLatest/JumpToLatest";
 import type { ContentSyncState, SessionDetail, SessionMessage } from "../model/types";
@@ -26,12 +26,14 @@ const messageListKey = (message: SessionMessage) => (
 export function Message({
   message,
   onQuote,
+  quoteDisabled = false,
   streaming = false,
   forkable = false,
   forkDisabled = false,
   forking = false,
   onFork,
   editable = false,
+  editDisabled = false,
   editing = false,
   onEdit,
   retryable = false,
@@ -39,6 +41,7 @@ export function Message({
   onRetry,
   shareable = false,
   threadId = "",
+  groupShare,
   executionStatus,
   contextStatus,
   executionPlaceholder = false,
@@ -46,22 +49,26 @@ export function Message({
   queued = false,
   actions,
   onSelect,
+  selectDisabled = false,
 }: {
   message: SessionMessage;
   onQuote?: () => void;
+  quoteDisabled?: boolean;
   streaming?: boolean;
   forkable?: boolean;
   forkDisabled?: boolean;
   forking?: boolean;
-  onFork: () => Promise<boolean>;
+  onFork?: () => Promise<boolean>;
   editable?: boolean;
+  editDisabled?: boolean;
   editing?: boolean;
-  onEdit: () => void;
+  onEdit?: () => void;
   retryable?: boolean;
   retrying?: boolean;
   onRetry?: () => Promise<boolean>;
   shareable?: boolean;
   threadId?: string;
+  groupShare?: { roomId: string; agentId: string };
   executionStatus?: ExecutionStatus;
   contextStatus?: ContextStatus;
   executionPlaceholder?: boolean;
@@ -69,6 +76,7 @@ export function Message({
   queued?: boolean;
   actions?: ReactNode;
   onSelect?: () => void;
+  selectDisabled?: boolean;
 }) {
   const presentation = presentConversationMessage(message);
   const shown = presentation.message;
@@ -94,23 +102,26 @@ export function Message({
         </div>
       ) : null}
       {!executionPlaceholder ? <div className={`${styles.body} ${message.role === "user" && !message.displaySourceAgentId ? styles.userBubble : styles.assistantBody}`}>
-        {!queued && message.deliveryState === "pending" ? <Clock3 className={styles.waiting} role="status" aria-label="正在确认指令是否已送达" /> : null}
-        {message.deliveryState === "sending" ? <LoaderCircle className={styles.sending} role="status" aria-label="发送中" /> : null}
+        {!queued && message.modelSwitchState !== "switching" && message.deliveryState === "pending" ? <Clock3 className={styles.waiting} role="status" aria-label="正在确认指令是否已送达" /> : null}
+        {message.modelSwitchState !== "switching" && message.deliveryState === "sending" ? <LoaderCircle className={styles.sending} role="status" aria-label="发送中" /> : null}
         {message.role === "assistant" && message.turnStatus === "interrupted" ? <small>已中断</small> : null}
         {streaming ? <><ContentRenderer message={shown} threadId={threadId} /><i className={styles.cursor} /></> : heartbeatUser ? <CollapsedMarkdown text={heartbeatUser.instructions} /> : <ContentRenderer message={shown} threadId={threadId} />}
-        {message.deliveryState === "occupied" ? <small>Codex 占用中，未发送</small> : message.deliveryState === "failed" ? <small>{message.deliveryError || "发送失败"}</small> : null}
+        {message.deliveryState === "occupied" ? <small>Codex 占用中，未发送</small> : message.deliveryState === "failed" && message.modelSwitchState !== "failed" ? <small>{message.deliveryError || "发送失败"}</small> : null}
       </div> : null}
       {!executionPlaceholder ? (
         <div className={styles.actionRow}>
           {actions ?? <MessageActions
             onSelect={onSelect}
+            selectDisabled={selectDisabled}
             onQuote={onQuote}
+            quoteDisabled={quoteDisabled}
             text={copyText}
             forkable={forkable}
             forkDisabled={forkDisabled}
             forking={forking}
             onFork={onFork}
             editable={editable}
+            editDisabled={editDisabled}
             editing={editing}
             onEdit={onEdit}
             retryable={retryable}
@@ -118,6 +129,7 @@ export function Message({
             onRetry={onRetry}
             shareable={shareable}
             threadId={threadId}
+            groupShare={groupShare}
             messageId={message.id}
           />}
           {completedGoal ? <span className={styles.goalAchieved} aria-label="目标达成结果"><Target aria-hidden="true" />已在 {Math.floor(completedGoal.timeUsedSeconds)} 秒内达成目标</span> : null}
@@ -129,6 +141,15 @@ export function Message({
       ) : null}
     </article>
   );
+}
+
+function ModelSwitchNotice({ message }: { message: SessionMessage }) {
+  const model = message.modelSwitch?.split("::").at(-1);
+  const switching = message.modelSwitchState === "switching";
+  return <div role="status" className={styles.modelSwitch}>
+    {switching ? <LoaderCircle aria-hidden="true" /> : null}
+    {switching ? `正在切换至 ${model}…` : message.modelSwitchState === "failed" ? "模型切换失败" : `已切换至 ${model}`}
+  </div>;
 }
 
 export interface ConversationViewHandle {
@@ -359,8 +380,9 @@ export function ConversationView({
         {!loading && !error && !session && listAvailable ? <div className={styles.state}>当前项目暂无可显示对话</div> : null}
         {session ? (
           <>
-            {visibleItems.map((item, index) => (
-                <div data-message-id={item.message.id} key={item.id}>
+            {visibleItems.map((item) => (
+              <Fragment key={item.id}>
+                <div data-message-id={item.message.id}>
                   {selectedMessages && !item.executionPlaceholder && forwardableMessage(item.message).text.trim() ? <label className={styles.selectMessage}><input type="checkbox" aria-label={`选择消息 ${item.message.id}`} checked={selectedMessages.has(item.id)} onChange={() => onSelectMessage?.(item.id)} />选择</label> : null}
                   {item.content ?? <Message
                         message={item.message}
@@ -376,7 +398,7 @@ export function ConversationView({
                           && !session?.archived}
                         editing={editingMessageId === item.message.id}
                         onEdit={() => onEditMessage(item.message)}
-                        retryable={item.message.deliveryState === "pending" || item.message.deliveryState === "failed"}
+                        retryable={item.message.deliveryState === "pending" || item.message.deliveryState === "failed" || item.message.modelSwitchState === "failed"}
                         retrying={retryingMessageId === item.message.id}
                         onRetry={() => onRetryMessage(item.message)}
                         shareable={agentScoped
@@ -389,6 +411,8 @@ export function ConversationView({
                         executionPlaceholder={item.executionPlaceholder}
                       />}
                 </div>
+                {item.message.modelSwitch ? <ModelSwitchNotice message={item.message} /> : null}
+              </Fragment>
             ))}
             {queue}
           </>

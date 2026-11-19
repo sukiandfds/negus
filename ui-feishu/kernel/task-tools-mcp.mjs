@@ -3,7 +3,7 @@ import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
 import { pathToFileURL } from 'node:url';
 
-export function createHandoffMcpServer({ endpoint = process.env.NEGUS_HANDOFF_ENDPOINT, token = process.env.NEGUS_HANDOFF_TOKEN, background = process.env.NEGUS_BACKGROUND_TASKS === '1', fetchResponse = fetch } = {}) {
+export function createHandoffMcpServer({ endpoint = process.env.NEGUS_HANDOFF_ENDPOINT, token = process.env.NEGUS_HANDOFF_TOKEN, background = process.env.NEGUS_BACKGROUND_TASKS === '1', groupNotices = process.env.NEGUS_GROUP_NOTICES === '1', fetchResponse = fetch } = {}) {
   const server = new McpServer({ name: 'negus-handoffs', version: '1.0.0' });
   const call = async (action, args) => {
     try {
@@ -27,6 +27,11 @@ export function createHandoffMcpServer({ endpoint = process.env.NEGUS_HANDOFF_EN
     description: '在本来源助手已创建的后台对话中追加要求。沿用原 taskId、线程和供应商；同一次调用重试须使用相同 requestId。未确认发送时只核对，不重复发送。',
     inputSchema: z.object({ taskId: z.string().min(1), requestId: z.string().min(1), instructions: z.string().min(1) }),
   }, args => call('followup', args));
+  if (groupNotices) server.registerTool('publish_group_notice', {
+    description: '在负责人的同一条群状态中立即发布重要风险、需要用户决定的具体问题或无法继续的阻塞。用一两句说清影响和需要用户做什么。普通排查和进度留在任务详情。',
+    inputSchema: z.object({ requestId: z.string().trim().min(1).max(80),
+      kind: z.enum(['risk', 'decision', 'blocker']), text: z.string().trim().min(1).max(240) }),
+  }, args => call('groupNotice', args));
   server.registerTool('list_tasks', { description: '查询当前对话的任务和结果，不重复执行。', inputSchema: z.object({}), annotations: { readOnlyHint: true } }, args => call('list', args));
   return server;
 }

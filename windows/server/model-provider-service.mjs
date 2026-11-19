@@ -1,3 +1,4 @@
+import { readProviderModels } from "./provider-model-catalog.mjs";
 import { withVerifiedReasoning } from './model-capabilities.mjs';
 import { readCurrentApiConfiguration } from "./current-api-configuration.mjs";
 import fs from "node:fs/promises";
@@ -238,6 +239,7 @@ export const createModelProviderService = ({
   createClient = createAppServerClient,
   sharedConfig = createCcSwitchConfigService(),
   fetchModels = globalThis.fetch,
+  fetchResponse = globalThis.fetch,
   currentApiConfiguration = readCurrentApiConfiguration,
 } = {}) => {
   if (!projectRoot) throw new Error("Project root is required for model provider routing.");
@@ -248,24 +250,52 @@ export const createModelProviderService = ({
   }
   const nativeConfiguration = Promise.resolve().then(currentApiConfiguration).catch(() => null);
   const clientPromises = new Map();
+  const removing = new Set();
+  const activeUses = new Map();
+  const assertAvailable = id => {
+    if (removing.has(id) || !providerMap.has(id)) throw statusError("配置正在删除或已不存在", 409);
+  };
+  const withProviderUse = async (id, run) => {
+    assertAvailable(id);
+    activeUses.set(id, (activeUses.get(id) || 0) + 1);
+    try { return await run(); }
+    finally {
+      const remaining = activeUses.get(id) - 1;
+      if (remaining) activeUses.set(id, remaining);
+      else activeUses.delete(id);
+    }
+  };
+  const usesDefaultHome = id => Boolean(defaultClient) &&
+    path.resolve(runtimeRoot, id, 'codex-home') === path.resolve(defaultCodexHome);
+  const isInUse = id => activeUses.has(id) || clientPromises.has(id)
+    || id.startsWith('ccswitch_') && (catalogId("current") === id || usesDefaultHome(id));
   const ownedClients = new Map();
   let refreshing = null;
   let sharedConfigRefreshedAt = 0;
+  let sharedDeletionRevision = 0;
   const fingerprints = new Map();
   const catalogFile = path.join(runtimeRoot, 'model-catalog.json');
   let catalogs = {};
   const catalogReady = fs.readFile(catalogFile, 'utf8').then((text) => { catalogs = JSON.parse(text); }).catch(() => {});
+  const catalogId = (id) => id === "current" && currentProvider.sharedConfigId
+    ? `ccswitch_${currentProvider.sharedConfigId}` : id;
   const applyCatalog = (provider) => {
-    const cached = catalogs?.[provider.id];
+    const cached = catalogs?.[catalogId(provider.id)];
     if (cached?.baseUrl !== provider.baseUrl || !Array.isArray(cached.models)) return;
-    provider.models = [...new Map([...provider.models, ...cached.models].map((model) => [model.model, model])).values()];
+    const previous = new Map(provider.models.map((model) => [model.model, model]));
+    // A completed supplier read is authoritative: keep local capability
+    // metadata for surviving models, but never append removed presets.
+    provider.models = cached.models.map((model) => ({ ...previous.get(model.model), ...model }));
+    if (provider.mode === "current") provider.activeModels = provider.models.map((model) => model.model);
   };
   const refreshShared = ({ force = false } = {}) => {
     if (!force && sharedConfigRefreshedAt && Date.now() - sharedConfigRefreshedAt < SHARED_CONFIG_CACHE_MS) return Promise.resolve();
     if (!refreshing) refreshing = (async () => {
       await catalogReady;
+      const revision = sharedDeletionRevision;
       const entries = await sharedConfig.runtimeProviders({ force });
       const native = await nativeConfiguration;
+      if (revision !== sharedDeletionRevision) return;
       if (native) {
         const match = entries.find(entry => entry.baseUrl.replace(/\/$/u, "") === native.baseUrl && entry.key === native.key);
         currentProvider.sharedConfigId = match?.id?.replace(/^ccswitch_/u, '') || '';
@@ -279,7 +309,7 @@ export const createModelProviderService = ({
       }
       for (const entry of entries) {
         // Running clients retain their configuration until the service is safely restarted.
-        if (clientPromises.has(entry.id)) continue;
+        if (removing.has(entry.id) || clientPromises.has(entry.id)) continue;
         const fingerprint = createHash('sha256').update(JSON.stringify(entry)).digest('hex');
         if (fingerprints.get(entry.id) === fingerprint) continue;
         // Shared providers read the authoritative DB through command auth; no DPAPI copy.
@@ -298,51 +328,67 @@ export const createModelProviderService = ({
 
   const catalogRequests = new Map();
   let catalogWrite = Promise.resolve();
-  const refreshProviderModels = (providerId) => {
-    const id = requireProviderId(providerId);
+  const refreshProviderModels = async (providerId) => {
+    const requestedId = requireProviderId(providerId);
+    if (requestedId === "current" || requestedId.startsWith("ccswitch_")) {
+      await refreshShared({ force: true }).catch(error => { if (requestedId !== "current") throw error; });
+    } else await catalogReady;
+    const id = catalogId(requestedId);
     if (catalogRequests.has(id)) return catalogRequests.get(id);
-    const request = (async () => {
-      const native = id === CURRENT_MODEL_PROVIDER_ID ? await nativeConfiguration : null;
-      if (id === CURRENT_MODEL_PROVIDER_ID && !native) return; // OAuth/native-only runtime uses model/list.
-      if (native) { await catalogReady; currentProvider.baseUrl = native.baseUrl; applyCatalog(currentProvider); }
-      if (id === CURRENT_MODEL_PROVIDER_ID) await refreshShared({ force: true });
-      if (id.startsWith('ccswitch_')) await refreshShared({ force: true });
-      else { await catalogReady; for (const entry of providerMap.values()) applyCatalog(entry); }
+    const request = withProviderUse(id, async () => {
       const provider = providerMap.get(id);
-      if (!provider) throw statusError('配置不存在，请刷新配置列表', 404);
-      const credential = native ? native.key : id.startsWith('ccswitch_')
-        ? await sharedConfig.readCredential(id)
-        : await credentialStore.read(id);
-      let payload;
+      if (!provider) throw statusError("配置不存在，请刷新配置列表", 404);
+      const native = requestedId === "current" ? await nativeConfiguration : null;
+      if (requestedId === "current" && !native) return { count: null };
+      if (native && id === "current") provider.baseUrl = native.baseUrl;
+      const baseUrl = provider.baseUrl;
+      const sourceFor = async () => {
+        if (id.startsWith("ccswitch_") && sharedConfig.readCatalogConfig) return sharedConfig.readCatalogConfig(id);
+        if (native) return native;
+        const key = id.startsWith("ccswitch_") ? await sharedConfig.readCredential(id) : await credentialStore.read(id);
+        return { key, baseUrl };
+      };
+      const { key: credential, baseUrl: configuredUrl, version } = await sourceFor();
+      if (configuredUrl?.replace(/\/$/, "") !== baseUrl.replace(/\/$/, "") || (native && native.key !== credential)) {
+        throw statusError("配置已变更，请重新刷新", 409);
+      }
+      let modelIds;
       try {
-        const url = new URL(`${provider.baseUrl.replace(/\/$/, '')}/models`);
-        if (url.protocol !== 'https:' || url.username || url.password) throw new Error('invalid URL');
-        const response = await fetchModels(url, { headers: { Authorization: `Bearer ${credential}` }, redirect: 'error', signal: AbortSignal.timeout(10000) });
-        if (!response.ok) throw statusError(`配置模型目录读取失败：供应商返回 HTTP ${response.status}${response.status === 403 ? '，当前 Key 无权访问此分组' : response.status === 401 ? '，请检查 API Key' : ''}`, 502);
-        payload = await response.json();
-        if (!Array.isArray(payload.data)) throw new Error('invalid models');
-      } catch (error) { throw error.statusCode ? error : statusError(error.name === 'TimeoutError' ? '配置模型目录读取超时，请重试' : '配置模型目录读取失败，请检查地址和网络', 502); }
-      const ids = [...new Set(payload.data.map((entry) => entry?.id).filter((model) => typeof model === 'string'
-        && model.length > 0 && model.length <= 120 && !model.includes('::')
-        && (id !== GROK_MODEL_PROVIDER_ID || /^grok-/i.test(model))))];
-      if (!ids.length) throw statusError('配置未返回可用模型', 502);
-      const models = ids.map((model) => provider.models.find((entry) => entry.model === model) || {
+        const url = new URL(`${baseUrl.replace(/\/$/, "")}/models`);
+        if (url.protocol !== "https:" || url.username || url.password) throw new Error("地址必须使用 HTTPS");
+        const response = await fetchModels(url, { headers: { Authorization: `Bearer ${credential}` }, redirect: "error", signal: AbortSignal.timeout(10000) });
+        modelIds = await readProviderModels(response);
+      } catch (error) {
+        throw error.statusCode ? error : statusError(error.name === "TimeoutError"
+          ? "配置模型目录读取超时，请重试" : "配置模型目录读取失败，请检查地址和网络", 502);
+      }
+      const ids = modelIds.filter(model => id !== GROK_MODEL_PROVIDER_ID || /^grok-/i.test(model));
+      const models = ids.map(model => provider.models.find(entry => entry.model === model) || {
         id: model, model, displayName: model, description: provider.displayName, isDefault: false,
         supportedReasoningEfforts: [], experimental: false,
       });
-      catalogs[id] = { baseUrl: provider.baseUrl, models };
-      applyCatalog(provider);
-      catalogWrite = catalogWrite.catch(() => {}).then(async () => {
+      const write = catalogWrite.catch(() => {}).then(async () => {
+        const latest = await sourceFor();
+        if (providerMap.get(id)?.baseUrl !== baseUrl || latest.key !== credential || latest.version !== version) {
+          throw statusError("配置在刷新期间已变更，请重新刷新", 409);
+        }
+        const next = { ...catalogs, [id]: { baseUrl, models } };
+        if (id === catalogId("current") && id !== "current") delete next.current;
         await fs.mkdir(runtimeRoot, { recursive: true });
         const temporary = `${catalogFile}.tmp`;
-        await fs.writeFile(temporary, JSON.stringify(catalogs), 'utf8');
+        await fs.writeFile(temporary, JSON.stringify(next), "utf8");
         await fs.rename(temporary, catalogFile);
+        catalogs = next;
+        applyCatalog(providerMap.get(id));
+        if (id === catalogId("current")) applyCatalog(currentProvider);
       });
-      await catalogWrite;
-    })();
+      catalogWrite = write;
+      await write;
+      return { count: ids.length, version };
+    });
     catalogRequests.set(id, request);
-    void request.finally(() => catalogRequests.delete(id)).catch(() => {});
-    return request;
+    try { return await request; }
+    finally { catalogRequests.delete(id); }
   };
 
   const modelOwner = (model) => {
@@ -352,7 +398,7 @@ export const createModelProviderService = ({
     )) || currentProvider;
   };
 
-  const resolveRoute = ({ model = "", modelProviderId = "" } = {}) => {
+  const resolveRoute = ({ model = "", modelProviderId = "", allowRetired = false } = {}) => {
     const parts = String(model).split('::');
     const requestedModel = clean(parts.length === 2 ? parts[1] : model, 120);
     const requestedProviderId = modelProviderId ? requireProviderId(modelProviderId) : parts.length === 2 ? requireProviderId(parts[0]) : "";
@@ -361,11 +407,16 @@ export const createModelProviderService = ({
     const inferred = modelOwner(requestedModel);
     const provider = requestedProvider || inferred;
     if (!provider) throw statusError("Model provider is not registered.", 400);
-    const activeModel = provider.mode === "current" && provider.activeModel
+    const currentCatalog = catalogs[catalogId(provider.id)];
+    const activeCatalog = currentCatalog?.baseUrl === provider.baseUrl ? currentCatalog : null;
+    if (!allowRetired && requestedModel && activeCatalog?.baseUrl === provider.baseUrl && !provider.models.some(entry => entry.model === requestedModel)) {
+      throw statusError(`模型 ${requestedModel} 已不在此配置目录，请换一个模型`, 400);
+    }
+    const activeModel = !activeCatalog && provider.mode === "current" && provider.activeModel
       && (!requestedModel || !provider.activeModels.length || !provider.activeModels.includes(requestedModel))
       ? provider.activeModel : "";
-    const modelId = activeModel || requestedModel || provider.defaultModel || "";
-    if (provider.mode !== 'current' && modelId && !provider.models.some((entry) => entry.model === modelId)) {
+    const modelId = activeModel || requestedModel || (provider.models.some(entry => entry.model === provider.defaultModel) ? provider.defaultModel : provider.models[0]?.model) || "";
+    if (!allowRetired && provider.mode !== 'current' && modelId && !provider.models.some((entry) => entry.model === modelId)) {
       throw statusError(`Model ${modelId || "(default)"} does not belong to provider ${provider.id}.`, 400);
     }
     return { modelProviderId: provider.id, model: modelId, provider };
@@ -387,8 +438,8 @@ export const createModelProviderService = ({
     await catalogReady;
     if (native) { currentProvider.baseUrl = native.baseUrl; applyCatalog(currentProvider); }
     const nativeModels = Array.isArray(currentModels) ? currentModels : [];
-    const currentCatalog = catalogs[CURRENT_MODEL_PROVIDER_ID]?.baseUrl === native?.baseUrl
-      ? catalogs[CURRENT_MODEL_PROVIDER_ID]?.models : null;
+    const currentCatalog = catalogs[catalogId(CURRENT_MODEL_PROVIDER_ID)]?.baseUrl === native?.baseUrl
+      ? catalogs[catalogId(CURRENT_MODEL_PROVIDER_ID)]?.models : null;
     const nativeByModel = new Map(nativeModels.map(entry => [entry.model, entry]));
     const visibleCurrent = currentCatalog
       ? currentCatalog.map(entry => ({ ...entry, ...(nativeByModel.get(entry.model) || {}) }))
@@ -426,43 +477,88 @@ export const createModelProviderService = ({
 
   const getClient = async (routeInput = {}) => {
     if (String(routeInput.modelProviderId || routeInput.model).startsWith('ccswitch_')) await refreshShared();
-    const route = resolveRoute(routeInput);
+    const route = resolveRoute({ ...routeInput, allowRetired: true });
     if (route.provider.mode === "current") {
       if (!defaultClient) throw statusError("Current Codex provider is unavailable.", 503);
       return defaultClient;
     }
-    if (!await isProviderConfigured(route.provider.id)) {
-      throw statusError(`${route.provider.displayName} credential is not configured.`, 503);
-    }
-    // An inherited CODEX_HOME can make current an alias of an isolated provider.
-    // Reuse its writer instead of starting two app-servers against the same home.
-    if (defaultClient && path.resolve(runtimeRoot, route.provider.id, 'codex-home') === path.resolve(defaultCodexHome)) {
-      return defaultClient;
-    }
-    if (!clientPromises.has(route.provider.id)) {
-      const promise = ensureCodexHome({
-        runtimeRoot,
-        provider: route.provider.defaultModel ? route.provider : { ...route.provider, defaultModel: route.model || route.provider.models[0]?.model },
-        credentialStore,
-        credentialHelper,
-        projectRoot,
-        sharedConfig,
-      }).then((codexHome) => {
-        const client = createClient({
-          codexHome,
-          label: route.provider.id,
-          sanitizeEnvironment: true,
-          workingDirectory: path.resolve(projectRoot),
+    return withProviderUse(route.provider.id, async () => {
+      if (!await isProviderConfigured(route.provider.id)) {
+        throw statusError(`${route.provider.displayName} credential is not configured.`, 503);
+      }
+      // An inherited CODEX_HOME can make current an alias of an isolated provider.
+      // Reuse its writer instead of starting two app-servers against the same home.
+      if (usesDefaultHome(route.provider.id)) {
+        return defaultClient;
+      }
+      if (!clientPromises.has(route.provider.id)) {
+        const promise = ensureCodexHome({
+          runtimeRoot,
+          provider: route.provider.defaultModel ? route.provider : { ...route.provider, defaultModel: route.model || route.provider.models[0]?.model },
+          credentialStore,
+          credentialHelper,
+          projectRoot,
+          sharedConfig,
+        }).then((codexHome) => {
+          const client = createClient({
+            codexHome,
+            label: route.provider.id,
+            sanitizeEnvironment: true,
+            workingDirectory: path.resolve(projectRoot),
+          });
+          ownedClients.set(route.provider.id, client);
+          return client;
+        }).catch((error) => {
+          clientPromises.delete(route.provider.id);
+          throw error;
         });
-        ownedClients.set(route.provider.id, client);
-        return client;
-      }).catch((error) => {
-        clientPromises.delete(route.provider.id);
-        throw error;
+        clientPromises.set(route.provider.id, promise);
+      }
+      return clientPromises.get(route.provider.id);
+    });
+  };
+
+  const complete = async (routeInput = {}, {
+    instructions = '', input = '', maxOutputTokens = 320, textFormat = null, timeoutMs = 30000,
+  } = {}) => {
+    if (String(routeInput.modelProviderId || routeInput.model).startsWith('ccswitch_')) await refreshShared();
+    const route = resolveRoute(routeInput);
+    return withProviderUse(route.provider.id, async () => {
+      const provider = route.provider;
+      const source = provider.id === CURRENT_MODEL_PROVIDER_ID ? await nativeConfiguration
+        : provider.id.startsWith('ccswitch_') && sharedConfig.readCatalogConfig ? await sharedConfig.readCatalogConfig(provider.id)
+        : { baseUrl: provider.baseUrl, key: provider.id.startsWith('ccswitch_')
+          ? await sharedConfig.readCredential(provider.id) : await credentialStore.read(provider.id) };
+      const baseUrl = String(source?.baseUrl || '').replace(/\/$/u, '');
+      const credential = source?.key;
+      if (!baseUrl || !credential) throw statusError('选定渠道缺少可用的 Responses API 配置', 503);
+      const response = await fetchResponse(`${baseUrl}/responses`, {
+        method: 'POST',
+        redirect: 'error',
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: { Authorization: `Bearer ${credential}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: route.model,
+          instructions,
+          input,
+          reasoning: routeInput.reasoningEffort ? { effort: routeInput.reasoningEffort } : undefined,
+          max_output_tokens: maxOutputTokens,
+          ...(textFormat ? { text: { format: textFormat } } : {}),
+          store: false,
+        }),
       });
-      clientPromises.set(route.provider.id, promise);
-    }
-    return clientPromises.get(route.provider.id);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw statusError(payload?.error?.message || `选定渠道返回 HTTP ${response.status}`, 502);
+      const text = (payload.output || [])
+        .flatMap(item => item?.content || [])
+        .map(item => item?.text || '')
+        .filter(Boolean)
+        .join('\n')
+        .trim();
+      if (!text) throw statusError('选定渠道没有返回文本', 502);
+      return { text, modelProviderId: provider.id, model: route.model,
+        reasoningEffort: routeInput.reasoningEffort || '' };
+    });
   };
 
   const close = () => {
@@ -521,13 +617,33 @@ export const createModelProviderService = ({
   };
 
   return {
-    isInUse: (providerId) => clientPromises.has(providerId),
+    catalogId,
+    removeSharedProvider: async (providerId, remove, { requireEmpty = false } = {}) => {
+      if (removing.has(providerId) || isInUse(providerId)) {
+        throw statusError("配置仍在使用或正在删除", 409);
+      }
+      if (requireEmpty && (catalogs[providerId]?.baseUrl !== providerMap.get(providerId)?.baseUrl
+        || catalogs[providerId]?.models?.length !== 0)) {
+        throw statusError("目录已变更，请重新刷新", 409);
+      }
+      removing.add(providerId);
+      try {
+        const result = await remove();
+        sharedDeletionRevision++;
+        sharedConfigRefreshedAt = 0;
+        providerMap.delete(providerId);
+        fingerprints.delete(providerId);
+        return result;
+      } finally { removing.delete(providerId); }
+    },
+    isInUse,
     currentConfiguration: () => nativeConfiguration,
     providers: () => [...providerMap.values()].map((provider) => ({ ...provider })),
     resolveRoute,
     listModels,
     isProviderConfigured,
     getClient,
+    complete,
     credentials: credentialStore,
     sharedConfig,
     refreshShared,

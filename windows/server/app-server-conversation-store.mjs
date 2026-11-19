@@ -462,13 +462,26 @@ export const createAppServerConversationStore = ({
   };
   const listNativeSubagents = async (archived = false) => nativeSubagents?.(archived) || [];
 
+  const withDeveloperInstructions = async (
+    { additionalDeveloperInstructions, developerInstructions, ...params } = {},
+    { inherit = false } = {},
+  ) => {
+    if (inherit && developerInstructions == null && !additionalDeveloperInstructions) return params;
+    return {
+      ...params,
+      developerInstructions: [developerInstructions ?? await getUserProfilePrompt(), additionalDeveloperInstructions].filter(Boolean).join("\n"),
+    };
+  };
+
   const createSession = async (model = "", requestedProjectRoot = "", options = {}) => {
     const cwd = requestedProjectRoot ? path.resolve(requestedProjectRoot) : projectRoot;
     if (!options.managed && !isAllowedProjectRoot(cwd)) throw new Error("This project folder is not registered in Negus.");
-    const profilePrompt = await getUserProfilePrompt();
     const runtimeOptions = options.managed ? null : await threadRuntimeOptions({ id: "", cwd, fresh: true });
-    const params = { cwd, sandbox: options.sandbox || "danger-full-access", approvalPolicy: options.approvalPolicy || "never", developerInstructions: [profilePrompt, options.developerInstructions].filter(Boolean).join("\n"),
-      ...(runtimeOptions?.resume || {}) };
+    const params = await withDeveloperInstructions({
+      cwd, sandbox: options.sandbox || "danger-full-access", approvalPolicy: options.approvalPolicy || "never",
+      additionalDeveloperInstructions: options.additionalDeveloperInstructions ?? options.developerInstructions,
+      ...runtimeOptions?.resume,
+    });
     if (model) params.model = model;
     const result = await client.request("thread/start", params);
     let thread = result.thread;
@@ -743,23 +756,23 @@ export const createAppServerConversationStore = ({
     // New threads already start with their requested policy;
     // empty threads cannot be resumed before their first persisted turn.
     if (freshRuntime) return freshRuntime;
-    return client.request("thread/resume", {
+    return client.request("thread/resume", await withDeveloperInstructions({
       threadId, persistExtendedHistory: true,
-      developerInstructions: await getUserProfilePrompt(), ...(runtimeOptions?.resume || {}),
-    });
+      ...runtimeOptions?.resume,
+    }));
   };
 
   const forkSession = async (threadId, lastTurnId) => {
     const { thread, runtimeOptions } = await ensureProjectThread(threadId);
     if (!lastTurnId) throw new Error("请选择一个已完成的对话位置再继续");
     const forkOptions = await threadRuntimeOptions({ id: "", cwd: thread.cwd || projectRoot, fresh: true });
-    const result = await client.request("thread/fork", {
+    const result = await client.request("thread/fork", await withDeveloperInstructions({
       threadId,
       lastTurnId,
       cwd: thread.cwd || projectRoot,
       ...(runtimeOptions?.resume || {}),
       ...(forkOptions?.resume || {}),
-    });
+    }, { inherit: true }));
     if (!result?.thread) throw new Error("Codex 未返回新的分支会话");
     forkOptions?.bindThread?.(result.thread.id);
     threadCache.set(result.thread.id, result.thread);
@@ -788,20 +801,18 @@ export const createAppServerConversationStore = ({
     try {
       const runtime = await resumeThread(threadId);
       const { runtimeOptions } = await ensureProjectThread(threadId);
-      const developerInstructions = await getUserProfilePrompt();
-      const result = await client.request("turn/start", {
+      const result = await client.request("turn/start", await withDeveloperInstructions({
         threadId,
         input: await inputFromAttachments(promptFromSlashCommand(text, attachments), attachments, attachmentContent),
         additionalContext: {
           "negus.communication": { kind: "application", value: communicationInstructions },
           "negus.model": { kind: "application", value: `本轮调用模型：${settings.model || runtime?.model || "未取得"}。这是当前请求的模型标识，回答模型身份时以此为准；不得用 ~/.codex/config.toml 的全局默认值、Codex 工具名称或历史回复推断当前模型。未取得时如实说明。此标识不证明供应商内部的实际模型。` },
         },
-        ...(developerInstructions ? { developerInstructions } : {}),
         ...(submissionId ? { clientUserMessageId: submissionId } : {}),
         ...(runtimeOptions?.turn || {}),
         ...(settings.model ? { model: settings.model } : {}),
         ...(settings.reasoningEffort ? { effort: settings.reasoningEffort } : {}),
-      });
+      }));
       freshThreadRuntime.delete(threadId);
       const cached = threadCache.get(threadId);
       if (cached && !cached.preview) {
@@ -911,13 +922,13 @@ export const createAppServerConversationStore = ({
     return client.request("thread/goal/clear", { threadId });
   };
 
-  const updateModel = async (threadId, model) => {
+  const updateModel = async (threadId, model, { reasoningEffort } = {}) => {
     const runtime = await resumeThread(threadId);
-    await client.request("thread/settings/update", { threadId, model });
+    await client.request("thread/settings/update", { threadId, model, ...(reasoningEffort ? { effort: reasoningEffort } : {}) });
     if (freshThreadRuntime.has(threadId)) {
-      freshThreadRuntime.set(threadId, { ...runtime, model });
+      freshThreadRuntime.set(threadId, { ...runtime, model, ...(reasoningEffort ? { reasoningEffort } : {}) });
     }
-    return { model, modelProvider: runtime.modelProvider || "", reasoningEffort: runtime.reasoningEffort || "" };
+    return { model, modelProvider: runtime.modelProvider || "", reasoningEffort: reasoningEffort || runtime.reasoningEffort || "" };
   };
 
   const threadNotLoaded = (error) => /thread not loaded/i.test(String(error?.message || ""));

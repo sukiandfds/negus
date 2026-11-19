@@ -6,10 +6,15 @@ import { createClientId } from "../../../shared/id/clientId";
 import styles from "./AgentMessageShareControl.module.css";
 
 interface AgentShareRoom { id: string; name: string; }
-interface AgentShareTargets { conversationId: string; agent: { id: string; name: string }; rooms: AgentShareRoom[]; }
+interface AgentShareTargets { conversationId?: string; agent: { id: string; name: string }; rooms: AgentShareRoom[]; }
 type ShareStatus = "success" | "error" | "";
 
-export function AgentMessageShareControl({ className, threadId, messageId }: { className: string; threadId: string; messageId: string }) {
+export function AgentMessageShareControl({ className, threadId = "", messageId, groupSource }: {
+  className: string;
+  threadId?: string;
+  messageId: string;
+  groupSource?: { roomId: string; agentId: string };
+}) {
   const [open, setOpen] = useState(false);
   const [targets, setTargets] = useState<AgentShareTargets | null>(null);
   const [loadingTargets, setLoadingTargets] = useState(false);
@@ -29,9 +34,15 @@ export function AgentMessageShareControl({ className, threadId, messageId }: { c
     if (loadingTargets || publishingRoomId) return;
     setOpen(true); setTargets(null); setError(""); setStatus(""); setLoadingTargets(true);
     try {
-      const conversationId = currentConversationId();
-      const targetQuery = conversationId ? `conversationId=${encodeURIComponent(conversationId)}` : `threadId=${encodeURIComponent(threadId)}`;
-      setTargets(await fetchJson<AgentShareTargets>(`/api/agent-share/targets?${targetQuery}`));
+      if (groupSource) {
+        setTargets(await fetchJson<AgentShareTargets>(
+          `/api/group/share-targets?sourceRoomId=${encodeURIComponent(groupSource.roomId)}&agentId=${encodeURIComponent(groupSource.agentId)}`,
+        ));
+      } else {
+        const conversationId = currentConversationId();
+        const targetQuery = conversationId ? `conversationId=${encodeURIComponent(conversationId)}` : `threadId=${encodeURIComponent(threadId)}`;
+        setTargets(await fetchJson<AgentShareTargets>(`/api/agent-share/targets?${targetQuery}`));
+      }
     } catch { setError("发送失败"); }
     finally { setLoadingTargets(false); }
   };
@@ -43,7 +54,12 @@ export function AgentMessageShareControl({ className, threadId, messageId }: { c
     const requestId = requestIds.get(roomId) || createClientId("share");
     requestIds.set(roomId, requestId); setPublishingRoomId(roomId);
     try {
-      await postJson("/api/agent-share", { requestId, conversationId: targets.conversationId, messageId, roomId });
+      await postJson(
+        groupSource ? "/api/group/share" : "/api/agent-share",
+        groupSource
+          ? { requestId, sourceRoomId: groupSource.roomId, targetRoomId: roomId, messageId }
+          : { requestId, conversationId: targets.conversationId, messageId, roomId },
+      );
       requestIds.delete(roomId); setStatus("success"); setOpen(false);
     } catch { setStatus("error"); setOpen(false); }
     finally { setPublishingRoomId(""); }

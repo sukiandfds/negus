@@ -201,11 +201,8 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
       if (terminalExecution(status) && store.get(id).executionStatus.active) store.update(id, { executionStatus: status });
     }
   }, [store, shown.projects, store.getSnapshot()]);
-  const model = resolveVisibleModel(c.models, readModelDefaults(), selected.contextStatus.model, session?.model || '');
-  const effort = resolveVisibleEffort(c.models, readModelDefaults(), model, selected.contextStatus.reasoningEffort);
   const states = [...store.committed];
   const display = { ...c, ...selected, session, executionStatus, goal: c.goal || selected.goal, userInputRequest: c.userInputRequest,
-    visibleModel: model, visibleEffort: effort, usageModel: selected.executionStatus.active ? c.usageModel : model,
     streamingText: executionStatus.streamingText || '', commentaryText: executionStatus.commentary || '',
     syncing,
     project: shown.project, sessions: c.sessions.map(summary => summary.threadId === c.selectedId

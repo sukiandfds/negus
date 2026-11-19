@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Pencil, RefreshCw } from "lucide-react";
 import { ChannelManager, useChannelCatalog } from "./ChannelManager";
 import type { CodexModel } from "../model/types";
-import { channelProviderId, chooseEffort, useModelDefaults } from "../model/modelDefaults";
+import { channelProviderId, chooseEffort, providerIdForModel, useModelDefaults } from "../model/modelDefaults";
 import { formatModelDisplayName } from "../model/modelDisplayName";
 import { formatReasoningEffort } from "../model/reasoningEffortLabels";
 import { ModelSelect } from "./ModelSelect";
 import { ReasoningEffortSelect } from "./ReasoningEffortSelect";
+import { ModelCatalogFeedback } from "./ModelCatalogFeedback";
+import { refreshConfiguredModels, refreshModelCatalog, type CatalogResult } from "../data/modelCatalogRefresh";
 import styles from "./ModelSelect.module.css";
 
 interface ModelSettingsControlProps {
@@ -27,90 +29,54 @@ export function ModelSettingsControl({
 }: ModelSettingsControlProps) {
   const [open, setOpen] = useState(false);
   const [channelsOpen, setChannelsOpen] = useState(false);
-  const [draftModel, setDraftModel] = useState(currentModel);
-  const [draftEffort, setDraftEffort] = useState(currentEffort);
-  const [applying, setApplying] = useState(false);
-  const [applyError, setApplyError] = useState("");
+  const [refreshError, setRefreshError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [emptyResults, setEmptyResults] = useState<CatalogResult[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
-  const current = models.find((entry) => entry.model === currentModel);
-  const draftModelEntry = models.find((entry) => entry.model === draftModel);
-  const modelLabel = currentModel ? formatModelDisplayName(currentModel, current?.displayName) : "选择模型";
-  const effortLabel = formatReasoningEffort(currentEffort);
-  const buttonLabel = [modelLabel, effortLabel].filter(Boolean).join(" · ");
-  const busy = changing || applying;
-  const hasChanges = draftModel !== currentModel || Boolean(draftEffort && draftEffort !== currentEffort);
+  const current = models.find(entry => entry.model === currentModel);
+  const buttonLabel = [currentModel ? formatModelDisplayName(currentModel, current?.displayName?.split(" · ").at(-1)) : "选择模型",
+    formatReasoningEffort(currentEffort)].filter(Boolean).join(" · ");
   const defaults = useModelDefaults();
-  const { allChannels } = useChannelCatalog(models, currentModel);
-  const providerOf = (model: string) => models.find((entry) => entry.model === model)?.modelProviderId || (model.includes('::') ? model.split('::')[0] : /^grok-/i.test(model) ? 'fusheng-grok' : 'current');
-  const selectedProvider = providerOf(draftModel || currentModel);
-  const channelOptions = allChannels.filter((entry) => entry.switchable !== false && !defaults.archivedProviderIds.includes(channelProviderId(entry)));
-  const visibleModels = models.filter((entry, index, all) =>
-    providerOf(entry.model) === selectedProvider
-    && all.findIndex((candidate) => candidate.model === entry.model) === index);
-  const crossProvider = Boolean(currentModel && draftModel && providerOf(currentModel) !== providerOf(draftModel));
-
-  const closeMenu = () => {
-    if (busy) return;
-    setOpen(false);
-    setApplyError("");
-  };
-
-  const toggleMenu = () => {
-    if (open) {
-      closeMenu();
-      return;
-    }
-    setDraftModel(currentModel);
-    setDraftEffort(currentEffort);
-    setApplyError("");
-    setOpen(true);
-  };
-
+  const { allChannels, canonical, managed } = useChannelCatalog(models, currentModel);
+  const providerOf = (model: string) => providerIdForModel(models, model);
+  const provider = providerOf(currentModel);
+  const selectedProvider = canonical(provider);
+  const channelOptions = allChannels.filter(entry => entry.switchable !== false
+    && !defaults.archivedProviderIds.map(canonical).includes(canonical(channelProviderId(entry)))
+    && models.some(model => canonical(providerOf(model.model)) === canonical(channelProviderId(entry))));
+  const candidates = models.filter(model => canonical(providerOf(model.model)) === selectedProvider);
+  const local = candidates.filter(model => providerOf(model.model) === provider);
+  const visibleModels = local.length ? local : candidates;
+  const busy = changing || refreshing;
+  const closeMenu = () => { if (!busy) setOpen(false); };
   const stageModel = async (model: string) => {
-    const next = models.find((entry) => entry.model === model);
-    const supported = next?.supportedReasoningEfforts.map((entry) => entry.reasoningEffort) || [];
-    setDraftModel(model);
-    setDraftEffort(chooseEffort(next, supported.includes(draftEffort) ? draftEffort : ""));
-    setApplyError("");
-    return true;
-  };
-
-  const stageEffort = async (reasoningEffort: string) => {
-    setDraftEffort(reasoningEffort);
-    setApplyError("");
-    return true;
-  };
-
-  const stageChannel = async (providerId: string) => {
-    const entry = channelOptions.find((item) => channelProviderId(item) === providerId);
-    const model = entry?.modelKey || (entry?.model ? `ccswitch_${entry.id}::${entry.model}` : "");
     if (!model) return false;
-    return stageModel(model);
+    setRefreshError("");
+    return onModelChange(model, chooseEffort(models.find(entry => entry.model === model), currentEffort));
   };
-
-  const applySettings = async () => {
-    if (disabled || busy || !hasChanges) return;
-    setApplying(true);
-    setApplyError("");
+  const stageChannel = async (providerId: string) => {
+    const entry = channelOptions.find(item => canonical(channelProviderId(item)) === providerId);
+    const option = entry?.availableModel || entry?.modelKey || models.find(model => canonical(providerOf(model.model)) === providerId)?.model;
+    return option ? stageModel(option) : false;
+  };
+  const refresh = async () => {
+    setRefreshing(true);
+    setRefreshError("");
     try {
-      if (draftModel !== currentModel && !await onModelChange(draftModel, draftEffort)) {
-        setApplyError("模型设置没有生效，请重试");
+      if (!managed) {
+        await refreshModelCatalog(provider);
         return;
       }
-      if (!crossProvider && draftEffort && draftEffort !== currentEffort && !await onReasoningEffortChange(draftEffort)) {
-        setApplyError("推理强度没有生效，请重试");
-        return;
-      }
-      setOpen(false);
+      const results = await refreshConfiguredModels(provider);
+      setRefreshError(results.filter(entry => entry.error).map(entry => entry.error).join("；"));
+      setEmptyResults(results.filter(entry => entry.count === 0));
     } catch (reason) {
-      setApplyError(reason instanceof Error ? reason.message : "模型设置没有生效，请重试");
-    } finally {
-      setApplying(false);
-    }
+      setRefreshError(reason instanceof Error ? reason.message : "刷新失败");
+    } finally { setRefreshing(false); }
   };
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || channelsOpen || emptyResults.length) return;
     const closeOutside = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) closeMenu();
     };
@@ -123,7 +89,7 @@ export function ModelSettingsControl({
       document.removeEventListener("pointerdown", closeOutside);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [busy, open]);
+  }, [busy, open, channelsOpen, emptyResults.length]);
 
   return (
     <div className={styles.settings} ref={rootRef}>
@@ -133,7 +99,7 @@ export function ModelSettingsControl({
         aria-expanded={open}
         aria-haspopup="dialog"
         title={buttonLabel}
-        onClick={toggleMenu}
+        onClick={() => setOpen(value => !value)}
       >
         <span>{buttonLabel}</span>
         <ChevronDown aria-hidden="true" />
@@ -144,11 +110,11 @@ export function ModelSettingsControl({
             <span>模型</span>
             <div className={styles.modelPicker}>
             <ModelSelect
-              currentModel={draftModel}
+              currentModel={currentModel}
               models={visibleModels}
-              loading={loading}
+              loading={loading && !models.length}
               changing={busy}
-              error={applyError || error}
+              error={refreshError || error}
               disabled={disabled}
               onChange={stageModel}
             />
@@ -156,7 +122,7 @@ export function ModelSettingsControl({
               title={loading ? "正在刷新模型" : "刷新配置模型"}
               aria-label="刷新配置模型" aria-busy={loading}
               disabled={loading || busy}
-              onClick={() => window.dispatchEvent(new CustomEvent('negus-channels-updated', { detail: { providerId: selectedProvider } }))}>
+              onClick={() => void refresh()}>
               <RefreshCw size={14} aria-hidden="true" />
             </button>
             </div>
@@ -164,38 +130,35 @@ export function ModelSettingsControl({
           <label className={styles.settingRow}>
             <span>推理强度</span>
             <ReasoningEffortSelect
-              currentModel={draftModelEntry}
-              currentEffort={draftEffort}
-              loading={loading}
+              currentModel={current}
+              currentEffort={currentEffort}
+              loading={loading && !models.length}
               changing={busy}
-              error={applyError || error}
+              error={refreshError || error}
               disabled={disabled}
-              onChange={stageEffort}
+              onChange={onReasoningEffortChange}
             />
           </label>
-          {disabled ? <small className={styles.menuHint}>当前连接或会话状态不支持修改</small> : null}
+          {disabled ? <small className={styles.menuHint}>当前会话不支持修改</small> : null}
           <div className={styles.menuHint} role="status">下一轮发送时生效，不影响正在运行的任务。</div>
-          {applyError || error ? <small className={styles.menuError} role="alert">{error || applyError}</small> : null}
+          {refreshError || error ? <small className={styles.menuError} role="alert">{refreshError || error}</small> : null}
           <div className={styles.settingRow}>
             <span>配置</span>
             <div className={styles.modelPicker}>
-              <select className={styles.select} aria-label="配置" value={channelOptions.some((entry) => channelProviderId(entry) === providerOf(draftModel)) ? providerOf(draftModel) : ""} disabled={disabled || busy || !channelOptions.length} onChange={(event) => void stageChannel(event.target.value)}>
-                {channelOptions.some((entry) => channelProviderId(entry) === providerOf(draftModel)) ? null : <option value="">{current?.providerDisplayName || "选择配置"}</option>}
-                {channelOptions.map((entry) => <option key={channelProviderId(entry)} value={channelProviderId(entry)}>{entry.name}</option>)}
+              <select className={styles.select} aria-label="配置" value={channelOptions.some((entry) => canonical(channelProviderId(entry)) === selectedProvider) ? selectedProvider : ""} disabled={disabled || busy || !channelOptions.length} onChange={(event) => void stageChannel(event.target.value)}>
+                {channelOptions.some((entry) => canonical(channelProviderId(entry)) === selectedProvider) ? null : <option value="">{current?.providerDisplayName || "选择配置"}</option>}
+                {channelOptions.map((entry) => <option key={channelProviderId(entry)} value={canonical(channelProviderId(entry))}>{entry.name}</option>)}
               </select>
-              <button className={styles.refreshButton} type="button" title="编辑配置" aria-label="编辑配置" disabled={busy} onClick={() => { setOpen(false); setChannelsOpen(true); }}>
+              <button className={styles.refreshButton} type="button" title="编辑配置" aria-label="编辑配置" disabled={busy} onClick={() => setChannelsOpen(true)}>
                 <Pencil size={14} aria-hidden="true" />
               </button>
             </div>
           </div>
-          <div className={styles.settingsActions}>
-            <button className={styles.cancelButton} type="button" disabled={busy} onClick={closeMenu}>取消</button>
-            <button className={styles.confirmButton} type="button" disabled={disabled || busy || !hasChanges} onClick={() => void applySettings()}>
-              {busy ? "正在应用" : crossProvider ? "切换" : "确认"}
-            </button>
-          </div>
+
         </div>
       ) : null}
+      {emptyResults.length ? <ModelCatalogFeedback results={emptyResults} onClose={() => setEmptyResults([])}
+        onDeleted={() => { window.dispatchEvent(new Event("negus-channels-updated")); }} /> : null}
       {channelsOpen ? <ChannelManager currentModel={currentModel} models={models} onClose={() => setChannelsOpen(false)} /> : null}
     </div>
   );

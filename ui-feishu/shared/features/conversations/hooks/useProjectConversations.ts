@@ -1,4 +1,5 @@
 import { currentConversationId } from "../../../shared/api/conversationScope";
+import { canonicalChannelId } from "../../models/components/ChannelManager";
 import { modelApi } from "../../models/data/modelApi";
 import { HttpError } from "../../../shared/api/http";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -10,7 +11,7 @@ import { useCodexExecution } from "../../execution/hooks/useCodexExecution";
 import type { ProjectEvent, UserInputRequest } from "../../execution/model/types";
 import { useModels } from "../../models/hooks/useModels";
 import { readModelCatalog } from "../../models/data/modelCatalogCache";
-import { providerIdOf, readModelDefaults, resolveVisibleEffort, resolveVisibleModel, useModelDefaults } from "../../models/model/modelDefaults";
+import { providerIdForModel, providerIdOf, readModelDefaults, resolveVisibleEffort, resolveVisibleModel, useModelDefaults } from "../../models/model/modelDefaults";
 import { conversationApi } from "../data/conversationApi";
 import { useConversationEvents } from "../realtime/useConversationEvents";
 import { createOptimisticMessage, createSubmissionId } from "../state/optimisticMessage";
@@ -66,9 +67,13 @@ export function useProjectConversations() {
     model: string;
     reasoningEffort: string;
     providerName: string;
+    requestId: string;
   } | null>(null);
+  const switchResponse = useRef<((id: string | false) => void) | null>(null);
+  const switchInFlight = useRef(false);
   const [providerSwitchBusy, setProviderSwitchBusy] = useState(false);
   const [providerSwitchError, setProviderSwitchError] = useState("");
+  const [sendPreparationError, setSendPreparationError] = useState<{ threadId: string; message: string } | null>(null);
   const userInputRequest = selection.store.get(serverThreadId).userInputRequest;
   const setUserInputRequest = useCallback((value: UserInputRequest | null | ((current: UserInputRequest | null) => UserInputRequest | null)) => {
     const id = selection.selectedIdRef.current;
@@ -95,17 +100,7 @@ export function useProjectConversations() {
     selectSession: selection.selectSession,
   }, contextManagement.status.model);
   const runningModelRef = useRef(new Map<string, { turnId: string; model: string }>());
-  const modelManager = useModels(serverThreadId, (threadId, result) => {
-    if (result.threadId && result.threadId !== threadId) {
-      contextManagement.applyModelSettings(result.threadId, result);
-      if (selection.selectedIdRef.current === threadId) {
-        selection.selectSession(result.threadId);
-      }
-    } else {
-      contextManagement.applyModelSettings(threadId, result);
-    }
-    if (result.committed) void catalog.refreshSessions(false, undefined, false);
-  }, contextManagement.status.model);
+  const modelManager = useModels();
   const modelDefaults = useModelDefaults();
   const recordedModel = contextManagement.status.threadId === selection.selectedId ? contextManagement.status.model : "";
   const sessionModel = (selection.session?.threadId === selection.selectedId ? selection.session.model || "" : "")
@@ -115,46 +110,51 @@ export function useProjectConversations() {
   const sessionEffort = (selection.session?.threadId === selection.selectedId ? selection.session.reasoningEffort || "" : "")
     || catalog.sessions.find((item) => item.threadId === selection.selectedId)?.reasoningEffort
     || "";
-  const visibleModel = resolveVisibleModel(modelManager.models, modelDefaults, recordedModel, sessionModel);
+  const persistedModel = resolveVisibleModel(modelManager.models, modelDefaults, recordedModel, sessionModel);
+  const draftSettingsRef = useRef(new Map<string, { model: string; reasoningEffort: string }>());
+  const [, setDraftVersion] = useState(0);
+  const modelDraftKey = (id: string) => "negus-model-draft-v1:" + encodeURIComponent(conversationScope + ":" + id);
+  const readDraft = (id: string) => draftSettingsRef.current.get(id) || readLocalCache(modelDraftKey(id),
+    (value): value is { model: string; reasoningEffort: string } => Boolean(value && typeof (value as { model?: unknown }).model === "string" &&
+      typeof (value as { reasoningEffort?: unknown }).reasoningEffort === "string"));
+  const modelDraft = readDraft(selection.selectedId);
+  const visibleModel = modelDraft?.model || persistedModel;
+  const visibleEffort = modelDraft?.reasoningEffort
+    ?? resolveVisibleEffort(modelManager.models, modelDefaults, visibleModel, recordedEffort || sessionEffort);
   if (execution.status.active && execution.status.threadId === selection.selectedId) {
     const previous = runningModelRef.current.get(selection.selectedId);
     if (!previous || !previous.model || previous.turnId !== execution.status.turnId) runningModelRef.current.set(selection.selectedId, { turnId: execution.status.turnId, model: recordedModel || sessionModel });
   } else runningModelRef.current.delete(selection.selectedId);
-  const usageModel = execution.status.active ? runningModelRef.current.get(selection.selectedId)?.model || '' : visibleModel;
-  const draftSettingsRef = useRef(new Map<string, { model: string; reasoningEffort: string }>());
-  const visibleEffort = draftSettingsRef.current.get(selection.selectedId)?.reasoningEffort
-    ?? resolveVisibleEffort(modelManager.models, modelDefaults, visibleModel, recordedEffort || sessionEffort);
-  const modelChoiceRef = useRef({ threadId: "", recordedModel: "", sessionModel: "", recordedEffort: "", contextSettled: false });
+  const usageModel = execution.status.active ? runningModelRef.current.get(selection.selectedId)?.model || '' : persistedModel;
+  const modelChoiceRef = useRef({ threadId: "", contextSettled: false });
   modelChoiceRef.current = {
     threadId: selection.selectedId,
-    recordedModel,
-    sessionModel,
-    recordedEffort,
-    contextSettled: contextManagement.status.threadId === selection.selectedId
-      && !selection.loadingSession
+    contextSettled: contextManagement.status.threadId === selection.selectedId && !selection.loadingSession
       && (selection.store.synced.has(selection.selectedId) || Boolean(contextManagement.status.updatedAt) || contextManagement.status.phase === "failed"),
   };
-  const catalogModelsRef = useRef(modelManager.models);
-  catalogModelsRef.current = modelManager.models;
-  const stageUnrecordedModel = useCallback(async (threadId: string, applyVisible = false) => {
-    const choice = modelChoiceRef.current;
-    if (choice.threadId !== threadId || selection.selectedIdRef.current !== threadId) throw new Error("对话已切换，消息未发送");
-    if (!choice.contextSettled) {
-      if (applyVisible) throw new Error("模型设置还在读取中，请稍后再发送");
-      return false;
+  const unavailableModel = (model: string) => modelManager.loaded && Boolean(model)
+    && !modelManager.models.some(entry => entry.model === model
+      || (canonicalChannelId(providerIdOf(entry)) === canonicalChannelId(providerIdForModel(modelManager.models, model))
+        && entry.model.split("::").at(-1) === model.split("::").at(-1)));
+  const commitSettings = async (threadId: string, model: string, reasoningEffort: string, scope = conversationScope) => {
+    if (!model) return { threadId };
+    if (unavailableModel(model)) throw new Error("所选模型已下架，请换一个模型");
+    const result = await modelApi.update(threadId, model, undefined, reasoningEffort, scope);
+    const target = result.threadId || threadId;
+    if (reasoningEffort && result.reasoningEffort !== reasoningEffort) {
+      await modelApi.updateReasoningEffort(target, reasoningEffort, undefined, scope);
     }
-    const defaults = readModelDefaults();
-    const shownModel = resolveVisibleModel(catalogModelsRef.current, defaults, choice.recordedModel, choice.sessionModel);
-    const shownEffort = resolveVisibleEffort(catalogModelsRef.current, defaults, shownModel, choice.recordedEffort);
-    const modelNeedsWrite = Boolean(shownModel && (applyVisible || (!choice.recordedModel && !choice.sessionModel)));
-    const effortNeedsWrite = Boolean(shownEffort && shownEffort !== choice.recordedEffort);
-    if (!modelNeedsWrite && !effortNeedsWrite) return false;
-    const staged = modelNeedsWrite
-      ? await modelManager.change(shownModel, shownEffort || undefined, threadId)
-      : await modelManager.changeReasoningEffort(shownEffort, threadId);
-    if (!staged) throw new Error("模型设置没有生效，请重试");
-    return true;
-  }, [modelManager.change, modelManager.changeReasoningEffort, selection.selectedIdRef]);
+    contextManagement.markSubmitted(target, { model, reasoningEffort });
+    return { threadId: target };
+  };
+  const stageUnrecordedModel = async (threadId: string) => {
+    if (selection.selectedIdRef.current !== threadId) throw new Error("对话已切换，操作已取消");
+    if (!isPendingThread(threadId) && canonicalChannelId(providerIdForModel(modelManager.models, visibleModel))
+      !== canonicalChannelId(providerIdForModel(modelManager.models, persistedModel))) {
+      throw new Error("请先发送一条消息确认切换配置");
+    }
+    await commitSettings(threadId, visibleModel, visibleEffort);
+  };
 
   const refreshUserInput = useCallback(async (_signal?: AbortSignal) => {
     const id = selection.selectedIdRef.current;
@@ -257,8 +257,7 @@ export function useProjectConversations() {
     if (!threadId || selection.selectedIdRef.current !== threadId) return false;
     try {
       if (!execution.status.active) {
-        await stageUnrecordedModel(threadId, true);
-        await modelManager.applyPending(threadId);
+        await stageUnrecordedModel(threadId);
       }
       if (selection.selectedIdRef.current !== threadId) return false;
       const message = appendTranscript ? { ...createOptimisticMessage("/goal " + objective, attachments, createSubmissionId()), source: "native-goal" } : null;
@@ -278,7 +277,31 @@ export function useProjectConversations() {
       if (selection.selectedIdRef.current === threadId) selection.setSessionError(presentConversationError(error));
       return false;
     }
-  }, [waitForThread, selection.selectedIdRef, selection.addOptimisticMessage, selection.setSessionError, execution.status.active, stageUnrecordedModel, modelManager.applyPending, goal.update, catalog.refreshSessions]);
+  }, [waitForThread, selection.selectedIdRef, selection.addOptimisticMessage, selection.setSessionError, execution.status.active, stageUnrecordedModel, goal.update, catalog.refreshSessions]);
+
+  const providerOf = (model: string) => canonicalChannelId(providerIdForModel(modelManager.models, model));
+  const currentProvider = () => canonicalChannelId(selection.session?.modelProviderId || providerIdForModel(modelManager.models, persistedModel));
+  const employeeDirect = selection.session?.conversationKind === "direct" || Boolean(new URLSearchParams(window.location.search).get("agent"));
+  const crossProvider = Boolean(visibleModel && persistedModel && providerOf(visibleModel) !== currentProvider());
+  const prepareSend = async (queue = false): Promise<string | false> => {
+    const threadId = selection.selectedIdRef.current;
+    if (!threadId || threadId !== selection.selectedId || switchResponse.current) return false;
+    setSendPreparationError(null);
+    const fail = (message: string) => { setSendPreparationError({ threadId, message }); return false as const; };
+    if (unavailableModel(visibleModel)) return false;
+    if (isPendingThread(threadId) || !crossProvider) return threadId;
+    if (execution.status.active) return fail("当前任务运行中，请完成后再发送到其他配置");
+    if (queue) return fail("切换配置需要先退出等候队列模式，再点击发送");
+    if (employeeDirect) return threadId;
+    if (editingMessageRef.current) return fail("请先退出编辑，再发送到其他配置");
+    const entry = modelManager.models.find(item => item.model === visibleModel);
+    return new Promise(resolve => {
+      switchResponse.current = resolve;
+      setProviderSwitchError("");
+      setProviderSwitch({ threadId, title: selection.session?.title || "当前对话", model: visibleModel,
+        reasoningEffort: visibleEffort, providerName: entry?.providerDisplayName || providerOf(visibleModel), requestId: createSubmissionId() });
+    });
+  };
 
   const reconcileMessage = useCallback(async (threadId: string, messageId: string, submissionId: string, scope: string) => {
     if (reconcilingSubmissionsRef.current.has(submissionId) || reconciledSubmissionsRef.current.has(submissionId)) return;
@@ -288,11 +311,13 @@ export function useProjectConversations() {
         const result = await executionApi.submissionStatus(threadId, submissionId, undefined, scope).catch(() => null);
         if (reconciledSubmissionsRef.current.has(submissionId)) return;
         if (result?.status === "accepted" || result?.status === "failed") {
-          selection.updateOptimisticMessage(threadId, messageId, {
+          selection.store.changeMessages(threadId, messages => messages.map(message => message.id === messageId ? {
+            ...message,
+            ...(message.modelSwitchState === "switching" ? { modelSwitchState: result.status === "failed" ? "failed" as const : undefined } : {}),
             deliveryState: result.status === "failed" ? "failed" : undefined,
             ...(result.error ? { deliveryError: result.error, deliveryState: /active writer/iu.test(result.error) ? "occupied" : "failed" } : {}),
             ...(result.turnId ? { turnId: result.turnId } : {}),
-          });
+          } : message));
           if (result.status === "accepted") {
             catalog.updateSessionSummary({ threadId, updatedAt: new Date().toISOString() });
             await selection.loadSession(threadId, { retry: false, recovery: true, conversationId: scope });
@@ -308,28 +333,40 @@ export function useProjectConversations() {
       reconciledSubmissionsRef.current.add(submissionId);
       reconcilingSubmissionsRef.current.delete(submissionId);
     }
-  }, [selection.updateCurrentSession, selection.updateOptimisticMessage, selection.loadSession, catalog.updateSessionSummary]);
+  }, [selection.store, selection.updateCurrentSession, selection.loadSession, catalog.updateSessionSummary]);
 
-  const sendDirectMessage = useCallback(async (text: string, attachments: MediaFile[] = [], existingSubmissionId = "", replacingMessageId = "") => {
+  const sendDirectMessage = useCallback(async (text: string, attachments: MediaFile[] = [], existingSubmissionId = "", replacingMessageId = "", retryModel = "", preparedThread?: string) => {
     const messageText = text.trim();
-    const requestedThreadId = selection.selectedId;
+    const requestedThreadId = preparedThread || selection.selectedId;
     if ((!messageText && !attachments.length) || !requestedThreadId || submittingThreads.current.has(requestedThreadId)) return false;
+    if (unavailableModel(retryModel || visibleModel)) { selection.setSessionError("所选模型已下架，请换一个模型"); return false; }
     submittingThreads.current.add(requestedThreadId);
-    const settings = { model: visibleModel, reasoningEffort: visibleEffort };
+    const settings = { model: retryModel || visibleModel, reasoningEffort: visibleEffort };
+    const current = selection.store.get(requestedThreadId);
+    const provider = current.session?.conversationKind === "direct" && current.session.modelProviderId;
+    const switchingProvider = Boolean(provider && settings.model && !current.executionStatus.active
+      && canonicalChannelId(provider) !== providerOf(settings.model));
     const scope = conversationScope;
     let threadId = requestedThreadId;
     const submissionId = existingSubmissionId || createSubmissionId();
-    const optimisticMessage = { ...createOptimisticMessage(messageText, attachments, submissionId), deliveryState: "preparing" as const };
+    const optimisticMessage: SessionMessage = {
+      ...createOptimisticMessage(messageText, attachments, submissionId), deliveryState: "preparing",
+      ...(switchingProvider ? { modelSwitch: settings.model, modelSwitchState: "switching" } : {}),
+    };
     if (replacingMessageId) selection.removeOptimisticMessage(threadId, replacingMessageId);
     reconciledSubmissionsRef.current.delete(submissionId);
     selection.addOptimisticMessage(threadId, optimisticMessage);
     setLocalSendVersion(value => value + 1);
     const updateDelivery = (deliveryState: "pending" | "failed" | "occupied" | undefined, turnId?: string, deliveryError?: string) => {
       if (deliveryState && reconciledSubmissionsRef.current.has(submissionId)) return;
-      selection.updateOptimisticMessage(threadId, optimisticMessage.id, { deliveryState, deliveryError, ...(turnId ? { turnId } : {}) });
+      const message = selection.store.get(threadId).session?.messages.find(item => item.id === optimisticMessage.id);
+      selection.updateOptimisticMessage(threadId, optimisticMessage.id, {
+        deliveryState, deliveryError, ...(turnId ? { turnId } : {}),
+        ...((message?.modelSwitchState || (!message && optimisticMessage.modelSwitchState)) === "switching" && deliveryState !== "pending"
+          ? { modelSwitchState: deliveryState ? "failed" as const : undefined } : {}),
+      });
     };
     try {
-      modelManager.clearPending(requestedThreadId);
       if (isPendingThread(requestedThreadId)) draftSettingsRef.current.set(requestedThreadId, settings);
       const created = await waitForThread(requestedThreadId);
       if (!created) throw new Error("新对话创建失败，请重试");
@@ -339,22 +376,18 @@ export function useProjectConversations() {
         submittingThreads.current.add(threadId);
         selection.addOptimisticMessage(threadId, optimisticMessage);
       }
-      if (!selection.store.get(threadId).executionStatus.active) {
+      if ((!preparedThread || preparedThread === selection.selectedId) && !selection.store.get(threadId).executionStatus.active) {
         try {
-          const result = await modelApi.update(threadId, settings.model, undefined, settings.reasoningEffort, scope);
-          if (result.threadId && result.threadId !== threadId) {
+          const result = await commitSettings(threadId, settings.model, settings.reasoningEffort, scope);
+          if (result.threadId !== threadId) {
             selection.removeOptimisticMessage(threadId, optimisticMessage.id);
             const previous = threadId;
             threadId = result.threadId;
             selection.addOptimisticMessage(threadId, optimisticMessage);
             if (selection.selectedIdRef.current === previous) selection.selectSession(threadId);
           }
-          if (settings.reasoningEffort) await modelApi.updateReasoningEffort(threadId, settings.reasoningEffort, undefined, scope);
-          contextManagement.markSubmitted(threadId, settings);
         } catch (error) {
-          // A turn may start between the two settings requests. The message endpoint
-          // decides whether to start or steer; settings contention is not send failure.
-          if (!(error instanceof Error) || !/^当前任务运行中，请在完成后(?:调整推理强度|切换模型)$/.test(error.message)) throw error;
+          if (!(error instanceof Error) || !/^当前任务运行中，请在完成后(?:调整推理强度|切换模型)$/.test(error.message) || crossProvider) throw error;
         }
       }
       selection.updateOptimisticMessage(threadId, optimisticMessage.id, { deliveryState: "sending" });
@@ -386,8 +419,8 @@ export function useProjectConversations() {
       submittingThreads.current.delete(requestedThreadId);
       submittingThreads.current.delete(threadId);
     }
-  }, [selection.selectedId, visibleModel, visibleEffort, conversationScope, waitForThread, execution.status.active, execution.sendMessage,
-    selection.addOptimisticMessage, selection.removeOptimisticMessage, selection.updateCurrentSession, selection.selectSession, selection.loadSession, selection.updateOptimisticMessage, selection.setSessionError, contextManagement.markSubmitted, modelManager.clearPending, reconcileMessage, catalog.updateSessionSummary]);
+  }, [selection.selectedId, visibleModel, visibleEffort, conversationScope, waitForThread, execution.sendMessage, providerOf, selection.store,
+    selection.addOptimisticMessage, selection.removeOptimisticMessage, selection.updateCurrentSession, selection.selectSession, selection.loadSession, selection.updateOptimisticMessage, selection.setSessionError, commitSettings, crossProvider, unavailableModel, reconcileMessage, catalog.updateSessionSummary]);
 
   useEffect(() => {
     const threadId = selection.selectedId;
@@ -403,15 +436,17 @@ export function useProjectConversations() {
     if (!message.submissionId || retryingMessageId) return false;
     setRetryingMessageId(message.id);
     try {
-      return await sendDirectMessage(message.text, attachmentsFromMessage(message), message.deliveryState === "failed" ? "" : message.submissionId, message.id);
+      return await sendDirectMessage(message.text, attachmentsFromMessage(message), message.deliveryState === "failed" ? "" : message.submissionId, message.id, message.modelSwitchState ? message.modelSwitch : undefined);
     } finally {
       setRetryingMessageId("");
     }
   }, [retryingMessageId, sendDirectMessage]);
 
-  const sendMessage = useCallback(async (text: string, attachments: MediaFile[] = []) => {
+  const sendMessage = useCallback(async (text: string, attachments: MediaFile[] = [], preparedThread?: string) => {
+    const sendThread = preparedThread || await prepareSend();
+    if (!sendThread) return false;
     const target = editingMessageRef.current;
-    if (!target) return sendDirectMessage(text, attachments);
+    if (!target) return sendDirectMessage(text, attachments, "", "", "", sendThread);
     const threadId = selection.selectedIdRef.current;
     if (!threadId || !target.turnId || target.role !== "user" || execution.status.active || selection.session?.archived) return false;
     setForkingMessageId(target.id);
@@ -430,7 +465,7 @@ export function useProjectConversations() {
     } finally {
       setForkingMessageId("");
     }
-  }, [execution.status.active, selection.selectedIdRef, selection.session, selection.cancelSessionLoad, selection.updateCurrentSession, sendDirectMessage]);
+  }, [execution.status.active, selection.selectedIdRef, selection.session, selection.cancelSessionLoad, selection.updateCurrentSession, sendDirectMessage, prepareSend]);
 
   const beginEditMessage = useCallback((message: SessionMessage) => {
     if (message.role !== "user" || !message.turnId || selection.session?.archived) return;
@@ -500,12 +535,12 @@ export function useProjectConversations() {
 
   const queueMessage = useCallback(async (text: string, attachments: MediaFile[] = []) => {
     const messageText = text.trim();
-    if (!messageText && !attachments.length) return false;
+    if ((!messageText && !attachments.length) || !await prepareSend(true)) return false;
     const settings = { model: visibleModel, reasoningEffort: visibleEffort };
     const threadId = await waitForThread(selection.selectedId);
     if (!threadId) return false;
     return followUpQueue.enqueue(messageText, attachments, threadId, settings);
-  }, [followUpQueue.enqueue, selection.selectedId, visibleModel, visibleEffort, waitForThread]);
+  }, [followUpQueue.enqueue, selection.selectedId, visibleModel, visibleEffort, waitForThread, prepareSend]);
 
   const openNewSession = useCallback((projectRoot = "", requestedModel = "", requestedProviderId = "", options: { deferred?: boolean; onCreated?: (threadId: string) => void } = {}) => {
     if (openingNewSessionRef.current) return false;
@@ -616,82 +651,57 @@ export function useProjectConversations() {
     return catalog.refreshSessions(false, typeof threadId === 'string' ? threadId : undefined, false);
   }, [catalog.refreshSessions]);
 
-  const providerOf = useCallback((model: string) => {
-    const entry = modelManager.models.find((item) => item.model === model);
-    return {
-      id: entry ? providerIdOf(entry) : model.includes("::") ? model.split("::")[0] : "current",
-      name: entry?.providerDisplayName || entry?.displayName || "",
-    };
-  }, [modelManager.models]);
+  const changeModel = async (model: string, reasoningEffort = visibleEffort) => {
+    const id = selection.selectedId;
+    if (!id || selection.selectedIdRef.current !== id || !model) return false;
+    setSendPreparationError(null);
+    const draft = { model, reasoningEffort };
+    draftSettingsRef.current.set(id, draft);
+    if (!isPendingThread(id)) writeLocalCache(modelDraftKey(id), draft);
+    setDraftVersion(version => version + 1);
+    return true;
+  };
 
-  const changeModel = useCallback(async (model: string, reasoningEffort?: string) => {
-    const threadId = selection.selectedIdRef.current;
-    if (isPendingThread(threadId)) {
-      draftSettingsRef.current.set(threadId, { model, reasoningEffort: reasoningEffort ?? visibleEffort });
-      selection.updateCurrentSession(threadId, current => ({ ...current, model }));
-      return true;
-    }
-    const source = providerOf(visibleModel);
-    const target = providerOf(model);
-    const employeeScoped = Boolean(new URLSearchParams(window.location.search).get("agent"));
-    if (threadId && !employeeScoped && visibleModel && source.id !== target.id) {
-      if (execution.status.active) {
-        selection.setSessionError("当前任务完成后再切换配置");
-        return false;
-      }
-      setProviderSwitchError("");
-      setProviderSwitch({
-        threadId,
-        title: selection.session?.title || "当前对话",
-        model,
-        reasoningEffort: reasoningEffort ?? visibleEffort,
-        providerName: target.name || target.id,
-      });
-      return true;
-    }
-    return modelManager.change(model, reasoningEffort);
-  }, [execution.status.active, modelManager.change, providerOf, selection.selectedIdRef, selection.session?.title, selection.setSessionError, selection.updateCurrentSession, visibleEffort, visibleModel]);
-
-  const cancelProviderSwitch = useCallback(() => {
-    const request = providerSwitch;
-    if (!request) return false;
-    const previous = contextManagement.status.lastSuccessfulSettings || {
-      model: visibleModel,
-      reasoningEffort: visibleEffort,
-    };
-    modelManager.clearPending(request.threadId);
-    draftSettingsRef.current.delete(request.threadId);
-    contextManagement.applyModelSettings(request.threadId, { ...previous, committed: true });
+  const cancelProviderSwitch = () => {
+    if (switchInFlight.current) return false;
+    switchResponse.current?.(false);
+    switchResponse.current = null;
     setProviderSwitch(null);
     setProviderSwitchError("");
     return true;
-  }, [contextManagement.applyModelSettings, contextManagement.status.lastSuccessfulSettings, modelManager.clearPending, providerSwitch, visibleEffort, visibleModel]);
+  };
 
-  const confirmProviderSwitch = useCallback(async () => {
+  const confirmProviderSwitch = async () => {
     const request = providerSwitch;
-    if (!request || providerSwitchBusy) return false;
+    if (!request || switchInFlight.current || !switchResponse.current) return false;
+    switchInFlight.current = true;
     setProviderSwitchBusy(true);
     setProviderSwitchError("");
     try {
-      const result = await modelApi.copyToProvider(request.threadId, request.model, request.reasoningEffort, conversationScope);
+      if (selection.selectedIdRef.current !== request.threadId || selection.store.get(request.threadId).executionStatus.active) {
+        throw new Error("对话已切换或任务正在运行，请返回重试");
+      }
+      if (unavailableModel(request.model)) throw new Error("所选模型已下架，请换一个模型");
+      const result = await modelApi.copyToProvider(request.threadId, request.model, request.reasoningEffort, conversationScope, request.requestId);
       catalog.updateSessionSummary(result.session);
       contextManagement.applyModelSettings(result.session.threadId, {
-        model: result.model,
-        reasoningEffort: result.reasoningEffort,
-        committed: true,
+        model: result.model, reasoningEffort: result.reasoningEffort, committed: true,
       });
-      await selection.loadSession(result.session.threadId);
       selection.selectSession(result.session.threadId);
+      void selection.loadSession(result.session.threadId).catch(() => {});
       void catalog.refreshSessions(false, result.session.threadId, false);
+      switchResponse.current?.(result.session.threadId);
+      switchResponse.current = null;
       setProviderSwitch(null);
       return true;
     } catch (reason) {
       setProviderSwitchError(reason instanceof Error ? reason.message : "创建新对话失败");
       return false;
     } finally {
+      switchInFlight.current = false;
       setProviderSwitchBusy(false);
     }
-  }, [catalog.refreshSessions, catalog.updateSessionSummary, contextManagement.applyModelSettings, conversationScope, providerSwitch, providerSwitchBusy, selection.loadSession, selection.selectSession]);
+  };
 
   const handleEvent = useCallback((event: ProjectEvent) => {
     if (!selection.store.acceptEvent(event)) return;
@@ -709,6 +719,10 @@ export function useProjectConversations() {
     const acceptedQueueItem = followUpQueue.handleEvent(event);
     goal.handleEvent(event);
     if (event.type === "context_status") contextManagement.handleEvent(event);
+    if (event.type === "employee_model_switched") {
+      selection.updateCurrentSession(event.threadId, current => ({ ...current, modelProviderId: event.modelProviderId }));
+      selection.updateOptimisticMessage(event.threadId, `optimistic-${event.submissionId}`, { modelSwitch: event.model, modelSwitchState: undefined });
+    }
     if (event.type === "user_message_accepted") {
       if (acceptedQueueItem) {
         const message = createOptimisticMessage(acceptedQueueItem.text, acceptedQueueItem.attachments, event.submissionId, acceptedQueueItem.sentAt || undefined);
@@ -716,7 +730,7 @@ export function useProjectConversations() {
           authorId: acceptedQueueItem.authorId, authorName: acceptedQueueItem.authorName, displaySourceAgentId: acceptedQueueItem.displaySourceAgentId });
       }
       reconciledSubmissionsRef.current.add(event.submissionId);
-      selection.updateOptimisticMessage(event.threadId, `optimistic-${event.submissionId}`, { deliveryState: undefined, deliveryError: undefined, turnId: event.turnId, protocolTurnId: event.turnId });
+      selection.updateOptimisticMessage(event.threadId, `optimistic-${event.submissionId}`, { deliveryState: undefined, deliveryError: undefined, turnId: event.turnId, protocolTurnId: event.turnId, ...(event.modelSwitch ? { modelSwitch: event.modelSwitch, modelSwitchState: undefined } : {}) });
     }
     if (event.type === "execution_status" && event.phase === "completed"
       && (previousStatus?.phase !== event.phase || previousStatus?.turnId !== event.turnId)) contextManagement.completeSettings(event.threadId);
@@ -740,7 +754,7 @@ export function useProjectConversations() {
     }
     if (event.type === 'user_input_resolved') selection.store.update(event.threadId, current => ({
       userInputRequest: String(current.userInputRequest?.requestId) === String(event.requestId) ? null : current.userInputRequest }), true);
-  }, [contextManagement.handleEvent, execution.handleEvent, followUpQueue.handleEvent, goal.handleEvent, selection.addOptimisticMessage, selection.updateOptimisticMessage, selection.selectedIdRef]);
+  }, [contextManagement.handleEvent, execution.handleEvent, followUpQueue.handleEvent, goal.handleEvent, selection.addOptimisticMessage, selection.updateOptimisticMessage, selection.updateCurrentSession, selection.selectedIdRef]);
   const recoverRealtime = useCallback((_reason: RealtimeRecoveryReason) => {
     const threadId = selection.selectedIdRef.current;
     const pending = realtimeRecoveryRef.current;
@@ -830,7 +844,10 @@ export function useProjectConversations() {
     visibleEffort,
     models: modelManager.models,
     modelsLoading: modelManager.loading,
-    modelChanging: modelManager.changing,
+    modelChanging: false,
+    selectedModelUnavailable: unavailableModel(visibleModel),
+    sendPreparationError: sendPreparationError?.threadId === selection.selectedId ? sendPreparationError.message : "",
+    prepareSend,
     modelError: modelManager.error,
     sending: execution.sending,
     sendingSlow: execution.sendingSlow,
@@ -856,13 +873,7 @@ export function useProjectConversations() {
     compactContext: contextManagement.compact,
     setAutoCompactThreshold: contextManagement.setThreshold,
     changeModel,
-    changeReasoningEffort: async (reasoningEffort: string) => {
-      const id = selection.selectedIdRef.current;
-      if (!isPendingThread(id)) return modelManager.changeReasoningEffort(reasoningEffort);
-      draftSettingsRef.current.set(id, { model: visibleModel, reasoningEffort });
-      selection.updateCurrentSession(id, current => ({ ...current }));
-      return true;
-    },
+    changeReasoningEffort: (reasoningEffort: string) => changeModel(visibleModel, reasoningEffort),
     goal: goal.goal,
     goalBusy: goal.busy,
     goalError: goal.error,
@@ -875,8 +886,7 @@ export function useProjectConversations() {
       if (status === "active") {
         try {
           if (!execution.status.active) {
-            await stageUnrecordedModel(threadId, true);
-            await modelManager.applyPending(threadId);
+            await stageUnrecordedModel(threadId);
           }
           if (selection.selectedIdRef.current !== threadId) return false;
         } catch (error) {

@@ -38,13 +38,19 @@ const applyDefaults = (value: ModelDefaults) => {
   return value;
 };
 let reading: Promise<ModelDefaults> | null = null;
+let savedVersion = 0;
 export const refreshModelDefaults = () => {
-  if (!reading) reading = fetchJson<ModelDefaults>('/api/model-defaults', AbortSignal.timeout(10000))
-    .then(applyDefaults).finally(() => { reading = null; });
+  if (!reading) {
+    const version = savedVersion;
+    reading = fetchJson<ModelDefaults>('/api/model-defaults', AbortSignal.timeout(10000))
+      .then(value => version === savedVersion ? applyDefaults(value) : readModelDefaults())
+      .finally(() => { reading = null; });
+  }
   return reading;
 };
-export const writeModelDefaults = async (next: ModelDefaults) => {
-  const value = await postJson<ModelDefaults>('/api/model-defaults', next);
+export const writeModelDefaults = async (next: Omit<ModelDefaults, "archivedProviderIds">) => {
+  const value = await postJson<ModelDefaults>('/api/model-defaults/selection', next);
+  savedVersion++;
   return applyDefaults(value);
 };
 export function useModelDefaults(): ModelDefaults {
@@ -63,6 +69,11 @@ export function useModelDefaults(): ModelDefaults {
 
 export const providerIdOf = (entry: CodexModel) => (
   entry.modelProviderId || (entry.model.includes("::") ? entry.model.split("::")[0] : "current")
+);
+
+export const providerIdForModel = (models: CodexModel[], model: string) => (
+  models.find((entry) => entry.model === model)?.modelProviderId
+  || (model.includes("::") ? model.split("::")[0] : /^grok-/i.test(model) ? "fusheng-grok" : "current")
 );
 
 export const channelProviderId = (entry: { id: string; modelKey?: string }) => {
@@ -94,13 +105,12 @@ export const resolveVisibleModel = (
   recordedModel: string,
   sessionModel: string,
 ) => {
-  if (recordedModel) return recordedModel;
-  if (sessionModel) return sessionModel;
+  if (recordedModel || sessionModel) return recordedModel || sessionModel;
   const pool = availableModels(models, defaults);
   if (!pool.length) return defaults.model || "";
   const preferred = pool.find((entry) => (entry.model === defaults.model || entry.model.split('::').at(-1) === defaults.model.split('::').at(-1)) && (!defaults.providerId || providerIdOf(entry) === defaults.providerId));
   if (preferred) return preferred.model;
-  if (defaults.model && defaults.providerId) return defaults.model;
+
   const providerId = defaults.providerId || "current";
   const group = pool.filter((entry) => providerIdOf(entry) === providerId);
   const target = group.length ? group : pool.filter((entry) => providerIdOf(entry) === "current");

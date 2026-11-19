@@ -119,6 +119,15 @@ const conversationStoreOptions = {
   attachmentContent,
   registerMedia: media.register,
   onProtocolMessage: (message) => {
+    if (employeeRuntime) {
+      const original = message;
+      message = employeeRuntime.publicProtocolMessage(message);
+      if (!message) return;
+      if (message !== original) {
+        contextManagement?.handleProtocolMessage(message);
+        return;
+      }
+    }
     if (!employeeRuntime?.ownsThread(message?.params?.threadId)) execution.handleProtocolMessage(message);
     void agentTasks?.onProtocolMessage(message).catch(error => console.error("[agent-tasks]", error.message));
     void appServerConversations.handleProtocolMessage(message).catch((error) => {
@@ -146,7 +155,7 @@ const conversationStoreOptions = {
   threadRuntimeOptions: async (thread) => {
     const taskOptions = agentTasks?.runtimeOptions(thread);
     if (taskOptions) return taskOptions;
-    const employee = employeeRegistry?.list?.().find((entry) => entry.mainThreadId === thread?.id);
+    const employee = employeeRegistry?.list?.().find((entry) => (entry.runtimeThreadIds?.at(-1) || entry.mainThreadId) === thread?.id);
     if (!employee) return null;
     const policy = { sandbox: "danger-full-access", approvalPolicy: "never" };
     return {

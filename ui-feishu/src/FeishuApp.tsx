@@ -131,7 +131,7 @@ export function FeishuApp() {
   }, []);
   const roster = useMemo(() => {
     const base = buildConversationDirectory(viewDirectory, viewC.sessions, viewC.archivedView, viewC.project?.root, viewC.cachedSessions, viewC.archivedByThread);
-    const rooms: Conversation[] = groups.rooms.filter(room => Boolean(room.archived) === viewC.archivedView).map(room => ({ id: `group:${room.id}`, kind: 'group', roomId: room.id, name: room.name, subtitle: viewDirectory.projects.find(project => project.projectId === room.projectId)?.name || '群聊', projectId: room.projectId, time: room.lastActivityAt }));
+    const rooms: Conversation[] = groups.rooms.filter(room => Boolean(room.archived) === viewC.archivedView).map(room => ({ id: `group:${room.id}`, kind: 'group', roomId: room.id, name: room.name, subtitle: viewDirectory.projects.find(project => project.projectId === room.projectId)?.name || '群聊', projectId: room.projectId, time: room.lastActivityAt, preview: room.latestMessage?.text }));
     return { ...base, all: [...base.all, ...rooms], projects: base.projects.map(project => {
       const children = [...(project.children || []), ...rooms.filter(room => room.projectId === project.projectId)].sort(byLatest);
       return { ...project, time: children[0]?.time || project.time, children };
@@ -200,7 +200,9 @@ export function FeishuApp() {
       details={details} setDetails={setDetails} agentId={employee?.employeeId || agentId} selectedName={selectedName} selected={selected}
       targets={forwardTargets} onOpenTarget={open}
       onBack={() => setMobileChat(false)} onShare={() => setSharing(true)} /></div>
-    {roomId && <GroupWorkspace key={roomId} room={groupRoom || { id: roomId, name: '群聊', projectId: '' }} projectName={directory.projects.find(project => project.projectId === groupRoom?.projectId)?.name || ''} onBack={() => setMobileChat(false)} onShare={() => setSharing(true)} onRename={name => groups.update(roomId, { name })} />}
+    {roomId && <GroupWorkspace key={roomId} room={groupRoom || { id: roomId, name: '群聊', projectId: '' }} projectName={directory.projects.find(project => project.projectId === groupRoom?.projectId)?.name || ''}
+      forwardTargets={[...forwardTargets, ...groups.rooms.filter(item => !item.archived && item.id !== roomId).map(item => ({ id: `group:${item.id}`, kind: 'group' as const, roomId: item.id, name: item.name, subtitle: directory.projects.find(project => project.projectId === item.projectId)?.name || '群聊' }))]}
+      onOpenTarget={open} onBack={() => setMobileChat(false)} onShare={() => setSharing(true)} onRename={name => groups.update(roomId, { name })} />}
     {section === 'border' && <BorderToolPage onBack={() => setSection('messages')} />}
     {creatingGroup && <CreateGroupDialog directory={directory} onClose={() => setCreatingGroup(false)} onCreated={room => { setCreatingGroup(false); void groups.refresh(); setSection('messages'); setFilter('all'); void open({ id: `group:${room.id}`, name: room.name, subtitle: '群聊', kind: 'group', roomId: room.id }); }} />}
     <ShareConversationDialog open={sharing} title={roomId ? groupRoom?.name || '群聊' : c.session?.title || selectedName} heading={roomId ? '分享当前群聊' : undefined} onClose={closeSharing} />

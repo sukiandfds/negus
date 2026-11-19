@@ -6,20 +6,24 @@ import styles from "./MessageActions.module.css";
 interface MessageActionsProps {
   children?: ReactNode;
   onSelect?: () => void;
+  selectDisabled?: boolean;
   onQuote?: () => void;
+  quoteDisabled?: boolean;
   text: string;
-  forkable: boolean;
+  forkable?: boolean;
   forkDisabled?: boolean;
-  forking: boolean;
-  onFork: () => Promise<boolean>;
-  editable: boolean;
-  editing: boolean;
-  onEdit: () => void;
+  forking?: boolean;
+  onFork?: () => Promise<boolean>;
+  editable?: boolean;
+  editDisabled?: boolean;
+  editing?: boolean;
+  onEdit?: () => void;
   retryable?: boolean;
   retrying?: boolean;
   onRetry?: () => Promise<boolean>;
   shareable?: boolean;
   threadId?: string;
+  groupShare?: { roomId: string; agentId: string };
   messageId?: string;
 }
 
@@ -40,7 +44,7 @@ export const copyWithFallback = async (text: string) => {
   if (!copied) throw new Error("clipboard unavailable");
 };
 
-export function MessageActions({ children, onSelect, onQuote, text, forkable, forkDisabled = false, forking, onFork, editable, editing, onEdit, retryable = false, retrying = false, onRetry, shareable = false, threadId = "", messageId = "" }: MessageActionsProps) {
+export function MessageActions({ children, onSelect, selectDisabled = false, onQuote, quoteDisabled = false, text, forkable = false, forkDisabled = false, forking = false, onFork, editable = false, editDisabled = false, editing = false, onEdit, retryable = false, retrying = false, onRetry, shareable = false, threadId = "", groupShare, messageId = "" }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const resetTimerRef = useRef<number | null>(null);
@@ -78,21 +82,21 @@ export function MessageActions({ children, onSelect, onQuote, text, forkable, fo
       >
         {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
       </button>
-      {editable ? (
+      {editable && onEdit ? (
         <button
           className={styles.button}
           type="button"
           aria-label={editing ? "正在编辑" : "重新编辑"}
           title={editing ? "正在编辑" : "重新编辑"}
-          disabled={editing}
+          disabled={editing || editDisabled}
           onClick={onEdit}
         >
           <Edit3 aria-hidden="true" />
         </button>
       ) : null}
-      {onSelect ? <button className={styles.button} type="button" aria-label="多选消息" title="多选消息" onClick={onSelect}><ListChecks aria-hidden="true" /></button> : null}
-      {onQuote ? <button className={styles.button} type="button" aria-label="引用这条消息" title="引用" onClick={onQuote}><Quote aria-hidden="true" /></button> : null}
-      {forkable ? (
+      {onSelect ? <button className={styles.button} type="button" aria-label="多选消息" title="多选消息" disabled={selectDisabled} onClick={onSelect}><ListChecks aria-hidden="true" /></button> : null}
+      {onQuote ? <button className={styles.button} type="button" aria-label="引用这条消息" title="引用" disabled={quoteDisabled} onClick={onQuote}><Quote aria-hidden="true" /></button> : null}
+      {forkable && onFork ? (
         <button
           className={styles.button}
           type="button"
@@ -104,11 +108,12 @@ export function MessageActions({ children, onSelect, onQuote, text, forkable, fo
           <GitBranch aria-hidden="true" className={forking ? styles.spinning : undefined} />
         </button>
       ) : null}
-      {shareable && threadId && messageId ? (
+      {shareable && messageId && (threadId || groupShare) ? (
         <AgentMessageShareControl
           className={styles.button}
           threadId={threadId}
           messageId={messageId}
+          groupSource={groupShare}
         />
       ) : null}
       {retryable && onRetry ? (

@@ -2,7 +2,7 @@ import { isReasoningEffort } from './reasoning-efforts.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { operateSharedDatabase } from './shared-config-database.mjs';
 import TOML from '@iarna/toml';
 import { readCurrentApiConfiguration } from './current-api-configuration.mjs';
@@ -139,10 +139,12 @@ export const createCcSwitchConfigService = ({ database = path.join(os.homedir(),
     cachedRecords = null; cachedList = null; cachedRecordsAt = 0; cachedListAt = 0;
     return { saved: true, id: savedId, notice: '已保存' };
   };
-  const remove = async (id) => {
+  const versionOf = row => row && createHash("sha256").update(JSON.stringify(row)).digest("hex");
+  const remove = async (id, expectedVersion) => {
     const rows = await records(true);
     const existing = rows.find((row) => row.id === id);
     if (!existing) throw failure('配置已不存在，请刷新', 409);
+    if (expectedVersion && versionOf(existing) !== expectedVersion) throw failure('配置已变更，请重新刷新', 409);
     if (existing.is_current) throw failure('此配置正在被电脑 Codex 使用，暂不删除；可在 Negus 中归档', 409);
     await invoke({ action: 'delete', id, expectedConfig: existing.settings_config, expectedRow: JSON.stringify(existing) });
     cachedRecords = null;
@@ -151,17 +153,18 @@ export const createCcSwitchConfigService = ({ database = path.join(os.homedir(),
     cachedListAt = 0;
     return { deleted: true, notice: '已从共享配置删除。' };
   };
-  const readCredential = async (providerId) => {
+  const readCatalogConfig = async (providerId) => {
     const id = String(providerId).replace(/^ccswitch_/u, "");
     const row = (await invoke({ action: "list" })).find(entry => entry.id === id);
     if (!row) throw failure("供应商配置已不存在，请刷新。", 409);
     const entry = decode(row);
     if (!entry.switchable) throw failure("此配置暂不支持使用 API Key 接入。", 400);
-    return entry.key;
+    return { key: entry.key, baseUrl: entry.baseUrl, version: versionOf(row) };
   };
+  const readCredential = async providerId => (await readCatalogConfig(providerId)).key;
   const credentialCommand = (providerId) => ({
     command: process.execPath,
     args: [fileURLToPath(new URL("../scripts/shared-provider-credential.mjs", import.meta.url)), path.resolve(database), providerId],
   });
-  return { list, save, remove, resolveDraft, runtimeProviders, currentDisplayName, readCredential, credentialCommand };
+  return { readCatalogConfig, list, save, remove, resolveDraft, runtimeProviders, currentDisplayName, readCredential, credentialCommand };
 };

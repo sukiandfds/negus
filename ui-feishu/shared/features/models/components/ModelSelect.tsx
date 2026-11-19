@@ -15,21 +15,18 @@ interface ModelSelectProps {
 export function ModelSelect({
   currentModel, models, disabled, loading, changing, error, onChange,
 }: ModelSelectProps) {
-  const options = currentModel && !models.some((entry) => entry.model === currentModel)
-    ? [{ id: currentModel, model: currentModel, displayName: currentModel, description: "", isDefault: false, supportedReasoningEfforts: [] }, ...models]
-    : models;
-
   return (
     <select
       className={styles.select}
       aria-label="切换模型"
       title={error || "当前模型"}
-      value={currentModel}
-      disabled={disabled || loading || changing || !options.length}
+      value={models.some((entry) => entry.model === currentModel) ? currentModel : ""}
+      disabled={disabled || loading || changing || !models.length}
       onChange={(event) => void onChange(event.target.value)}
     >
       {!currentModel ? <option value="">选择模型</option> : null}
-      {options.map((entry) => (
+      {currentModel && !models.some((entry) => entry.model === currentModel) ? <option value="">选择模型</option> : null}
+      {models.map((entry) => (
         <option key={entry.id} value={entry.model}>{formatModelDisplayName(entry.model, entry.displayName)}</option>
       ))}
     </select>

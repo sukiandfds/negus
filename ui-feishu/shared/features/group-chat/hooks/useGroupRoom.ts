@@ -64,6 +64,7 @@ export function useGroupRoom(initialRoomId = "current-project") {
   const [focusRequest, setFocusRequest] = useState<{ id: string; nonce: number } | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [retryingMessageId, setRetryingMessageId] = useState("");
   const sendingRef = useRef(false);
   const activeRoomIdRef = useRef(roomId);
   const sendGenerationRef = useRef(0);
@@ -251,6 +252,7 @@ export function useGroupRoom(initialRoomId = "current-project") {
     setSnapshot(cached);
     setLoading(!cached);
     setSending(false);
+    setRetryingMessageId("");
     setInitialSyncReady(false);
     setError("");
     queuedAgentIdsRef.current = [];
@@ -384,8 +386,91 @@ export function useGroupRoom(initialRoomId = "current-project") {
     }
   }, [roomId]);
 
+  const retry = useCallback(async (message: GroupMessage) => {
+    const clientMessageId = String(message.clientMessageId || "").trim();
+    if (!member || message.type !== "human" || message.authorId !== member.id
+      || message.failure !== true || !clientMessageId || sendingRef.current) return false;
+    if (!(await ensureLiveTail())) return false;
+    sendingRef.current = true;
+    setSending(true);
+    setRetryingMessageId(message.id);
+    setError("");
+    const requestRoomId = roomId;
+    const sendGeneration = ++sendGenerationRef.current;
+    try {
+      const result = await groupApi.send(
+        member,
+        requestRoomId,
+        message.text,
+        clientMessageId,
+        (message.attachments || []).map(file => file.id),
+        message.replyTo,
+      );
+      if (sendGeneration !== sendGenerationRef.current || activeRoomIdRef.current !== requestRoomId) return false;
+      pendingMessagesRef.current.delete(clientMessageId);
+      setSnapshot((current) => current && {
+        ...current,
+        messages: upsertGroupMessage(current.messages, {
+          ...result.message,
+          clientMessageId: result.message.clientMessageId || clientMessageId,
+        }),
+      });
+      const followUp = describeSendResult(result);
+      queuedAgentIdsRef.current = followUp.agentIds;
+      setNotice(followUp.notice);
+      return true;
+    } catch (reason) {
+      if (sendGeneration === sendGenerationRef.current) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
+      return false;
+    } finally {
+      if (sendGeneration === sendGenerationRef.current) {
+        sendingRef.current = false;
+        setSending(false);
+        setRetryingMessageId("");
+      }
+    }
+  }, [ensureLiveTail, member, roomId]);
+
+  const edit = useCallback(async (message: GroupMessage, text: string) => {
+    const content = text.trim();
+    if (!member || message.type !== "human" || message.authorId !== member.id
+      || message.pending || !message.clientMessageId || !content || sendingRef.current) return false;
+    sendingRef.current = true;
+    setSending(true);
+    setError("");
+    try {
+      const result = await groupApi.edit(member, roomId, message.id, message.clientMessageId, content);
+      setSnapshot((current) => current && {
+        ...current,
+        messages: upsertGroupMessage(current.messages, result.message),
+      });
+      setNotice("消息已更新");
+      return true;
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+      return false;
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
+  }, [member, roomId]);
+
+  const forward = useCallback(async (sourceRoomId: string, targetRoomId: string, messageIds: string[], requestId: string) => {
+    if (!member || sourceRoomId !== roomId || !targetRoomId || targetRoomId === sourceRoomId || !messageIds.length) return false;
+    setError("");
+    try {
+      await groupApi.forward(member, sourceRoomId, targetRoomId, messageIds, requestId);
+      return true;
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+      return false;
+    }
+  }, [member, roomId]);
+
   return {
-    snapshot, rooms, roomId, selectRoom, member, loading, initialSyncReady, sending, error, notice, send, interrupt, refresh,
+    snapshot, rooms, roomId, selectRoom, member, loading, initialSyncReady, sending, error, notice, send, retry, retryingMessageId, edit, forward, interrupt, refresh,
     historyLoading, historyNotice, historyNavigation, focusRequest, loadOlder, loadNewer, jumpToDate, returnToLatest, revealMessage,
     connected: realtime.connected,
     streaming: realtime.streaming,

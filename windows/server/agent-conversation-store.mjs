@@ -56,7 +56,7 @@ const textFromContent = (value) => {
 };
 
 const normalizeHistoryMessage = (message, binding) => {
-  const role = message?.role === "user" || message?.role === "assistant" ? message.role : "";
+  const role = ["user", "assistant"].includes(message?.role) || (message?.role === "system" && message.source === "employee-model-switch") ? message.role : "";
   const text = String(message?.text || "");
   const id = clean(message?.id, 240);
   if (!role || !id || !text.trim()) return null;

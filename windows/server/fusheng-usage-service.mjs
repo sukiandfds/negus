@@ -79,6 +79,7 @@ export const createFushengUsageService = ({
   let cachedAt = 0;
   let cachedKey = "";
   let inFlight = null;
+  const publicPricing = new Map();
   const loadCredentials = async () => {
     // Only fall back when the new file does not exist, never after a corrupt write.
     const exists = await fs.access(credentialsFile).then(() => true, () => false);
@@ -110,47 +111,40 @@ export const createFushengUsageService = ({
   };
 
 
-  const readChannelRatios = async (entries) => {
+  const publicOrigin = "https://fushengyunsuan.cn";
+  const readPublicRatios = ({ force = false, origin = publicOrigin } = {}) => {
+    const cached = publicPricing.get(origin);
+    if (cached?.pending || (!force && cached && now().getTime() - cached.at < cacheMs)) return cached.request;
+    const request = requestJson(fetchImpl, new URL("/api/pricing", origin)).then(pricing => {
+      if (!pricing.group_ratio || pricing.success === false) throw serviceError("供应商公开价表格式错误");
+      return Object.fromEntries(Object.entries(pricing.group_ratio)
+        .filter(([, ratio]) => ratio !== null && ratio !== "" && Number.isFinite(Number(ratio)) && Number(ratio) >= 0)
+        .map(([group, ratio]) => [group, Number(ratio)]));
+    });
+    const entry = { pending: true, request, at: now().getTime() };
+    publicPricing.set(origin, entry);
+    void request.then(() => { entry.pending = false; }, () => {
+      if (publicPricing.get(origin) === entry) publicPricing.delete(origin);
+    });
+    return request;
+  };
+  const readChannelRatios = async (entries, { force = false } = {}) => {
     const credentials = await loadCredentials().catch(() => null);
-    const timedFetch = (url, options) => fetchImpl(url, { ...options, signal: AbortSignal.timeout(6000), redirect: 'error' });
-    if (!credentials) {
-      const eligible = entries.filter(entry => entry.key && entry.baseUrl && (() => {
-        try { return new URL(entry.baseUrl).origin === 'https://fushengyunsuan.cn'; } catch { return false; }
-      })());
-      if (!eligible.length) return {};
-      const pricing = await requestJson(timedFetch, 'https://fushengyunsuan.cn/api/pricing');
-      const result = {};
-      await Promise.all(eligible.map(async entry => {
-        try {
-          const token = await requestJson(timedFetch, 'https://fushengyunsuan.cn/api/usage/token/', { Authorization: 'Bearer ' + entry.key });
-          // A token name is not a group identifier. Never guess from configuration names.
-          const group = token.data?.group;
-          const ratio = group ? pricing.group_ratio?.[group] : undefined;
-          if (ratio !== undefined && Number.isFinite(Number(ratio)) && Number(ratio) >= 0)
-            result[entry.id] = { priceRatio: Number(ratio), priceGroup: group, ratioSource: 'supplier' };
-        } catch {}
-      }));
-      return result;
-    }
-    const headers = { Authorization: `Bearer ${credentials.accessToken}`, 'New-Api-User': String(credentials.userId) };
-    const [tokens, pricing] = await Promise.all([
-      requestJson(timedFetch, new URL('/api/token/?p=1&page_size=100', credentials.baseUrl), headers),
-      requestJson(timedFetch, new URL('/api/pricing', credentials.baseUrl)),
-    ]);
-    const items = Array.isArray(tokens.data) ? tokens.data : tokens.data?.items || [];
-    if (Number(tokens.data?.total || items.length) > items.length) return {};
+    const origin = credentials?.baseUrl || publicOrigin;
+    const pricing = await readPublicRatios({ origin, force });
+    const account = credentials && await requestJson(fetchImpl, new URL("/api/token/?p=1&page_size=100", origin),
+      { Authorization: `Bearer ${credentials.accessToken}`, "New-Api-User": String(credentials.userId) }).catch(() => null);
+    const items = Array.isArray(account?.data) ? account.data : account?.data?.items || [];
     const result = {};
-    await Promise.all(entries.map(async (entry) => {
-      if (!entry.key || !entry.baseUrl || new URL(entry.baseUrl).origin !== new URL(credentials.baseUrl).origin) return;
+    await Promise.all(entries.map(async entry => {
       try {
-        const token = await requestJson(timedFetch, new URL('/api/usage/token/', entry.baseUrl), { Authorization: `Bearer ${entry.key}` });
-        const matches = items.filter((item) => item.name === token.data?.name);
-        const groups = [...new Set(matches.map((item) => item.group).filter(Boolean))];
-        if (groups.length !== 1) return;
-        const ratio = pricing.group_ratio?.[groups[0]];
-        if (ratio === undefined || !Number.isFinite(Number(ratio))) return;
-        result[entry.id] = { priceRatio: Number(ratio), priceGroup: groups[0], ratioSource: 'supplier' };
-      } catch { /* Unverified prices remain explicitly configured/unknown. */ }
+        if (!entry.key || !entry.baseUrl || new URL(entry.baseUrl).origin !== origin) return;
+        const token = await requestJson(fetchImpl, new URL("/api/usage/token/", origin), { Authorization: `Bearer ${entry.key}` });
+        const groups = token.data?.group ? [token.data.group] : Number(account?.data?.total || items.length) <= items.length
+          ? [...new Set(items.filter(item => item.name === token.data?.name).map(item => item.group).filter(Boolean))] : [];
+        if (groups.length !== 1 || !Object.hasOwn(pricing, groups[0])) return;
+        result[entry.id] = { priceRatio: pricing[groups[0]], priceGroup: groups[0], ratioSource: "supplier" };
+      } catch { /* A configuration without a verified group has no assigned ratio. */ }
     }));
     return result;
   };
@@ -236,5 +230,5 @@ export const createFushengUsageService = ({
     return inFlight;
   };
 
-  return { read, readChannelRatios, credentialStatus, saveCredentials };
+  return { read, readPublicRatios, readChannelRatios, credentialStatus, saveCredentials };
 };

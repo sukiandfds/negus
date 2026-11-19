@@ -1,5 +1,4 @@
 import { transferEmployeeThread } from "../../ui-feishu/server/employee-provider-integration.mjs";
-import { communicationInstructions } from "./base-prompt.mjs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
@@ -77,6 +76,8 @@ export const createEmployeeRuntimeService = ({
   const openPromises = new Map();
   const sendLocks = new Map();
   const modelChanges = new Map();
+  const nativeThreads = new Map();
+  const nativeThreadId = employee => employee.runtimeThreadIds?.at(-1) || employee.mainThreadId;
   let closed = false;
 
   // A dead app-server never sends turn/completed for the turns it was
@@ -85,7 +86,8 @@ export const createEmployeeRuntimeService = ({
     for (const [employeeId, status] of statuses) {
       if (!status.active) continue;
       const threadId = clean(registry.get(employeeId)?.mainThreadId, 120);
-      if ((threadClients.get(threadId) || defaultClient) !== runtimeClient) continue;
+      const currentClient = threadClients.get(threadId) || defaultClient;
+      if ((currentClient.nativeClient || currentClient) !== runtimeClient) continue;
       publishTurnCompletion({
         employeeId, threadId, turnId: clean(status.turnId, 160), status: "interrupted", error: "Codex 进程已退出",
       });
@@ -120,10 +122,19 @@ export const createEmployeeRuntimeService = ({
     return runtimeClient;
   };
 
+  const scopedClient = (client, threadId) => ({
+    nativeClient: client,
+    request: (method, params, options) => client.request(method, { ...params, threadId }, options),
+    probe: (method, params, options) => (client.probe || client.request).call(client, method, { ...params, threadId }, options),
+    getPendingUserInput: () => client.getPendingUserInput?.(threadId),
+    respondToUserInput: (_, requestId, answers) => client.respondToUserInput?.(threadId, requestId, answers),
+  });
+
   const clientForThread = async (threadId, employee) => {
     const existing = threadClients.get(threadId);
     if (existing) return existing;
-    const runtimeClient = await clientForEmployee(employee);
+    const client = await clientForEmployee(employee);
+    const runtimeClient = nativeThreadId(employee) !== threadId ? scopedClient(client, nativeThreadId(employee)) : client;
     threadClients.set(threadId, runtimeClient);
     return runtimeClient;
   };
@@ -143,7 +154,19 @@ export const createEmployeeRuntimeService = ({
   function rememberInitialThread(employee) {
     const threadId = clean(employee?.mainThreadId, 120);
     if (threadId) threadEmployees.set(threadId, employee.id);
+    for (const id of employee.runtimeThreadIds || []) nativeThreads.set(id, employee.id);
   }
+
+  // The employee's public thread stays stable across native runs.
+  const publicProtocolMessage = message => {
+    const id = message?.params?.threadId;
+    const employeeId = nativeThreads.get(id) || threadEmployees.get(id);
+    if (!employeeId) return message;
+    const employee = registry.get(employeeId);
+    if (!employee || nativeThreadId(employee) !== id) return null;
+    return employee.mainThreadId === id ? message
+      : { ...message, params: { ...message.params, threadId: employee.mainThreadId } };
+  };
 
   const statusFor = (employeeId) => statuses.get(employeeId) || {
     phase: "idle",
@@ -460,7 +483,7 @@ export const createEmployeeRuntimeService = ({
         threadId: binding.runtimeKind === "codex" ? binding.runtimeSessionId : null,
       },
       status: statusFor(employee.id),
-      messages: messages.map(publicMessage),
+      messages: messages.filter(message => message.role !== "system").map(publicMessage),
     };
   };
 
@@ -471,10 +494,22 @@ export const createEmployeeRuntimeService = ({
     const binding = opened?.binding || conversationStore.findByAgentKind?.(employee.id, "direct");
     const threadId = readOnly ? clean(employee.mainThreadId, 120) : binding?.runtimeSessionId;
     if (!threadId || binding?.runtimeSessionId !== threadId) throw statusError("员工对话记录不存在", 404);
-    const session = await readHistory(routeForEmployee(employee).modelProviderId, threadId, "all", page);
+    const session = await readHistory(routeForEmployee(employee).modelProviderId, nativeThreadId(employee), "all", page);
     if (!session) throw statusError("员工对话记录不存在", 404);
+    const turns = new Set(session.messages.filter(message => message.role === "user").map(message => message.turnId));
+    const notices = turns.size && employee.runtimeThreadIds?.length
+      ? new Map((await conversationStore.readMessages(binding.conversationId))
+        .filter(message => message.source === "employee-model-switch" && turns.has(message.turnId))
+        .map(message => [message.turnId, message]))
+      : new Map();
     return {
       ...session,
+      threadId,
+      modelProviderId: routeForEmployee(employee).modelProviderId,
+      messages: session.messages.map(message => {
+        const notice = message.role === "user" && notices.get(message.turnId);
+        return notice && message.submissionId === notice.submissionId ? { ...message, modelSwitch: notice.text } : message;
+      }),
       title: employee.conversationTitle || session.title || `${employee.name} · 主对话`,
       archived: employee.conversationArchived === true,
       conversationKind: "direct",
@@ -539,7 +574,9 @@ export const createEmployeeRuntimeService = ({
     });
   };
 
-  const handleProtocolMessage = (message) => {
+  const handleProtocolMessage = (message, alreadyPublic = false) => {
+    if (!alreadyPublic) message = publicProtocolMessage(message);
+    if (!message) return;
     const threadId = clean(message?.params?.threadId, 120);
     const employeeId = threadEmployees.get(threadId);
     if (!employeeId) return;
@@ -710,9 +747,9 @@ export const createEmployeeRuntimeService = ({
           if (completionReplayed) continue;
           completionReplayed = true;
         }
-        handleProtocolMessage(replayed);
+        handleProtocolMessage(replayed, true);
       }
-      if (!completionReplayed && compatibleCompletion) handleProtocolMessage(compatibleCompletion);
+      if (!completionReplayed && compatibleCompletion) handleProtocolMessage(compatibleCompletion, true);
     } finally {
       submission.replaying = false;
       clearEarlyEvents(submission);
@@ -724,9 +761,7 @@ export const createEmployeeRuntimeService = ({
   const sendMessage = async ({ employeeId, text, attachments = [], requestId = "" }) => {
     await modelChanges.get(employeeId);
     await reconcileEmployeeIdle(employeeId);
-    const pending = registry.require(employeeId).pendingModelSettings;
-    if (pending) await applyModelSettings(employeeId, pending, { source: pending.modelSelectionSource || "default" });
-    const employee = registry.require(employeeId);
+    let employee = registry.require(employeeId);
     const cleanText = String(text || "").trim();
     if (!cleanText && !attachments.length) throw statusError("消息不能为空", 400);
     if (cleanText.length > 32000) throw statusError("消息过长", 413);
@@ -773,6 +808,18 @@ export const createEmployeeRuntimeService = ({
     };
     const sending = (async () => {
       assertSubmissionOpen();
+      const pending = employee.pendingModelSettings;
+      if (pending) {
+        await applyModelSettings(employeeId, pending, { source: pending.modelSelectionSource || "default" });
+        employee = registry.require(employeeId);
+      }
+      assertSubmissionOpen();
+      if (employee.mainThreadId && employee.modelSwitchPending) {
+        execution?.publishThreadEvent?.(employee.mainThreadId, {
+          type: "employee_model_switched", threadId: employee.mainThreadId, submissionId: cleanRequestId,
+          model: employee.modelSwitchPending, modelProviderId: routeForEmployee(employee).modelProviderId,
+        });
+      }
       const { binding, threadId } = await ensureOpen(employee.id);
       assertSubmissionOpen();
       submission.threadId = threadId;
@@ -828,12 +875,10 @@ export const createEmployeeRuntimeService = ({
             ...turnPolicyFor(),
           }),
           ...(method === "turn/start" ? {
+            developerInstructions: employeeTurnInstructions(employee.instructions, [context, taskService?.leaderInstructions(employee.id)].filter(Boolean).join("\n")),
             ...(employee.model ? { model: employee.model } : {}),
             ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}),
-            additionalContext: { 'negus.model': { kind: 'application', value: `本轮调用模型：${employee.model || '未取得'}。回答模型身份时以本轮请求为准，不以历史回复或全局默认配置推断。此标识不证明供应商内部实际模型。` }, 'negus.employee': { kind: 'application', value: '以下是本员工当前生效的职责和工作要求，替代对话中旧的员工身份及派工说明。\n' + [
-              communicationInstructions, employee.instructions,
-              [context, taskService?.leaderInstructions(employee.id)].filter(Boolean).join("\n"),
-            ].filter(Boolean).join('\n') } },
+            additionalContext: { 'negus.model': { kind: 'application', value: `本轮调用模型：${employee.model || '未取得'}。回答模型身份时以本轮请求为准，不以历史回复或全局默认配置推断。此标识不证明供应商内部实际模型。` } },
           } : {}),
         });
         let result;
@@ -917,6 +962,21 @@ export const createEmployeeRuntimeService = ({
         }
         assertSubmissionOpen();
         submission.boundTurnId = completedTurnId;
+        if (requestMethod === "turn/start" && employee.modelSwitchPending) {
+          const model = employee.modelSwitchPending;
+          try {
+            await conversationStore.appendMessage?.({ conversationId: binding.conversationId, message: {
+              id: `model-switch:${completedTurnId}`, role: "system", text: model,
+              submissionId: cleanRequestId, turnId: completedTurnId, source: "employee-model-switch",
+            } });
+            await registry.clearModelSwitchNotice(employee.id);
+          } catch (error) {
+            console.warn("[employee-runtime] model switch notice storage failed:", error.message);
+          }
+          execution?.publishThreadEvent?.(threadId, {
+            type: "user_message_accepted", threadId, submissionId: cleanRequestId, turnId: completedTurnId, modelSwitch: model,
+          });
+        }
         if (currentStatus.active && (!currentStatus.turnId || currentStatus.turnId === completedTurnId)) {
           const waiting = ["waitingOnApproval", "waitingOnUserInput"].includes(currentStatus.phase);
           const processing = ["submitted", "working"].includes(currentStatus.phase);
@@ -1004,7 +1064,12 @@ export const createEmployeeRuntimeService = ({
       if (statusFor(employeeId).active) throw statusError("员工正在处理消息，不能修改模型", 409);
       const employee = registry.require(employeeId);
       const selected = { ...employee, ...employee.pendingModelSettings, ...settings };
-      const route = modelProviders.resolveRoute({ model: selected.model, modelProviderId: Object.hasOwn(settings, "model") ? settings.modelProviderId || "" : selected.modelProviderId });
+      await modelProviders.refreshShared?.();
+      let route = modelProviders.resolveRoute({ model: selected.model, modelProviderId: Object.hasOwn(settings, "model") ? settings.modelProviderId || "" : selected.modelProviderId });
+      const originalId = routeForEmployee(employee).modelProviderId;
+      if (modelProviders.catalogId && modelProviders.catalogId(originalId) === modelProviders.catalogId(route.modelProviderId)) {
+        route = modelProviders.resolveRoute({ model: route.model, modelProviderId: originalId });
+      }
       const pending = { modelProviderId: route.modelProviderId, model: route.model, reasoningEffort: selected.reasoningEffort, modelSelectionSource: "explicit" };
       if (!employee.mainThreadId) return applyModelSettings(employeeId, pending);
       await registry.setPendingModelSettings(employeeId, pending);
@@ -1037,6 +1102,7 @@ export const createEmployeeRuntimeService = ({
     };
     const currentRoute = routeForEmployee(employee);
     const switchingProvider = currentRoute.modelProviderId !== requestedRoute.modelProviderId;
+    const switchingModel = currentRoute.model !== requestedRoute.model;
     const runtimeClient = modelProviders
       ? await modelProviders.getClient(requestedRoute)
       : defaultClient;
@@ -1046,41 +1112,43 @@ export const createEmployeeRuntimeService = ({
       : clean(employee.reasoningEffort, 40);
     const nextSettings = { modelProviderId: requestedRoute.modelProviderId, model: requestedRoute.model, reasoningEffort };
     const threadId = employee.mainThreadId;
-    let originalClient;
+    let replacementId;
+    let replacement;
     try {
-      if (threadId) {
-        originalClient = await clientForThread(threadId, employee);
-        if (switchingProvider) {
-          await transferEmployeeThread({ source: originalClient, target: runtimeClient, providers: modelProviders,
-            threadId, route: requestedRoute, reasoningEffort,
-            config: { ...taskService?.leaderConfig(employee.id), ...(reasoningEffort ? { model_reasoning_effort: reasoningEffort } : {}) },
-            instructions: employeeTurnInstructions(employee.instructions, taskService?.leaderInstructions(employee.id)),
-            policy: policyFor(employee),
-          });
-          threadClients.set(threadId, runtimeClient);
-          freshThreads.delete(threadId);
-          taskConfiguredClients.set(threadId, runtimeClient);
-        } else {
-          await resumeThread(threadId, employee);
-          if (requestedRoute.model && requestedRoute.model !== currentRoute.model) {
-            await runtimeClient.request("thread/settings/update", { threadId, model: requestedRoute.model });
-          }
-          if (reasoningEffort && reasoningEffort !== clean(employee.reasoningEffort, 40)) {
-            await runtimeClient.request("thread/settings/update", { threadId, effort: reasoningEffort });
-          }
-          freshThreads.delete(threadId);
-        }
+      if (threadId && switchingProvider && modelProviders) {
+        const original = await clientForThread(threadId, employee);
+        replacementId = randomUUID();
+        nativeThreads.set(replacementId, employee.id);
+        replacement = await transferEmployeeThread({ source: original.nativeClient || original, target: runtimeClient, providers: modelProviders,
+          threadId: nativeThreadId(employee), nextThreadId: replacementId, route: requestedRoute, reasoningEffort,
+          config: { ...taskService?.leaderConfig(employee.id), ...(reasoningEffort ? { model_reasoning_effort: reasoningEffort } : {}) },
+          instructions: employeeTurnInstructions(employee.instructions, taskService?.leaderInstructions(employee.id)),
+          policy: policyFor(employee),
+        });
+      } else if (threadId && (switchingModel || reasoningEffort !== clean(employee.reasoningEffort, 40))) {
+        await resumeThread(threadId, employee);
+        const currentClient = await clientForThread(threadId, employee);
+        const updatedSettings = {
+          ...(switchingModel ? { model: requestedRoute.model } : {}),
+          ...(reasoningEffort && reasoningEffort !== clean(employee.reasoningEffort, 40) ? { effort: reasoningEffort } : {}),
+        };
+        if (Object.keys(updatedSettings).length) await currentClient.request("thread/settings/update", { threadId, ...updatedSettings });
+        freshThreads.delete(threadId);
       }
-      const updated = await registry.setModelSettings(employee.id, nextSettings, { source: options.source || "explicit" });
+      const updated = await registry.setModelSettings(employee.id, nextSettings, {
+        source: options.source || "explicit",
+        runtimeThreadId: replacementId,
+        ...(switchingProvider && threadId ? { modelSwitchPending: requestedRoute.model } : {}),
+      });
+      if (replacementId) {
+        const scoped = scopedClient(runtimeClient, replacementId);
+        threadClients.set(threadId, scoped);
+        freshThreads.delete(threadId);
+        taskConfiguredClients.set(threadId, scoped);
+      }
       return { employee: updated, status: statusFor(employee.id) };
     } catch (error) {
-      if (switchingProvider && threadId && originalClient) {
-        await runtimeClient.request("thread/unsubscribe", { threadId }).catch(() => {});
-        threadClients.set(threadId, originalClient);
-        freshThreads.delete(threadId);
-        taskConfiguredClients.delete(threadId);
-        await resumeThread(threadId, employee).catch(() => {});
-      }
+      await replacement?.discard();
       throw error;
     }
 
@@ -1092,7 +1160,7 @@ export const createEmployeeRuntimeService = ({
     if (!employeeId) throw statusError("员工 Thread 不存在", 404);
     const saved = registry.require(employeeId);
     const employee = saved.pendingModelSettings || saved;
-    const runtime = await readRuntimeContext?.(saved.modelProviderId || CURRENT_MODEL_PROVIDER_ID, cleanThreadId);
+    const runtime = await readRuntimeContext?.(saved.modelProviderId || CURRENT_MODEL_PROVIDER_ID, nativeThreadId(saved));
     return {
       model: employee.modelProviderId?.startsWith("ccswitch_") ? employee.modelProviderId + "::" + employee.model : employee.model || "",
       modelProvider: employee.modelProviderId || CURRENT_MODEL_PROVIDER_ID,
@@ -1195,7 +1263,7 @@ export const createEmployeeRuntimeService = ({
     readSession,
     getSourceRevision: (threadId) => {
       const employee = registry.require(threadEmployees.get(threadId));
-      return readRevision(routeForEmployee(employee).modelProviderId, threadId);
+      return readRevision(routeForEmployee(employee).modelProviderId, nativeThreadId(employee));
     },
     renameSession,
     forkSession,
@@ -1206,6 +1274,7 @@ export const createEmployeeRuntimeService = ({
     confirmModification,
     getStatus,
     acceptsProtocolMessage,
+    publicProtocolMessage,
     updateModelSettings,
     getRuntimeContext: runtimeContextForThread,
     getThreadStatus: threadStatus,
@@ -1225,7 +1294,8 @@ export const createEmployeeRuntimeService = ({
           && clean(employee.mainThreadId, 120) === clean(binding?.runtimeSessionId, 120),
       );
     },
-    ownsThread: (threadId) => threadEmployees.has(clean(threadId, 120)),
+    ownsThread: (threadId) => threadEmployees.has(clean(threadId, 120)) || nativeThreads.has(clean(threadId, 120)),
+    isRuntimeThread: (threadId) => nativeThreads.has(clean(threadId, 120)),
     close,
   };
 };

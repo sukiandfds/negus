@@ -24,6 +24,8 @@ export interface SessionMessage {
   text: string;
   deliveryState?: "preparing" | "sending" | "pending" | "failed" | "occupied";
   deliveryError?: string;
+  modelSwitch?: string;
+  modelSwitchState?: "switching" | "failed";
   submissionId?: string;
   blocks?: ContentBlock[];
   createdAt?: string;

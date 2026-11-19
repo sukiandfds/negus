@@ -22,3 +22,7 @@
   composes: state from "../../conversations/components/ConversationView.module.css";
   min-height: 100%;
 }
+
+.selectMessage {
+  composes: selectMessage from "../../conversations/components/ConversationView.module.css";
+}

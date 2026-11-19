@@ -4,6 +4,7 @@ import { AttachmentButton, AttachmentPreviews } from "../../attachments/componen
 import { useAttachmentDraft } from "../../attachments/hooks/useAttachmentDraft";
 import { SlashCommandMenu, type SlashCommandOption } from "../../conversations/components/SlashCommandMenu";
 import { QuoteDraft } from "../../conversations/components/QuoteDraft";
+import { MessageEditingBar } from "../../conversations/components/MessageEditingBar";
 import { goalCapabilityOptions } from "../../goals/model/capability";
 import type { MediaFile } from "../../../shared/model/media";
 import { useDismissibleLayer } from "../../../shared/hooks/useDismissibleLayer";
@@ -31,15 +32,18 @@ const createCapabilityOptions = (copy: GroupComposerCopy): SlashCommandOption[] 
   { id: "app", command: "/app", group: "Apps", label: "使用 App", detail: "选择当前可用连接器" },
 ];
 
-export function GroupComposer({ disabled, busy = false, error, notice = "", quote = null, copy: copyOverrides, onClearQuote, onSend, onInterrupt }: {
+export function GroupComposer({ disabled, busy = false, error, notice = "", quote = null, editingMessage = null, copy: copyOverrides, onClearQuote, onSend, onEdit, onCancelEdit, onInterrupt }: {
   disabled: boolean;
   busy?: boolean;
   error: string;
   notice?: string;
   quote?: { id: string; authorName: string; text: string } | null;
+  editingMessage?: { id: string; text: string } | null;
   copy?: Partial<GroupComposerCopy>;
   onClearQuote?: () => void;
   onSend: (text: string, attachments?: MediaFile[], replyTo?: { id: string; authorName: string; text: string } | null) => Promise<boolean>;
+  onEdit?: (messageId: string, text: string) => Promise<boolean>;
+  onCancelEdit?: () => void;
   onInterrupt: () => Promise<boolean>;
 }) {
   const copy = { ...defaultGroupComposerCopy, ...copyOverrides };
@@ -83,8 +87,11 @@ export function GroupComposer({ disabled, busy = false, error, notice = "", quot
     if (submittingRef.current || disabled || draft.uploading || (!text.trim() && !draft.attachments.length)) return;
     submittingRef.current = true;
     try {
-      const uploaded = await draft.uploadAll();
-      if (await onSend(text, uploaded, quote)) {
+      const uploaded = editingMessage ? [] : await draft.uploadAll();
+      const accepted = editingMessage && onEdit
+        ? await onEdit(editingMessage.id, text)
+        : await onSend(text, uploaded, quote);
+      if (accepted) {
         setText("");
         draft.clear();
       }
@@ -99,6 +106,16 @@ export function GroupComposer({ disabled, busy = false, error, notice = "", quot
     textarea.style.height = `${textarea.scrollHeight}px`;
   }, [text]);
 
+  useEffect(() => {
+    if (!editingMessage) return;
+    setText(editingMessage.text);
+    setCapabilityOpen(false);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(editingMessage.text.length, editingMessage.text.length);
+    });
+  }, [editingMessage?.id]);
+
   return (
     <div className={composerStyles.positioner}>
       {error ? <div className={styles.errorText} role="alert">{error}</div> : notice ? <div className={styles.noticeText} role="status">{notice}</div> : null}
@@ -107,6 +124,7 @@ export function GroupComposer({ disabled, busy = false, error, notice = "", quot
         aria-label="群聊输入"
         onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
         onDrop={(event) => {
+          if (editingMessage) return;
           if (!event.dataTransfer.files.length) return;
           event.preventDefault();
           draft.addFiles(event.dataTransfer.files);
@@ -125,6 +143,11 @@ export function GroupComposer({ disabled, busy = false, error, notice = "", quot
             onSelect={insertCapability}
           />
         ) : null}
+        {editingMessage ? <MessageEditingBar preview={editingMessage.text || "附件指令"} onCancel={() => {
+          setText("");
+          draft.clear();
+          onCancelEdit?.();
+        }} /> : null}
         <AttachmentPreviews
           attachments={draft.attachments}
           error={draft.error}
@@ -134,15 +157,16 @@ export function GroupComposer({ disabled, busy = false, error, notice = "", quot
           onCancelUpload={draft.cancelUpload}
         />
         <label className={composerStyles.srOnly} htmlFor={inputId}>发送群聊消息</label>
-        <QuoteDraft quote={quote} onClear={onClearQuote} />
+        <QuoteDraft quote={editingMessage ? null : quote} onClear={onClearQuote} />
         <textarea
           id={inputId}
           ref={textareaRef}
           value={text}
           rows={2}
-          placeholder={copy.placeholder}
+          placeholder={editingMessage ? "修改自己的消息" : copy.placeholder}
           onChange={(event) => setText(event.target.value)}
           onPaste={(event) => {
+            if (editingMessage) return;
             if (!event.clipboardData.files.length) return;
             event.preventDefault();
             draft.addFiles(event.clipboardData.files);
@@ -158,7 +182,7 @@ export function GroupComposer({ disabled, busy = false, error, notice = "", quot
         />
         <div className={composerStyles.footer}>
           <div className={composerStyles.leadingControls} onPointerDown={() => textareaRef.current?.blur()}>
-            <AttachmentButton disabled={disabled || draft.uploading} onFiles={draft.addFiles} />
+            <AttachmentButton disabled={disabled || draft.uploading || Boolean(editingMessage)} onFiles={draft.addFiles} />
             <button
               className={composerStyles.commandButton}
               type="button"
@@ -187,7 +211,7 @@ export function GroupComposer({ disabled, busy = false, error, notice = "", quot
               <Square className={composerStyles.stopIcon} aria-hidden="true" />
             </button>
           ) : (
-            <button className={composerStyles.sendButton} type="button" title={busy ? "加入等候" : "发送"} aria-label={busy ? "加入等候" : "发送"} disabled={disabled || (!text.trim() && !draft.attachments.length)} onClick={() => void submit()}><Send aria-hidden="true" /></button>
+            <button className={composerStyles.sendButton} type="button" title={editingMessage ? "重新发送" : busy ? "加入等候" : "发送"} aria-label={editingMessage ? "重新发送" : busy ? "加入等候" : "发送"} disabled={disabled || !text.trim() && (Boolean(editingMessage) || !draft.attachments.length)} onClick={() => void submit()}><Send aria-hidden="true" /></button>
           )}
         </div>
       </div>

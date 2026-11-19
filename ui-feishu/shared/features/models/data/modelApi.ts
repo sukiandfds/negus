@@ -24,11 +24,11 @@ export const modelApi = {
     withConversation({ threadId, reasoningEffort }, conversationId),
     signal,
   ),
-  copyToProvider: (threadId: string, model: string, reasoningEffort: string, conversationId = currentConversationId()) => postJson<{
+  copyToProvider: (threadId: string, model: string, reasoningEffort: string, conversationId = currentConversationId(), requestId = "") => postJson<{
     session: SessionSummary;
     sourceThreadId: string;
   } & ModelUpdateResult>(
     "/api/session/provider-copy",
-    withConversation({ threadId, model, reasoningEffort }, conversationId),
+    withConversation({ threadId, model, reasoningEffort, requestId }, conversationId),
   ),
 };

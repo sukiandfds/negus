@@ -1,5 +1,5 @@
 import { useEffect, useId, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
-import { Send, Sparkles, Square, X } from "lucide-react";
+import { ListEnd, Send, Sparkles, Square } from "lucide-react";
 import { AttachmentButton, AttachmentPreviews } from "../../attachments/components/AttachmentDraft";
 import { useAttachmentDraft } from "../../attachments/hooks/useAttachmentDraft";
 import { ContextControl } from "../../context-management/components/ContextControl";
@@ -17,6 +17,7 @@ import type { EditableGoalStatus, ThreadGoal } from "../../goals/model/types";
 import { goalCapabilityOptions } from "../../goals/model/capability";
 import { SlashCommandMenu, type SlashCommandOption } from "./SlashCommandMenu";
 import { QuoteDraft, type MessageQuote } from "./QuoteDraft";
+import { MessageEditingBar } from "./MessageEditingBar";
 import { useDismissibleLayer } from "../../../shared/hooks/useDismissibleLayer";
 import styles from "./ConversationComposer.module.css";
 
@@ -64,7 +65,10 @@ interface ConversationComposerProps {
   modelsLoading: boolean;
   modelChanging: boolean;
   modelError: string;
-  onSend: (text: string, attachments?: MediaFile[]) => Promise<boolean>;
+  selectedModelUnavailable?: boolean;
+  sendPreparationError?: string;
+  onPrepareSend?: (queue: boolean) => Promise<string | false>;
+  onSend: (text: string, attachments?: MediaFile[], preparedThread?: string) => Promise<boolean>;
   onQueue: (text: string, attachments?: MediaFile[]) => Promise<boolean>;
   queueing: boolean;
   editingMessage: SessionMessage | null;
@@ -92,13 +96,14 @@ export function ConversationComposer({
   connected, selected, archived, status, contextStatus,
   shownModel, shownEffort,
   models, modelsLoading, modelChanging, modelError,
-  onSend, onQueue, queueing,
+  onSend, onPrepareSend, selectedModelUnavailable, sendPreparationError, onQueue, queueing,
   editingMessage, onCancelEdit,
   onInterrupt, onReview, goal, goalBusy, goalError, goalResumePrompt, onDismissGoalResumePrompt, onChangeGoalStatus, onClearGoal, onSetGoal, onEditGoal,
   onCompactContext, onAutoCompactThresholdChange, onModelChange,
   onReasoningEffortChange,
 }: ConversationComposerProps) {
   const [text, setText] = useState("");
+  const [queueNext, setQueueNext] = useState(false);
   const [quote, setQuote] = useState<MessageQuote | null>(null);
   const [goalConfirmation, setGoalConfirmation] = useState<"replace" | "resume" | null>(null);
   const [slash, setSlash] = useState<SlashState | null>(null);
@@ -111,6 +116,8 @@ export function ConversationComposer({
   const [withdrawing, setWithdrawing] = useState(false);
   const inputDisabled = withdrawing || !selected || archived || queueing || draft.uploading || goalBusy;
   const editing = Boolean(editingMessage);
+  const sendToQueue = queueNext && !editing;
+  const sendLabel = editing ? "重新发送" : sendToQueue ? "加入等候队列" : status.active ? "插入发送" : "发送";
   const inheritedAttachments = editingMessage?.blocks?.flatMap((block) => (
     "file" in block && block.file ? [block.file] : []
   )) || [];
@@ -239,11 +246,11 @@ export function ConversationComposer({
     const submittedText = text;
     const submittedQuote = quote;
     const messageText = quote ? `${[`引用 ${quote.authorName}：`, quote.text].join("\n").split(/\r?\n/u).map(line => `> ${line}`).join("\n")}\n\n${submittedText}` : submittedText;
-    setText("");
-    setSlash(null);
     if (!editing && !quote && !draft.attachments.length && !inheritedAttachments.length) {
       const command = submittedText.trim().toLocaleLowerCase();
       if (command === "/compact" || command === "/stop" || command === "/review") {
+        setText("");
+        setSlash(null);
         try {
           const accepted = command === "/compact"
             ? await onCompactContext()
@@ -259,6 +266,10 @@ export function ConversationComposer({
     }
     let uploaded: MediaFile[] = [];
     try {
+      const preparedThread = !goalMatch && onPrepareSend ? await onPrepareSend(sendToQueue) : undefined;
+      if (preparedThread === false) return;
+      setText("");
+      setSlash(null);
       uploaded = draft.attachments.length ? await draft.uploadAll() : [];
       const submittedAttachments = editing
         ? [...inheritedAttachments, ...uploaded.filter((attachment) => !inheritedAttachments.some((item) => item.id === attachment.id))]
@@ -269,9 +280,10 @@ export function ConversationComposer({
         ? (goalMatch[1]?.trim() || submittedAttachments.length
           ? await onSetGoal(goalMatch[1]?.trim() || "", submittedAttachments)
           : await onChangeGoalStatus("active"))
-        : editing || !status.active
-        ? await onSend(messageText, submittedAttachments)
-        : await onQueue(messageText, submittedAttachments);
+        : sendToQueue
+          ? await onQueue(messageText, submittedAttachments)
+          : await onSend(messageText, submittedAttachments, preparedThread || undefined);
+      if (accepted && sendToQueue && !goalMatch) setQueueNext(false);
       if (!accepted) {
         setQuote(current => current || submittedQuote);
         if (uploaded.length) draft.restoreFiles(uploaded);
@@ -325,14 +337,11 @@ export function ConversationComposer({
           onToggleGroup={toggleSlashGroup}
           onSelect={insertSlashCommand}
         />
-        {editingMessage ? (
-          <div className={styles.editingBar}>
-            <span><strong>重新编辑</strong><span className={styles.editingPreview}>{visibleMessageText(editingMessage) || "附件指令"}</span></span>
-            <button type="button" aria-label="取消重新编辑" title="取消重新编辑" onClick={() => { setText(""); draft.clear(); onCancelEdit(); }}>
-              <X aria-hidden="true" />
-            </button>
-          </div>
-        ) : null}
+        {editingMessage ? <MessageEditingBar preview={visibleMessageText(editingMessage) || "附件指令"} onCancel={() => {
+          setText("");
+          draft.clear();
+          onCancelEdit();
+        }} /> : null}
         <AttachmentPreviews
           attachments={draft.attachments}
           error={draft.error}
@@ -341,13 +350,16 @@ export function ConversationComposer({
           onRemove={draft.removeFile}
         />
         <label className={styles.srOnly} htmlFor={promptId}>给 Codex 发送指令</label>
+        {selectedModelUnavailable ? <small role="alert">所选模型已下架，请换一个模型</small> : null}
+        {sendPreparationError ? <small role="alert">{sendPreparationError}</small> : null}
         <QuoteDraft quote={quote} onClear={() => setQuote(null)} />
+        {sendToQueue ? <div className={styles.editingBar} role="status">消息将进入等候队列</div> : null}
         <textarea
           id={promptId}
           ref={textareaRef}
           rows={2}
           value={text}
-          placeholder={!selected ? "请选择一个对话" : archived ? "已归档，请先恢复对话" : status.active && status.phase !== "submitted" ? "追加指令，引导当前任务" : "给 Codex 发送指令"}
+          placeholder={!selected ? "请选择一个对话" : archived ? "已归档，请先恢复对话" : !sendToQueue && status.active && status.phase !== "submitted" ? "追加指令，引导当前任务" : "给 Codex 发送指令"}
           disabled={inputDisabled}
           onChange={(event) => {
             setText(event.target.value);
@@ -411,6 +423,17 @@ export function ConversationComposer({
             >
               <Sparkles aria-hidden="true" />
             </button>
+            <button
+              className={styles.commandButton}
+              type="button"
+              aria-label="等候队列"
+              title="等候队列"
+              aria-pressed={sendToQueue}
+              disabled={inputDisabled || editing}
+              onClick={() => setQueueNext(current => !current)}
+            >
+              <ListEnd aria-hidden="true" />
+            </button>
           </div>
           <span className={styles.spacer} />
           <div className={styles.settingsControls}>
@@ -421,7 +444,7 @@ export function ConversationComposer({
               loading={modelsLoading}
               changing={modelChanging}
               error={modelError}
-              disabled={!connected || !selected || archived}
+              disabled={!selected || archived}
               onModelChange={onModelChange}
               onReasoningEffortChange={onReasoningEffortChange}
             />
@@ -457,8 +480,8 @@ export function ConversationComposer({
             <button
               className={styles.sendButton}
               type="button"
-              title={editing ? "重新发送" : status.active ? "加入等候队列" : "发送"}
-              aria-label={editing ? "重新发送" : status.active ? "加入等候队列" : "发送"}
+              title={sendLabel}
+              aria-label={sendLabel}
               disabled={inputDisabled || !hasContent}
               onClick={() => void submit()}
             >

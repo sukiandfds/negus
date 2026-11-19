@@ -14,9 +14,15 @@ export async function extendGroupRooms({ stateRoot, roomDirectory, services, pro
   try { records = JSON.parse(await fs.readFile(file, 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   const original = new Set(rooms.map(room => room.snapshot().room.id));
+  const summarizeRoom = ({ room, messages }) => {
+    const last = messages.at(-1);
+    return last ? { ...room, lastActivityAt: last.createdAt,
+      latestMessage: { id: last.id, sequence: last.sequence,
+        text: (last.text?.trim().replace(/\s+/g, ' ') || '[附件]').slice(0, 260) } } : room;
+  };
   const decorate = () => {
     Object.assign(roomDirectory, createGroupRoomDirectory({ rooms }));
-    roomDirectory.list = () => rooms.map(store => { const snapshot = store.snapshot(); return { ...snapshot.room, lastActivityAt: snapshot.messages.at(-1)?.createdAt || snapshot.room.lastActivityAt }; });
+    roomDirectory.list = () => rooms.map(store => summarizeRoom(store.snapshot()));
   };
   const pending = new Map();
   let recordsChanged = false;

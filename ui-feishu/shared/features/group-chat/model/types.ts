@@ -39,6 +39,8 @@ export interface GroupMessage {
   replyTo?: { id: string; authorName: string; text: string; sequence?: number } | null;
   failure?: boolean;
   text: string;
+  editedAt?: string | null;
+  editHistory?: Array<{ text: string; editedAt: string }>;
   attachments?: MediaFile[];
   artifactIds?: string[];
   createdAt: string;
@@ -65,6 +67,8 @@ export interface GroupRoom {
   name: string;
   projectId: string;
   archived?: boolean;
+  lastActivityAt?: string;
+  latestMessage?: Pick<GroupMessage, "id" | "sequence" | "text">;
 }
 
 export interface GroupSnapshot {

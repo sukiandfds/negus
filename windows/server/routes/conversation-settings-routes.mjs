@@ -33,7 +33,8 @@ export const createConversationSettingsRoutes = ({ conversations, execution, con
       return true;
     }
     if (isEmployeeDirectBinding(binding)) {
-      const result = await employeeRuntime.updateModelSettings(binding.agentId, { model });
+      const reasoningEffort = typeof body.reasoningEffort === "string" && body.reasoningEffort ? body.reasoningEffort : undefined;
+      const result = await employeeRuntime.updateModelSettings(binding.agentId, { model, ...(reasoningEffort ? { reasoningEffort } : {}) });
       sendJson(response, {
         model: result.employee.model || model,
         modelProvider: result.employee.modelProviderId || "current",

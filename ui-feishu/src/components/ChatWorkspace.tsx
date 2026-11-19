@@ -4,6 +4,8 @@ import { Check, Files, PanelRight, Pencil, Share2, X } from 'lucide-react';
 import { FollowUpQueue } from '../../shared/features/conversations/components/FollowUpQueue';
 import { ConversationView, type ConversationViewHandle } from '../../shared/features/conversations/components/ConversationView';
 import { ConversationComposer, type ConversationComposerHandle } from '../../shared/features/conversations/components/ConversationComposer';
+import { ForwardMessageDialog } from '../../shared/features/conversations/components/ForwardMessageDialog';
+import { MessageSelectionBar } from '../../shared/features/conversations/components/MessageSelectionBar';
 import { ContentRenderer } from '../../shared/features/conversations/rendering/ContentRenderer';
 import { ChatHeader } from './ChatHeader';
 import { ConversationOrigin } from './ConversationOrigin';
@@ -34,11 +36,9 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
   const viewRef = useRef<ConversationViewHandle>(null);
   const [selection, setSelection] = useState<{ threadId: string; ids: Set<string> } | null>(null);
   const [forwardDialog, setForwardDialog] = useState(false);
-  const [targetId, setTargetId] = useState('');
   const [forwardError, setForwardError] = useState('');
   const [forwardBusy, setForwardBusy] = useState(false);
   const [pendingForward, setPendingForward] = useState<{ threadId: string; text: string } | null>(null);
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const providerDialogRef = useRef<HTMLDialogElement>(null);
   const currentThread = useRef(c.selectedId);
   currentThread.current = c.selectedId;
@@ -46,9 +46,6 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
   const composerKey = [...composers.current.entries()].find(([, entry]) => entry.threadId === c.selectedId)?.[0] || c.composerKey || c.selectedId;
   if (c.selectedId && c.session?.threadId === c.selectedId && !c.session.readOnly) composers.current.set(composerKey, { threadId: c.selectedId, state: c });
   const activeComposer = () => composerRefs.current.get(composerKey);
-  useEffect(() => {
-    if (forwardDialog) dialogRef.current?.showModal();
-  }, [forwardDialog]);
   useEffect(() => {
     if (c.providerSwitch) providerDialogRef.current?.showModal();
   }, [c.providerSwitch]);
@@ -96,9 +93,8 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
     if (next.has(id)) next.delete(id); else next.add(id);
     setSelection({ threadId: c.selectedId, ids: next });
   };
-  const forward = async () => {
+  const forward = async (target: Conversation) => {
     const sourceId = c.selectedId;
-    const target = targets.find(item => item.threadId === targetId);
     const composed = viewRef.current?.composeForward(`${selected?.subtitle || '对话'} / ${selected?.name || c.session?.title || selectedName} (${sourceId})`, selectedIds || new Set());
     if (!target?.threadId || !composed?.text || !c.connected) return;
     setForwardBusy(true); setForwardError('');
@@ -150,13 +146,13 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
           </div>
           {tab === 'files' && <div className="content-panel"><div className="panel-title"><Files size={22} /><h2>对话文件</h2></div>{files.length ? files.map(m => <div className="file-row" key={m.id}><small>{compactTime(m.createdAt)}</small><ContentRenderer threadId={c.selectedId} message={{ ...m, blocks: m.blocks?.filter(b => b.type !== 'markdown' && b.type !== 'options') }} /></div>) : <div className="files-empty"><Files size={40} /><strong>此对话暂无附件</strong><span>聊天中发送或生成的文件会显示在这里</span></div>}</div>}
           <div className="chat-composer" style={{ display: tab === 'messages' ? undefined : 'none' }}>
-            {selectedIds && <div className="message-selection-bar"><button type="button" disabled={!selectedIds.size} onClick={() => { setTargetId(''); setForwardError(''); setForwardDialog(true); }}>转发消息 ({selectedIds.size})</button><button type="button" onClick={() => setSelection(null)}>取消</button></div>}
+            {selectedIds && <MessageSelectionBar selectedCount={selectedIds.size} onForward={() => { setForwardError(''); setForwardDialog(true); }} onCancel={() => setSelection(null)} />}
             {forwardError && !forwardDialog ? <p role="alert">{forwardError}</p> : null}
             {[...composers.current.entries()].map(([key, entry]) => <div key={key} style={{ display: key === composerKey && !c.session?.readOnly ? undefined : 'none' }}>
               <ConversationComposer ref={instance => { if (instance) composerRefs.current.set(key, instance); else composerRefs.current.delete(key); }} connected={entry.state.connected} selected={Boolean(entry.state.selectedId)} archived={Boolean(entry.state.session?.archived)}
               status={entry.state.executionStatus} contextStatus={entry.state.contextStatus}
               shownModel={entry.state.visibleModel} shownEffort={entry.state.visibleEffort} models={entry.state.models} modelsLoading={entry.state.modelsLoading} modelChanging={entry.state.modelChanging} modelError={entry.state.modelError}
-              onSend={entry.state.sendMessage} onQueue={entry.state.queueMessage} queueing={entry.state.queueBusy}
+              selectedModelUnavailable={entry.state.selectedModelUnavailable} sendPreparationError={entry.state.sendPreparationError} onPrepareSend={entry.state.prepareSend} onSend={entry.state.sendMessage} onQueue={entry.state.queueMessage} queueing={entry.state.queueBusy}
               editingMessage={entry.state.editingMessage} onCancelEdit={entry.state.cancelEditMessage} onInterrupt={entry.state.interrupt} onReview={entry.state.review}
               goal={entry.state.goal} goalBusy={entry.state.goalBusy} goalError={entry.state.goalError} goalResumePrompt={entry.state.goalResumePrompt} onDismissGoalResumePrompt={entry.state.dismissGoalResumePrompt}
               onChangeGoalStatus={entry.state.changeGoalStatus} onClearGoal={entry.state.clearGoal} onSetGoal={entry.state.setGoal} onEditGoal={entry.state.editGoal}
@@ -166,16 +162,8 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
         </div>
         {details && <ConversationDetails c={c} usage={usage} agentId={agentId} selectedName={selectedName} onClose={() => setDetails(false)} />}
       </div>
-      {forwardDialog && createPortal(<dialog ref={dialogRef} className={dialogStyles.dialog} aria-label="转发消息" onCancel={event => { event.preventDefault(); if (!forwardBusy) setForwardDialog(false); }}>
-        <header><strong>转发消息</strong><button type="button" aria-label="关闭" disabled={forwardBusy} onClick={() => setForwardDialog(false)}><X /></button></header>
-        <p>仅转发文字，附件不会转发。</p>
-        <label>目标对话<select aria-label="目标对话" value={targetId} disabled={forwardBusy} onChange={event => setTargetId(event.target.value)}>
-          <option value="">选择目标对话</option>
-          {targets.filter(item => item.threadId && item.threadId !== c.selectedId && !item.roomId && !item.pending && !item.session?.archived && !item.session?.readOnly).map(item => <option key={item.threadId} value={item.threadId || ''}>{item.subtitle} · {item.name}</option>)}
-        </select></label>
-        {forwardError ? <p role="alert" className={dialogStyles.error}>{forwardError}</p> : null}
-        <footer><button type="button" disabled={!targetId || forwardBusy} onClick={() => void forward()}>转发</button><button type="button" disabled={forwardBusy} onClick={() => setForwardDialog(false)}>取消</button></footer>
-      </dialog>, document.body)}
+      <ForwardMessageDialog open={forwardDialog} targets={targets} sourceId={c.selectedId} busy={forwardBusy} error={forwardError}
+        onClose={() => setForwardDialog(false)} onForward={target => void forward(target)} />
       {c.providerSwitch && createPortal(<dialog ref={providerDialogRef} className={dialogStyles.dialog} aria-label="切换模型配置" onCancel={event => { event.preventDefault(); if (!c.providerSwitchBusy) c.cancelProviderSwitch(); }}>
         <header><strong>切换模型配置</strong><button type="button" aria-label="关闭" disabled={c.providerSwitchBusy} onClick={() => c.cancelProviderSwitch()}><X /></button></header>
         <p>切换配置将使用完整上下文创建新对话，是否创建？</p>

@@ -34,7 +34,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
         ? route.model.split('::') : ['current', route.model];
       let resolved;
       try {
-        resolved = providers.resolveRoute({ model: route.model, modelProviderId: providerId });
+        resolved = providers.resolveRoute({ model: route.model, modelProviderId: providerId, allowRetired: true });
       } catch {
         continue;
       }
@@ -168,7 +168,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
       const task = (async () => {
         const target = await storeFor(owner(id));
         const activeModel = route.runtimeModel || route.activeModel || route.model || route.resumeInfo.model;
-        const resolved = providers.resolveRoute({ model: activeModel, modelProviderId: owner(id) });
+        const resolved = providers.resolveRoute({ model: activeModel, modelProviderId: owner(id), allowRetired: true });
         const info = providers.prepareResumeFile ? await providers.prepareResumeFile(owner(id), route.resumeInfo) : route.resumeInfo;
         await target.resumeProviderSession(id, { ...info, model: resolved.model || activeModel,
           modelProvider: owner(id) === 'current' ? undefined : owner(id), reasoningEffort: route.reasoningEffort });
@@ -226,7 +226,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
           model: route.model || runtime.model,
           reasoningEffort: route.reasoningEffort ?? runtime.reasoningEffort ?? "",
         };
-        const resolved = providers.resolveRoute({ model: route.attemptSettings.model,
+        const resolved = providers.resolveRoute({ model: route.attemptSettings.model, allowRetired: true,
           modelProviderId: route.pendingProviderId || owner(id) });
         const effectiveModel = resolved.model || route.attemptSettings.model;
         args[3] = { ...route.attemptSettings, model: effectiveModel };
@@ -459,8 +459,8 @@ export const createProviderConversationStore = ({ current, providers, createStor
         modelProvider: target.modelProviderId === 'current' ? undefined : target.modelProviderId,
         reasoningEffort,
       });
-      await targetStore.updateModel(threadId, effectiveModel);
-      if (reasoningEffort) await targetStore.updateReasoningEffort(threadId, reasoningEffort);
+      const applied = await targetStore.updateModel(threadId, effectiveModel, { reasoningEffort });
+      if (reasoningEffort && applied?.reasoningEffort !== reasoningEffort) await targetStore.updateReasoningEffort(threadId, reasoningEffort);
       const registeredModel = target.modelProviderId === 'current' ? effectiveModel : `${target.modelProviderId}::${effectiveModel}`;
       const session = await registerSession({
         ...info.summary, threadId, title, cwd: info.cwd, source: "codex", archived: false,
@@ -486,14 +486,18 @@ export const createProviderConversationStore = ({ current, providers, createStor
     }
   };
   const switching = new Map();
-  service.updateModel = async (id, model, { allowProviderSwitch = false, reasoningEffort = "" } = {}) => {
+  service.updateModel = async (id, model, { allowProviderSwitch = false, reasoningEffort = "", allowRetired = false } = {}) => {
     await ready;
     if (switching.has(id) || activating.has(id)) throw Object.assign(new Error("正在切换模型，请稍候"), { statusCode: 409 });
     const task = (async () => {
       await providers.refreshShared?.().catch((error) => { if (model.includes('::')) throw error; });
-      const target = providers.resolveRoute({ model });
-      if (!isReasoningEffort(reasoningEffort)) throw new Error("无效的思考等级");
+      let target = providers.resolveRoute({ model, allowRetired });
       const sourceProviderId = owner(id);
+      if (providers.catalogId && providers.catalogId(sourceProviderId) === providers.catalogId(target.modelProviderId)) {
+        target = providers.resolveRoute({ model: target.model, modelProviderId: sourceProviderId, allowRetired });
+        model = sourceProviderId === "current" ? target.model : `${sourceProviderId}::${target.model}`;
+      }
+      if (!isReasoningEffort(reasoningEffort)) throw new Error("无效的思考等级");
       const sourceConfigured = await providerConfigured(sourceProviderId);
       if (!sourceConfigured && target.modelProviderId === sourceProviderId) {
         throw Object.assign(new Error("当前对话配置已移除，请选择其他配置的模型"), { statusCode: 409 });
@@ -502,8 +506,8 @@ export const createProviderConversationStore = ({ current, providers, createStor
       if (sourceConfigured) await rememberPreviousSettings(id, source);
       if (target.modelProviderId === sourceProviderId) {
         await ensureRestored(id);
-        const result = await source.updateModel(id, target.model || model);
-        routes[id] = { ...routes[id], providerId: owner(id), pendingProviderId: undefined, model, runtimeModel: target.model || model, activeModel: target.model || model };
+        const result = await source.updateModel(id, target.model || model, { reasoningEffort });
+        routes[id] = { ...routes[id], providerId: owner(id), pendingProviderId: undefined, model, runtimeModel: target.model || model, activeModel: target.model || model, ...(reasoningEffort ? { reasoningEffort } : {}) };
         await save();
         return { ...result, model };
       }
