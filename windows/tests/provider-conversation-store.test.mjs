@@ -927,3 +927,23 @@ test('runtime model wins over stale resume metadata when restoring a copied thre
   assert.equal(normalFork.resumeInfo.model, 'deepseek-flash');
   assert.deepEqual(normalFork.lastSuccessfulSettings, { model: 'deepseek::deepseek-flash', reasoningEffort: 'none' });
 });
+
+test('a retired provider cannot hide saved history or live rows from another provider', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-retired-list-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const service = createProviderConversationStore({ stateFile: path.join(root, 'routes.json'),
+    current: { listSessions: async () => [{ threadId: 'desktop' }] },
+    providers: { getClient: async ({ modelProviderId }) => {
+      if (modelProviderId === 'retired') throw Error('Model provider is not registered');
+      return modelProviderId;
+    } },
+    createStore: () => ({ listSessions: async () => [{ threadId: 'healthy', title: 'updated' }] }),
+  });
+  for (const [id, provider, archived] of [['old', 'retired', false], ['filed', 'retired', true], ['healthy', 'vip', false]]) {
+    await service.registerSession({ threadId: id, archived, source: 'codex' }, provider, 'model');
+  }
+  const rows = await service.listSessions('all', false);
+  assert.deepEqual(rows.map(row => row.threadId).sort(), ['desktop', 'healthy', 'old']);
+  assert.equal(rows.find(row => row.threadId === 'healthy').title, 'updated');
+  assert.ok((await service.listSessions('all', true)).some(row => row.threadId === 'filed'));
+});

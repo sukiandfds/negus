@@ -330,10 +330,18 @@ export const createProviderConversationStore = ({ current, providers, createStor
     };
     const lists = [];
     for (const providerId of ids) {
-      const store = await storeFor(providerId);
-      const native = await store.listNativeSubagents?.(args[1]).catch(() => []) || [];
+      if (!await providerConfigured(providerId)) continue;
+      let live, native;
+      try {
+        const store = await storeFor(providerId);
+        native = await store.listNativeSubagents?.(args[1]).catch(() => []) || [];
+        live = await store.listSessions(...args);
+      } catch (error) {
+        console.warn(`[conversation-list] Using saved summaries for ${providerId}: ${error.message}`);
+        continue;
+      }
       const nativeById = new Map(native.map(session => [session.threadId, session]));
-      const listed = (await store.listSessions(...args)).map(session => {
+      const listed = live.map(session => {
         const indexed = nativeById.get(session.threadId);
         return indexed ? {
           ...session,

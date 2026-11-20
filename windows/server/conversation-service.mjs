@@ -158,15 +158,13 @@ export const createConversationService = ({ primary, fallback, contentVersionSto
   };
 
   const listSessions = async (...args) => {
-    let sessions;
-    try {
-      const primarySessions = await primary.listSessions(...args);
-      const fallbackSessions = await fallback.listSessions(...args);
-      sessions = mergeFallbackSessions(primarySessions, fallbackSessions);
-    } catch (error) {
-      console.warn(`[conversation-service] app-server request failed, using JSONL fallback: ${error.message}`);
-      sessions = await fallback.listSessions(...args);
-    }
+    const results = await Promise.allSettled([primary, fallback].map(async store => store.listSessions(...args)));
+    if (results.every(result => result.status === 'rejected')) throw results[0].reason;
+    const sessions = mergeFallbackSessions(...results.map(result => {
+      if (result.status === 'fulfilled') return result.value;
+      console.warn(`[conversation-list] Source unavailable: ${result.reason?.message}`);
+      return [];
+    }));
     const source = String(args[0] || "all");
     const archived = Boolean(args[1]);
     if (!supplementalMessages?.listSessions || archived || source === "happy") return sessions;
