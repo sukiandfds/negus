@@ -178,6 +178,13 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
     if (!line.trim()) return;
     try {
       const item = JSON.parse(line);
+      if (item.type === "event_msg" && item.payload?.item?.type === "ContextCompaction" && item.payload.type === "item_completed") {
+        const { turn_id, started_at_ms, completed_at_ms } = item.payload;
+        // Codex exposes this operation as ContextCompaction, not as an assistant answer.
+        state.messages = state.messages.filter(message => !(message.protocolTurnId === turn_id && message.role === "assistant"
+          && message.phase === "final_answer" && Date.parse(message.createdAt) >= started_at_ms && Date.parse(message.createdAt) <= completed_at_ms));
+        return;
+      }
       if (item.type === "event_msg" && item.payload?.type === "item_completed" && item.payload.item?.type === "UserMessage") {
         const event = item.payload;
         const completed = new Date(event.completed_at_ms);
@@ -374,7 +381,7 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
     const ordered = await Promise.all(files.map(async file => ({ header: headers.find(header => header.file === file), stat: await fsp.stat(file) })));
     const header = ordered.at(-1).header;
     const fileRevision = ordered.map(({ stat }) => conversationSourceRevision(stat)).join('|');
-    const sourceRevision = 'user-id-v2:' + fileRevision;
+    const sourceRevision = 'history-v3:' + fileRevision;
     if (metadataOnly) return { id: threadId, path: header.file, paths: files, cwd: header.cwd, name: header.title, sourceRevision };
     const parts = await Promise.all(ordered.map(({ header }) => readSession(header)));
     const after = await Promise.all(files.map(file => fsp.stat(file).then(conversationSourceRevision)));
