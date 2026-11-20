@@ -3,11 +3,11 @@ import type { ConversationPresentation, SessionDetail, SessionMessage } from '..
 import type { InitialConversationState } from './initialConversation';
 import { idleStatus } from '../../execution/hooks/useCodexExecution';
 import { emptyStatus } from '../../context-management/hooks/useContextManagement';
-import { conversationApi } from '../data/conversationApi';
+import { conversationApi, type ConversationRead } from '../data/conversationApi';
 import { mergeMessageList, mergePendingOptimisticMessages, mergeSessionRefresh, sameSubmission } from './conversationMerge';
 import { createOptimisticMessage } from './optimisticMessage';
 import { readModelCatalog } from '../../models/data/modelCatalogCache';
-import { readModelDefaults, resolveVisibleModel, resolveVisibleEffort } from '../../models/model/modelDefaults';
+import { readModelDefaults, resolveVisibleEffort } from '../../models/model/modelDefaults';
 
 export type ThreadSnapshot = Pick<ConversationPresentation, 'executionStatus' | 'contextStatus' | 'goal' | 'queueItems' | 'userInputRequest'> & {
   session: SessionDetail | null;
@@ -200,11 +200,9 @@ export class ConversationStore {
         this.notify();
       }
     };
-    if (!remote || next.contextStatus || next.executionStatus) {
-      this.revisions.set(id, (this.revisions.get(id) || 0) + 1);
-      this.fieldRevisions.set(id, { ...this.fieldRevisions.get(id),
-        ...Object.fromEntries(keys.map(key => [key, this.revisions.get(id)])) });
-    }
+    this.revisions.set(id, (this.revisions.get(id) || 0) + 1);
+    this.fieldRevisions.set(id, { ...this.fieldRevisions.get(id),
+      ...Object.fromEntries(keys.map(key => [key, this.revisions.get(id)])) });
     if (remote) {
       this.live.set(id, { ...this.live.get(id), ...next });
       notify();
@@ -236,21 +234,35 @@ export class ConversationStore {
   read = (id: string, sourceRevision: string, signal: AbortSignal, conversationId?: string) => {
     const pending = this.reads.get(id);
     if (pending && !pending.signal.aborted) return pending.promise;
-    const promise = conversationApi.snapshot(id, sourceRevision, signal, conversationId).then(result => {
+    const revision = this.revisions.get(id) || 0;
+    const snapshot = (result: ConversationRead): ThreadSnapshot => {
+      const previous = this.get(id);
       const current = this.committed.get(id)?.session;
+      if ((this.bodyRevisions.get(id) || 0) > revision) return previous;
       const incoming = result.session;
+      const bodyReady = Object.hasOwn(result, 'session');
       const session = incoming && current ? current.contentVersion && incoming.contentVersion && current.contentVersion > incoming.contentVersion
         ? current : refreshSession(current, incoming) : incoming || current || null;
-      if (!session) throw new Error('对话同步失败，保留已有内容');
+      const context = result.context || previous.contextStatus;
       const selectedSettings = this.committed.get(id)?.contextStatus.selectedSettings;
-      const saved = selectedSettings || result.context.lastSuccessfulSettings;
+      const saved = selectedSettings || context.lastSuccessfulSettings;
       const models = readModelCatalog(), defaults = readModelDefaults();
-      const model = saved ? resolveVisibleModel(models, defaults, saved.model, '') : result.context.model;
-      const contextStatus = saved ? { ...result.context, model, selectedSettings,
-        reasoningEffort: resolveVisibleEffort(models, defaults, model, saved.reasoningEffort) } : result.context;
-      return { session: { ...session, ...(incoming && result.historyFormatVersion ? { historyFormatVersion: result.historyFormatVersion } : {}), sourceRevision: result.sourceRevision || session.sourceRevision },
-        contextStatus: { ...contextStatus, usageSourceRevision: result.sourceRevision || session.sourceRevision || '' },
-        executionStatus: result.status, goal: result.goal, queueItems: result.queue, userInputRequest: result.input };
+      const model = saved ? saved.model : context.model;
+      const contextStatus = saved ? { ...context, model, selectedSettings,
+        reasoningEffort: selectedSettings ? resolveVisibleEffort(models, defaults, model, saved.reasoningEffort) : saved.reasoningEffort } : context;
+      return { session: session && { ...session, ...(incoming && result.historyFormatVersion ? { historyFormatVersion: result.historyFormatVersion } : {}), sourceRevision: bodyReady ? result.sourceRevision || session.sourceRevision : session.sourceRevision },
+        contextStatus: { ...contextStatus, ...(result.context && bodyReady ? { usageSourceRevision: result.sourceRevision || session?.sourceRevision || '' } : {}) },
+        executionStatus: result.status, goal: 'goal' in result ? result.goal! : previous.goal,
+        queueItems: result.queue, userInputRequest: 'input' in result ? result.input! : previous.userInputRequest };
+    };
+    const promise = conversationApi.snapshot(id, sourceRevision, signal, conversationId, result => {
+      if (signal.aborted) return;
+      if (this.commit(id, snapshot(result), revision)) this.notify();
+    }).then(result => {
+      if (result.detailErrors) console.error('[negus:conversation-details]', { threadId: id, errors: result.detailErrors });
+      const value = snapshot(result);
+      if (result.refreshBody) this.invalidate(id);
+      return value;
     });
     const entry = { signal, promise };
     this.reads.set(id, entry);
@@ -289,7 +301,8 @@ export class ConversationStore {
           && (this.bodyRevisions.get(id) || 0) <= revision
           ? snapshot.contextStatus.usageSourceRevision : undefined,
         model: snapshot.contextStatus.model, reasoningEffort: snapshot.contextStatus.reasoningEffort,
-        selectedSettings: snapshot.contextStatus.selectedSettings } };
+        selectedSettings: snapshot.contextStatus.selectedSettings,
+        lastSuccessfulSettings: snapshot.contextStatus.lastSuccessfulSettings ?? context.lastSuccessfulSettings } };
       else {
         const patch = this.live.get(id);
         if (patch && key in patch) snapshot = { ...snapshot, [key]: patch[key] };
@@ -317,7 +330,8 @@ export class ConversationStore {
     const live = this.live.get(id);
     if (live?.contextStatus) live.contextStatus = { ...live.contextStatus,
       usageSourceRevision: snapshot.contextStatus.usageSourceRevision,
-      model: snapshot.contextStatus.model, reasoningEffort: snapshot.contextStatus.reasoningEffort };
+      model: snapshot.contextStatus.model, reasoningEffort: snapshot.contextStatus.reasoningEffort,
+      lastSuccessfulSettings: snapshot.contextStatus.lastSuccessfulSettings };
     this.synced.add(id);
     if (live?.executionStatus && !keepExecution) {
       const status = withStreamingStatus(snapshot.executionStatus, live.executionStatus);

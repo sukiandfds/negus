@@ -1,8 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { resolveConversationFile } from "../conversation-file.mjs";
 import { paginationFrom, readJson, sendJson } from "../http/request-utils.mjs";
 
 export const createConversationHistoryRoutes = ({ conversations, execution, followUpQueue, contextManagement, media, publishThreadEvent, agentConversationStore, employeeRuntime, roomDirectory, agentTasks, authorizeAgentThread, isEmployeeDirectBinding, sessionSource, readAgentSession, readOrdinarySession, publicUserInputRequest }) => {
   const providerCopies = new Map();
+  const detailReads = new Map();
   return async (request, response, url) => {
   if (url.pathname === "/api/session/file" && request.method === "GET") {
     const threadId = url.searchParams.get("threadId") || "";
@@ -218,41 +220,88 @@ export const createConversationHistoryRoutes = ({ conversations, execution, foll
     const conversationId = url.searchParams.get("conversationId") || "";
     const source = url.searchParams.get("source") || "all";
     const pagination = paginationFrom(url);
+    if (url.searchParams.get("beforeMessageId")) pagination.beforeMessageId = url.searchParams.get("beforeMessageId");
     const binding = await authorizeAgentThread({ threadId, conversationId, allowGroup: true });
     const view = url.searchParams.get("view") === "1";
+    const continuation = url.searchParams.get('details');
+    if (view && continuation) {
+      const read = detailReads.get(continuation);
+      if (!read || read.threadId !== threadId || read.conversationId !== conversationId) {
+        throw Object.assign(new Error("详情读取已过期，请刷新对话"), { statusCode: 409 });
+      }
+      const result = await (read.settled ? read.result() : read.promise);
+      detailReads.delete(continuation);
+      sendJson(response, result);
+      return true;
+    }
+    let timer;
+    const budget = view ? new Promise(resolve => { timer = setTimeout(() => resolve(false), 120); }) : null;
     const requestedRevision = view ? url.searchParams.get("sourceRevision") : null;
     const revisionSource = sessionSource(binding);
-    const readRevision = async () => {
-      const revision = await Promise.resolve().then(() => revisionSource.getSourceRevision(threadId)).catch(() => null);
-      const actorRevision = await agentTasks?.actorRevisionFor?.(threadId);
-      return revision && actorRevision ? `${revision}|actor:${actorRevision}` : revision;
+    const actor = Promise.resolve(agentTasks?.actorRevisionFor?.(threadId));
+    const combineRevision = (revision, actorRevision, liveRevision) => revision
+      ? [revision, actorRevision && `actor:${actorRevision}`, liveRevision && `live:${liveRevision}`].filter(Boolean).join('|') : null;
+    const readRevision = async () => combineRevision(await revisionSource.getSourceRevision?.(threadId),
+      await agentTasks?.actorRevisionFor?.(threadId), execution.getHistoryRevision?.(threadId));
+    let currentRevision, bodyRevision;
+    const initialRevision = view ? readRevision().then(value => { currentRevision = value; return value; }) : null;
+    const readBody = async () => {
+      if (requestedRevision && await initialRevision === requestedRevision) { bodyRevision = requestedRevision; return null; }
+      let session = binding
+        ? view && isEmployeeDirectBinding(binding)
+          ? await employeeRuntime.readSession(binding.agentId, { ...pagination, readOnly: true })
+          : await readAgentSession(binding, source, pagination)
+        : await readOrdinarySession(threadId, source, pagination);
+      if (session && execution.completeSession) session = execution.completeSession(session,
+        !url.searchParams.has("before") && !url.searchParams.has("cursor") && !url.searchParams.has("beforeMessageId"));
+      if (!session) throw Object.assign(new Error("session not found"), { statusCode: 404 });
+      if (view) bodyRevision = session.sourceRevision
+        ? combineRevision(session.sourceRevision, await actor, execution.getHistoryRevision?.(threadId)) : await initialRevision;
+      return session;
     };
-    const currentRevision = view && requestedRevision ? await readRevision() : null;
-    const reuseBody = Boolean(requestedRevision && currentRevision === requestedRevision);
-    let session = reuseBody ? null : binding
-      ? view && isEmployeeDirectBinding(binding)
-        ? await employeeRuntime.readSession(binding.agentId, { ...pagination, readOnly: true })
-        : await readAgentSession(binding, source, pagination)
-      : await readOrdinarySession(threadId, source, pagination);
-    if (session && execution.completeSession) session = execution.completeSession(session,
-      !url.searchParams.has("before") && !url.searchParams.has("cursor"));
-    if (!session && !reuseBody) {
-      sendJson(response, { error: "session not found" }, 404);
-      return true;
-    }
     if (view) {
-      const source = sessionSource(binding);
-      const [context, goal, input] = await Promise.all([
-        contextManagement.load(threadId), source.getGoal(threadId), source.getPendingUserInput(threadId),
+      const ready = {}, errors = {};
+      const capture = (key, read) => Promise.resolve().then(read).then(value => { ready[key] = value; }, error => {
+        errors[key] = { message: error.message, statusCode: error.statusCode || 500 };
+      });
+      const complete = Promise.all([
+        capture('session', readBody),
+        capture('context', () => contextManagement.load(threadId)),
+        capture('goal', async () => (await revisionSource.getGoal(threadId)).goal),
+        capture('input', async () => publicUserInputRequest(await revisionSource.getPendingUserInput(threadId))),
+        initialRevision,
       ]);
-      const finalRevision = await readRevision();
-      if (requestedRevision && currentRevision !== null && currentRevision !== finalRevision) {
-        throw Object.assign(new Error("对话更新中，请重试同步"), { statusCode: 409 });
-      }
-      sendJson(response, { session, context, goal: goal.goal, status: execution.getStatus(threadId),
-        queue: followUpQueue.list(threadId), input: publicUserInputRequest(input), sourceRevision: finalRevision, historyFormatVersion: 3 });
+      const snapshot = (refreshBody = false, verified = false) => {
+        if (errors.session) throw Object.assign(new Error(errors.session.message), { statusCode: errors.session.statusCode });
+        const fields = { ...ready };
+        if (refreshBody) { delete fields.session; delete fields.context; }
+        // A locally validated body can ship while the independent version lookup is slow.
+        if (!verified && (currentRevision === undefined || (bodyRevision !== undefined && currentRevision !== bodyRevision))) delete fields.context;
+        return { ...fields, status: execution.getStatus(threadId), queue: followUpQueue.list(threadId),
+          sourceRevision: currentRevision === null ? null : bodyRevision ?? null, historyFormatVersion: 3,
+          ...(refreshBody ? { refreshBody: true } : {}),
+          ...(Object.keys(errors).length ? { detailErrors: { ...errors } } : {}) };
+      };
+      const result = async () => {
+        const finalRevision = await readRevision();
+        return { ...snapshot(currentRevision !== finalRevision || (finalRevision !== null && bodyRevision !== finalRevision), true),
+          sourceRevision: finalRevision };
+      };
+      const full = complete.then(result);
+      void full.catch(() => {});
+      let finished;
+      try { finished = await Promise.race([full, budget]); } finally { clearTimeout(timer); }
+      if (finished !== false) { sendJson(response, finished); return true; }
+      const token = randomUUID();
+      const read = { threadId, conversationId, promise: full, result, settled: false };
+      detailReads.set(token, read);
+      void full.then(() => { read.settled = true; }, () => { read.settled = true; });
+      const expiry = setTimeout(() => detailReads.delete(token), 60000);
+      expiry.unref?.();
+      sendJson(response, { ...snapshot(), details: token });
       return true;
     }
+    const session = await readBody();
     sendJson(response, session);
     return true;
   }

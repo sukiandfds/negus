@@ -55,11 +55,62 @@ const isConversationMessageRecord = (item) => isAssistantReplyRecord(item)
   || (item?.type === "response_item" && item.payload?.type === "message"
     && ["user", "assistant"].includes(item.payload?.role));
 
-export const latestAssistantReplyAtFromRollout = async (file, readSettings = false, includeMessage = false) => {
+// Lifecycle records can arrive after a different turn: only their turn ID owns the outcome.
+const successfulSettingsFromRecords = (records) => {
+  const turns = new Map();
+  let active, latest;
+  const turnFor = id => {
+    if (!turns.has(id)) turns.set(id, { id });
+    return turns.get(id);
+  };
+  for (const [index, item] of records.reverse().entries()) {
+    const payload = item.payload || {};
+    const id = payload.turn_id || payload.internal_chat_message_metadata_passthrough?.turn_id;
+    const event = item.type === 'event_msg' ? payload.type : '';
+    if (event === 'task_started') {
+      active = id ? turnFor(id) : turnFor(Symbol());
+      active.lifecycle = true;
+    } else if (['task_complete', 'turn_aborted', 'turn_completed'].includes(event)) {
+      const turn = id ? turnFor(id) : active;
+      if (turn) {
+        turn.lifecycle = true;
+        turn.terminal = event !== 'turn_aborted' && !payload.error && (!payload.status || payload.status === 'completed');
+      }
+    } else if (item.type === 'turn_context') {
+      active = id ? turnFor(id) : active?.lifecycle && active.terminal === undefined ? active : turnFor(Symbol());
+      active.settings = { model: payload.model, reasoningEffort: payload.effort || payload.reasoning_effort || '' };
+    } else if (isAssistantReplyRecord(item)) {
+      // Old contexts have no ID; an identified reply supplies it when no start was recorded.
+      if (id && active && typeof active.id === 'symbol' && !active.lifecycle && !turns.has(id)) {
+        turns.delete(active.id); active.id = id; turns.set(id, active);
+      }
+      const turn = id ? turnFor(id) : active;
+      if (turn) turn.reply = index;
+    }
+  }
+  for (const turn of turns.values()) {
+    if (turn.settings?.model && turn.reply !== undefined && (!turn.lifecycle || turn.terminal === true)
+      && (!latest || turn.reply > latest.reply)) latest = turn;
+  }
+  return latest?.settings || '';
+};
+
+export const latestAssistantReplyAtFromRollout = async (file, readSettings = false, includeMessage = false, exactFile = false) => {
+  if (readSettings !== true) return readRolloutSummary(file, readSettings, includeMessage, exactFile);
+  // Files already follow the history reader's stable order; reduce once across the entire conversation.
+  const files = Array.isArray(file) ? [...file].reverse() : [file];
+  const records = [];
+  for (const source of files) {
+    for (const record of await readRolloutSummary(source, true, false, Array.isArray(file) || exactFile)) records.push(record);
+  }
+  return successfulSettingsFromRecords(records);
+};
+
+const readRolloutSummary = async (file, readSettings, includeMessage, exactFile) => {
   if (!file || typeof file !== "string") return "";
   let handle;
   try {
-    file = await latestRolloutFile(file);
+    if (!exactFile) file = await latestRolloutFile(file);
     handle = await openRollout(file);
     const stat = await handle.stat();
     const chunkSize = 256 * 1024;
@@ -68,6 +119,7 @@ export const latestAssistantReplyAtFromRollout = async (file, readSettings = fal
     let scanned = 0;
     let carry = "";
     let foundReply = false;
+    const successRecords = [];
     let usage;
     let latestSettings;
     while (end > 0 && scanned < maxBytes) {
@@ -86,6 +138,11 @@ export const latestAssistantReplyAtFromRollout = async (file, readSettings = fal
         let item;
         try { item = JSON.parse(line); } catch { continue; }
         if (readSettings) {
+          if (readSettings === true) {
+            if (item.type === 'turn_context' || isAssistantReplyRecord(item)
+              || (item.type === 'event_msg' && ['task_started', 'task_complete', 'turn_aborted', 'turn_completed'].includes(item.payload?.type))) successRecords.push(item);
+            continue;
+          }
           const info = item.type === "event_msg" && item.payload?.type === "token_count" ? item.payload.info : null;
           if (readSettings === "latest" && !usage && Number.isFinite(info?.last_token_usage?.total_tokens)
             && info.last_token_usage.total_tokens >= 0 && Number.isFinite(info.model_context_window) && info.model_context_window > 0) {
@@ -114,7 +171,7 @@ export const latestAssistantReplyAtFromRollout = async (file, readSettings = fal
       }
       if (latest) return latest;
     }
-    return latestSettings || "";
+    return readSettings === true ? successRecords : latestSettings || "";
   } catch {
     return "";
   } finally {

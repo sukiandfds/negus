@@ -8,17 +8,13 @@ export function useModels() {
   const catalog = modelCatalogFor(conversationId);
   const cached = useSyncExternalStore(catalog.subscribe, catalog.getSnapshot);
   const models = cached.data ?? readModelCatalog();
-  const loading = cached.refreshing || (cached.data === null && !cached.error);
+  const loading = cached.refreshing;
   useEffect(() => {
     const refresh = () => {
       void refreshModelCatalog("", conversationId).catch(() => {});
     };
     window.addEventListener('negus-channels-updated', refresh);
     return () => window.removeEventListener('negus-channels-updated', refresh);
-  }, [conversationId]);
-
-  useEffect(() => {
-    void refreshModelCatalog("", conversationId, false).catch(() => {});
   }, [conversationId]);
 
   return { models, loading, loaded: cached.data !== null, error: cached.error };

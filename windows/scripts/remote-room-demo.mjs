@@ -184,8 +184,9 @@ const localFiles = id => {
 };
 const appServerConversations = createProviderConversationStore({
   historyFor: id => ({
+    findSession: localFiles(id).findSession,
     listNativeSubagents: localFiles(id).listNativeSubagents,
-    getSessionResumeInfo: threadId => localFiles(id).findSession(threadId, 'all', { metadataOnly: true }),
+    getSessionResumeInfo: (threadId, options) => localFiles(id).findSession(threadId, 'all', { ...options, metadataOnly: true }),
     listSessions: async (source, archived = false) => currentConversations.summarizeThreads(
       await readLocalThreadIndex(homeFor(id), projectRoots, archived), source, archived),
   }),

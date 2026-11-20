@@ -97,21 +97,6 @@ export const createConversationService = ({ primary, fallback, contentVersionSto
   const inFlightFinds = new Map();
   const missingThreadPattern = /(?:thread|conversation|session).*(?:not found|does not exist|unknown)|no persisted turns/iu;
 
-  const withFallback = async (operation, ...args) => {
-    try {
-      return await primary[operation](...args);
-    } catch (error) {
-      // A refusal is an answer, not an outage: the JSONL fallback must not
-      // serve what the primary store deliberately declined.
-      if (error?.statusCode === 403) throw error;
-      const options = args[2] || {};
-      if (operation === "findSession" && (options.cursor !== undefined
-        || options.before === undefined && Number.isSafeInteger(options.limit) && options.limit > 0)) throw error;
-      console.warn(`[conversation-service] app-server request failed, using JSONL fallback: ${error.message}`);
-      return fallback[operation](...args);
-    }
-  };
-
   const findSession = (...args) => {
     const key = JSON.stringify({
       threadId: String(args[0] || ""),
@@ -124,11 +109,11 @@ export const createConversationService = ({ primary, fallback, contentVersionSto
     const request = (async () => {
       const threadId = String(args[0] || "");
       const options = args[2] || {};
-      const recentWindow = options.before === undefined && options.cursor === undefined;
+      const recentWindow = options.before === undefined && options.cursor === undefined && !options.beforeMessageId;
       let session;
       let supplemental = null;
       try {
-        session = await withFallback("findSession", ...args);
+        session = await primary.findSession(...args);
       } catch (error) {
         // A fresh Codex thread may only hold Negus image records so far; paged
         // reads skip the JSONL fallback, so serve those records instead of failing.

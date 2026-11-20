@@ -206,7 +206,7 @@ test('first send creates one draft with final settings and survives navigating a
   select('b'); sessions.set('b', { threadId: 'b', model: 'another', messages: [] });
   render('useProjectConversations');
   gate.resolve();
-  assert.equal(await sending, true);
+  assert.equal(await sending, false, "explicit send failure must restore the composer draft");
   assert.deepEqual(calls[0], ['create', 'chosen', 'provider-chosen']);
   assert.equal(calls.filter(call => call[0] === 'create').length, 1);
   const sent = calls.find(call => call[0] === 'send');

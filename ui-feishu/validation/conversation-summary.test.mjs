@@ -831,3 +831,98 @@ test('compaction lifecycle timestamps update ordinary and employee rows without 
   rows = buildConversationDirectory(d, [a], false);
   assert.equal(rows.all.find(row => row.threadId === 'A').time, time('09'));
 });
+
+test('partial details reuse one in-flight read and preserve cached fields until the same read finishes', async () => {
+  const originalFetch = globalThis.fetch;
+  const store = new ConversationStore(readInitialConversationState());
+  const id = 'partial-history';
+  const base = { ...store.empty(id), session: { ...session(id, 'old', '08'), sourceRevision: 'old' },
+    goal: { threadId: id, objective: 'keep old goal', status: 'paused' } };
+  store.update(id, base);
+  let release, started, calls = 0;
+  const waiting = new Promise(resolve => { release = resolve; });
+  const continued = new Promise(resolve => { started = resolve; });
+  const partial = { context: { ...base.contextStatus, model: 'deleted::saved', lastSuccessfulSettings: { model: 'deleted::saved', reasoningEffort: 'high', providerName: 'saved provider' } },
+    status: base.executionStatus, queue: [], sourceRevision: 'new', details: 'pending-token' };
+  globalThis.fetch = async url => {
+    calls++;
+    if (String(url).includes('details=')) { started(); await waiting;
+      return Response.json({ ...partial, details: undefined, session: { ...session(id, 'new', '09'), sourceRevision: 'new' }, goal: null, input: null }); }
+    return Response.json(partial);
+  };
+  try {
+    const controller = new AbortController(), revision = store.revisions.get(id);
+    const pending = store.read(id, 'old', controller.signal, 'scope');
+    assert.equal(store.read(id, 'old', controller.signal, 'scope'), pending);
+    await continued;
+    assert.equal(store.get(id).session.sourceRevision, 'old', 'ready context must not tag unread body with its new revision');
+    assert.equal(store.get(id).goal.objective, 'keep old goal');
+    release();
+    const snapshot = await pending; store.commit(id, snapshot, revision);
+    assert.equal(store.get(id).session.messages.at(-1).text, 'new');
+    assert.equal(store.get(id).goal, null);
+    assert.equal(store.get(id).contextStatus.lastSuccessfulSettings.providerName, 'saved provider');
+    assert.equal(calls, 2, 'one initial HTTP read plus one continuation, with no repeated disk request');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('late details cannot overwrite a newer body or its successful settings', async () => {
+  const originalFetch = globalThis.fetch;
+  const store = new ConversationStore(readInitialConversationState());
+  const id = 'late-history', initial = { ...store.empty(id), session: { ...session(id, 'old', '08'), sourceRevision: 'r1' } };
+  store.update(id, initial);
+  let release, started;
+  const waiting = new Promise(resolve => { release = resolve; });
+  const continued = new Promise(resolve => { started = resolve; });
+  globalThis.fetch = async url => {
+    const payload = { session: initial.session, context: initial.contextStatus, status: initial.executionStatus,
+      queue: [], goal: { objective: 'old goal' }, input: null, sourceRevision: 'r1' };
+    if (String(url).includes('details=')) { started(); await waiting; return Response.json(payload); }
+    return Response.json({ ...payload, details: 'late' });
+  };
+  try {
+    const revision = store.revisions.get(id);
+    const pending = store.read(id, 'r1', new AbortController().signal, 'scope');
+    await continued;
+    const newer = { ...initial, session: { ...session(id, 'newer', '10'), sourceRevision: 'r2' },
+      contextStatus: { ...initial.contextStatus, lastSuccessfulSettings: { model: 'new-model', reasoningEffort: 'high', providerName: 'new-provider' } } };
+    store.update(id, newer);
+    release(); store.commit(id, await pending, revision);
+    assert.equal(store.get(id).session.sourceRevision, 'r2');
+    assert.equal(store.get(id).session.messages.at(-1).text, 'newer');
+    assert.equal(store.get(id).contextStatus.lastSuccessfulSettings.providerName, 'new-provider');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('late detail completion preserves newer remote goal, queue and input without invalidating body', async () => {
+  const originalFetch = globalThis.fetch;
+  const store = new ConversationStore(readInitialConversationState());
+  const id = 'late-states', initial = { ...store.empty(id), session: { ...session(id, 'saved', '08'), sourceRevision: 'r1' } };
+  store.update(id, initial);
+  let release, started;
+  const waiting = new Promise(resolve => { release = resolve; });
+  const continued = new Promise(resolve => { started = resolve; });
+  globalThis.fetch = async url => {
+    const payload = { session: initial.session, context: initial.contextStatus, status: initial.executionStatus,
+      queue: [], goal: null, input: null, sourceRevision: 'r1' };
+    if (String(url).includes('details=')) { started(); await waiting; return Response.json(payload); }
+    return Response.json({ ...payload, details: 'late' });
+  };
+  try {
+    const revision = store.revisions.get(id), bodyRevision = store.bodyRevisions.get(id);
+    const pending = store.read(id, 'r1', new AbortController().signal, 'scope');
+    await continued;
+    const goal = { threadId: id, objective: 'new goal', status: 'paused' };
+    const queueItems = [{ submissionId: 'queued', text: 'new queue item', attachments: [] }];
+    const userInputRequest = { id: 'new-input', threadId: id, questions: [] };
+    store.update(id, { goal }, true);
+    store.update(id, { queueItems }, true);
+    store.update(id, { userInputRequest }, true);
+    release(); store.commit(id, await pending, revision);
+    assert.deepEqual(store.get(id).goal, goal);
+    assert.equal(store.get(id).queueItems[0].submissionId, 'queued');
+    assert.deepEqual(store.get(id).userInputRequest, userInputRequest);
+    assert.equal(store.bodyRevisions.get(id), bodyRevision, 'state events do not demand another body read');
+    assert.equal(store.dirty.has(id), false);
+  } finally { globalThis.fetch = originalFetch; }
+});

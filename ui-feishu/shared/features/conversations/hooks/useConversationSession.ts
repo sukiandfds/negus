@@ -49,7 +49,10 @@ export function useConversationSession(initial: InitialConversationState) {
     olderRequests.current.set(id, controller);
     setLoadingOlder(true);
     try {
-      const response = await conversationApi.session(id, { cursor: cached.nextCursor || undefined,
+      const first = cached.messages.find(message => !message.id.startsWith('optimistic-'));
+      const localHistory = !cached.conversationKind || cached.conversationKind === 'task';
+      const beforeMessageId = localHistory ? first?.itemId || first?.id : undefined;
+      const response = await conversationApi.session(id, { beforeMessageId, cursor: beforeMessageId ? undefined : cached.nextCursor || undefined,
         before: cached.nextCursor ? undefined : cached.nextBefore ?? undefined }, controller.signal, options.conversationId);
       if (controller.signal.aborted || !('messages' in response)) return false;
       const current = store.get(id, false).session;

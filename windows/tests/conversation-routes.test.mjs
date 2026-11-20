@@ -88,17 +88,20 @@ test("combined session view reuses ordinary/employee readers and can skip unchan
   }
 });
 
-test("combined session view propagates a component failure instead of returning partial success", async () => {
+test("combined session view preserves ready body and reports the failed component", async () => {
   const route = createConversationRoutes({
     conversations: { findSession: async () => ({ messages: [] }), getGoal: async () => { throw new Error("goal failed"); }, getPendingUserInput: async () => null },
     contextManagement: { load: async () => ({}) }, execution: { getStatus: () => ({}) }, followUpQueue: { list: () => [] },
   });
   const call = invokeGet(route, "/api/session?threadId=t1&view=1");
-  await assert.rejects(call.promise, /goal failed/);
-  assert.equal(call.response.body, "");
+  await call.promise;
+  const result = JSON.parse(call.response.body);
+  assert.deepEqual(result.session, { messages: [] });
+  assert.equal(result.detailErrors.goal.message, "goal failed");
+  assert.equal(Object.hasOwn(result, "goal"), false);
 });
 
-test("combined session view rejects a revision change during the read", async () => {
+test("combined session view keeps independent fields and requests body refresh after a version change", async () => {
   let revision = "r1";
   const route = createConversationRoutes({
     conversations: { getSourceRevision: async () => revision, findSession: async () => ({ messages: [] }),
@@ -107,8 +110,11 @@ test("combined session view rejects a revision change during the read", async ()
     execution: { getStatus: () => ({}) }, followUpQueue: { list: () => [] },
   });
   const call = invokeGet(route, "/api/session?threadId=t1&view=1&sourceRevision=r1");
-  await assert.rejects(call.promise, /对话更新中/);
-  assert.equal(call.response.body, "");
+  await call.promise;
+  const result = JSON.parse(call.response.body);
+  assert.equal(result.refreshBody, true);
+  assert.equal(Object.hasOwn(result, 'session'), false);
+  assert.equal(result.goal, null);
 });
 
 test("combined ordinary and employee views check revision after slow context completes", async () => {
@@ -135,10 +141,14 @@ test("combined ordinary and employee views check revision after slow context com
     await new Promise(resolve => setImmediate(resolve));
     revision = "r2";
     releaseContext();
-    await assert.rejects(call.promise, error => error.statusCode === 409 && /对话更新中/.test(error.message));
+    await call.promise;
+    const result = JSON.parse(call.response.body);
+    assert.equal(result.refreshBody, true);
+    assert.equal(Object.hasOwn(result, 'session'), false);
+    assert.equal(Object.hasOwn(result, 'context'), false);
+    assert.equal(result.goal, null);
     assert.equal(revisionReads, 2);
-    assert.equal(call.response.body, "");
-    assert.equal(call.response.status, 0);
+    assert.equal(call.response.status, 200);
   }
 });
 
@@ -677,4 +687,17 @@ test('goal submission with attachment records and broadcasts the submitted messa
   assert.equal(response.status, 200);
   assert.equal(events[0].type, 'user_message_submitted');
   assert.equal(events[0].attachments[0].id, 'file-1');
+});
+
+test('unversioned supplemental content does not trigger an endless body refresh', async () => {
+  const route = createConversationRoutes({
+    conversations: { getSourceRevision: async () => null, findSession: async () => ({ messages: [], sourceRevision: 'disk-only' }),
+      getGoal: async () => ({ goal: null }), getPendingUserInput: async () => null },
+    contextManagement: { load: async () => ({}) }, execution: { getStatus: () => ({}) }, followUpQueue: { list: () => [] },
+  });
+  const call = invokeGet(route, '/api/session?threadId=t1&view=1');
+  await call.promise;
+  const result = JSON.parse(call.response.body);
+  assert.equal(result.refreshBody, undefined); assert.equal(result.sourceRevision, null);
+  assert.equal(result.session.sourceRevision, 'disk-only');
 });

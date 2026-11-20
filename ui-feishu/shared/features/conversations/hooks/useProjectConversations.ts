@@ -405,7 +405,7 @@ export function useProjectConversations() {
       if (!attempt || attempt.outcome === "failed") {
         const reason = attempt?.error || "发送失败";
         updateDelivery(/already has an active writer/iu.test(reason) ? "occupied" : "failed", undefined, reason);
-        return true;
+        return false;
       }
       if (attempt.outcome === "uncertain") {
         updateDelivery("pending");
@@ -428,7 +428,7 @@ export function useProjectConversations() {
       }
       const reason = error instanceof Error ? error.message : String(error);
       updateDelivery(/already has an active writer/iu.test(reason) ? "occupied" : "failed", undefined, reason);
-      return true;
+      return false;
     } finally {
       submittingThreads.current.delete(requestedThreadId);
       submittingThreads.current.delete(threadId);

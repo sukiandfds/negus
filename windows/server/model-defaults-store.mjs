@@ -2,20 +2,13 @@ import { readJsonFile, writeJsonFileAtomic } from './persistence/json-file.mjs';
 
 const EMPTY_DEFAULTS = { providerId: '', model: '', effort: '', archivedProviderIds: [] };
 
-export const createModelDefaultsStore = (file, { fallback = null } = {}) => {
+export const createModelDefaultsStore = (file) => {
   let writes = Promise.resolve();
   const normalize = async (input = {}) => {
     let providerId = String(input.providerId || '').trim();
     let model = String(input.model || '').trim();
     let effort = String(input.effort || '').trim();
     let archivedProviderIds = Array.isArray(input.archivedProviderIds) ? input.archivedProviderIds : [];
-    if (!providerId && !model) {
-      const value = fallback ? await fallback() : EMPTY_DEFAULTS;
-      providerId = String(value?.providerId || '').trim();
-      model = String(value?.model || '').trim();
-      effort = String(value?.effort || '').trim();
-      archivedProviderIds = Array.isArray(input.archivedProviderIds) ? input.archivedProviderIds : value?.archivedProviderIds || [];
-    }
     if (providerId.length > 100 || model.length > 240 || !['','none','minimal','low','medium','high','xhigh','max','ultra'].includes(effort)
       || (providerId && !model)) throw Object.assign(new Error('设为默认前请选择默认模型'), { statusCode: 400 });
     return { providerId, model, effort, archivedProviderIds: [...new Set(archivedProviderIds.filter(id => typeof id === 'string'))] };

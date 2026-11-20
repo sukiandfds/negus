@@ -6,7 +6,7 @@ export interface ContextStatus {
   model: string;
   reasoningEffort: string;
   selectedSettings?: { model: string; reasoningEffort: string };
-  lastSuccessfulSettings?: { model: string; reasoningEffort: string } | null;
+  lastSuccessfulSettings?: { model: string; reasoningEffort: string; providerName?: string; modelProviderId?: string } | null;
   usedTokens: number | null;
   contextWindow: number | null;
   percentage: number | null;

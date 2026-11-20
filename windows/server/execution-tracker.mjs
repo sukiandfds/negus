@@ -7,6 +7,8 @@ import { writeJsonFileAtomic } from "./persistence/json-file.mjs";
 export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTerminal = () => {}, registerMedia = () => null }) => {
   const statuses = new Map();
   const completedMessages = new Map();
+  const historyRevisions = new Map();
+  const historyChanged = threadId => historyRevisions.set(threadId, (historyRevisions.get(threadId) || 0) + 1);
   const messageTimes = new Map();
   const activeGoals = new Set();
   const messagePhases = new Map();
@@ -30,7 +32,7 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
     try {
       const stored = JSON.parse(fs.readFileSync(stateFile, "utf8"));
       for (const entry of stored.messageTimes || []) messageTimes.set(...entry);
-      for (const entry of stored.completedMessages || []) completedMessages.set(...entry);
+      for (const entry of stored.completedMessages || []) { completedMessages.set(...entry); historyChanged(entry[1].threadId); }
       for (const status of stored.statuses || []) {
         if (!status?.threadId) continue;
         const needsRestartNormalization = status.phase === "systemError"
@@ -370,6 +372,7 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
           const message = { ...parsed, id: `codex:${encodeURIComponent(turnId || "unknown")}:${encodeURIComponent(itemId)}`,
             itemId, turnId, role: "assistant", text: parsed?.text || "", phase: params.item.phase || "final_answer", createdAt, serverTimestamp: true };
           completedMessages.set(key, { threadId, message });
+          historyChanged(threadId);
           schedulePersist();
           broadcastThreadEvent(threadId, { type: "assistant_message_completed", threadId, message });
           if (!isCompletedTurn && !isRetiredTurn(threadId, eventTurnId) && params.item.phase === "commentary") updateCommentary(threadId, text);
@@ -547,11 +550,14 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
     handleProtocolMessage,
     handleHealthState,
     getStatus,
+    getHistoryRevision: threadId => historyRevisions.has(threadId) ? `${eventEpoch}:${historyRevisions.get(threadId)}` : "",
     recordMessage: (threadId, message) => {
+      historyChanged(threadId);
       completedMessages.set(itemKey(threadId, message.itemId || message.id), { threadId, message });
       schedulePersist();
     },
     clearCompletedMessages: (threadId) => {
+      historyChanged(threadId);
       for (const [key, entry] of completedMessages) if (entry.threadId === threadId && entry.message.source !== "native-goal") completedMessages.delete(key);
       schedulePersist();
     },

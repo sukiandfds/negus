@@ -285,7 +285,7 @@ export function ConversationComposer({
         let accepted: boolean;
         try {
           accepted = await onSend(messageText, previews, preparedThread || undefined, async submissionId => {
-            const files = await draft.uploadAll();
+            const files = uploaded = await draft.uploadAll();
             const retained = new Set<string>();
             let imageIndex = 0;
             files.forEach((media, index) => {
@@ -308,6 +308,7 @@ export function ConversationComposer({
           temporaryUrls.forEach(url => URL.revokeObjectURL(url));
         }
         if (!accepted) {
+          if (uploaded.length) draft.restoreFiles(uploaded);
           setText(current => current || submittedText);
           setQuote(current => current || submittedQuote);
         }

@@ -34,7 +34,7 @@ test("returns the primary session without reading the JSONL fallback", async () 
   service.close();
 });
 
-test("uses the JSONL fallback only when the app-server read fails", async () => {
+test("preserves a local history read error instead of switching providers", async () => {
   let fallbackCalls = 0;
   const primary = {
     findSession: async () => { throw new Error("app-server unavailable"); },
@@ -49,13 +49,12 @@ test("uses the JSONL fallback only when the app-server read fails", async () => 
   };
   const service = createConversationService({ primary, fallback });
 
-  const session = await service.findSession("thread");
-  assert.equal(session.threadId, "thread");
-  assert.equal(fallbackCalls, 1);
+  await assert.rejects(service.findSession("thread"), /app-server unavailable/);
+  assert.equal(fallbackCalls, 0);
   service.close();
 });
 
-test("preserves fallback media when the app-server read fails", async () => {
+test("preserves local history media without a sending client", async () => {
   const primary = {
     findSession: async () => { throw new Error("app-server unavailable"); },
     close: () => {},
@@ -70,7 +69,7 @@ test("preserves fallback media when the app-server read fails", async () => {
     }),
     close: () => {},
   };
-  const service = createConversationService({ primary, fallback });
+  const service = createConversationService({ primary: fallback, fallback: primary });
 
   const session = await service.findSession("thread");
   assert.deepEqual(session.messages[0].blocks.map((block) => block.type), ["markdown", "image"]);

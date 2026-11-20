@@ -50,7 +50,7 @@ export const buildBuiltInChannels = (models: CodexModel[], currentModel: string,
       model: pricing?.model || model.model, availableModel: model.model, modelKey: model.model, editable: false, switchable: true }] : [];
   });
 
-export function useChannelCatalog(models: CodexModel[], currentModel: string) {
+export function useChannelCatalog(models: CodexModel[], currentModel: string, active = true) {
   const cached = useSyncExternalStore(channelCatalog.subscribe, channelCatalog.getSnapshot);
   const channels = cached.data?.channels || [];
   const pricing = cached.data?.pricing;
@@ -60,11 +60,12 @@ export function useChannelCatalog(models: CodexModel[], currentModel: string) {
     return next;
   };
   useEffect(() => {
+    if (!active) return;
     void readChannels().catch(() => {});
     const refresh = () => { void readChannels(true).catch(() => {}); };
     window.addEventListener('negus-channels-updated', refresh);
     return () => window.removeEventListener('negus-channels-updated', refresh);
-  }, []);
+  }, [active]);
   const currentLink = channels.find(c => c.id === 'current')?.sharedConfigId;
   const sharedChannels = channels.filter((entry) => !entry.modelKey && entry.id !== currentLink).map((entry) => {
     const providerId = channelProviderId(entry);

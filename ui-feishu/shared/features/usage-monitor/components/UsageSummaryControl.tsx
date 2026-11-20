@@ -77,7 +77,7 @@ export function UsageSummaryControl({ snapshot, loading, error, onRefresh, curre
     } finally { setSaving(false); }
   };
   const rootRef = useRef<HTMLDivElement>(null);
-  const { channels } = useChannelCatalog(models, currentModel);
+  const { channels } = useChannelCatalog(models, currentModel, false);
   const providerId = models.find(model => model.model === currentModel)?.modelProviderId
     || (currentModel.includes('::') ? currentModel.split('::')[0] : /^grok-/i.test(currentModel) ? 'fusheng-grok' : 'current');
   const channel = currentModel ? channels.find(entry => entry.id === (providerId.startsWith('ccswitch_') ? providerId.slice(9) : providerId)) : undefined;

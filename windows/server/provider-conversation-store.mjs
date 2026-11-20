@@ -1,3 +1,4 @@
+import { readPersistedThreadGoal, expandGoalObjective } from './thread-goal-objective.mjs';
 import { backgroundTaskRoute } from './background-tasks/model-policy.mjs';
 import { isReasoningEffort } from './reasoning-efforts.mjs';
 import { latestAssistantReplyAtFromRollout } from "./app-server-conversation-store.mjs";
@@ -12,6 +13,7 @@ import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 // Ordinary project conversations only. Employee runtimes keep their own bindings.
 export const createProviderConversationStore = ({ current, providers, createStore, historyFor, stateFile, providerForThread = () => null }) => {
   const stores = new Map([["current", Promise.resolve(current)]]);
+  const readyStores = new Map([["current", current]]);
   let routes = {};
   let writing = Promise.resolve();
   const save = () => {
@@ -23,7 +25,8 @@ export const createProviderConversationStore = ({ current, providers, createStor
   const routesLoaded = readJsonFile(stateFile, {}).then((stored) => {
     routes = stored && typeof stored === "object" ? stored : {};
   });
-  const ready = routesLoaded.then(async () => {
+  let preparation;
+  const ready = () => preparation ||= routesLoaded.then(async () => {
     await providers.refreshShared?.().catch(() => {});
     let changed = false;
     for (const [id, route] of Object.entries(routes)) {
@@ -43,12 +46,9 @@ export const createProviderConversationStore = ({ current, providers, createStor
       const reasoningEffort = route.reasoningEffort ?? route.resumeInfo?.reasoningEffort ?? "";
       const stale = route.runtimeModel !== targetModel || route.activeModel !== targetModel
         || route.resumeInfo?.model !== targetModel || route.resumeInfo?.reasoningEffort !== reasoningEffort;
-      const lastModel = route.lastSuccessfulSettings?.model;
-      const lastEffort = route.lastSuccessfulSettings?.reasoningEffort ?? "";
-      if (!stale && lastModel === route.model && lastEffort === reasoningEffort) continue;
+      if (!stale) continue;
       routes[id] = {
         ...route, runtimeModel: targetModel, activeModel: targetModel, reasoningEffort,
-        lastSuccessfulSettings: { model: route.model, reasoningEffort },
         resumeInfo: route.resumeInfo ? {
           ...route.resumeInfo, model: targetModel, reasoningEffort,
           summary: { ...route.resumeInfo.summary, threadId: id, model: targetModel },
@@ -63,6 +63,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
       const pending = providers.getClient({ modelProviderId: providerId }).then(async (client) =>
         client === await providers.getClient({ modelProviderId: 'current' }) ? current : createStore(client, providerId));
       stores.set(providerId, pending);
+      void pending.then(store => readyStores.set(providerId, store), () => {});
       void pending.catch(() => stores.delete(providerId));
     }
     return stores.get(providerId);
@@ -71,6 +72,25 @@ export const createProviderConversationStore = ({ current, providers, createStor
   const owner = (id) => routes[id]?.providerId || providerForThread(id) || childOwners.get(id) || "current";
   const providerConfigured = async (providerId) => providerId === 'current' || !providers.isProviderConfigured
     || await providers.isProviderConfigured(providerId).catch(() => false);
+  const providerName = async providerId => {
+    const configured = providers.providers?.().find(provider => provider.id === providerId)?.displayName;
+    if (!stateFile || providerId === 'current' || path.basename(providerId) !== providerId) return configured || providerId;
+    let file;
+    try {
+      file = await fs.open(path.join(path.dirname(stateFile), 'model-providers', providerId, 'codex-home', 'config.toml'));
+      // The generated runtime keeps the display name before its auth command. Never execute that command.
+      let section = false;
+      for await (const line of file.readLines()) {
+        if (line.startsWith('[model_providers.')) {
+          section = line === `[model_providers.${providerId}]` || line === `[model_providers.${JSON.stringify(providerId)}]`;
+          if (!section && line.endsWith('.auth]')) break;
+        }
+        if (section && line.startsWith('name = ')) return JSON.parse(line.slice(7));
+      }
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    finally { await file?.close().catch(() => {}); }
+    return configured || providerId;
+  };
   const decorate = (session) => session && ({ ...session,
     createdBy: routes[session.threadId]?.createdBy || session.createdBy,
     ...(routes[session.threadId]?.manualTitle ? { title: routes[session.threadId].manualTitle } : {}),
@@ -108,42 +128,41 @@ export const createProviderConversationStore = ({ current, providers, createStor
       reasoningEffort: route.reasoningEffort || "", manualTitle: route.manualTitle || "", summary: route.summary };
   };
   const service = {};
-  service.getRecordedProviderForThread = async id => { await ready; return routes[id]?.providerId || null; };
+  service.getRecordedProviderForThread = async id => { await routesLoaded; return routes[id]?.providerId || null; };
   service.getVerifiedProviderForThread = async id => {
-    await ready;
+    await ready();
     if (routes[id]?.providerId) return routes[id].providerId;
     const info = await current.getSessionResumeInfo(id, { readOnly: true }).catch(() => null);
     return info?.path && info?.cwd ? 'current' : null;
   };
   service.getSessionResumeInfo = async (id, options = { readOnly: true }) => {
-    await ready;
+    await ready();
     return (await storeFor(owner(id))).getSessionResumeInfo(id, { ...options, historyFile: routes[id]?.resumeInfo?.path });
   };
   service.findSessionForProvider = async (providerId, ...args) => (await storeFor(providerId)).findSession(...args);
   service.getRuntimeContextForProvider = async (providerId, id) => {
-    await ready;
+    await ready();
     return (await storeFor(providerId)).getRuntimeContext(id, { historyFile: routes[id]?.resumeInfo?.path });
   };
   service.getSourceRevisionForProvider = async (providerId, id) => {
-    const info = await (await storeFor(providerId)).getSessionResumeInfo(id, { readOnly: true, historyFile: routes[id]?.resumeInfo?.path });
+    await routesLoaded;
+    const info = await (await historyFor(providerId)).getSessionResumeInfo(id, { readOnly: true, historyFile: routes[id]?.resumeInfo?.path });
+    if (info?.sourceRevision) return info.sourceRevision;
     return info?.path ? latestRolloutFile(info.path)
       .then(source => fs.stat(source))
       .then(conversationSourceRevision)
       .catch(() => null) : null;
   };
-  service.getSourceRevision = async id => { await ready; return service.getSourceRevisionForProvider(owner(id), id); };
+  service.getSourceRevision = async id => { await routesLoaded; return service.getSourceRevisionForProvider(owner(id), id); };
   service.listSessionsForProvider = async (providerId, ...args) => (await historyFor(providerId || "current")).listSessions(...args);
-  const rememberPreviousSettings = async (id, source, readOnly = false) => {
+  const rememberPreviousSettings = async id => {
     if (Object.hasOwn(routes[id] || {}, "lastSuccessfulSettings")) return;
-    const info = source.isFreshSession?.(id) ? null : await source.getSessionResumeInfo(id, { readOnly, historyFile: routes[id]?.resumeInfo?.path });
-    const previous = info?.path ? await latestAssistantReplyAtFromRollout(info.path, true) : null;
-    routes[id] = { ...routes[id], providerId: owner(id), lastSuccessfulSettings: previous ? {
-      ...previous, model: owner(id).startsWith("ccswitch_") ? owner(id) + "::" + previous.model : previous.model,
-    } : null };
+    const previous = await readSuccessfulSettings(id, await historyInfo(id));
+    routes[id] = { ...routes[id], providerId: owner(id), lastSuccessfulSettings: previous };
   };
   service.handleProtocolMessage = async ({ method, params = {} } = {}) => {
     if (method !== "turn/started" && method !== "turn/completed") return;
-    await ready;
+    await ready();
     const route = routes[params.threadId];
     if (!route?.attemptSettings) return;
     if (method === "turn/started") {
@@ -202,15 +221,20 @@ export const createProviderConversationStore = ({ current, providers, createStor
     restored.add(`${owner(id)}:${id}`);
     await save();
   };
-  for (const method of ["renameSession", "findSession", "sendMessage", "steerMessage", "interrupt",
-    "updateReasoningEffort", "getRuntimeContext", "getThreadStatus",
-    "revertSession", "compactContext", "reviewSession", "getGoal", "setGoal", "clearGoal", "getPendingUserInput",
+  for (const method of ["renameSession", "sendMessage", "steerMessage", "interrupt",
+    "updateReasoningEffort", "getThreadStatus",
+    "revertSession", "compactContext", "reviewSession", "setGoal", "clearGoal",
     "respondToUserInput"]) {
     service[method] = async (id, ...args) => {
-      await ready;
-      if (method === 'sendMessage') await providers.refreshShared?.().catch(() => {});
+      await ready();
+      if (method === 'sendMessage') {
+        await providers.refreshShared?.();
+        const route = routes[id];
+        const selected = providers.resolveRoute({ model: route?.model || '', modelProviderId: route?.pendingProviderId || owner(id) });
+        if (!await providerConfigured(selected.modelProviderId)) throw Object.assign(new Error("所选配置缺少有效凭据，请在配置中更新后重试"), { statusCode: 503 });
+      }
       if (switching.has(id)) await switching.get(id);
-      if (!["findSession", "getRuntimeContext", "getThreadStatus", "getGoal", "getPendingUserInput"].includes(method)) await ensureRestored(id);
+      if (method !== "getThreadStatus") await ensureRestored(id);
       if (method === 'sendMessage') {
         if (routes[id]?.pendingProviderId && !await providerConfigured(owner(id))) {
           if (!activating.has(id)) {
@@ -220,17 +244,19 @@ export const createProviderConversationStore = ({ current, providers, createStor
           await activating.get(id);
         }
         const source = await storeFor(owner(id));
-        await rememberPreviousSettings(id, source);
+        await rememberPreviousSettings(id);
         const runtime = await source.getRuntimeContext(id);
         const route = routes[id];
         route.attemptSettings = {
           model: route.model || runtime.model,
           reasoningEffort: route.reasoningEffort ?? runtime.reasoningEffort ?? "",
+          providerName: providers.providers?.().find(provider => provider.id === (route.pendingProviderId || owner(id)))?.displayName || route.lastSuccessfulSettings?.providerName || owner(id),
+          modelProviderId: route.pendingProviderId || owner(id),
         };
         const resolved = providers.resolveRoute({ model: route.attemptSettings.model, allowRetired: true,
           modelProviderId: route.pendingProviderId || owner(id) });
         const effectiveModel = resolved.model || route.attemptSettings.model;
-        args[3] = { ...route.attemptSettings, model: effectiveModel };
+        args[3] = { model: effectiveModel, reasoningEffort: route.attemptSettings.reasoningEffort };
         if (effectiveModel !== route.attemptSettings.model && resolved.modelProviderId === owner(id)) {
           route.runtimeModel = effectiveModel;
           route.activeModel = effectiveModel;
@@ -244,23 +270,13 @@ export const createProviderConversationStore = ({ current, providers, createStor
         }
         await activating.get(id);
       }
-      if (method === 'getRuntimeContext' && routes[id]?.pendingProviderId) return {
-        model: routes[id].model, modelProvider: routes[id].pendingProviderId, reasoningEffort: routes[id].reasoningEffort || '',
-        lastSuccessfulSettings: routes[id].lastSuccessfulSettings,
-      };
       if (method === 'updateReasoningEffort' && routes[id]?.pendingProviderId) {
         routes[id].reasoningEffort = args[0];
         await save();
         return { model: routes[id].model, modelProvider: routes[id].pendingProviderId, reasoningEffort: args[0] };
       }
       const source = await storeFor(owner(id));
-      if (['findSession', 'getRuntimeContext', 'getGoal'].includes(method) && routes[id]?.resumeInfo?.path) {
-        const index = method === 'findSession' ? 1 : 0;
-        args[index] = { ...args[index], historyFile: routes[id].resumeInfo.path };
-      }
-      if (method === "updateReasoningEffort" || method === "getRuntimeContext") {
-        await rememberPreviousSettings(id, source, method === "getRuntimeContext");
-      }
+      if (method === "updateReasoningEffort") await rememberPreviousSettings(id);
       const result = await source[method](id, ...args);
       if (method === "renameSession") {
         routes[id] = { ...routes[id], providerId: owner(id), manualTitle: args[0], summary: { ...routes[id]?.summary, ...result, threadId: id, title: args[0] } };
@@ -273,27 +289,54 @@ export const createProviderConversationStore = ({ current, providers, createStor
         routes[id].reasoningEffort = args[0];
         await save();
       }
-      if (method === "getRuntimeContext" && result) result.lastSuccessfulSettings = routes[id]?.lastSuccessfulSettings;
-      if (method === "getRuntimeContext" && result && routes[id]?.model) {
-        result.model = routes[id].model;
-        result.reasoningEffort = routes[id].reasoningEffort ?? result.reasoningEffort;
-      }
-      if (method === "getRuntimeContext" && result?.model && !routes[id]?.model) {
-        routes[id] = { ...routes[id], providerId: owner(id), model: result.model };
-        await save();
-      }
-      if (method === "getRuntimeContext" && result?.model && !result.model.includes('::')) {
-        const resultProviderId = owner(id);
-        if (resultProviderId !== "current") result.model = `${resultProviderId}::${result.model}`;
-        result.modelProvider = resultProviderId;
-      }
       return result?.threadId ? decorate(result) : result;
     };
   }
+  // FEAT-001: history owns reads; obtaining a sender belongs only to explicit actions.
+  const historyInfo = async (id) => {
+    await routesLoaded;
+    return (await historyFor(owner(id))).getSessionResumeInfo(id, { readOnly: true, historyFile: routes[id]?.resumeInfo?.path });
+  };
+  service.findSession = async (id, source, options = {}) => {
+    await routesLoaded;
+    return decorate(await (await historyFor(owner(id))).findSession(id, source, { ...options, ...(routes[id]?.resumeInfo?.path ? { historyFile: routes[id].resumeInfo.path } : {}) }));
+  };
+  const readSuccessfulSettings = async (id, info) => {
+    const route = routes[id];
+    let previous = route?.lastSuccessfulSettings;
+    if (!Object.hasOwn(route || {}, 'lastSuccessfulSettings')) {
+      previous = await latestAssistantReplyAtFromRollout(info?.paths || (info?.path ? [info.path] : []), true);
+    }
+    const successfulProvider = previous?.modelProviderId || (previous?.model?.includes('::') ? previous.model.split('::')[0] : owner(id));
+    return previous ? { ...previous, modelProviderId: successfulProvider,
+      model: successfulProvider === "current" ? previous.model : previous.model?.includes('::') ? previous.model : `${successfulProvider}::${previous.model}`,
+      providerName: previous.providerName || await providerName(successfulProvider) } : null;
+  };
+  service.getRuntimeContext = async id => {
+    const info = await historyInfo(id);
+    const runtime = info?.path ? await latestAssistantReplyAtFromRollout(info.path, 'latest') : {};
+    const route = routes[id];
+    const successful = await readSuccessfulSettings(id, info);
+    const qualify = model => model && !model.includes('::') && owner(id) !== 'current' ? `${owner(id)}::${model}` : model || '';
+    return { ...runtime, model: route?.model || qualify(runtime.model),
+      reasoningEffort: route?.reasoningEffort ?? runtime.reasoningEffort ?? '', lastSuccessfulSettings: successful };
+  };
+  service.getGoal = async id => {
+    const info = await historyInfo(id);
+    if (!info?.path) return { goal: null };
+    const home = info.path.split(/[/\\](?:sessions|archived_sessions)[/\\]/)[0];
+    const root = path.join(home, 'attachments');
+    const result = await readPersistedThreadGoal(id, root);
+    return { ...result, goal: await expandGoalObjective(result.goal, root) };
+  };
+  service.getPendingUserInput = async id => {
+    await historyInfo(id);
+    return readyStores.get(owner(id))?.getPendingUserInput?.(id) || null;
+  };
   const missingPersistedThread = (error) => /thread not loaded|session not found|no rollout found|rollout path missing/i.test(String(error?.message || ""));
   for (const [method, archived] of [["archiveSession", true], ["unarchiveSession", false]]) {
     service[method] = async (id) => {
-      await ready;
+      await ready();
       if (switching.has(id)) await switching.get(id);
       await ensureRestored(id);
       try {
@@ -383,7 +426,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
   service.listModels = async () => providers.listModels(await current.listModels());
   // FEAT-001: new chats and forks share registration; native start/fork stay distinct.
   const registerSession = service.registerSession = async (session, providerId, model, metadata = {}, expectedRoute) => {
-    await ready;
+    await ready();
     if (expectedRoute !== undefined && JSON.stringify(routes[session.threadId] || null) !== expectedRoute)
       throw Object.assign(Error('对话登记已变化，未覆盖'), { statusCode: 409 });
     routes[session.threadId] = { providerId, model, createdBy: 'user', summary: session, ...metadata };
@@ -392,7 +435,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
   };
   // Repair a known assistant-created thread in the live store, never by rewriting its state file externally.
   service.registerExistingBackground = async ({ threadId, providerId, expectedProviderId = null }) => {
-    await ready;
+    await ready();
     const previous = routes[threadId];
     const before = JSON.stringify(previous || null);
     if (!threadId || !providerId || (previous?.providerId || null) !== expectedProviderId
@@ -409,7 +452,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
         summary: info.summary, resumeInfo: info, createdBy: 'assistant', reasoningEffort: settings?.reasoningEffort ?? info.reasoningEffort ?? previous?.reasoningEffort ?? '' }, before);
   };
   service.createSession = async (model = "", cwd = "", modelProviderId = "", options = {}) => {
-    await ready;
+    await ready();
     await providers.refreshShared?.().catch((error) => { if (model.includes('::')) throw error; });
     const hasExplicitRoute = Boolean(String(model ?? '').trim() || String(modelProviderId ?? '').trim());
     const route = !hasExplicitRoute
@@ -425,7 +468,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
         ...(sessionOptions.reasoningEffort ? { reasoningEffort: sessionOptions.reasoningEffort } : {}) });
   };
   service.forkSession = async (id, ...args) => {
-    await ready;
+    await ready();
     const providerId = owner(id);
     const result = await (await storeFor(providerId)).forkSession(id, ...args);
     // A pending provider selection belongs to the parent, not the native fork.
@@ -435,7 +478,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
       providerId !== 'current' && model && !model.includes('::') ? `${providerId}::${model}` : model);
   };
   service.createFromProvider = async (id, model, { reasoningEffort = "" } = {}) => {
-    await ready;
+    await ready();
     if (!isReasoningEffort(reasoningEffort)) throw new Error("无效的思考等级");
     const target = providers.resolveRoute({ model });
     if (!await providerConfigured(target.modelProviderId)) throw new Error('配置 Key 尚未配置');
@@ -475,7 +518,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
         updatedAt: new Date().toISOString(), model: effectiveModel, forkedFromId: id,
       }, target.modelProviderId, registeredModel,
       { createdBy: "user", manualTitle: title, reasoningEffort,
-        lastSuccessfulSettings: { model: registeredModel, reasoningEffort }, activeModel: effectiveModel, runtimeModel: effectiveModel,
+        lastSuccessfulSettings: (await service.getRuntimeContext(id)).lastSuccessfulSettings, activeModel: effectiveModel, runtimeModel: effectiveModel,
         crossProviderCopyFrom: id,
         resumeInfo: { ...destination, model: effectiveModel, reasoningEffort } });
       return { session, sourceThreadId: id, model: session.model || registeredModel, modelProvider: target.modelProviderId, reasoningEffort };
@@ -495,7 +538,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
   };
   const switching = new Map();
   service.updateModel = async (id, model, { allowProviderSwitch = false, reasoningEffort = "", allowRetired = false } = {}) => {
-    await ready;
+    await ready();
     if (switching.has(id) || activating.has(id)) throw Object.assign(new Error("正在切换模型，请稍候"), { statusCode: 409 });
     const task = (async () => {
       await providers.refreshShared?.().catch((error) => { if (model.includes('::')) throw error; });
@@ -506,12 +549,13 @@ export const createProviderConversationStore = ({ current, providers, createStor
         model = sourceProviderId === "current" ? target.model : `${sourceProviderId}::${target.model}`;
       }
       if (!isReasoningEffort(reasoningEffort)) throw new Error("无效的思考等级");
+      if (!await providerConfigured(target.modelProviderId)) throw Object.assign(new Error("所选配置缺少有效凭据，请在配置中更新后重试"), { statusCode: 503 });
       const sourceConfigured = await providerConfigured(sourceProviderId);
       if (!sourceConfigured && target.modelProviderId === sourceProviderId) {
         throw Object.assign(new Error("当前对话配置已移除，请选择其他配置的模型"), { statusCode: 409 });
       }
       const source = sourceConfigured ? await storeFor(sourceProviderId) : null;
-      if (sourceConfigured) await rememberPreviousSettings(id, source);
+      await rememberPreviousSettings(id);
       if (target.modelProviderId === sourceProviderId) {
         await ensureRestored(id);
         const result = await source.updateModel(id, target.model || model, { reasoningEffort });
@@ -519,7 +563,6 @@ export const createProviderConversationStore = ({ current, providers, createStor
         await save();
         return { ...result, model };
       }
-      if (!await providers.isProviderConfigured(target.modelProviderId)) throw new Error('配置 Key 尚未配置');
       if (!sourceConfigured) {
         const info = await storedRouteInfo(id, sourceProviderId);
         if (!info?.path) throw Object.assign(new Error("原对话配置已移除，且找不到原对话记录"), { statusCode: 409 });

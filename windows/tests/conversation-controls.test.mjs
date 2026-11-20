@@ -1301,12 +1301,13 @@ test("unloaded settings reuse project history metadata without resuming a thread
       calls.push(method); throw Error(method === 'thread/read' ? 'thread not loaded: old' : `unexpected ${method}`);
     } } });
   try {
-    const service = createProviderConversationStore({ current: store, providers: {}, stateFile: path.join(root, 'routes.json') });
+    const service = createProviderConversationStore({ current: store, providers: {}, stateFile: path.join(root, 'routes.json'),
+      historyFor: () => ({ getSessionResumeInfo: id => history.findSession(id, 'all', { metadataOnly: true }) }) });
     const context = await service.getRuntimeContext('old');
     assert.equal(context.model, 'saved-model');
     assert.equal(context.reasoningEffort, 'high');
-    assert.deepEqual(context.lastSuccessfulSettings, { model: 'saved-model', reasoningEffort: 'high' });
-    assert.ok(calls.every(method => method === 'thread/read'), 'viewing must never resume or start a turn');
+    assert.deepEqual(context.lastSuccessfulSettings, { model: 'saved-model', reasoningEffort: 'high', providerName: 'current', modelProviderId: 'current' });
+    assert.deepEqual(calls, [], 'viewing must not call the runtime');
     await assert.rejects(() => store.getRuntimeContext('absent'), /thread not loaded/);
     await assert.rejects(() => store.getSessionResumeInfo('old'), /unexpected thread\/resume/);
   } finally { store.close(); history.close(); await rm(root, { recursive: true, force: true }); }

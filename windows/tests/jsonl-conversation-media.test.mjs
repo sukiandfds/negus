@@ -178,7 +178,7 @@ test('reads legacy roots and trusted recorded paths with thread and project vali
   t.after(() => store.close());
   assert.equal((await store.findSession('legacy')).messages[0].text, 'retained history');
   assert.equal((await store.findSession('recorded', 'all', { historyFile: recorded })).messages[0].text, 'retained history');
-  assert.equal(await store.findSession('wrong-id', 'all', { historyFile: recorded }), null);
-  assert.equal(await store.findSession('other', 'all', { historyFile: other }), null);
+  await assert.rejects(store.findSession('wrong-id', 'all', { historyFile: recorded }), { statusCode: 403 });
+  await assert.rejects(store.findSession('other', 'all', { historyFile: other }), { statusCode: 403 });
   assert.equal(await store.findSession('recorded'), null, 'a recorded read does not change store ownership');
 });

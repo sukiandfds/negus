@@ -8,7 +8,10 @@ import { createJsonlConversationStore } from "../server/jsonl-conversation-store
 import { createBackgroundTaskService } from '../server/background-tasks/service.mjs';
 
 const createProviderConversationStore = options => createStoreUnderTest({
-  historyFor: id => id === 'current' ? options.current : options.createStore(id, id),
+  historyFor: id => {
+    const source = id === 'current' ? options.current : options.createStore(id, id);
+    return { ...source, getSessionResumeInfo: source?.getSessionResumeInfo || (async (_id, options) => options?.historyFile ? { path: options.historyFile } : null) };
+  },
   ...options,
 });
 
@@ -406,7 +409,7 @@ test("failed sends keep the current choice but preserve the last completed setti
     const context = await service.getRuntimeContext("thread");
     assert.equal(context.model, "gpt-bad");
     assert.equal(context.reasoningEffort, "low");
-    assert.deepEqual(context.lastSuccessfulSettings, { model: "gpt-good", reasoningEffort: "high" });
+    assert.deepEqual(context.lastSuccessfulSettings, { model: "gpt-good", reasoningEffort: "high", providerName: "current", modelProviderId: "current" });
     const restarted = createProviderConversationStore(options);
     assert.deepEqual((await restarted.getRuntimeContext("thread")).lastSuccessfulSettings, context.lastSuccessfulSettings);
     fail = false;
@@ -438,7 +441,7 @@ test("imports the previous successful model from history instead of the latest f
       providers: {}, stateFile: path.join(root, "routes.json"),
     });
     assert.deepEqual((await service.getRuntimeContext("thread")).lastSuccessfulSettings, {
-      model: "good", reasoningEffort: "high",
+      model: "good", reasoningEffort: "high", providerName: "current", modelProviderId: "current",
     });
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -926,7 +929,7 @@ test('runtime model wins over stale resume metadata when restoring a copied thre
   assert.equal(saved.activeModel, 'deepseek-flash');
   assert.equal(saved.runtimeModel, 'deepseek-flash');
   assert.equal(saved.resumeInfo.model, 'deepseek-flash');
-  assert.deepEqual(saved.lastSuccessfulSettings, { model: 'deepseek::deepseek-flash', reasoningEffort: 'none' });
+  assert.deepEqual(saved.lastSuccessfulSettings, { model: 'deepseek::gpt-6.1-sol', reasoningEffort: 'medium' }, 'runtime repair must not rewrite the last successful response');
   const normalFork = JSON.parse(await fs.readFile(stateFile, 'utf8'))[normalForkId];
   assert.equal(normalFork.activeModel, undefined);
   assert.equal(normalFork.resumeInfo.model, 'deepseek-flash');

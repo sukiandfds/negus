@@ -37,7 +37,10 @@ export function ModelSettingsControl({
   const buttonLabel = [currentModel ? formatModelDisplayName(currentModel, current?.displayName?.split(" · ").at(-1)) : "选择模型",
     formatReasoningEffort(currentEffort)].filter(Boolean).join(" · ");
   const defaults = useModelDefaults();
-  const { allChannels, canonical, managed } = useChannelCatalog(models, currentModel);
+  const { allChannels, canonical, managed } = useChannelCatalog(models, currentModel, open);
+  useEffect(() => {
+    if (open) void refreshModelCatalog("", undefined, false).catch(() => {});
+  }, [open]);
   const providerOf = (model: string) => providerIdForModel(models, model);
   const provider = providerOf(currentModel);
   const selectedProvider = canonical(provider);
