@@ -373,12 +373,28 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
     const files = await orderedRolloutFiles(headers.map(header => header.file));
     const ordered = await Promise.all(files.map(async file => ({ header: headers.find(header => header.file === file), stat: await fsp.stat(file) })));
     const header = ordered.at(-1).header;
-    const sourceRevision = ordered.map(({ stat }) => conversationSourceRevision(stat)).join('|');
+    const fileRevision = ordered.map(({ stat }) => conversationSourceRevision(stat)).join('|');
+    const sourceRevision = 'user-id-v2:' + fileRevision;
     if (metadataOnly) return { id: threadId, path: header.file, paths: files, cwd: header.cwd, name: header.title, sourceRevision };
     const parts = await Promise.all(ordered.map(({ header }) => readSession(header)));
     const after = await Promise.all(files.map(file => fsp.stat(file).then(conversationSourceRevision)));
-    if (after.join('|') !== sourceRevision) throw Object.assign(new Error("对话更新中，请重试同步"), { statusCode: 409 });
+    if (after.join('|') !== fileRevision) throw Object.assign(new Error("对话更新中，请重试同步"), { statusCode: 409 });
     const messages = [...new Map(parts.flatMap(part => part.messages).map(message => [message.id, message])).values()];
+    // Response items and protocol items have separate IDs but share the turn ID.
+    // Only a one-to-one turn can establish identity without an exact item match.
+    const users = new Map(), confirmations = new Map();
+    for (const message of messages) if (message.role === 'user' && message.turnId)
+      users.set(message.turnId, users.has(message.turnId) ? null : message);
+    for (const { header } of ordered) for (const event of sessionCache.get(header.file).userMessageEvents) {
+      const prior = confirmations.get(event.turnId);
+      if (prior === undefined) confirmations.set(event.turnId, event);
+      else if (prior?.itemId !== event.itemId || prior?.submissionId !== event.submissionId) confirmations.set(event.turnId, null);
+    }
+    for (const [index, message] of messages.entries()) {
+      const event = confirmations.get(message.turnId);
+      if (users.get(message.turnId) === message && !message.submissionId && event?.submissionId)
+        messages[index] = { ...message, submissionId: event.submissionId };
+    }
     let session = { ...parts.at(-1), messages: messages.map((message, sequence) => ({ ...message, sequence })), messageCount: messages.length, sourceRevision };
     if (source !== "all" && session.source !== source) return null;
     if (includeEventTimes) session = { ...session, userMessageEvents: ordered.flatMap(({ header }) => sessionCache.get(header.file).userMessageEvents) };
