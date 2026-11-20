@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readLocalThreadIndex } from '../../windows/server/local-thread-index.mjs';
 import { createAppServerClient } from '../../windows/server/app-server-client.mjs';
 import { createAppServerConversationStore } from '../../windows/server/app-server-conversation-store.mjs';
 import { createProviderConversationStore } from '../../windows/server/provider-conversation-store.mjs';
@@ -75,7 +76,7 @@ export async function withExistingConversations(current, options) {
     const savedRoutes = await readJson(routesFile, {});
     const ids = new Set(['current', ...Object.values(savedRoutes).map(route => route.providerId).filter(Boolean)]);
     const lists = await Promise.all([...ids].map(id => historyFor(id).listSessions(...args)));
-    const nativeSessions = currentStore ? await currentStore.listSessions(...args).catch(() => []) : [];
+    const nativeSessions = currentStore ? await currentStore.summarizeThreads(await readLocalThreadIndex(home, projects.map(project => project.root), args[1]), ...args) : [];
     const sessions = new Map([...lists.flat(), ...nativeSessions].map(session => [session.threadId, session]));
     for (const [id, route] of Object.entries(savedRoutes)) {
       const session = sessions.get(id) || route.summary;
@@ -96,7 +97,7 @@ export async function withExistingConversations(current, options) {
     onProtocolMessage: event => { options.onProtocolMessage?.(event); void native.handleProtocolMessage(event); },
   });
   currentStore = makeStore(clients, 'current');
-  const native = createProviderConversationStore({ current: currentStore, providers, stateFile: routesFile, createStore: makeStore });
+  const native = createProviderConversationStore({ current: currentStore, providers, historyFor, stateFile: routesFile, createStore: makeStore });
   const service = createConversationService({ primary: native, fallback: {
     listSessions: listHistory,
     findSession: async (...args) => {

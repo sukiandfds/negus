@@ -3,9 +3,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createProviderConversationStore } from "../server/provider-conversation-store.mjs";
+import { createProviderConversationStore as createStoreUnderTest } from "../server/provider-conversation-store.mjs";
 import { createJsonlConversationStore } from "../server/jsonl-conversation-store.mjs";
 import { createBackgroundTaskService } from '../server/background-tasks/service.mjs';
+
+const createProviderConversationStore = options => createStoreUnderTest({
+  historyFor: id => id === 'current' ? options.current : options.createStore(id, id),
+  ...options,
+});
 
 test('source revision follows the compacted continuation rollout', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-provider-revision-'));
@@ -931,13 +936,12 @@ test('runtime model wins over stale resume metadata when restoring a copied thre
 test('a retired provider cannot hide saved history or live rows from another provider', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-retired-list-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const service = createProviderConversationStore({ stateFile: path.join(root, 'routes.json'),
-    current: { listSessions: async () => [{ threadId: 'desktop' }] },
-    providers: { getClient: async ({ modelProviderId }) => {
-      if (modelProviderId === 'retired') throw Error('Model provider is not registered');
-      return modelProviderId;
-    } },
-    createStore: () => ({ listSessions: async () => [{ threadId: 'healthy', title: 'updated' }] }),
+  let channelCalls = 0;
+  const touchChannel = async () => { channelCalls++; throw Error('offline'); };
+  const service = createStoreUnderTest({ stateFile: path.join(root, 'routes.json'), current: {},
+    providers: { getClient: touchChannel, isProviderConfigured: touchChannel }, createStore: touchChannel,
+    historyFor: id => ({ listSessions: async (_source, archived) => archived ? [] : id === 'current'
+      ? [{ threadId: 'desktop' }] : id === 'vip' ? [{ threadId: 'healthy', title: 'updated' }] : [] }),
   });
   for (const [id, provider, archived] of [['old', 'retired', false], ['filed', 'retired', true], ['healthy', 'vip', false]]) {
     await service.registerSession({ threadId: id, archived, source: 'codex' }, provider, 'model');
@@ -946,4 +950,5 @@ test('a retired provider cannot hide saved history or live rows from another pro
   assert.deepEqual(rows.map(row => row.threadId).sort(), ['desktop', 'healthy', 'old']);
   assert.equal(rows.find(row => row.threadId === 'healthy').title, 'updated');
   assert.ok((await service.listSessions('all', true)).some(row => row.threadId === 'filed'));
+  assert.equal(channelCalls, 0);
 });

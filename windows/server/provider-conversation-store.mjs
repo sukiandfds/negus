@@ -10,7 +10,7 @@ import { conversationSourceRevision } from "./conversation-version-store.mjs";
 import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
 // Ordinary project conversations only. Employee runtimes keep their own bindings.
-export const createProviderConversationStore = ({ current, providers, createStore, stateFile, providerForThread = () => null }) => {
+export const createProviderConversationStore = ({ current, providers, createStore, historyFor, stateFile, providerForThread = () => null }) => {
   const stores = new Map([["current", Promise.resolve(current)]]);
   let routes = {};
   let writing = Promise.resolve();
@@ -20,9 +20,10 @@ export const createProviderConversationStore = ({ current, providers, createStor
     });
     return writing;
   };
-  const ready = readJsonFile(stateFile, {}).then((stored) => {
+  const routesLoaded = readJsonFile(stateFile, {}).then((stored) => {
     routes = stored && typeof stored === "object" ? stored : {};
-  }).then(async () => {
+  });
+  const ready = routesLoaded.then(async () => {
     await providers.refreshShared?.().catch(() => {});
     let changed = false;
     for (const [id, route] of Object.entries(routes)) {
@@ -131,7 +132,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
       .catch(() => null) : null;
   };
   service.getSourceRevision = async id => { await ready; return service.getSourceRevisionForProvider(owner(id), id); };
-  service.listSessionsForProvider = async (providerId, ...args) => (await storeFor(providerId || "current")).listSessions(...args);
+  service.listSessionsForProvider = async (providerId, ...args) => (await historyFor(providerId || "current")).listSessions(...args);
   const rememberPreviousSettings = async (id, source, readOnly = false) => {
     if (Object.hasOwn(routes[id] || {}, "lastSuccessfulSettings")) return;
     const info = source.isFreshSession?.(id) ? null : await source.getSessionResumeInfo(id, { readOnly, historyFile: routes[id]?.resumeInfo?.path });
@@ -312,7 +313,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
     };
   }
   service.listSessions = async (...args) => {
-    await ready;
+    await routesLoaded;
     childOwners.clear();
     const ids = [...new Set(["current", ...Object.values(routes).map((route) => route.providerId)])];
     const childConflicts = new Set();
@@ -322,7 +323,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
       if (parentOwners.has(id)) return parentOwners.get(id);
       let providerId = routes[id]?.providerId || await providerForThread(id);
       if (!providerId) {
-        const info = await current.getSessionResumeInfo?.(id, { readOnly: true }).catch(() => null);
+        const info = await (await historyFor("current")).getSessionResumeInfo?.(id, { readOnly: true }).catch(() => null);
         if (info?.path && info?.cwd) providerId = 'current';
       }
       parentOwners.set(id, providerId || null);
@@ -330,10 +331,9 @@ export const createProviderConversationStore = ({ current, providers, createStor
     };
     const lists = [];
     for (const providerId of ids) {
-      if (!await providerConfigured(providerId)) continue;
       let live, native;
       try {
-        const store = await storeFor(providerId);
+        const store = await historyFor(providerId);
         native = await store.listNativeSubagents?.(args[1]).catch(() => []) || [];
         live = await store.listSessions(...args);
       } catch (error) {

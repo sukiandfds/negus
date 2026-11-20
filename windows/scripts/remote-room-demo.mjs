@@ -9,6 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { createJsonlConversationStore } from "../server/jsonl-conversation-store.mjs";
+import { readLocalThreadIndex } from "../server/local-thread-index.mjs";
 import { createAppServerConversationStore } from "../server/app-server-conversation-store.mjs";
 import { createAppServerClient } from "../server/app-server-client.mjs";
 import { createProviderConversationStore } from "../server/provider-conversation-store.mjs";
@@ -171,17 +172,29 @@ const conversationStoreOptions = {
   client: appServerClient,
 };
 const currentConversations = createAppServerConversationStore(conversationStoreOptions);
+const histories = new Map([['current', jsonlConversations]]);
+const homeFor = id => id === 'current' ? process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
+  : path.join(projectRoot, 'runtime', 'model-providers', id, 'codex-home');
+const localFiles = id => {
+  if (!histories.has(id)) histories.set(id, createJsonlConversationStore({
+    sessionRoot: path.join(homeFor(id), 'sessions'), projectRoot, projectRoots,
+    registerMedia: media.register, onChange: realtime.broadcast,
+  }));
+  return histories.get(id);
+};
 const appServerConversations = createProviderConversationStore({
+  historyFor: id => ({
+    listNativeSubagents: localFiles(id).listNativeSubagents,
+    getSessionResumeInfo: threadId => localFiles(id).findSession(threadId, 'all', { metadataOnly: true }),
+    listSessions: async (source, archived = false) => currentConversations.summarizeThreads(
+      await readLocalThreadIndex(homeFor(id), projectRoots, archived), source, archived),
+  }),
   current: currentConversations,
   providers: modelProviders,
   providerForThread: threadId => agentTasks?.providerForThread?.(threadId),
   stateFile: path.join(projectRoot, "runtime", "conversation-provider-routes.json"),
   createStore: (client, providerId) => {
-    const history = createJsonlConversationStore({
-      sessionRoot: path.join(projectRoot, "runtime", "model-providers", providerId, "codex-home", "sessions"),
-      projectRoot, projectRoots, registerMedia: media.register,
-      onChange: realtime.broadcast,
-    });
+    const history = localFiles(providerId);
     const store = createAppServerConversationStore({
     ...conversationStoreOptions, client,
     goalAttachmentRoot: path.join(projectRoot, "runtime", "model-providers", providerId, "codex-home", "attachments"),
@@ -189,8 +202,7 @@ const appServerConversations = createProviderConversationStore({
     autoTitleStateFile: path.join(projectRoot, "runtime", `conversation-titles-${providerId}.json`),
     autoTitleEnabled: false,
     });
-    return { ...store, listNativeSubagents: history.listNativeSubagents,
-      close: () => { store.close(); history.close(); } };
+    return { ...store, listNativeSubagents: history.listNativeSubagents };
   },
 });
 const conversationVersions = createConversationVersionStore({
@@ -585,6 +597,7 @@ const close = async () => {
   server.close();
   realtime.close();
   conversations.close();
+  for (const [id, history] of histories) if (id !== "current") history.close();
   await Promise.allSettled([...new Set(multiAgentDirectory.values())].map(service => service.close()));
   webOutputs.close();
   employeeRuntime.close();

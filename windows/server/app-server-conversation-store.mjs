@@ -440,9 +440,8 @@ export const createAppServerConversationStore = ({
     ...(thread.model ? { model: thread.model } : {}),
   });
 
-  const listSessions = async (source = "all", archived = false) => {
+  const summarizeThreads = async (threads, source = "all", archived = false) => {
     await loadAutoTitles();
-    const threads = await listThreads({ archived });
     const summaries = await Promise.all(threads
       .filter((thread) => source === "all" || sourceFromThread(thread) === source)
       .map(async (thread) => {
@@ -460,6 +459,7 @@ export const createAppServerConversationStore = ({
       }));
     return summaries.sort((left, right) => sessionTime(right.updatedAt) - sessionTime(left.updatedAt));
   };
+  const listSessions = async (source = "all", archived = false) => summarizeThreads(await listThreads({ archived }), source, archived);
   const listNativeSubagents = async (archived = false) => nativeSubagents?.(archived) || [];
 
   const withDeveloperInstructions = async (
@@ -1051,7 +1051,7 @@ export const createAppServerConversationStore = ({
   };
 
   return {
-    listSessions, listNativeSubagents, createSession, renameSession, findSession, sendMessage, steerMessage, interrupt,
+    summarizeThreads, listSessions, listNativeSubagents, createSession, renameSession, findSession, sendMessage, steerMessage, interrupt,
     forkSession, archiveSession, unarchiveSession,
     listModels, updateModel, updateReasoningEffort, getRuntimeContext, getThreadStatus,
     revertSession, compactContext, reviewSession, getGoal, setGoal, clearGoal,
