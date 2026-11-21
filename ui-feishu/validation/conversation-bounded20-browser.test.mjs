@@ -6,7 +6,7 @@ const page = await browser.newPage();
 page.setDefaultTimeout(10000);
 const stamp = '2026-10-30T00:00:00Z';
 const summaries = Array.from({ length: 25 }, (_, i) => ({ threadId: `t${i}`, sourceRevision: 'r1', source: 'codex', title: `对话${i}`, updatedAt: new Date(Date.parse(stamp) - i * 1000).toISOString(), messageCount: 2, latestMessage: `摘要${i}`, latestUser: '', latestAssistant: '' }));
-const detail = id => ({ ...summaries[Number(id.slice(1))], historyFormatVersion: 3, hasMore: true, nextBefore: 1, messages: [{ id: `old-${id}`, role: 'user', text: `历史${id}`, createdAt: stamp }, { id: `m-${id}`, role: 'assistant', text: `正文${id}${summaries[Number(id.slice(1))].sourceRevision === 'r2' ? '-更新' : ''}`, createdAt: stamp }] });
+const detail = id => ({ ...summaries[Number(id.slice(1))], historyFormatVersion: 4, hasMore: true, nextBefore: 1, messages: [{ id: `old-${id}`, role: 'user', text: `历史${id}`, createdAt: stamp }, { id: `m-${id}`, role: 'assistant', text: `正文${id}${summaries[Number(id.slice(1))].sourceRevision === 'r2' ? '-更新' : ''}`, createdAt: stamp }] });
 const calls = [], errors = [];
 let active = 0, peak = 0;
 page.on('pageerror', error => errors.push(error.message));
@@ -28,7 +28,7 @@ await page.route('**/api/**', async route => {
     calls.push({ id, revision: u.searchParams.get('sourceRevision') });
     peak = Math.max(peak, ++active); await new Promise(resolve => setTimeout(resolve, 30)); --active;
     const index = Number(id.slice(1));
-    data = { session: u.searchParams.get('sourceRevision') === summaries[index].sourceRevision ? null : detail(id), sourceRevision: summaries[index].sourceRevision, historyFormatVersion: 3,
+    data = { session: u.searchParams.get('sourceRevision') === summaries[index].sourceRevision ? null : detail(id), sourceRevision: summaries[index].sourceRevision, historyFormatVersion: 4,
       context: { type: 'context_status', threadId: id, model: '', reasoningEffort: '', phase: 'idle' }, status: { type: 'execution_status', threadId: id, phase: 'idle', active: false, activities: [] }, goal: null, queue: [], input: null };
   } else if (p === '/api/models') data = [];
   else if (p === '/api/model-channels') data = { channels: [] };

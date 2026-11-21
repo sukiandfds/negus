@@ -52,7 +52,7 @@ await page.route('**/api/**', async route => {
     data = { ...summaries[0], threadId: 'created', title: '新对话', cwd: body.projectRoot, messageCount: 0 };
     summaries.push(data); contexts.set('created', { ...contexts.get('ordinary'), threadId: 'created' });
   } else if (path === '/api/session/message') data = { threadId: id, turnId: 'fixture-turn', status: 'accepted' };
-  else if (path === '/api/session') data = { session: url.searchParams.get('sourceRevision') === details(id).sourceRevision ? null : details(id), sourceRevision: details(id).sourceRevision, historyFormatVersion: 3,
+  else if (path === '/api/session') data = { session: url.searchParams.get('sourceRevision') === details(id).sourceRevision ? null : details(id), sourceRevision: details(id).sourceRevision, historyFormatVersion: 4,
     context: contexts.get(id), status: idle(id), goal: null, queue: [], input: null };
   if (path === '/api/session' && request.method() === 'GET' && slowContext) {
     // Hold the aggregate while a same-thread live event reaches the actual Store.

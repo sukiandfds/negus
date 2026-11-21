@@ -9,6 +9,7 @@ import { ModelSelect } from "./ModelSelect";
 import { ReasoningEffortSelect } from "./ReasoningEffortSelect";
 import { ModelCatalogFeedback } from "./ModelCatalogFeedback";
 import { refreshConfiguredModels, refreshModelCatalog, type CatalogResult } from "../data/modelCatalogRefresh";
+import { currentConversationId } from "../../../shared/api/conversationScope";
 import styles from "./ModelSelect.module.css";
 
 interface ModelSettingsControlProps {
@@ -38,9 +39,10 @@ export function ModelSettingsControl({
     formatReasoningEffort(currentEffort)].filter(Boolean).join(" · ");
   const defaults = useModelDefaults();
   const { allChannels, canonical, managed } = useChannelCatalog(models, currentModel, open);
+  const conversationId = currentConversationId();
   useEffect(() => {
-    if (open) void refreshModelCatalog("", undefined, false).catch(() => {});
-  }, [open]);
+    if (open) void refreshModelCatalog("", conversationId, false).catch(() => {});
+  }, [open, conversationId]);
   const providerOf = (model: string) => providerIdForModel(models, model);
   const provider = providerOf(currentModel);
   const selectedProvider = canonical(provider);
@@ -67,10 +69,10 @@ export function ModelSettingsControl({
     setRefreshError("");
     try {
       if (!managed) {
-        await refreshModelCatalog(provider);
+        await refreshModelCatalog(provider, conversationId);
         return;
       }
-      const results = await refreshConfiguredModels(provider);
+      const results = await refreshConfiguredModels(provider, conversationId);
       setRefreshError(results.filter(entry => entry.error).map(entry => entry.error).join("；"));
       setEmptyResults(results.filter(entry => entry.count === 0));
     } catch (reason) {

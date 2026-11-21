@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -181,4 +181,42 @@ test('reads legacy roots and trusted recorded paths with thread and project vali
   await assert.rejects(store.findSession('wrong-id', 'all', { historyFile: recorded }), { statusCode: 403 });
   await assert.rejects(store.findSession('other', 'all', { historyFile: other }), { statusCode: 403 });
   assert.equal(await store.findSession('recorded'), null, 'a recorded read does not change store ownership');
+});
+
+
+test("local history retains each steer receipt and excludes only harness goal inputs", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codex-jsonl-inputs-"));
+  const threadId = "00000000-0000-4000-8000-000000000002";
+  const file = path.join(root, `rollout-${threadId}.jsonl`);
+  const turnId = "active-turn";
+  const timestamp = "2026-11-20T09:00:00.000Z";
+  const goalText = '<codex_internal_context source="goal">internal continuation</codex_internal_context>';
+  const record = (id, text, kind = "user.text", provenance = "user") => ({
+    type: "response_item", timestamp, payload: { type: "message", role: "user", id,
+      content: [{ type: "input_text", text }], internal_chat_message_metadata_passthrough: {
+        turn_id: turnId, content_item_kinds: [kind], content_item_metadata: [{ provenance: { type: provenance } }],
+      },
+    },
+  });
+  const receipt = (id, clientId) => ({ type: "event_msg", timestamp, payload: {
+    type: "item_completed", turn_id: turnId, completed_at_ms: Date.parse(timestamp),
+    item: { type: "UserMessage", id, client_id: clientId, content: [{ type: "text", text: "same" }] },
+  } });
+  const append = (...rows) => appendFile(file, rows.map(JSON.stringify).join("\n") + "\n");
+  await append({ type: "session_meta", payload: { id: threadId, cwd: root } },
+    { type: "event_msg", timestamp, payload: { type: "task_started", turn_id: turnId } },
+    record("msg-first", "same"));
+  let store = createJsonlConversationStore({ sessionRoot: root, projectRoot: root, registerMedia: () => null });
+  try {
+    assert.equal((await store.findSession(threadId)).messages.length, 1);
+    await append(receipt("event-first", "send-first"), record("msg-goal", goalText, "goal.internal_context", "harness"),
+      record("msg-old-goal", goalText, "user.goal", "harness"), receipt("event-hidden", "unrelated"),
+      record("msg-second", "same"), receipt("event-first", "send-first"), receipt("event-second", "send-second"), record("msg-quote", goalText));
+    const expected = [["same", "send-first"], ["same", "send-second"], [goalText, undefined]];
+    const read = async () => (await store.findSession(threadId)).messages.map(({ text, submissionId }) => [text, submissionId]);
+    assert.deepEqual(await read(), expected);
+    store.close();
+    store = createJsonlConversationStore({ sessionRoot: root, projectRoot: root, registerMedia: () => null });
+    assert.deepEqual(await read(), expected);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

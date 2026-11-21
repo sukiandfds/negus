@@ -14,10 +14,10 @@ export const refreshModelCatalog = (
 
 export type CatalogResult = { id: string; name: string; owner?: string; count?: number | null; error?: string; protected?: string; ticket?: string };
 
-export const refreshConfiguredModels = async (providerId = "") => {
+export const refreshConfiguredModels = async (providerId = "", conversationId = currentConversationId()) => {
   const result = await postJson<{ results: CatalogResult[] }>("/api/model-channels/catalog",
     { action: "refresh", providerId }, AbortSignal.timeout(90000));
   if (!Array.isArray(result.results)) throw new Error("模型目录刷新需要更新后端");
-  await refreshModelCatalog();
+  await refreshModelCatalog("", conversationId);
   return result.results;
 };

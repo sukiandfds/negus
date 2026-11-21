@@ -162,8 +162,8 @@ const readRolloutSummary = async (file, readSettings, includeMessage, exactFile)
           continue;
         }
         if (!isConversationMessageRecord(item)) continue;
-        const message = includeMessage ? messageFromItem(item, () => null) : null;
-        if (includeMessage && !message) continue;
+        const message = messageFromItem(item, () => null);
+        if (!message) continue;
         const parsed = Date.parse(item.timestamp || "");
         if (!Number.isFinite(parsed) || parsed < latestMs) continue;
         latestMs = parsed;
