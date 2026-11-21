@@ -6,7 +6,7 @@ const fileVersion = 2;
 const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 // FEAT-001: detect Desktop/history writes without reading message bodies.
-export const conversationSourceRevision = (stat) => hash(["history-v4", stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs]);
+export const conversationSourceRevision = (stat) => hash([stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs]);
 
 const normalizeMessages = (messages) => {
   const used = new Set();

@@ -593,7 +593,7 @@ test('prefetched recent conversations survive reload without opening each one', 
 test('old history format is refreshed once while new format reuses the cache', () => {
   storage.clear();
   const legacy = session('legacy', 'old', '09');
-  const updated = { ...session('updated', 'new', '10'), historyFormatVersion: 4 };
+  const updated = { ...session('updated', 'new', '10'), historyFormatVersion: 3 };
   writeConversationSnapshot({ selectedId: 'legacy', sessions: [legacy, updated], session: legacy,
     cachedSessions: new Map([['legacy', legacy], ['updated', updated]]) });
   window.location.search = '?thread=legacy';
@@ -601,7 +601,7 @@ test('old history format is refreshed once while new format reuses the cache', (
   assert.ok(initial.partialSessionIds.includes('legacy'));
   assert.ok(!initial.partialSessionIds.includes('updated'));
   assert.equal(initial.session.messages[0].text, 'old');
-  const refreshed = { ...legacy, historyFormatVersion: 4 };
+  const refreshed = { ...legacy, historyFormatVersion: 3 };
   writeConversationSnapshot({ selectedId: 'legacy', sessions: [refreshed], session: refreshed, cachedSessions: new Map([['legacy', refreshed]]) });
   assert.ok(!readInitialConversationState().partialSessionIds.includes('legacy'));
 });
@@ -830,36 +830,6 @@ test('compaction lifecycle timestamps update ordinary and employee rows without 
   d.contextTimeByThread.A = time('09'); // authoritative server clock replaces a fast client clock
   rows = buildConversationDirectory(d, [a], false);
   assert.equal(rows.all.find(row => row.threadId === 'A').time, time('09'));
-});
-
-test('opening cached history replaces old parser rows and keeps pending sends and server pagination', async () => {
-  const id = 'cached-goal-history';
-  const shared = { id: 'visible', role: 'assistant', text: 'last visible reply', createdAt: time('09') };
-  const quoted = { id: 'quote', role: 'user', text: '<codex_internal_context source="goal">quotation</codex_internal_context>', createdAt: time('10') };
-  const pending = { id: 'optimistic-unsent', role: 'user', text: 'pending send', createdAt: time('11') };
-  const legacy = { ...session(id, '', '10'), sourceRevision: 'old', historyFormatVersion: 3,
-    hasMore: false, nextBefore: null, nextCursor: null,
-    messages: [{ ...quoted, id: 'internal', createdAt: time('08') }, shared, quoted] };
-  const store = new ConversationStore({ selectedId: id, snapshotSavedAt: '', sessionIsPartial: true,
-    session: legacy, cachedSessions: [legacy], partialSessionIds: [id], sessions: [] });
-  store.addMessage(id, pending);
-  const { executionStatus: status, contextStatus: context } = store.get(id);
-  const { historyFormatVersion: _, ...detail } = legacy;
-  const incoming = { ...detail, sourceRevision: 'new', hasMore: true, nextBefore: 20, nextCursor: 'new-page', messages: [shared, quoted] };
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => Response.json({ session: incoming, sourceRevision: 'new', historyFormatVersion: 4, status, context, queue: [] });
-  try {
-    const revision = store.revisions.get(id) || 0;
-    const snapshot = await store.read(id, '', new AbortController().signal, 'scope');
-    assert.deepEqual(snapshot.session.messages.map(message => message.id), ['visible', 'quote']);
-    store.commit(id, snapshot, revision);
-    const refreshed = store.get(id).session;
-    assert.deepEqual(refreshed.messages.map(message => message.id), ['visible', 'quote', 'optimistic-unsent']);
-    assert.equal(refreshed.historyFormatVersion, 4);
-    assert.equal(refreshed.hasMore, true);
-    assert.equal(refreshed.nextBefore, 20);
-    assert.equal(refreshed.nextCursor, 'new-page');
-  } finally { globalThis.fetch = originalFetch; }
 });
 
 test('partial details reuse one in-flight read and preserve cached fields until the same read finishes', async () => {

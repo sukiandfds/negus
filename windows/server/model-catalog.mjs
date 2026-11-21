@@ -6,15 +6,14 @@ import { zstdDecompressSync } from 'node:zlib';
 
 export const neutralModelInstructions = text => text?.replace(/^You are Codex, (?:an agent|a coding agent) based on GPT-[\w.-]+\.(?=\s|$)/u, 'You are a coding assistant.');
 
+// All Negus providers and the desktop use the user's same catalog.
 export const sharedModelCatalogArguments = () => {
   const home = path.join(os.homedir(), '.codex');
-  const negusCatalog = path.join(home, 'negus-models.json');
-  if (fs.existsSync(negusCatalog)) return ['-c', `model_catalog_json=${JSON.stringify(negusCatalog)}`];
   let config;
   try { config = TOML.parse(fs.readFileSync(path.join(home, 'config.toml'), 'utf8')); }
   catch (error) { if (error.code === 'ENOENT') return []; throw error; }
-  const catalog = config.model_catalog_json;
-  return catalog && fs.existsSync(catalog) ? ['-c', `model_catalog_json=${JSON.stringify(catalog)}`] : [];
+  const catalog = config.model_catalog_json || path.join(home, 'negus-models.json');
+  return fs.existsSync(catalog) ? ['-c', `model_catalog_json=${JSON.stringify(catalog)}`] : [];
 };
 
 export const verifiedContextWindow = model => {

@@ -1,10 +1,10 @@
-// GPT: Codex model/list and the local shared Codex model catalog.
+// GPT: Codex 0.165.0-alpha.1.2 model/list (2026-10-29), shared across providers.
 // https://docs.x.ai/developers/model-capabilities/text/reasoning
 // https://api-docs.deepseek.com/guides/thinking_mode (Responses API)
 const standard = ['low', 'medium', 'high', 'xhigh'];
 const extended = [...standard, 'max', 'ultra'];
 const presets = {
-  ...Object.fromEntries(['gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-astra',
+  ...Object.fromEntries(['gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-astra',
     'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-daybreak-blue-latest', 'gpt-daybreak-red-latest'].map(model => [model, extended])),
   'gpt-6-luna': [...standard, 'max'],
   'gpt-5.6-luna': [...standard, 'max'],

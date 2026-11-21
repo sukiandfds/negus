@@ -38,14 +38,7 @@ export const withStreamingStatus = (status: ThreadSnapshot['executionStatus'], l
   status.active && status.turnId && live?.turnId === status.turnId ? { ...status,
     streamingItemId: live.streamingItemId ?? status.streamingItemId, streamingText: live.streamingText ?? status.streamingText,
     commentary: live.commentary ?? status.commentary } : status;
-const isNewHistoryFormat = (current: SessionDetail, incoming: SessionDetail) =>
-  (incoming.historyFormatVersion ?? 0) > (current.historyFormatVersion ?? 0);
-
 const refreshSession = (current: SessionDetail, incoming: SessionDetail) => {
-  if (isNewHistoryFormat(current, incoming)) {
-    // The old parser may have emitted rows that are absent from every page of the new history.
-    return mergePendingOptimisticMessages(incoming, current.messages.filter(message => message.id.startsWith('optimistic-')));
-  }
   const merged = mergeSessionRefresh(current, incoming);
   return merged.messages.length > incoming.messages.length ? { ...merged, hasMore: current.hasMore,
     nextBefore: current.nextBefore, nextCursor: current.nextCursor } : merged;
@@ -246,11 +239,10 @@ export class ConversationStore {
       const previous = this.get(id);
       const current = this.committed.get(id)?.session;
       if ((this.bodyRevisions.get(id) || 0) > revision) return previous;
-      const incoming = result.session && result.historyFormatVersion
-        ? { ...result.session, historyFormatVersion: result.historyFormatVersion } : result.session;
+      const incoming = result.session;
       const bodyReady = Object.hasOwn(result, 'session');
       const session = incoming && current ? current.contentVersion && incoming.contentVersion && current.contentVersion > incoming.contentVersion
-        && !isNewHistoryFormat(current, incoming) ? current : refreshSession(current, incoming) : incoming || current || null;
+        ? current : refreshSession(current, incoming) : incoming || current || null;
       const context = result.context || previous.contextStatus;
       const selectedSettings = this.committed.get(id)?.contextStatus.selectedSettings;
       const saved = selectedSettings || context.lastSuccessfulSettings;
@@ -258,7 +250,7 @@ export class ConversationStore {
       const model = saved ? saved.model : context.model;
       const contextStatus = saved ? { ...context, model, selectedSettings,
         reasoningEffort: selectedSettings ? resolveVisibleEffort(models, defaults, model, saved.reasoningEffort) : saved.reasoningEffort } : context;
-      return { session: session && { ...session, sourceRevision: bodyReady ? result.sourceRevision || session.sourceRevision : session.sourceRevision },
+      return { session: session && { ...session, ...(incoming && result.historyFormatVersion ? { historyFormatVersion: result.historyFormatVersion } : {}), sourceRevision: bodyReady ? result.sourceRevision || session.sourceRevision : session.sourceRevision },
         contextStatus: { ...contextStatus, ...(result.context && bodyReady ? { usageSourceRevision: result.sourceRevision || session?.sourceRevision || '' } : {}) },
         executionStatus: result.status, goal: 'goal' in result ? result.goal! : previous.goal,
         queueItems: result.queue, userInputRequest: 'input' in result ? result.input! : previous.userInputRequest };

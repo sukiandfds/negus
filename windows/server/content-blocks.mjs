@@ -295,7 +295,6 @@ const isUsefulUserMessage = (text, blocks) => {
 
 export const messageFromItem = (item, registerMedia) => {
   const payload = item?.payload;
-  const metadata = payload?.internal_chat_message_metadata_passthrough || {};
   let role = "";
   let content;
 
@@ -314,11 +313,6 @@ export const messageFromItem = (item, registerMedia) => {
     if (payload.role === "assistant" && payload.phase && !["final_answer", "commentary"].includes(payload.phase)) return null;
     role = payload.role;
     content = payload.content;
-    if (role === "user" && Array.isArray(content)) {
-      // The rollout stores goal instructions in the user role for the model, with harness provenance.
-      content = content.filter((_, index) => !(metadata.content_item_metadata?.[index]?.provenance?.type === "harness"
-        && ["goal.internal_context", "user.goal"].includes(metadata.content_item_kinds?.[index])));
-    }
   } else if (item?.type === "response_item" && payload?.type === "image_view") {
     role = "assistant";
     content = { type: "imageView", path: payload.path };
@@ -330,6 +324,7 @@ export const messageFromItem = (item, registerMedia) => {
   const text = visibleText(blocks);
   if (role === "user" && !isUsefulUserMessage(text, blocks)) return null;
   if (!blocks.length) return null;
+  const metadata = payload?.internal_chat_message_metadata_passthrough || {};
   const itemId = item.id || payload?.id || payload?.client_id || "";
   const idSource = itemId || `${role}:${JSON.stringify(blocks)}`;
   return {

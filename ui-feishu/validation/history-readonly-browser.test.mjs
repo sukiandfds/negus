@@ -23,9 +23,7 @@ page.on('pageerror', error => errors.push(error.message));
 await page.addInitScript(() => {
   const sources = [];
   window.EventSource = class { constructor() { sources.push(this); setTimeout(() => this.onopen?.(), 0); } close() {} };
-  window.emitHistory = event => sources.at(-1)?.onmessage?.({ data: JSON.stringify(event) });
-  window.historyConnectionCount = () => sources.length;
-  window.disconnectHistory = () => sources.at(-1)?.onerror?.();
+  window.emitHistory = event => sources.forEach(source => source.onmessage?.({ data: JSON.stringify(event) }));
 });
 // Observe the actual store without replacing its readers, commit or pagination behavior.
 await page.route('**/useProjectConversations.ts*', async route => {
@@ -173,49 +171,6 @@ try {
   assert.equal((await read()).goal.objective, 'fixture goal');
   assert.ok(timings.slice(crossVersionStart).find(t => t.fields.includes('details')).ms < 230);
   console.log('PASS slow version checks fit first-packet budget; cross-version continuation keeps goal and existing refresh reloads body');
-  const turnId = 'steer-live';
-  const text = '运行中同文追加';
-  const sentIds = [];
-  const write = (...entries) => fs.appendFile(f.file, entries.map(JSON.stringify).join('\n') + '\n');
-  await write({ type: 'event_msg', payload: { type: 'task_started', turn_id: turnId } });
-  f.execution.handleProtocolMessage({ method: 'turn/started', params: { threadId: f.id, turn: { id: turnId } } });
-  await page.evaluate(event => window.emitHistory(event), f.execution.getStatus(f.id));
-  await wait(async () => (await read()).executionStatus.active);
-  f.controls.steer = async (_thread, turn, message, _attachments, submissionId) => {
-    assert.equal(turn, turnId); assert.equal(message, text);
-    sentIds.push(submissionId);
-    const timestamp = new Date().toISOString();
-    await write({ type: 'response_item', timestamp, payload: { type: 'message', role: 'user', id: `msg-${submissionId}`,
-      content: [{ type: 'input_text', text }], internal_chat_message_metadata_passthrough: {
-        turn_id: turn, content_item_kinds: ['user.text'], content_item_metadata: [{ provenance: { type: 'user' } }],
-      } } }, { type: 'event_msg', timestamp, payload: { type: 'item_completed', turn_id: turn, completed_at_ms: Date.parse(timestamp),
-        item: { type: 'UserMessage', id: `item-${submissionId}`, client_id: submissionId, content: [{ type: 'text', text }] } } });
-    return {};
-  };
-  const seen = async count => {
-    await wait(async () => (await read()).session?.messages.filter(message => message.text === text && !message.id.startsWith('optimistic-')).length === count);
-    assert.equal(await bubble(text).count(), count);
-    assert.deepEqual((await read()).session.messages.filter(message => message.text === text).map(message => message.submissionId), sentIds);
-  };
-  for (const count of [1, 2]) {
-    await composer().fill(text);
-    const sent = page.waitForResponse(response => new URL(response.url()).pathname === '/api/session/message');
-    await page.getByRole('button', { name: '插入发送', exact: true }).click();
-    assert.equal((await sent).status(), 202);
-    await wait(() => sentIds.length === count);
-    await page.evaluate(event => window.emitHistory(event), { type: 'sessions_changed', threadId: f.id });
-    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-    await seen(count);
-  }
-  const connections = await page.evaluate(() => window.historyConnectionCount());
-  await page.evaluate(() => window.disconnectHistory());
-  await page.waitForFunction(previous => window.historyConnectionCount() > previous, connections);
-  await page.evaluate(() => window.emitHistory({ type: 'connected', eventId: 1, gap: true }));
-  await seen(2);
-  await page.reload();
-  await seen(2);
-  console.log('PASS active turn: one click yields one bubble, two equal sends have distinct IDs, reconnect and reload retain both');
-
   } else {
     assert.equal((await read()).contextStatus.lastSuccessfulSettings.reasoningEffort, 'high');
     console.log('PASS cold legacy A success / B final_answer then aborted displays A/model-a with A effort');
