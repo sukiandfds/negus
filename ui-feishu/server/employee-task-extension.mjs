@@ -1,3 +1,4 @@
+import { backgroundChecks, checkWindow } from '../../windows/server/status-panel/task-check.mjs';
 import { registerTaskThread, taskThreadOptions } from "../kernel/task-thread.mjs";
 import { startConversationThread, resumeConversationThread } from "../../windows/server/execution/protocol.mjs";
 import { containsSubmittedInput } from "../../windows/server/message-identity.mjs";
@@ -43,6 +44,13 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     return followupTask({ kernel, source, target, input, queue, execution, clientFor, providerForThread,
       actor: source.source?.actor || (source.agentId ? { id: source.agentId, name: registry.require(source.agentId).name } : null) });
   };
+  const checks = new Map();
+  const reports = await createTaskTools({ progressOnly: true, invoke: async (taskId,input) => {
+    const monitor=checks.get(taskId);
+    if(!monitor || input.action!=='progress' || !input.requestId || !input.text?.trim()) throw Error('后台任务未运行或缺少阶段结果');
+    await monitor.progress(input.requestId,input.text.trim());
+    return {reported:true};
+  }});
  const tools = await createTaskTools({ background: true, invoke: async (scope, input) => {
     const employeeScope = scope.startsWith('employee:');
     const ordinary = scope.startsWith('ordinary:');
@@ -113,7 +121,9 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       const requestKey = `handoff:${source.runtime.threadId}:${input.requestId}`;
       task = await kernel.enqueue({ ...handoff, kind: 'delegation', parentTaskId: source.id, requestKey });
     } else task = await kernel.delegate(source.id, handoff);
-    return taskStartupReceipt(kernel, task);
+    const receipt=await taskStartupReceipt(kernel, task);
+    if(ordinary && background && receipt.state==='running') receipt.nextStatusCheckAt=kernel.get(task.id)?.runtime?.panelCheck?.next;
+    return receipt;
   } });
   const runtime = createNativeTaskRuntime({ log, resolve: async (task, controls, { recovering }) => {
     const agentless = task.source?.kind === 'conversation' && !task.agentId;
@@ -148,10 +158,28 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     const taskInstructions = agentless
       ? conversationPrompt('', backgroundInstructions)
       : instructions(employee, task.background);
-    const options = taskThreadOptions(executionPolicy, taskInstructions, task.background ? backgroundToolConfig : tools.config(task.id), employee.model);
+    const panelTask = agentless && task.background;
+    const monitor = panelTask && backgroundChecks({
+      read:()=>kernel.get(task.id)?.runtime?.panelCheck,
+      save:panelCheck=>controls.checkpoint({panelCheck}),
+      probe:async()=>{
+        const turnId=kernel.get(task.id)?.runtime?.turnId;
+        const snapshot=await client.request('thread/read',{threadId,includeTurns:true});
+        const turn=snapshot.thread?.turns?.find(x=>x.id===turnId);
+        if(!turn)throw Error('未找到本次执行');
+        return turn.status;
+      },
+      notify:async(id,text)=>{
+        const receipt=await queue.enqueue({threadId:task.source.threadId,submissionId:'progress:'+task.id+':'+id,
+          stableDispatchId:'progress:'+task.id+':'+id,text:`[Negus任务阶段结果 ${task.id}]\n阶段结果：${text}\n请汇报此阶段结果。后台任务仍在继续，不要再次派发。`});
+        if(receipt.state==='failed')throw Error(receipt.error||'阶段结果投递失败');
+      }
+    });
+    const watch = monitor ? {onStarted:async()=>{checks.set(task.id,monitor);await monitor.start();},onFinished:()=>{monitor.close();checks.delete(task.id);reports.release(task.id);}} : {};
+    const options = taskThreadOptions(executionPolicy, taskInstructions, panelTask ? {...backgroundToolConfig,...reports.config(task.id)} : task.background ? backgroundToolConfig : tools.config(task.id), employee.model);
     if (recovering) {
       if (threadId) await register();
-      return { client, threadId };
+      return { client, threadId, ...watch };
     }
     if (controls.signal.aborted) return { client, threadId: threadId || 'cancelled-before-start', input: [] };
     if (threadId) {
@@ -171,7 +199,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     }
     await kernel.recordInput(task.id, { requestId: 'initial', submissionId: task.id, text: task.instructions,
       actor: task.source?.actor || (task.source?.agentId ? { id: task.source.agentId, name: registry.require(task.source.agentId).name } : null) });
-    return { client, threadId, input: [{ type: 'text', text: task.instructions, text_elements: [] }],
+    return { client, threadId, ...watch, ...(monitor?{startFields:()=>({panelCheck:{next:Date.now()+checkWindow}})}:{}), input: [{ type: 'text', text: task.instructions, text_elements: [] }],
       turnOptions: { cwd: employee.projectRoot, ...turnExecutionPolicy, developerInstructions: taskInstructions, additionalContext: employeeContext(employee.id && growthService?.getContext(employee.id)),
         clientUserMessageId: task.id, ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}) } };
   } });
@@ -428,11 +456,11 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       status: execution.getStatus(task.threadId).active ? execution.getStatus(task.threadId)
         : { ...execution.getStatus(task.threadId), active: !terminalStates.has(task.state), phase: task.state, label: task.state, detail: task.error || '' },
     }))],
-    tasks: publicTasks, deliveries: kernel.deliveries, cancelTask: kernel.cancel, reconcileTask: kernel.reconcile, retryDelivery: kernel.retryDelivery,
+    tasks: publicTasks, onTaskCommit: kernel.onTaskCommit, deliveries: kernel.deliveries, cancelTask: kernel.cancel, reconcileTask: kernel.reconcile, retryDelivery: kernel.retryDelivery,
     decorateTaskSession, decorateConversationSession, sourceActorFor, actorRevisionFor,
     providerForThread: threadId => conversationTasks().find(task => task.threadId === threadId)?.runtime.modelProviderId,
     registerTaskProvider: (id, provider) => taskProviders.set(id, provider),
     hasPendingWork: () => original.hasPendingWork() || kernel.hasPendingWork(),
-    close: async () => { closing = true; await kernel.close(); await tools.close(); await original.close(); },
+    close: async () => { closing = true; await kernel.close(); await reports.close(); await tools.close(); await original.close(); },
   };
 }

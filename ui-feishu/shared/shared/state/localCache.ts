@@ -64,7 +64,7 @@ export const createCachedResource = <T>(
             if (!valid(result)) throw new Error("Invalid cached resource response");
             const next = merge(result, snapshot.data);
             const data = JSON.stringify(next) === JSON.stringify(snapshot.data) ? snapshot.data! : next;
-            writeLocalCache(key, data);
+            if (data !== snapshot.data) writeLocalCache(key, data);
             publish({ data, refreshing: true, error: "" });
           } catch (reason) {
             if (queued) continue;

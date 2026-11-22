@@ -1,3 +1,4 @@
+import { capabilities, panelCommand } from '../status-panel/capabilities.mjs';
 export { terminalPhases } from "./protocol.mjs";
 
 const commandDetail = (item) => {
@@ -25,6 +26,9 @@ export const stateFromItem = (item) => {
     case "fileChange": return { phase: "fileChange", label: "Codex 正在修改文件" };
     case "mcpToolCall":
     case "dynamicToolCall": return { phase: "tool", label: "Codex 正在调用工具" };
+    case "enteredReviewMode": return { phase: "tool", label: "正在进行代码审查" };
+    case "exitedReviewMode": return { phase: "tool", label: "已结束代码审查" };
+    case "contextCompaction": return { phase: "tool", label: "正在压缩上下文" };
     case "webSearch": return { phase: "tool", label: "Codex 正在搜索资料" };
     case "agentMessage": return { phase: "responding", label: "Codex 正在回复" };
     default: return null;
@@ -50,6 +54,8 @@ export const activityFromItem = (item, completed = false) => {
     label: labels[item.type] || state.label,
     detail,
     completed,
+    ...(item.type==='commandExecution' ? {command:panelCommand(item.command)} : {}),
+    capabilities: capabilities(item.type, item.type === 'commandExecution' ? 'exec_command' : [item.server,item.tool].filter(Boolean).join('__'), {cmd:detail}),
     updatedAt: new Date().toISOString(),
   };
 };

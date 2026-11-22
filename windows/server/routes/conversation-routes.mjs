@@ -1,3 +1,4 @@
+import { statusPanelRoute } from '../status-panel/route.mjs';
 import { createConversationMessageRoutes } from "./conversation-message-routes.mjs";
 import { createConversationHistoryRoutes } from "./conversation-history-routes.mjs";
 import { createConversationSettingsRoutes } from "./conversation-settings-routes.mjs";
@@ -37,9 +38,9 @@ const publicUserInputRequest = (message) => {
 };
 
 export const createConversationRoutes = ({
-  conversations, execution, followUpQueue, contextManagement, media, submissionStore,
+  projectRoot, conversations, execution, followUpQueue, contextManagement, media, submissionStore,
   broadcast = () => {}, publishThreadEvent = (_threadId, event) => broadcast(event), agentConversationStore,
-  employeeRuntime, roomDirectory, modelProviders, agentTasks,
+  employeeRuntime, roomDirectory, modelProviders, agentTasks, readAutomations,
 }) => {
   const authorizeAgentThread = async ({ threadId, conversationId, allowGroup = false }) => {
     if (!agentConversationStore) return null;
@@ -103,6 +104,7 @@ export const createConversationRoutes = ({
 
   const context = { conversations, execution, followUpQueue, contextManagement, media, submissionStore, publishThreadEvent, agentConversationStore, employeeRuntime, roomDirectory, modelProviders, agentTasks, authorizeAgentThread, isEmployeeDirectBinding, sessionSource, readAgentSession, readOrdinarySession, publicUserInputRequest, publicAttachment };
   const routes = [
+    statusPanelRoute({ projectRoot, conversations, agentTasks, readAutomations, authorizeAgentThread }),
     createConversationMessageRoutes(context),
     createConversationHistoryRoutes(context),
     createConversationSettingsRoutes(context),

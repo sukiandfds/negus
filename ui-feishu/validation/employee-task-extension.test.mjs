@@ -217,6 +217,15 @@ test('ordinary assistant creates an explicit-provider task, follows up in place,
   assert.equal(starts[0].effort, 'high'); assert.equal(starts[0].clientUserMessageId, task.id);
   assert.equal(registrations[0].providerId, 'deepseek'); assert.equal(registrations[0].metadata.createdBy, 'assistant');
   assert.equal(bindings.length, 0); assert.equal(extension.tasks()[0].runtime.threadId, 'deepseek-thread');
+  assert.ok(task.nextStatusCheckAt >= Date.now()+295000 && task.nextStatusCheckAt <= Date.now()+300000);
+  const reporting = created[0].config['mcp_servers.negus_handoffs'].env;
+  assert.equal(reporting.NEGUS_PROGRESS_ONLY,'1');
+  const progressResponse = await fetch(reporting.NEGUS_HANDOFF_ENDPOINT, {method:'POST',
+    headers:{Authorization:'Bearer '+reporting.NEGUS_HANDOFF_TOKEN},
+    body:JSON.stringify({action:'progress',requestId:'first',text:'第一份证据已取得'})});
+  assert.equal(progressResponse.status,200);
+  assert.equal(extension.tasks()[0].runtime.panelCheck.text,'第一份证据已取得');
+  assert.ok(queued.some(item=>item.threadId==='source-thread' && item.text.includes('阶段结果：第一份证据已取得')));
   const initial = messageFromThreadItem(starts[0].turn.items[0]);
   const human = messageFromThreadItem({ id: 'human', type: 'userMessage', clientId: 'human-id', content: [{ type: 'text', text: '真人追加' }] });
   const decorated = extension.decorateTaskSession('deepseek-thread', { messages: [initial, human] }).messages;
@@ -224,8 +233,8 @@ test('ordinary assistant creates an explicit-provider task, follows up in place,
   assert.equal(decorated[1].authorName, undefined);
   starts[0].turn.status = 'completed'; starts[0].turn.items.push({ type: 'agentMessage', text: '完成' });
   listeners.forEach(callback => callback({ method: 'turn/completed', params: { threadId: 'deepseek-thread', turn: starts[0].turn } }));
-  await until(() => queued.some(item => item.threadId === 'source-thread'));
-  assert.equal(queued.filter(item => item.threadId === 'source-thread').length, 1);
+  await until(() => queued.some(item => item.threadId === 'source-thread' && item.text.startsWith('[Negus任务结果 ')));
+  assert.equal(queued.filter(item => item.threadId === 'source-thread' && item.text.startsWith('[Negus任务结果 ')).length, 1);
   const report = messageFromThreadItem(threads.get('source-thread').turns[0].items.at(-1));
   assert.equal(extension.decorateTaskSession('source-thread', { messages: [report] }).messages[0].authorName, 'DeepSeek Flash');
   const followup = await call({ action: 'followup', taskId: task.id, requestId: 'request-2', instructions: '补充证据' });

@@ -302,6 +302,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
     await routesLoaded;
     return (await historyFor(owner(id))).getSessionResumeInfo(id, { readOnly: true, historyFile: routes[id]?.resumeInfo?.path });
   };
+  service.getPanelHistoryInfo = historyInfo;
   service.findSession = async (id, source, options = {}) => {
     await routesLoaded;
     return decorate(await (await historyFor(owner(id))).findSession(id, source, { ...options, ...(routes[id]?.resumeInfo?.path ? { historyFile: routes[id].resumeInfo.path } : {}) }));

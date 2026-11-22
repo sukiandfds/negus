@@ -24,7 +24,7 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
     let resolveResult;
     const completion = new Promise(resolve => { resolveResult = resolve; });
     const started = () => announcePromise ||= (async () => {
-      await controls.started({ threadId, turnId });
+      await controls.started({ threadId, turnId, ...prepared.startFields?.() });
       await prepared.onStarted?.();
     })();
     const ignored = new Set(recovering ? task.runtime.previousTurnIds || [] : previousTurnIds);
@@ -142,6 +142,7 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
       }
       return await completion;
     } finally {
+      prepared.onFinished?.();
       clearInterval(healthTimer);
       unsubscribe?.(); unsubscribeHealth?.(); controls.signal.removeEventListener('abort', aborted); active.delete(task.id);
     }

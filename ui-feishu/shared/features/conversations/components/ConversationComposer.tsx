@@ -52,6 +52,7 @@ export interface ConversationComposerHandle {
 
 interface ConversationComposerProps {
   ref?: Ref<ConversationComposerHandle>;
+  usageControl?: ReactNode;
   desktopContext?: ReactNode;
   connected: boolean;
   selected: boolean;
@@ -91,7 +92,7 @@ interface ConversationComposerProps {
 
 export function ConversationComposer({
   ref,
-  desktopContext,
+  desktopContext, usageControl,
   connected, selected, archived, status, contextStatus,
   shownModel, shownEffort,
   models, modelsLoading, modelChanging, modelError,
@@ -452,7 +453,7 @@ export function ConversationComposer({
           </div>
           <span className={styles.spacer} />
           <div className={styles.settingsControls}>
-            <ModelSettingsControl
+            <ModelSettingsControl usageControl={usageControl}
               currentModel={shownModel}
               currentEffort={shownEffort}
               models={models}

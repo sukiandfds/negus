@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import {IntelligenceEfficiencyControl} from '../../intelligence-efficiency/components/IntelligenceEfficiencyControl';
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Pencil, RefreshCw } from "lucide-react";
 import { ChannelManager, readChannels, useChannelCatalog } from "./ChannelManager";
 import type { CodexModel } from "../model/types";
@@ -12,6 +13,7 @@ import { refreshConfiguredModels, refreshModelCatalog, type CatalogResult } from
 import styles from "./ModelSelect.module.css";
 
 interface ModelSettingsControlProps {
+  usageControl?: ReactNode;
   currentModel: string;
   currentEffort: string;
   models: CodexModel[];
@@ -24,7 +26,7 @@ interface ModelSettingsControlProps {
 }
 
 export function ModelSettingsControl({
-  currentModel, currentEffort, models, disabled, loading, changing, error,
+  usageControl, currentModel, currentEffort, models, disabled, loading, changing, error,
   onModelChange, onReasoningEffortChange,
 }: ModelSettingsControlProps) {
   const [open, setOpen] = useState(false);
@@ -81,7 +83,7 @@ export function ModelSettingsControl({
       if (!rootRef.current?.contains(event.target as Node)) closeMenu();
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeMenu();
+      if (event.key === "Escape" && !rootRef.current?.querySelector('[role="dialog"] [role="dialog"]')) closeMenu();
     };
     document.addEventListener("pointerdown", closeOutside);
     document.addEventListener("keydown", closeOnEscape);
@@ -107,7 +109,7 @@ export function ModelSettingsControl({
       {open ? (
         <div className={styles.settingsMenu} role="dialog" aria-label="模型设置">
           <div className={styles.settingRow}>
-            <span>模型</span>
+            <div className={styles.modelPicker}>模型<IntelligenceEfficiencyControl/></div>
             <div className={styles.modelPicker}>
             <ModelSelect
               currentModel={currentModel}
@@ -143,7 +145,7 @@ export function ModelSettingsControl({
           <div className={styles.menuHint} role="status">下一轮发送时生效，不影响正在运行的任务。</div>
           {refreshError || error ? <small className={styles.menuError} role="alert">{refreshError || error}</small> : null}
           <div className={styles.settingRow}>
-            <span>配置</span>
+            <div className={styles.modelPicker}>配置{usageControl}</div>
             <div className={styles.modelPicker}>
               <select className={styles.select} aria-label="配置" value={channelOptions.some((entry) => canonical(channelProviderId(entry)) === selectedProvider) ? selectedProvider : ""} disabled={disabled || busy || !channelOptions.length} onChange={(event) => void stageChannel(event.target.value)}>
                 {channelOptions.some((entry) => canonical(channelProviderId(entry)) === selectedProvider) ? null : <option value="">{current?.providerDisplayName || "选择配置"}</option>}

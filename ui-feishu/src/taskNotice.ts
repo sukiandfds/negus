@@ -4,6 +4,7 @@ const legacyHeader = `Negus 后台任务通知（已有任务，请勿重新委�
 const header = new RegExp(`^(?:${resultHeader}|${legacyHeader})`);
 
 export function isInternalTaskResult(text: string, preview = false): boolean {
+  if (new RegExp(`^\\[Negus任务阶段结果 ${uuid}\\]\\s+阶段结果：`).test(text)) return true;
   const value = preview && !header.test(text) ? text.replace(/^[^：\n]{1,40}：/, '') : text;
   if (!header.test(value)) return false;
   if (preview) return true;

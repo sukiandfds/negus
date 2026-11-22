@@ -25,6 +25,8 @@ export type ExecutionPhase =
   | "unknown";
 
 export interface ExecutionActivity {
+  command?: string;
+  capabilities?: {kind:string; label:string}[];
   id: string;
   phase: ExecutionPhase;
   label: string;

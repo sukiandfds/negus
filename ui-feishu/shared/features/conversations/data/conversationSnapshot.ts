@@ -96,7 +96,7 @@ let restored: ConversationSnapshot | null = null;
 let database: Promise<IDBDatabase> | undefined;
 let writes = Promise.resolve(true);
 const persisted = new Map<string, string>();
-const openDatabase = () => database ||= new Promise<IDBDatabase>((resolve, reject) => {
+export const openConversationCache = () => database ||= new Promise<IDBDatabase>((resolve, reject) => {
   const request = indexedDB.open('negus-conversations', 1);
   request.onupgradeneeded = () => {
     request.result.createObjectStore('threads', { keyPath: 'threadId' });
@@ -113,7 +113,7 @@ export const readConversationSnapshot = () => restored || readLegacySnapshot();
 export const restoreConversationCache = async (currentOnly = false) => {
   if (typeof indexedDB === 'undefined') return;
   try {
-    const db = await openDatabase();
+    const db = await openConversationCache();
     const saved = await new Promise<ConversationSnapshot | null>((resolve, reject) => {
       const tx = db.transaction(['threads', 'metadata'], 'readonly');
       const metadata = tx.objectStore('metadata').get('snapshot');
@@ -173,7 +173,7 @@ export const writeConversationSnapshot = ({ selectedId, sessions, session, cache
   restored = snapshot;
   writes = writes.catch(() => false).then(async () => {
     try {
-      const db = await openDatabase();
+      const db = await openConversationCache();
       const all = [...(snapshot.session ? [{ savedAt, session: snapshot.session, isPartial: snapshot.isPartial }] : []), ...(snapshot.recentSessions || [])];
       const changes = all.map(entry => ({ threadId: entry.session.threadId,
         entry: { ...entry, savedAt: '' }, view: snapshot.presentation?.[entry.session.threadId] }))

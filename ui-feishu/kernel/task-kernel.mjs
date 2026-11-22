@@ -18,6 +18,7 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
   try { state = JSON.parse(await fs.readFile(stateFile, 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   if (state.version !== 1 || !Array.isArray(state.tasks) || !Array.isArray(state.deliveries)) throw new Error('任务记录格式错误');
+  const commitListeners = new Set();
   let writes = Promise.resolve();
   let closed = false;
   let scheduled = false;
@@ -48,6 +49,7 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
         await fs.rename(temporary, stateFile);
       } catch (error) { await fs.rm(temporary, { force: true }).catch(() => {}); throw error; }
       state = next;
+      for(const notify of commitListeners)notify();
       return copy(result);
     });
     writes = work.catch(() => {});
@@ -357,6 +359,7 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
   schedule();
   return {
     enqueue, delegate, waitForStart, recordInput, recordProgress, acceptInput, cancelInput, linkInput, attributeFollowup, cancel,
+    onTaskCommit: notify => {commitListeners.add(notify);return ()=>commitListeners.delete(notify);},
     list: () => copy(state.tasks), deliveries: () => copy(state.deliveries), get: id => copy(find(id)),
     hasPendingWork: () => state.tasks.some(task => !terminalStates.has(task.state)),
     retryDelivery: async id => { await mutate(data => {

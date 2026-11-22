@@ -21,10 +21,11 @@ const elapsedText = (durationMs: number) => {
 
 export function ExecutionTimeline({
   status,
-  contextStatus,
+  contextStatus, compactSummary = false,
 }: {
   status: ExecutionStatus;
   contextStatus: ContextStatus;
+  compactSummary?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -53,6 +54,8 @@ export function ExecutionTimeline({
   const compacting = contextStatus.threadId === status.threadId && contextStatus.phase === "compacting";
   if (compacting && status.phase === "completed") return null;
   const label = compacting ? "正在压缩上下文" : status.phase === "submitted" ? "连接状态" : status.label.replace(/^Codex\s*/u, "");
+
+  if (compactSummary) return <p role="status">{label}{elapsed ? " · "+elapsed : ""}</p>;
 
   return (
     <section className={styles.timeline} aria-label="Codex 工作过程">

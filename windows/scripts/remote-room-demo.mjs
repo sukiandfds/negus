@@ -117,6 +117,7 @@ const conversationStoreOptions = {
   projectRoot,
   projectRoots,
   autoTitleStateFile: path.join(projectRoot, "runtime", "conversation-display-titles.json"),
+  onTopicChanged: (threadId,version) => realtime.broadcast({type:'topic_updated',threadId,version}),
   onAutoTitleChanged: (threadId) => realtime.broadcast({ type: "sessions_changed", threadId }),
   attachmentContent,
   registerMedia: media.register,

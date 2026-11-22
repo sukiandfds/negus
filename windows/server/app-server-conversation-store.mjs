@@ -1,3 +1,4 @@
+import { topicWriter } from './status-panel/topics.mjs';
 import { startConversationThread, resumeConversationThread, startTurn, steerTurn, interruptTurn } from "./execution/protocol.mjs";
 import { receiptMatches } from "./message-identity.mjs";
 import { latestRolloutFile, openRollout } from './rollout-file.mjs';
@@ -234,7 +235,7 @@ export const createAppServerConversationStore = ({
   projectRoot, projectRoots = [projectRoot], registerMedia, onProtocolMessage, onSubmitted, onFailed, onHealthState,
   goalAttachmentRoot = path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "attachments"),
   autoTitleStateFile = "", onAutoTitleChanged,
-  autoTitleEnabled = true,
+  autoTitleEnabled = true, onTopicChanged,
   historyFallback,
   nativeSubagents,
   attachmentContent,
@@ -242,6 +243,7 @@ export const createAppServerConversationStore = ({
   client = createAppServerClient(),
   supervision = {},
 }) => {
+  const topics = topicWriter(projectRoot,onTopicChanged);
   const isAllowedProjectRoot = (cwd) => {
     if (!cwd) return false;
     try {
@@ -312,6 +314,7 @@ export const createAppServerConversationStore = ({
       if (method === "turn/completed") autoTitleThread.resolve(autoTitleThread.text);
       return;
     }
+    if (method === 'turn/completed' && threadId) void topics.finish(threadId, params.turn?.id || params.turnId, params.turn?.status || 'completed');
     if (threadId) {
       const current = activeRuns.get(threadId) || {};
       const eventTurnId = String(params.turnId || params.turn?.id || params.item?.turnId || params.item?.turn?.id || "");
@@ -767,6 +770,7 @@ export const createAppServerConversationStore = ({
     const thread = await getThread(threadId);
     const belongsToProject = isAllowedProjectRoot(thread?.cwd);
     let runtimeOptions = await threadRuntimeOptions(thread);
+    const managed = Boolean(runtimeOptions);
     if (!belongsToProject && !runtimeOptions) throw foreignThreadError();
     if (belongsToProject && !runtimeOptions) {
       let permissions = {};
@@ -778,7 +782,7 @@ export const createAppServerConversationStore = ({
       };
     }
     threadCache.set(thread.id, thread);
-    return { thread, runtimeOptions };
+    return { thread, runtimeOptions, managed };
   };
 
   const resumeThread = async (threadId) => {
@@ -835,16 +839,18 @@ export const createAppServerConversationStore = ({
     onSubmitted?.(threadId);
     try {
       const runtime = await resumeThread(threadId);
-      const { runtimeOptions } = await ensureProjectThread(threadId);
+      const { runtimeOptions, managed } = await ensureProjectThread(threadId);
+      const topic = managed ? null : await topics.prepare(threadId);
       const result = await startTurn(client, await withDeveloperInstructions({
         threadId,
         input: await inputFromAttachments(text, attachments, attachmentContent),
         ...(submissionId ? { clientUserMessageId: submissionId } : {}),
         ...(runtimeOptions?.turn || {}),
-        additionalContext: { ...modelContext(settings.model || runtime?.model), ...runtimeOptions?.turn?.additionalContext },
+        additionalContext: { ...(topic && { "negus.topics": topic.context, "negus.topicRecall":topic.recall }), ...modelContext(settings.model || runtime?.model), ...runtimeOptions?.turn?.additionalContext },
         ...(settings.model ? { model: settings.model } : {}),
         ...(settings.reasoningEffort ? { effort: settings.reasoningEffort } : {}),
       }));
+      if(topic) topics.bind(threadId,result?.turn?.id,topic.draft);
       freshThreadRuntime.delete(threadId);
       const cached = threadCache.get(threadId);
       if (cached && !cached.preview) {

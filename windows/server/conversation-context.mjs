@@ -26,12 +26,14 @@ export function conversationContext(root) {
         if ((previous?.employee || "") === employee) delete additionalContext["negus.employee"];
         else if (!employee) additionalContext["negus.employee"] = { kind:"application", value:"此前的员工补充上下文已清空。" };
       }
+      const topicRecall = additionalContext["negus.topicRecall"]?.value;
+      if (topicRecall && topicRecall === previous?.topicRecall) delete additionalContext["negus.topicRecall"];
       const model = additionalContext["negus.model"]?.value;
       if (model && previous?.model === model) delete additionalContext["negus.model"];
       const { additionalContext: _, ...rest } = params;
       const result = await submit(method, Object.keys(additionalContext).length ? { ...rest, additionalContext } : rest);
       revisions.delete(id);
-      revisions.set(id, { profile: version, hasProfile: Boolean(content), employee, model });
+      revisions.set(id, { profile: version, hasProfile: Boolean(content), employee, model, topicRecall });
       if (revisions.size > 4096) revisions.delete(revisions.keys().next().value);
       return result;
     },

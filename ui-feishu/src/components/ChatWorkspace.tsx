@@ -1,3 +1,4 @@
+import { UsageSummaryControl } from '../../shared/features/usage-monitor/components/UsageSummaryControl';
 import { isOptimisticId } from "../../../windows/server/message-identity.mjs";
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -114,8 +115,9 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
       setForwardError(error instanceof Error ? error.message : '无法打开目标对话');
     } finally { setForwardBusy(false); }
   };
+  const chatAvatar = <Avatar name={selectedName} projectRoot={projectRoot} agentId={agentId} active={c.executionStatus.active && c.executionStatus.phase !== 'submitted'} size="small" />;
   return <section className="chat-workspace" aria-label="聊天工作区">
-      <ChatHeader avatar={<Avatar name={selectedName} projectRoot={projectRoot} agentId={agentId} active={c.executionStatus.active && c.executionStatus.phase !== 'submitted'} size="small" />}
+      <ChatHeader avatar={agentId ? chatAvatar : <button type="button" className="sp-avatar-button" aria-label="查看助手状态" aria-expanded={details} onClick={()=>setDetails(!details)}>{chatAvatar}</button>}
         title={<><ConversationOrigin origin={selected?.origin} nativeSubagent={selected?.nativeSubagent} /><span>{agentId ? selectedName : selected?.name || c.session?.title || selectedName}</span></>}
         subtitle={selected?.label || conversationStatus(c.executionStatus, c.contextStatus.threadId === c.selectedId ? c.contextStatus.phase : undefined, projectRoot || '未关联')}
         onBack={onBack} tab={tab} onTabChange={setTab} fileCount={files.length}
@@ -149,7 +151,7 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
             {selectedIds && <MessageSelectionBar selectedCount={selectedIds.size} onForward={() => { setForwardError(''); setForwardDialog(true); }} onCancel={() => setSelection(null)} />}
             {forwardError && !forwardDialog ? <p role="alert">{forwardError}</p> : null}
             {[...composers.current.entries()].map(([key, entry]) => <div key={key} style={{ display: key === composerKey && !c.session?.readOnly ? undefined : 'none' }}>
-              <ConversationComposer ref={instance => { if (instance) composerRefs.current.set(key, instance); else composerRefs.current.delete(key); }} connected={entry.state.connected} selected={Boolean(entry.state.selectedId)} archived={Boolean(entry.state.session?.archived)}
+              <ConversationComposer usageControl={<UsageSummaryControl currentModel={entry.state.visibleModel} snapshot={usage.snapshot} loading={usage.loading} error={usage.error} onRefresh={()=>void usage.refresh(true)} />} ref={instance => { if (instance) composerRefs.current.set(key, instance); else composerRefs.current.delete(key); }} connected={entry.state.connected} selected={Boolean(entry.state.selectedId)} archived={Boolean(entry.state.session?.archived)}
               status={entry.state.executionStatus} contextStatus={entry.state.contextStatus}
               shownModel={entry.state.visibleModel} shownEffort={entry.state.visibleEffort} models={entry.state.models} modelsLoading={entry.state.modelsLoading} modelChanging={entry.state.modelChanging} modelError={entry.state.modelError}
               selectedModelUnavailable={entry.state.selectedModelUnavailable} sendPreparationError={entry.state.sendPreparationError} onPrepareSend={entry.state.prepareSend} onSend={entry.state.sendMessage} onQueue={entry.state.queueMessage} queueing={entry.state.queueBusy}
@@ -160,7 +162,7 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
             </div>)}
           </div>
         </div>
-        {details && <ConversationDetails c={c} usage={usage} agentId={agentId} selectedName={selectedName} onClose={() => setDetails(false)} />}
+        {details && <ConversationDetails c={c} agentId={agentId} selectedName={selectedName} onClose={() => setDetails(false)} />}
       </div>
       <ForwardMessageDialog open={forwardDialog} targets={targets} sourceId={c.selectedId} busy={forwardBusy} error={forwardError}
         onClose={() => setForwardDialog(false)} onForward={target => void forward(target)} />

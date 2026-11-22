@@ -1,3 +1,4 @@
+import { panelSignals } from './status-panel/resources.mjs';
 import { createGroupCreationRoute } from "../../ui-feishu/server/group-extension.mjs";
 import { createTaskRoutes } from "../../ui-feishu/server/task-routes.mjs";
 import { createConnectionRoutes } from './routes/connection-routes.mjs';
@@ -28,6 +29,7 @@ export const createRequestHandler = ({
   employeeRuntime, employeeProjectDirectory, employeeGrowth, modelProviders, projectActivityIndex, projectStatus, agentTasks,
 }) => {
   const readAutomations = createDesktopAutomationReader();
+  const connectPanel=panelSignals({readAutomations,agentTasks});
   const maintenance = createMaintenanceGate({
     projectRoot,
     isBusy: () => {
@@ -56,12 +58,12 @@ export const createRequestHandler = ({
       employeeRuntime,
     }),
     ...(employeeRuntime ? [createEmployeeRoutes({ employeeRuntime })] : []),
-    ...(employeeProjectDirectory ? [createEmployeeProjectDirectoryRoutes({ directory: employeeProjectDirectory })] : []),
+    ...(employeeProjectDirectory ? [createEmployeeProjectDirectoryRoutes({ directory: employeeProjectDirectory, projectRoot })] : []),
     ...(employeeGrowth ? [createEmployeeGrowthRoutes({ growth: employeeGrowth })] : []),
     ...(projectActivityIndex ? [createProjectReviewRoutes({ activityIndex: projectActivityIndex, projectStatus })] : []),
     createGroupRoutes({ groupRoom, roomDirectory, media, multiAgent, multiAgentDirectory, webOutputs }),
     createFollowUpQueueRoutes({ queue: followUpQueue, media }),
-    createConversationRoutes({
+    createConversationRoutes({ projectRoot, readAutomations,
       conversations, execution, followUpQueue, contextManagement, media, submissionStore: submissions,
       broadcast: realtime.broadcast,
       publishThreadEvent: execution.publishThreadEvent,
@@ -72,7 +74,7 @@ export const createRequestHandler = ({
       modelProviders,
     }),
     createUsageRoutes({ fushengUsage }),
-    createSystemRoutes({ token, project, projectRoot, device, observerPort, media, realtime, modelProviders, fushengUsage }),
+    createSystemRoutes({ token, project, projectRoot, device, observerPort, media, realtime:{...realtime,connect(req,res){realtime.connect(req,res);connectPanel(req,res);}}, modelProviders, fushengUsage }),
   ];
 
   return async (request, response) => {
