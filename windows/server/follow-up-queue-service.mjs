@@ -1,8 +1,10 @@
+import { assertTurnReady, publishSubmitted, submitThreadInput } from "./conversation-input.mjs";
 import { createFollowUpQueueStore } from "./follow-up-queue-store.mjs";
 
 export const createFollowUpQueueService = ({
   stateFile,
   execution,
+  isCompacting = () => false,
   conversations,
   media,
   publishThreadEvent,
@@ -50,32 +52,20 @@ export const createFollowUpQueueService = ({
     }
     const submissionId = item.dispatchSubmissionId || item.submissionId;
     const sentAt = item.sentAt || new Date().toISOString();
-    publishThreadEvent(threadId, {
-      type: "user_message_submitted",
-      threadId,
-      submissionId,
-      queueSubmissionId: item.submissionId,
-      messageId: `optimistic-${submissionId}`,
-      text: item.text,
-      attachments: item.attachments,
-      createdAt: sentAt,
-      ...(actorFor(item) || {}),
-    });
+    publishSubmitted(publishThreadEvent, { threadId, submissionId, text: item.text, attachments: item.attachments,
+      createdAt: sentAt, queueSubmissionId: item.submissionId, ...(actorFor(item) || {}) });
     try {
-      if (status.active) await conversations.steerMessage(threadId, status.turnId, item.text, attachments, submissionId);
-      else {
-        if (item.modelSettings?.model) {
-          const settings = item.modelSettings;
-          const result = await conversations.updateModel(threadId, settings.model, {
-            allowProviderSwitch: true, reasoningEffort: settings.reasoningEffort, allowRetired: true,
-          });
-          if (result?.threadId && result.threadId !== threadId) throw new Error("排队任务的会话发生变化，消息未发送");
-          if (settings.reasoningEffort && result?.reasoningEffort !== settings.reasoningEffort) {
-            await conversations.updateReasoningEffort(threadId, settings.reasoningEffort);
-          }
+      if (!status.active && item.modelSettings?.model) {
+        const settings = item.modelSettings;
+        const result = await conversations.updateModel(threadId, settings.model, {
+          allowProviderSwitch: true, reasoningEffort: settings.reasoningEffort, allowRetired: true,
+        });
+        if (result?.threadId && result.threadId !== threadId) throw new Error("排队任务的会话发生变化，消息未发送");
+        if (settings.reasoningEffort && result?.reasoningEffort !== settings.reasoningEffort) {
+          await conversations.updateReasoningEffort(threadId, settings.reasoningEffort);
         }
-        await conversations.sendMessage(threadId, item.text, attachments, submissionId);
       }
+      await submitThreadInput(conversations, status, threadId, item.text, attachments, submissionId);
       store.complete(threadId, item.id);
       await store.flush();
       broadcastQueue(threadId, "completed");
@@ -89,7 +79,7 @@ export const createFollowUpQueueService = ({
 
   const dispatchNext = (threadId) => withThreadLock(threadId, async () => {
     const status = execution.getStatus(threadId);
-    if (status.active || ["failed", "interrupted", "systemError", "waitingOnApproval", "waitingOnUserInput"].includes(status.phase)) {
+    if (isCompacting(threadId) || status.active || ["failed", "interrupted", "systemError", "waitingOnApproval", "waitingOnUserInput"].includes(status.phase)) {
       return null;
     }
     const item = store.claimNext(threadId);
@@ -151,9 +141,9 @@ export const createFollowUpQueueService = ({
 
   const sendNow = async (threadId, itemId) => withThreadLock(threadId, async () => {
     const status = execution.getStatus(threadId);
-    if (status.active && !status.turnId) {
-      throw Object.assign(new Error("Codex 正在启动当前任务，请稍后再试"), { statusCode: 409 });
-    }
+    const waiting = isCompacting(threadId) && store.find(threadId, itemId);
+    if (waiting) return publicItem(waiting);
+    assertTurnReady(status);
     const item = store.claim(threadId, itemId);
     if (!item) throw Object.assign(new Error("该指令不存在或正在发送"), { statusCode: 409 });
     return publicItem(await dispatchClaimed(threadId, item, status));

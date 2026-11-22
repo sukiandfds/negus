@@ -1,3 +1,4 @@
+import { assertSameRequest } from "./request-fingerprint.mjs";
 import { visibleConversationMessages, renderTranscript } from "./conversation-summary-service.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -75,7 +76,7 @@ export const createConversationForwardService = ({
     const fingerprint = JSON.stringify({ sourceThreadId, targetThreadId });
     const existing = pending.get(requestId);
     if (existing) {
-      if (existing.fingerprint !== fingerprint) throw fail("请求编号已用于其他转发", 409);
+      assertSameRequest(existing, fingerprint, "请求编号已用于其他转发");
       return existing.promise;
     }
     const promise = (async () => {
@@ -83,7 +84,7 @@ export const createConversationForwardService = ({
       const receiptFile = path.join(stateRoot, requestId + ".json");
       const stored = await readJsonFile(receiptFile);
       if (stored) {
-        if (stored.fingerprint !== fingerprint) throw fail("请求编号已用于其他转发", 409);
+        assertSameRequest(stored, fingerprint, "请求编号已用于其他转发");
         if (stored.result) return stored.result;
         throw fail("这次转发曾在提交中中断，请先检查目标对话或队列，避免重复发送", 409);
       }

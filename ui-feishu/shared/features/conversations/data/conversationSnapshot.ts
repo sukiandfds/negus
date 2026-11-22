@@ -1,3 +1,4 @@
+import { isOptimisticId } from "../../../../../windows/server/message-identity.mjs";
 import type { ConversationPresentation, SessionDetail, SessionSummary } from "../model/types";
 import { readStorage, writeStorage } from "../../../shared/state/storage";
 
@@ -46,8 +47,8 @@ const validSnapshot = (value: ConversationSnapshot | null): ConversationSnapshot
   const sanitized = new Set<string>();
   const cleanSession = (session: SessionDetail) => {
     const messages = session.messages.filter(message => !message.id.startsWith("stream-")
-      && (!message.id.startsWith("optimistic-") || message.deliveryState === "failed" || message.deliveryState === "occupied"));
-    if (messages.length === session.messages.length && !messages.some(message => message.id.startsWith("optimistic-"))) return session;
+      && (!isOptimisticId(message.id) || message.deliveryState === "failed" || message.deliveryState === "occupied"));
+    if (messages.length === session.messages.length && !messages.some(message => isOptimisticId(message.id))) return session;
     sanitized.add(session.threadId);
     return { ...session, messages, sourceSignature: undefined };
   };

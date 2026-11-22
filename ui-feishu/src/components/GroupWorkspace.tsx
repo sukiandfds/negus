@@ -162,7 +162,7 @@ export function GroupWorkspace({ room, projectName, forwardTargets = [], onOpenT
             {selectedIds ? <MessageSelectionBar selectedCount={selectedIds.size} onForward={() => { setForwardError(''); setForwardDialog(true); }} onCancel={() => setSelection(null)} /> : null}
             <GroupComposer copy={feishuGroupComposerCopy} disabled={group.sending} busy={snapshot.agents.some(agent => agent.active)} error={group.error} notice={group.notice} quote={quote} editingMessage={editingMessage}
               onClearQuote={() => setQuote(null)} onCancelEdit={() => { setEditingMessage(null); setQuote(null); }}
-              onSend={async (text, attachments, replyTo) => { const accepted = await group.send(text, attachments, replyTo); if (accepted) { setSent(version => version + 1); setQuote(null); } return accepted; }}
+              onSend={async (text, attachments, replyTo, finishUpload) => { const accepted = await group.send(text, attachments, replyTo, finishUpload); if (accepted) { setSent(version => version + 1); setQuote(null); } return accepted; }}
               onEdit={async (messageId, text) => {
                 const target = editingMessage?.id === messageId ? editingMessage : null;
                 if (!target) return false;

@@ -3,7 +3,8 @@ import { JumpToLatest } from "../../../components/JumpToLatest/JumpToLatest";
 import { useReturnToBottom } from "../../../components/JumpToLatest/useReturnToBottom";
 import { emptyStatus } from "../../context-management/hooks/useContextManagement";
 import { Message } from "../../conversations/components/ConversationView";
-import type { ContentBlock, SessionMessage } from "../../conversations/model/types";
+import { deliveryPatch, messageContentBlocks } from "../../conversations/state/optimisticMessage";
+import type { SessionMessage } from "../../conversations/model/types";
 import type { ExecutionStatus } from "../../execution/model/types";
 import type { GroupMessage, GroupMessageHistory, GroupStreamingMessage } from "../model/types";
 import { avatarColor } from "../../../shared/presentation/avatarColor";
@@ -35,30 +36,17 @@ const timelineMessageKey = (message: GroupMessage) => {
   return `work:${message.workId}:final`;
 };
 
-const attachmentBlocks = (message: GroupMessage): ContentBlock[] => (message.attachments || []).map((file) => {
-  const type = file.mimeType.startsWith("image/") ? "image"
-    : file.mimeType.startsWith("audio/") ? "audio"
-      : file.mimeType.startsWith("video/") ? "video"
-        : "file";
-  return type === "file"
-    ? { id: file.id, type, source: file.url, name: file.name, file }
-    : { id: file.id, type, source: file.url, file };
-});
-
 export const groupSessionMessage = (message: GroupMessage, currentMemberId: string): SessionMessage => ({
   id: message.id,
+  submissionId: message.clientMessageId || undefined,
   role: message.type === "human" && message.authorId === currentMemberId ? "user" : "assistant",
   authorId: message.authorId,
   authorName: message.authorName,
   text: message.text,
-  blocks: [
-    ...(message.text ? [{ id: `${message.id}-text`, type: "markdown" as const, text: message.text }] : []),
-    ...attachmentBlocks(message),
-  ],
+  blocks: messageContentBlocks(message.id, message.text, message.attachments || []),
   createdAt: message.createdAt,
   sequence: message.sequence,
-  deliveryState: message.type === "human" && message.pending ? "sending" : message.type === "human" && message.failure ? "failed" : undefined,
-  deliveryError: message.failure ? "发送失败" : undefined,
+  ...deliveryPatch(message.type === "human" && message.pending ? "sending" : message.type === "human" && message.failure ? "failed" : undefined, message.failure ? message.deliveryError || "发送失败" : undefined),
 });
 
 const TimelineMessage = memo(function TimelineMessage({

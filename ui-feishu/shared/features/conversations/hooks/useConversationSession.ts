@@ -1,8 +1,9 @@
+import { isOptimisticId } from "../../../../../windows/server/message-identity.mjs";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { readInitialConversationState, type InitialConversationState } from '../state/initialConversation';
 import { restoreConversationCache } from '../data/conversationSnapshot';
 import { conversationApi } from '../data/conversationApi';
-import { mergeOlderMessages } from '../state/conversationMerge';
+import { mergeMessageList } from '../state/conversationMerge';
 import { isPendingThread } from '../model/pendingThread';
 import type { SessionDetail, SessionMessage } from '../model/types';
 import { ConversationStore } from '../state/conversationStore';
@@ -49,7 +50,7 @@ export function useConversationSession(initial: InitialConversationState) {
     olderRequests.current.set(id, controller);
     setLoadingOlder(true);
     try {
-      const first = cached.messages.find(message => !message.id.startsWith('optimistic-'));
+      const first = cached.messages.find(message => !isOptimisticId(message.id));
       const localHistory = !cached.conversationKind || cached.conversationKind === 'task';
       const beforeMessageId = localHistory ? first?.itemId || first?.id : undefined;
       const response = await conversationApi.session(id, { beforeMessageId, cursor: beforeMessageId ? undefined : cached.nextCursor || undefined,
@@ -57,7 +58,7 @@ export function useConversationSession(initial: InitialConversationState) {
       if (controller.signal.aborted || !('messages' in response)) return false;
       const current = store.get(id, false).session;
       if (current) store.update(id, { session: { ...current, hasMore: response.hasMore, nextBefore: response.nextBefore,
-        nextCursor: response.nextCursor, messages: mergeOlderMessages(response.messages, current.messages) } });
+        nextCursor: response.nextCursor, messages: mergeMessageList(response.messages, current.messages) } });
       return true;
     } catch (reason) {
       if (!controller.signal.aborted) { store.errors.set(id, presentConversationError(reason)); store.notify(); }

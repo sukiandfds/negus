@@ -1,3 +1,4 @@
+import { sameMessage } from "./message-identity.mjs";
 import { randomUUID } from "node:crypto";
 import { loadEmployeeDefinitions } from "./employee-definitions.mjs";
 import { mentionedAgentIds } from "./multi-agent/agent-routing.mjs";
@@ -297,10 +298,8 @@ export const createGroupRoomStore = async ({ stateFile, project, projectId = "",
     const cleanClientMessageId = cleanText(clientMessageId, 80) || null;
     const cleanWorkId = cleanText(workId, 160) || null;
     const cleanItemId = phase === "commentary" ? cleanText(itemId, 160) || null : null;
-    const existing = messages.find((message) => (
-      (cleanClientMessageId && message.authorId === cleanAuthorId && message.clientMessageId === cleanClientMessageId)
-      || (cleanWorkId && message.workId === cleanWorkId && (message.itemId || null) === cleanItemId)
-    ));
+    const identity = { clientMessageId: cleanClientMessageId, authorId: cleanAuthorId, workId: cleanWorkId, itemId: cleanItemId };
+    const existing = messages.find(message => sameMessage(message, identity));
     if (existing && !replaceExisting) return { message: existing, created: false };
     const files = (Array.isArray(attachments) ? attachments : []).slice(0, 6).map((file) => ({
       id: cleanText(file.id, 80),

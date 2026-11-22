@@ -1,3 +1,6 @@
+import { switchingTo, switchedTo, settleSwitch } from "../model/providerSwitch";
+import { terminalPhases } from "../../../../../windows/server/execution/protocol.mjs";
+import { optimisticMessageId, isOptimisticId } from "../../../../../windows/server/message-identity.mjs";
 import { moveSentImages } from "../../attachments/data/sentImagePreviews";
 import { currentConversationId } from "../../../shared/api/conversationScope";
 import { canonicalChannelId } from "../../models/components/ChannelManager";
@@ -9,13 +12,13 @@ import type { RealtimeRecoveryReason } from "../../../shared/model/realtime";
 import { useContextManagement } from "../../context-management/hooks/useContextManagement";
 import { executionApi } from "../../execution/data/executionApi";
 import { useCodexExecution } from "../../execution/hooks/useCodexExecution";
-import type { ProjectEvent, UserInputRequest } from "../../execution/model/types";
+import type { ProjectEvent } from "../../execution/model/types";
 import { useModels } from "../../models/hooks/useModels";
 import { readModelCatalog } from "../../models/data/modelCatalogCache";
 import { providerIdForModel, providerIdOf, readModelDefaults, resolveVisibleEffort, resolveVisibleModel, useModelDefaults } from "../../models/model/modelDefaults";
 import { conversationApi } from "../data/conversationApi";
 import { useConversationEvents } from "../realtime/useConversationEvents";
-import { createOptimisticMessage, createSubmissionId } from "../state/optimisticMessage";
+import { deliveryPatch, messageContentBlocks, queuedTranscriptMessage, beginOptimisticSend, createOptimisticMessage, createSubmissionId } from "../state/optimisticMessage";
 import { readInitialConversationState } from "../state/initialConversation";
 import { useConversationCatalog } from "./useConversationCatalog";
 import { presentConversationError, useConversationSession } from "./useConversationSession";
@@ -52,7 +55,7 @@ export function useProjectConversations() {
   const serverThreadId = isPendingThread(selection.selectedId) ? "" : selection.selectedId;
 
   const execution = useCodexExecution(serverThreadId, selection.store);
-  const followUpQueue = useFollowUpQueue(serverThreadId, selection.store);
+  const followUpQueue = useFollowUpQueue(selection.selectedId, selection.store);
   const goal = useThreadGoal(serverThreadId, selection.store);
   const [forkingMessageId, setForkingMessageId] = useState("");
   const [editingMessage, setEditingMessage] = useState<SessionMessage | null>(null);
@@ -71,15 +74,12 @@ export function useProjectConversations() {
     requestId: string;
   } | null>(null);
   const switchResponse = useRef<((id: string | false) => void) | null>(null);
+  const continueChoice = useRef("");
   const switchInFlight = useRef(false);
   const [providerSwitchBusy, setProviderSwitchBusy] = useState(false);
   const [providerSwitchError, setProviderSwitchError] = useState("");
   const [sendPreparationError, setSendPreparationError] = useState<{ threadId: string; message: string } | null>(null);
   const userInputRequest = selection.store.get(serverThreadId).userInputRequest;
-  const setUserInputRequest = useCallback((value: UserInputRequest | null | ((current: UserInputRequest | null) => UserInputRequest | null)) => {
-    const id = selection.selectedIdRef.current;
-    selection.store.update(id, { userInputRequest: typeof value === 'function' ? value(selection.store.get(id).userInputRequest) : value });
-  }, [selection.store]);
   const [userInputBusy, setUserInputBusy] = useState(false);
   const [userInputError, setUserInputError] = useState("");
   const reconcilingSubmissionsRef = useRef(new Set<string>());
@@ -137,16 +137,16 @@ export function useProjectConversations() {
     && !modelManager.models.some(entry => entry.model === model
       || (canonicalChannelId(providerIdOf(entry)) === canonicalChannelId(providerIdForModel(modelManager.models, model))
         && entry.model.split("::").at(-1) === model.split("::").at(-1)));
-  const commitSettings = async (threadId: string, model: string, reasoningEffort: string, scope = conversationScope) => {
+  const commitSettings = async (threadId: string, model: string, reasoningEffort: string, scope = conversationScope, continueSubmission = "") => {
     if (!model) return { threadId };
     if (unavailableModel(model)) throw new Error("所选模型已下架，请换一个模型");
-    const result = await modelApi.update(threadId, model, undefined, reasoningEffort, scope);
+    const result = await modelApi.update(threadId, model, undefined, reasoningEffort, scope, continueSubmission);
     const target = result.threadId || threadId;
     if (reasoningEffort && result.reasoningEffort !== reasoningEffort) {
       await modelApi.updateReasoningEffort(target, reasoningEffort, undefined, scope);
     }
     contextManagement.markSubmitted(target, { model, reasoningEffort });
-    return { threadId: target };
+    return { threadId: target, switched: result.switched, provider: result.modelProvider };
   };
   const stageUnrecordedModel = async (threadId: string) => {
     if (selection.selectedIdRef.current !== threadId) throw new Error("对话已切换，操作已取消");
@@ -314,10 +314,8 @@ export function useProjectConversations() {
         if (result?.status === "accepted" || result?.status === "failed") {
           selection.store.changeMessages(threadId, messages => messages.map(message => message.id === messageId ? {
             ...message,
-            ...(message.modelSwitchState === "switching" ? { modelSwitchState: result.status === "failed" ? "failed" as const : undefined } : {}),
-            deliveryState: result.status === "failed" ? "failed" : undefined,
-            ...(result.error ? { deliveryError: result.error, deliveryState: /active writer/iu.test(result.error) ? "occupied" : "failed" } : {}),
-            ...(result.turnId ? { turnId: result.turnId } : {}),
+            ...settleSwitch(message, result.status === "failed"),
+            ...deliveryPatch(result.status === "failed" ? "failed" : undefined, result.error, result.turnId),
           } : message));
           if (result.status === "accepted") {
             catalog.updateSessionSummary({ threadId, updatedAt: new Date().toISOString() });
@@ -344,30 +342,32 @@ export function useProjectConversations() {
     submittingThreads.current.add(requestedThreadId);
     const settings = { model: retryModel || visibleModel, reasoningEffort: visibleEffort };
     const current = selection.store.get(requestedThreadId);
-    const provider = current.session?.conversationKind === "direct" && current.session.modelProviderId;
+    const continued = continueChoice.current === requestedThreadId || Boolean(retryModel && current.session?.conversationKind !== "direct");
+    continueChoice.current = "";
+    const provider = (continued || current.session?.conversationKind === "direct") && (current.session?.modelProviderId || currentProvider());
     const switchingProvider = Boolean(provider && settings.model && !current.executionStatus.active
       && canonicalChannelId(provider) !== providerOf(settings.model));
     const scope = conversationScope;
     let threadId = requestedThreadId;
     const submissionId = existingSubmissionId || createSubmissionId();
-    let optimisticMessage: SessionMessage = {
-      ...createOptimisticMessage(messageText, attachments, submissionId), deliveryState: finishUpload ? "sending" : "preparing",
-      ...(switchingProvider ? { modelSwitch: settings.model, modelSwitchState: "switching" } : {}),
-    };
     if (replacingMessageId) {
       moveSentImages(current.session?.messages.find(item => item.id === replacingMessageId)?.submissionId, submissionId);
       selection.removeOptimisticMessage(threadId, replacingMessageId);
     }
     reconciledSubmissionsRef.current.delete(submissionId);
-    selection.addOptimisticMessage(threadId, optimisticMessage);
+    let optimisticMessage = beginOptimisticSend(messageText, attachments, message => {
+      const row: SessionMessage = { ...message, deliveryState: finishUpload ? "sending" : "preparing",
+        ...(switchingProvider ? switchingTo(settings.model) : retryModel ? switchedTo(retryModel) : {}) };
+      selection.addOptimisticMessage(threadId, row);
+      return row;
+    }, submissionId);
     setLocalSendVersion(value => value + 1);
     const updateDelivery = (deliveryState: "pending" | "failed" | "occupied" | undefined, turnId?: string, deliveryError?: string) => {
       if (deliveryState && reconciledSubmissionsRef.current.has(submissionId)) return;
       const message = selection.store.get(threadId).session?.messages.find(item => item.id === optimisticMessage.id);
       selection.updateOptimisticMessage(threadId, optimisticMessage.id, {
-        deliveryState, deliveryError, ...(turnId ? { turnId } : {}),
-        ...((message?.modelSwitchState || (!message && optimisticMessage.modelSwitchState)) === "switching" && deliveryState !== "pending"
-          ? { modelSwitchState: deliveryState ? "failed" as const : undefined } : {}),
+        ...deliveryPatch(deliveryState, deliveryError, turnId),
+        ...(deliveryState !== "pending" ? settleSwitch(message || optimisticMessage, Boolean(deliveryState)) : {}),
       });
     };
     try {
@@ -382,13 +382,17 @@ export function useProjectConversations() {
       }
       if (finishUpload) {
         attachments = await finishUpload(submissionId);
-        optimisticMessage = { ...optimisticMessage, blocks: createOptimisticMessage(messageText, attachments, submissionId).blocks };
+        optimisticMessage = { ...optimisticMessage, blocks: messageContentBlocks(optimisticMessage.id, messageText, attachments) };
         selection.updateOptimisticMessage(threadId, optimisticMessage.id, { blocks: optimisticMessage.blocks });
         finishUpload = undefined;
       }
       if ((!preparedThread || preparedThread === selection.selectedId) && !selection.store.get(threadId).executionStatus.active) {
         try {
-          const result = await commitSettings(threadId, settings.model, settings.reasoningEffort, scope);
+          const result = await commitSettings(threadId, settings.model, settings.reasoningEffort, scope, continued && (switchingProvider || retryModel) ? submissionId : "");
+          if (result.switched && result.provider) {
+            selection.updateCurrentSession(threadId, session => ({ ...session, modelProviderId: result.provider! }));
+            selection.updateOptimisticMessage(threadId, optimisticMessage.id, switchedTo(settings.model));
+          }
           if (result.threadId !== threadId) {
             selection.removeOptimisticMessage(threadId, optimisticMessage.id);
             const previous = threadId;
@@ -404,7 +408,7 @@ export function useProjectConversations() {
       const attempt = await execution.sendMessage(messageText, attachments.map(file => file.id), submissionId, threadId, scope);
       if (!attempt || attempt.outcome === "failed") {
         const reason = attempt?.error || "发送失败";
-        updateDelivery(/already has an active writer/iu.test(reason) ? "occupied" : "failed", undefined, reason);
+        updateDelivery("failed", undefined, reason);
         return false;
       }
       if (attempt.outcome === "uncertain") {
@@ -427,7 +431,7 @@ export function useProjectConversations() {
         throw error;
       }
       const reason = error instanceof Error ? error.message : String(error);
-      updateDelivery(/already has an active writer/iu.test(reason) ? "occupied" : "failed", undefined, reason);
+      updateDelivery("failed", undefined, reason);
       return false;
     } finally {
       submittingThreads.current.delete(requestedThreadId);
@@ -440,7 +444,7 @@ export function useProjectConversations() {
     const threadId = selection.selectedId;
     if (!threadId || isPendingThread(threadId)) return;
     for (const message of selection.session?.messages || []) {
-      if (message.id.startsWith("optimistic-") && message.submissionId && (!message.deliveryState || message.deliveryState === "pending")) {
+      if (isOptimisticId(message.id) && message.submissionId && (!message.deliveryState || message.deliveryState === "pending")) {
         void reconcileMessage(threadId, message.id, message.submissionId, conversationScope);
       }
     }
@@ -450,7 +454,7 @@ export function useProjectConversations() {
     if (!message.submissionId || retryingMessageId) return false;
     setRetryingMessageId(message.id);
     try {
-      return await sendDirectMessage(message.text, attachmentsFromMessage(message), message.deliveryState === "failed" ? "" : message.submissionId, message.id, message.modelSwitchState ? message.modelSwitch : undefined);
+      return await sendDirectMessage(message.text, attachmentsFromMessage(message), message.deliveryState === "failed" ? "" : message.submissionId, message.id, message.modelSwitch);
     } finally {
       setRetryingMessageId("");
     }
@@ -547,13 +551,11 @@ export function useProjectConversations() {
     }
   }, [catalog.forkSession, execution.status.active, execution.status.turnId, selection.selectedIdRef, selection.session?.archived]);
 
-  const queueMessage = useCallback(async (text: string, attachments: MediaFile[] = []) => {
+  const queueMessage = useCallback(async (text: string, attachments: MediaFile[] = [], finishUpload?: (id: string) => Promise<MediaFile[]>) => {
     const messageText = text.trim();
     if ((!messageText && !attachments.length) || !await prepareSend(true)) return false;
     const settings = { model: visibleModel, reasoningEffort: visibleEffort };
-    const threadId = await waitForThread(selection.selectedId);
-    if (!threadId) return false;
-    return followUpQueue.enqueue(messageText, attachments, threadId, settings);
+    return followUpQueue.enqueue(messageText, attachments, selection.selectedId, settings, finishUpload, waitForThread);
   }, [followUpQueue.enqueue, selection.selectedId, visibleModel, visibleEffort, waitForThread, prepareSend]);
 
   const openNewSession = useCallback((projectRoot = "", requestedModel = "", requestedProviderId = "", options: { deferred?: boolean; onCreated?: (threadId: string) => void } = {}) => {
@@ -685,6 +687,16 @@ export function useProjectConversations() {
     return true;
   };
 
+  const continueProviderSwitch = () => {
+    if (!providerSwitch || switchInFlight.current || !switchResponse.current) return;
+    if (selection.selectedIdRef.current !== providerSwitch.threadId) { cancelProviderSwitch(); return; }
+    continueChoice.current = providerSwitch.threadId;
+    switchResponse.current(providerSwitch.threadId);
+    switchResponse.current = null;
+    setProviderSwitch(null);
+    setProviderSwitchError("");
+  };
+
   const confirmProviderSwitch = async () => {
     const request = providerSwitch;
     if (!request || switchInFlight.current || !switchResponse.current) return false;
@@ -724,7 +736,7 @@ export function useProjectConversations() {
     execution.handleEvent(event);
     if (event.type === 'execution_status' && event.threadId !== selection.selectedIdRef.current) selection.store.update(event.threadId, { executionStatus: event }, true);
     if (event.type === 'execution_status' && event.threadId !== selection.selectedIdRef.current
-      && ['completed', 'failed', 'interrupted', 'systemError'].includes(event.phase)
+      && terminalPhases.has(event.phase)
       && (previousStatus?.phase !== event.phase || previousStatus?.turnId !== event.turnId)) {
       selection.store.freshBodies.add(event.threadId);
       selection.store.invalidate(event.threadId, false);
@@ -735,22 +747,21 @@ export function useProjectConversations() {
     if (event.type === "context_status") contextManagement.handleEvent(event);
     if (event.type === "employee_model_switched") {
       selection.updateCurrentSession(event.threadId, current => ({ ...current, modelProviderId: event.modelProviderId }));
-      selection.updateOptimisticMessage(event.threadId, `optimistic-${event.submissionId}`, { modelSwitch: event.model, modelSwitchState: undefined });
+      selection.updateOptimisticMessage(event.threadId, optimisticMessageId(event.submissionId), switchedTo(event.model));
     }
     if (event.type === "user_message_accepted") {
       if (acceptedQueueItem) {
-        const message = createOptimisticMessage(acceptedQueueItem.text, acceptedQueueItem.attachments, event.submissionId, acceptedQueueItem.sentAt || undefined);
-        selection.addOptimisticMessage(event.threadId, { ...message, turnId: event.turnId, serverTimestamp: Boolean(acceptedQueueItem.sentAt),
-          authorId: acceptedQueueItem.authorId, authorName: acceptedQueueItem.authorName, displaySourceAgentId: acceptedQueueItem.displaySourceAgentId });
+        const message = queuedTranscriptMessage(acceptedQueueItem, event.submissionId);
+        selection.addOptimisticMessage(event.threadId, { ...message, turnId: event.turnId, serverTimestamp: Boolean(acceptedQueueItem.sentAt) });
       }
       reconciledSubmissionsRef.current.add(event.submissionId);
-      selection.updateOptimisticMessage(event.threadId, `optimistic-${event.submissionId}`, { deliveryState: undefined, deliveryError: undefined, turnId: event.turnId, protocolTurnId: event.turnId, ...(event.modelSwitch ? { modelSwitch: event.modelSwitch, modelSwitchState: undefined } : {}) });
+      selection.updateOptimisticMessage(event.threadId, optimisticMessageId(event.submissionId), { ...deliveryPatch(undefined, undefined, event.turnId), protocolTurnId: event.turnId, ...(event.modelSwitch ? switchedTo(event.modelSwitch) : {}) });
     }
     if (event.type === "execution_status" && event.phase === "completed"
       && (previousStatus?.phase !== event.phase || previousStatus?.turnId !== event.turnId)) contextManagement.completeSettings(event.threadId);
     if (event.type === "user_message_submitted") {
       if (event.queueSubmissionId) selection.store.linkQueuedMessage(event.threadId, event.queueSubmissionId, event.submissionId);
-      selection.updateOptimisticMessage(event.threadId, event.messageId || `optimistic-${event.submissionId}`, { createdAt: event.createdAt, serverTimestamp: true });
+      selection.updateOptimisticMessage(event.threadId, event.messageId || optimisticMessageId(event.submissionId), { createdAt: event.createdAt, serverTimestamp: true });
       const generated = createOptimisticMessage(
         event.text,
         event.attachments || [],
@@ -834,6 +845,7 @@ export function useProjectConversations() {
     providerSwitchBusy,
     providerSwitchError,
     confirmProviderSwitch,
+    continueProviderSwitch,
     cancelProviderSwitch,
     forkFromMessage,
     forkingMessageId,

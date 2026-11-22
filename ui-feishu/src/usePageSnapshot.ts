@@ -4,7 +4,6 @@ import { writeConversationSnapshot } from '../shared/features/conversations/data
 import { isPendingThread } from '../shared/features/conversations/model/pendingThread';
 import { readConversationBatches } from '../shared/features/conversations/state/conversationBatch';
 import { terminalExecution, type ThreadSnapshot } from '../shared/features/conversations/state/conversationStore';
-import { readModelDefaults, resolveVisibleModel, resolveVisibleEffort } from '../shared/features/models/model/modelDefaults';
 import { buildConversationDirectory, mergeDirectoryProjects, snapshotStatusByThread } from './conversationDirectory';
 import { latestMessagePreview } from './taskNotice';
 
@@ -202,7 +201,7 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
     }
   }, [store, shown.projects, store.getSnapshot()]);
   const states = [...store.committed];
-  const display = { ...c, ...selected, session, executionStatus, goal: c.goal || selected.goal, userInputRequest: c.userInputRequest,
+  const display = { ...c, ...selected, queueItems: c.queueItems, session, executionStatus, goal: c.goal || selected.goal, userInputRequest: c.userInputRequest,
     streamingText: executionStatus.streamingText || '', commentaryText: executionStatus.commentary || '',
     syncing,
     project: shown.project, sessions: c.sessions.map(summary => summary.threadId === c.selectedId

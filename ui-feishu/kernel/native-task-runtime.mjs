@@ -1,7 +1,6 @@
-const terminal = new Set(['completed', 'failed', 'interrupted']);
-const resultFrom = turn => ({ status: turn.status,
-  text: (turn.items || []).filter(item => item.type === 'agentMessage' && item.phase !== 'commentary').map(item => item.text || '').join('\n'),
-  error: turn.error?.message || '' });
+import { turnCompletion, turnOutcomes as terminal, startTurn, interruptTurn } from "../../windows/server/execution/protocol.mjs";
+const resultFrom = turn => ({ ...turnCompletion(turn, "unknown"),
+  text: (turn.items || []).filter(item => item.type === 'agentMessage' && item.phase !== 'commentary').map(item => item.text || '').join('\n') });
 
 // Shared protocol adapter. resolve supplies the existing provider/client and channel context.
 export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () => {}, healthIntervalMs = 10000 }) {
@@ -33,7 +32,7 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
     const interrupt = async () => {
       if (ended || !turnId || interrupting) return;
       interrupting = true;
-      try { await client.request('turn/interrupt', { threadId, turnId }); }
+      try { await interruptTurn(client, threadId, turnId); }
       catch (error) { interrupting = false; trace({ event: 'native_interrupt_failed', taskId: task.id }); throw error; }
     };
     const queue = operation => {
@@ -126,7 +125,7 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
         await controls.checkpoint({ threadId, starting: true, registrationPending: false, previousTurnIds });
         startRequested = true;
         try {
-          const response = await client.request('turn/start', { ...turnOptions, threadId, input });
+          const response = await startTurn(client, { ...turnOptions, threadId, input });
           if (!response?.turn?.id) throw Error('运行时没有返回执行编号');
           turnId ||= response.turn.id;
           await started();

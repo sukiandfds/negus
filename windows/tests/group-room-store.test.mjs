@@ -65,6 +65,29 @@ test("restores attachment-only group messages", async (t) => {
   await restored.close();
 });
 
+test("updates a public status in place without adding history rows", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "negus-group-status-"));
+  const stateFile = path.join(directory, "group-room.json");
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const events = [];
+  const room = await createGroupRoomStore({ stateFile, project: "negus", broadcast: event => events.push(event) });
+  const input = { type: "agent", authorId: "developer", authorName: "技术研发", agentId: "developer",
+    workId: "work-1", itemId: "public-status", phase: "commentary",
+    text: "正在执行", preserveText: true };
+  const created = await room.addMessageWithStatus(input);
+  const updated = await room.addMessageWithStatus({ ...input, text: "最终交付", replaceExisting: true });
+  assert.equal(created.created, true);
+  assert.equal(updated.created, false);
+  assert.equal(updated.updated, true);
+  assert.equal(updated.message.id, created.message.id);
+  assert.equal(updated.message.sequence, created.message.sequence);
+  assert.equal(updated.message.text, "最终交付");
+  assert.equal(room.snapshot().messages.length, 1);
+  assert.equal(events.filter(event => event.type === "group_message_created").length, 1);
+  assert.equal(events.filter(event => event.type === "group_message_updated").length, 1);
+  await room.close();
+});
+
 test("keeps full history and returns date and cursor pages", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "negus-group-history-"));
   const stateFile = path.join(directory, "group-room.json");

@@ -11,6 +11,11 @@ import { createEmployeeGrowthStore } from '../../windows/server/employee-growth-
 import { createEmployeeGrowthService } from '../../windows/server/employee-growth-service.mjs';
 import { createPendingAgentMessage } from '../shared/features/group-chat/data/groupMessageState.ts';
 const until = async check => { const deadline = Date.now() + 4000; while (!check()) { if (Date.now() > deadline) assert.fail('condition timed out'); await new Promise(resolve => setTimeout(resolve, 5)); } };
+const untilSlow = async check => { const deadline = Date.now() + 20000; while (!check()) { if (Date.now() > deadline) assert.fail('condition timed out'); await new Promise(resolve => setTimeout(resolve, 10)); } };
+const selectedAgent = agentId => async ({ members }) => ({
+  agentIds: members.some(member => member.id === agentId) ? [agentId] : [members[0].id],
+  selection: { model: 'deepseek-flash', modelProviderId: 'deepseek', reasoningEffort: 'low', durationMs: 1 },
+});
 
 test('群任务开始事件携带员工中文名并保留缺失时回退', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-group-started-name-'));
@@ -33,7 +38,7 @@ test('群任务开始事件携带员工中文名并保留缺失时回退', async
     },
   };
   const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root,
-    appServerClient: client, broadcast: event => events.push(event) });
+    appServerClient: client, broadcast: event => events.push(event), selectGroupAgent: selectedAgent('manager') });
   t.after(async () => { await service.close(); await room.close(); await fs.rm(root, { recursive: true, force: true }); });
   await service.receive({ requestId: 'name-test', agentIds: [],
     message: { type: 'human', authorId: 'user', authorName: '用户', text: '请处理', attachments: [] } });
@@ -56,24 +61,348 @@ test('群任务开始事件携带员工中文名并保留缺失时回退', async
 test('群聊自然语言不广播，明确点名优先', async () => {
   const members = [{ id: 'manager', name: '运营管理' }, { id: 'dev', name: '技术研发' }, { id: 'risk', name: '风控' }];
   for (const [text, expected] of [['大家好', ['manager']], ['大家看看这个需求', ['manager']], ['@技术研发 请看', ['dev']], ['@技术研发 @风控 请看', ['dev', 'risk']]]) {
-    const result = await routeMessage({ text, members, explicitIds: mentionedAgentIds(text, members), receptionId: 'manager', allowBroadcast: false });
+    const result = await routeMessage({ text, members, explicitIds: mentionedAgentIds(text, members), receptionId: 'manager',
+      select: async () => 'manager' });
     assert.deepEqual(result.agentIds, expected);
   }
+});
+
+test('后台选人按职责唤醒员工，直接回复保持本人身份并覆盖单人多人追问失败和幂等', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-group-selector-chain-'));
+  const room = await createGroupRoomStore({ stateFile: path.join(root, 'room.json'), roomId: 'room', project: '测试', agentDefinitions: [
+    { id: 'manager', name: '运营管理', responsibility: '整体协调与汇总' },
+    { id: 'developer', name: '技术研发', responsibility: '代码实现、接口与验证' },
+    { id: 'reviewer', name: '风控质量', responsibility: '缺陷、风险与验收' },
+  ] });
+  const listeners = new Set();
+  const threads = new Map();
+  const turns = [];
+  const selections = [];
+  let failSelection = false;
+  const emit = (method, threadId, turn, extra = {}) => listeners.forEach(callback => callback({
+    method, params: { threadId, turnId: turn?.id, turn, ...extra },
+  }));
+  const client = {
+    subscribe(callback) { listeners.add(callback); return () => listeners.delete(callback); },
+    async request(method, params) {
+      if (method === 'thread/start') {
+        const thread = { id: `thread-${threads.size}`, turns: [], config: params.config };
+        threads.set(thread.id, thread);
+        return { thread };
+      }
+      const thread = threads.get(params.threadId);
+      if (method === 'thread/read' || method === 'thread/resume') return { thread };
+      if (method === 'turn/start') {
+        const turn = { id: `turn-${turns.length}`, status: 'inProgress', items: [] };
+        thread.turns.push(turn);
+        turns.push({ threadId: thread.id, turn });
+        queueMicrotask(() => emit('turn/started', thread.id, turn));
+        return { turn };
+      }
+      return {};
+    },
+  };
+  const complete = (entry, text) => {
+    entry.turn.status = 'completed';
+    entry.turn.items = [{ type: 'agentMessage', text }];
+    emit('item/completed', entry.threadId, entry.turn, { item: entry.turn.items[0] });
+    emit('turn/completed', entry.threadId, entry.turn);
+  };
+  const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root, appServerClient: client,
+    selectGroupAgent: async input => {
+      selections.push(input);
+      if (failSelection) throw Error('selector unavailable');
+      const ids = input.text.includes('技术研发') && input.text.includes('风控质量')
+        ? ['developer', 'reviewer'] : ['developer'];
+      return { agentIds: ids, selection: { model: 'deepseek-flash', modelProviderId: 'deepseek',
+        reasoningEffort: 'low', durationMs: 5 } };
+    } });
+  t.after(async () => { await service.close(); await room.close(); await fs.rm(root, { recursive: true, force: true }); });
+  const send = (requestId, text, replyTo = undefined, agentIds = []) => service.receive({ requestId, agentIds,
+    message: { type: 'human', authorId: 'u', authorName: '用户', text, attachments: [], ...(replyTo ? { replyTo } : {}) } });
+  const waitDelivered = async count => until(() => service.deliveries().filter(item => item.state === 'delivered').length >= count);
+
+  const first = await send('single', '检查接口实现');
+  assert.equal((await send('single', '检查接口实现')).message.id, first.message.id);
+  await until(() => turns.length === 1);
+  assert.equal(selections.length, 1);
+  assert.equal(service.tasks()[0].agentId, 'developer');
+  assert.equal(service.tasks()[0].source.routing.reason, 'selected');
+  assert.equal(service.tasks()[0].source.routing.selection.reasoningEffort, 'low');
+  complete(turns[0], '接口检查完成');
+  await waitDelivered(1);
+  const singleReply = room.snapshot().messages.find(message => message.text === '接口检查完成');
+  assert.equal(singleReply.agentId, 'developer');
+  assert.equal(singleReply.authorName, '技术研发');
+  assert.equal(service.tasks().some(task => task.agentId === 'manager'), false);
+
+  await send('multiple', '请技术研发和风控质量分别回答');
+  await until(() => turns.length === 3);
+  assert.deepEqual(selections.at(-1).members.map(member => member.id), ['manager', 'developer', 'reviewer']);
+  assert.deepEqual(service.tasks().filter(task => task.source.messageId === room.snapshot().messages.findLast(message => message.text === '请技术研发和风控质量分别回答').id)
+    .map(task => task.agentId).sort(), ['developer', 'reviewer']);
+  complete(turns[1], '技术侧公开答复');
+  complete(turns[2], '风控侧公开答复');
+  await waitDelivered(3);
+  assert.equal(room.snapshot().messages.find(message => message.text === '技术侧公开答复').agentId, 'developer');
+  assert.equal(room.snapshot().messages.find(message => message.text === '风控侧公开答复').agentId, 'reviewer');
+
+  const callsBeforeQuote = selections.length;
+  await send('quote', '继续说明这个结论', { id: singleReply.id });
+  await until(() => turns.length === 4);
+  assert.equal(selections.length, callsBeforeQuote);
+  assert.equal(service.tasks().findLast(task => task.source.messageId !== first.message.id).agentId, 'developer');
+  complete(turns[3], '引用追问完成');
+  await waitDelivered(4);
+
+  await send('followup', '再补充一下刚才的接口风险');
+  await until(() => turns.length === 5);
+  assert.match(JSON.stringify(selections.at(-1).context), /接口检查完成/);
+  complete(turns[4], '上下文追问完成');
+  await waitDelivered(5);
+
+  const callsBeforeQuestion = selections.length;
+  await send('short-question', '？');
+  await until(() => turns.length === 6);
+  assert.equal(selections.length, callsBeforeQuestion + 1);
+  assert.match(JSON.stringify(selections.at(-1).context), /上下文追问完成/);
+  assert.equal(service.tasks().find(task => task.source.messageId === room.snapshot().messages
+    .findLast(message => message.text === '？').id).agentId, 'developer');
+  complete(turns[5], '短问号由上下文员工回答');
+  await waitDelivered(6);
+
+  const callsBeforeTarget = selections.length;
+  const structuredTarget = await send('structured-target', '大家都出来说句话', undefined, ['reviewer']);
+  await until(() => turns.length === 7);
+  assert.equal(selections.length, callsBeforeTarget);
+  assert.equal(service.tasks().find(task => task.source.messageId === structuredTarget.message.id).agentId, 'reviewer');
+  complete(turns[6], '显式员工目标回答');
+  await waitDelivered(7);
+
+  const callsBeforeReply = selections.length;
+  const reviewerReply = room.snapshot().messages.find(message => message.text === '显式员工目标回答');
+  await send('structured-reply', '大家都出来说句话', { id: reviewerReply.id });
+  await until(() => turns.length === 8);
+  assert.equal(selections.length, callsBeforeReply);
+  assert.equal(service.tasks().find(task => task.source.messageId === room.snapshot().messages
+    .findLast(message => message.text === '大家都出来说句话').id).agentId, 'reviewer');
+  complete(turns[7], '引用员工回答');
+  await waitDelivered(8);
+
+  const taskCount = service.tasks().length;
+  const turnCount = turns.length;
+  failSelection = true;
+  await send('failure', '看一下这个');
+  await until(() => room.snapshot().messages.some(message => message.text.includes('直接 @具体员工')));
+  assert.equal(selections.at(-1).text, '看一下这个');
+  assert.equal(service.tasks().length, taskCount);
+  assert.equal(turns.length, turnCount);
+  const failureMessage = room.snapshot().messages.find(message => message.text.includes('直接 @具体员工'));
+  assert.equal(failureMessage.type, 'system');
+  assert.equal(room.snapshot().messages.some(message => message.authorId === 'manager' && message.text.includes('看一下这个')), false);
+  await untilSlow(() => !service.hasPendingWork() && service.deliveries().every(item => item.state === 'delivered'));
+});
+
+test('生产装配默认通过无工具 DeepSeek Flash Low 选择员工并从原员工身份发布', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-group-default-selector-'));
+  const room = await createGroupRoomStore({ stateFile: path.join(root, 'room.json'), roomId: 'room', project: '测试', agentDefinitions: [
+    { id: 'manager', name: '运营管理', responsibility: '整体协调与汇总' },
+    { id: 'developer', name: '技术研发', responsibility: '代码实现、接口与验证' },
+  ] });
+  const listeners = new Set();
+  const threads = new Map();
+  const calls = [];
+  const completions = [];
+  const emit = (method, threadId, turn, extra = {}) => listeners.forEach(callback => callback({
+    method, params: { threadId, turnId: turn?.id, turn, ...extra },
+  }));
+  const client = {
+    subscribe(callback) { listeners.add(callback); return () => listeners.delete(callback); },
+    async request(method, params, options) {
+      calls.push({ method, params, options });
+      if (method === 'thread/start') {
+        const thread = { id: `thread-${threads.size}`, turns: [], config: params.config, ephemeral: params.ephemeral };
+        threads.set(thread.id, thread);
+        return { thread };
+      }
+      const thread = threads.get(params.threadId);
+      if (method === 'thread/read' || method === 'thread/resume') return { thread };
+      if (method === 'turn/start') {
+        const turn = { id: `turn-${calls.length}`, status: 'inProgress', items: [] };
+        thread.turns.push(turn);
+        queueMicrotask(() => {
+          emit('turn/started', thread.id, turn);
+          if (thread.ephemeral) {
+            const item = { type: 'agentMessage', text: '{"agentIds":["developer"]}' };
+            emit('item/completed', thread.id, turn, { item });
+            turn.status = 'completed';
+            turn.items = [item];
+            emit('turn/completed', thread.id, turn);
+          }
+        });
+        return { turn };
+      }
+      return {};
+    },
+  };
+  const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root, appServerClient: client,
+    modelProviders: {
+      providers: () => [{ id: 'deepseek', displayName: 'DeepSeek', defaultModel: 'deepseek-flash',
+        models: [{ model: 'deepseek-flash' }] }],
+      isProviderConfigured: async () => true,
+      resolveRoute: ({ modelProviderId, model }) => ({ modelProviderId, model }),
+      getClient: async () => client,
+      refreshShared: async () => {},
+      complete: async (route, options) => {
+        completions.push({ route, options });
+        return { text: '{"agentIds":["developer"]}', modelProviderId: route.modelProviderId,
+          model: route.model, reasoningEffort: route.reasoningEffort };
+      },
+    },
+    queue: { list: () => [], enqueue: async () => {}, release: async () => {}, remove: async () => {} },
+    execution: { getStatus: () => ({ active: false }) } });
+  t.after(async () => { await service.close(); await room.close(); await fs.rm(root, { recursive: true, force: true }); });
+  await service.receive({ requestId: 'default-selector', agentIds: [],
+    message: { type: 'human', authorId: 'u', authorName: '用户', text: '检查接口回归', attachments: [] } });
+  await until(() => service.tasks().some(task => task.agentId === 'developer' && task.runtime.turnId));
+  assert.equal(completions.length, 1);
+  assert.equal(completions[0].route.model, 'deepseek-flash');
+  assert.equal(completions[0].route.reasoningEffort, 'low');
+  assert.match(completions[0].options.input, /检查接口回归/);
+  assert.equal(calls.filter(call => call.method === 'thread/start').every(call => call.params.ephemeral !== true), true);
+  const employee = service.tasks().find(task => task.agentId === 'developer');
+  assert.equal(employee.source.routing.reason, 'selected');
+  assert.equal(employee.source.routing.selection.model, 'deepseek-flash');
+  const employeeThread = threads.get(employee.runtime.threadId);
+  const employeeTurn = employeeThread.turns.at(-1);
+  employeeTurn.status = 'completed';
+  employeeTurn.items = [{ type: 'agentMessage', text: '接口回归通过' }];
+  emit('item/completed', employee.runtime.threadId, employeeTurn, { item: employeeTurn.items[0] });
+  emit('turn/completed', employee.runtime.threadId, employeeTurn);
+  await until(() => room.snapshot().messages.some(message => message.text === '接口回归通过'));
+  const reply = room.snapshot().messages.find(message => message.text === '接口回归通过');
+  assert.equal(reply.agentId, 'developer');
+  assert.equal(reply.authorName, '技术研发');
+  assert.equal(service.tasks().some(task => task.agentId === 'manager'), false);
+});
+
+test('模型选择全员、单人和否定句时分别按结构化结果唤醒并公开真实身份', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-group-all-members-'));
+  const definitions = [
+    { id: 'negus-assistant', name: 'negus助手' },
+    { id: 'manager', name: '运营管理' },
+    { id: 'researcher', name: '产品分析' },
+    { id: 'developer', name: '技术研发' },
+    { id: 'reviewer', name: '风控质量' },
+  ];
+  const room = await createGroupRoomStore({ stateFile: path.join(root, 'room.json'), roomId: 'room',
+    project: '测试', agentDefinitions: definitions });
+  const listeners = new Set();
+  const threads = new Map();
+  const turns = [];
+  const selectionInputs = [];
+  const modelResults = [
+    definitions.map(agent => agent.id),
+    definitions.map(agent => agent.id),
+    ['developer'],
+    ['developer'],
+  ];
+  const emit = (method, threadId, turn, extra = {}) => listeners.forEach(callback => callback({
+    method, params: { threadId, turnId: turn?.id, turn, ...extra },
+  }));
+  const client = {
+    subscribe(callback) { listeners.add(callback); return () => listeners.delete(callback); },
+    async request(method, params) {
+      if (method === 'thread/start') {
+        const thread = { id: `thread-${threads.size}`, turns: [] };
+        threads.set(thread.id, thread);
+        return { thread };
+      }
+      const thread = threads.get(params.threadId);
+      if (method === 'thread/read' || method === 'thread/resume') return { thread };
+      if (method === 'turn/start') {
+        const turn = { id: `turn-${turns.length}`, status: 'inProgress', items: [] };
+        thread.turns.push(turn);
+        turns.push({ threadId: thread.id, turn });
+        queueMicrotask(() => emit('turn/started', thread.id, turn));
+        return { turn };
+      }
+      return {};
+    },
+  };
+  const complete = (entry, text) => {
+    entry.turn.status = 'completed';
+    entry.turn.items = [{ type: 'agentMessage', text }];
+    emit('item/completed', entry.threadId, entry.turn, { item: entry.turn.items[0] });
+    emit('turn/completed', entry.threadId, entry.turn);
+  };
+  const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root,
+    appServerClient: client,
+    selectGroupAgent: async input => {
+      selectionInputs.push(input);
+      return { agentIds: modelResults[selectionInputs.length - 1], selection: {
+        model: 'deepseek-flash', modelProviderId: 'deepseek', reasoningEffort: 'low', durationMs: 1,
+      } };
+    } });
+  t.after(async () => { await service.close(); await room.close(); await fs.rm(root, { recursive: true, force: true }); });
+  const send = (requestId, text) => service.receive({ requestId, agentIds: [],
+    message: { type: 'human', authorId: 'u', authorName: '用户', text, attachments: [] } });
+
+  await send('all-say', '大家都出来说句话');
+  await until(() => turns.length === 5);
+  assert.equal(selectionInputs.length, 1);
+  assert.deepEqual(service.tasks().map(task => task.agentId).sort(), definitions.map(agent => agent.id).sort());
+  assert.equal(service.tasks().every(task => task.source.routing.reason === 'selected'), true);
+  for (const [index, entry] of turns.entries()) complete(entry, `当前成员${index + 1}公开回复`);
+  await until(() => room.snapshot().messages.filter(message => message.type === 'agent').length === 5);
+  assert.deepEqual(room.snapshot().messages.filter(message => message.type === 'agent')
+    .map(message => message.agentId).sort(), definitions.map(agent => agent.id).sort());
+  assert.equal(new Set(room.snapshot().messages.filter(message => message.type === 'agent')
+    .map(message => message.authorName)).size, 5);
+
+  await send('all-greet', '大家都出来打招呼');
+  await until(() => turns.length === 10);
+  assert.equal(selectionInputs.length, 2);
+  for (const [index, entry] of turns.slice(5).entries()) complete(entry, `当前成员${index + 1}再次公开回复`);
+  await until(() => room.snapshot().messages.filter(message => message.type === 'agent').length === 10);
+  assert.equal(new Set(room.snapshot().messages.filter(message => message.type === 'agent')
+    .map(message => message.authorName)).size, 5);
+
+  await send('ordinary-topic', '大家看看这个需求');
+  await until(() => turns.length === 11);
+  assert.equal(selectionInputs.length, 3);
+  assert.equal(service.tasks().filter(task => task.source.messageId === room.snapshot().messages
+    .find(message => message.text === '大家看看这个需求').id).length, 1);
+  complete(turns[10], '普通话题由技术研发单独回复');
+  await until(() => room.snapshot().messages.some(message => message.text === '普通话题由技术研发单独回复'));
+  assert.equal(room.snapshot().messages.find(message => message.text === '普通话题由技术研发单独回复')
+    .agentId, 'developer');
+
+  await send('negated-all', '大家都出来发言会打扰别人，请不要这样');
+  await until(() => turns.length === 12);
+  assert.equal(selectionInputs.length, 4);
+  assert.equal(service.tasks().filter(task => task.source.messageId === room.snapshot().messages
+    .find(message => message.text === '大家都出来发言会打扰别人，请不要这样').id).length, 1);
+  complete(turns[11], '否定句只由技术研发回应');
+  await until(() => room.snapshot().messages.some(message => message.text === '否定句只由技术研发回应'));
+  assert.equal(room.snapshot().messages.find(message => message.text === '否定句只由技术研发回应').agentId,
+    'developer');
 });
 
 // FEAT-002 2026-11-07: 运营管理和员工都是可选的，未点名消息不能因此报错。
 test('未点名消息在没有运营管理或没有员工的群里不报错', async t => {
   const client = { subscribe: () => () => {}, request: async method => method === 'thread/start' ? { thread: { id: 'thread' } }
     : method === 'thread/read' ? { thread: { turns: [] } } : method === 'turn/start' ? { turn: { id: 'turn' } } : {} };
-  for (const [agentDefinitions, expected] of [
-    [[], []],
-    [[{ id: 'developer', name: '技术研发' }], ['developer']],
-    [[{ id: 'developer', name: '技术研发' }, { id: 'negus-assistant', name: 'negus助手' }], ['negus-assistant']],
-    [[{ id: 'negus-assistant', name: 'negus助手' }, { id: 'manager', name: '运营管理' }], ['manager']],
+  for (const [agentDefinitions, selectedId, expected] of [
+    [[], '', []],
+    [[{ id: 'developer', name: '技术研发' }], 'developer', ['developer']],
+    [[{ id: 'developer', name: '技术研发' }, { id: 'negus-assistant', name: 'negus助手' }], 'negus-assistant', ['negus-assistant']],
+    [[{ id: 'negus-assistant', name: 'negus助手' }, { id: 'manager', name: '运营管理' }], 'manager', ['manager']],
   ]) {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-group-reception-'));
     const room = await createGroupRoomStore({ stateFile: path.join(root, 'room.json'), roomId: 'room', project: '测试', agentDefinitions });
-    const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root, appServerClient: client });
+    const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root, appServerClient: client,
+      ...(selectedId ? { selectGroupAgent: selectedAgent(selectedId) } : {}) });
     t.after(async () => { await service.close(); await room.close(); await fs.rm(root, { recursive: true, force: true }); });
     const { message } = await service.receive({ requestId: 'plain', agentIds: [], message: { type: 'human', authorId: 'u', authorName: '用户', text: '帮我看一下这个需求', attachments: [] } });
     assert.equal(message.text, '帮我看一下这个需求');
@@ -179,6 +508,8 @@ test('群内员工在真实下一轮先迁移后启动，同 thread 不重开', 
       isProviderConfigured: async () => true,
       resolveRoute: settings => settings,
       getClient: async () => client,
+      complete: async route => ({ text: '{"agentIds":["manager"]}', modelProviderId: route.modelProviderId,
+        model: route.model, reasoningEffort: route.reasoningEffort }),
     }, appServerClient: client,
     transferThread: async ({ threadId, route }) => {
       migrations += 1;
@@ -215,7 +546,8 @@ test('用户追加立即 steer 原 turn 且重试不重复派工', async t => {
     if (method === 'turn/interrupt') { const turn = thread.turns[0]; turn.status = 'interrupted'; queueMicrotask(() => listeners.forEach(callback => callback({ method: 'turn/completed', params: { threadId: thread.id, turn } }))); }
     return {};
   } };
-  const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root, appServerClient: client });
+  const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root, appServerClient: client,
+    selectGroupAgent: selectedAgent('manager') });
   t.after(async () => { await service.close(); await room.close(); await fs.rm(root, { recursive: true, force: true }); });
   const send = (id, text) => service.receive({ requestId: id, agentIds: [], message: { type: 'human', authorId: 'fixture', authorName: '测试', text, attachments: [] } });
   await send('first', '处理这个需求'); await until(() => service.tasks().some(task => task.state === 'running'));
@@ -241,7 +573,8 @@ test('未送达的补充在原turn结束后重试为同线程后续任务', asyn
     if (method === 'thread/read') return { thread: { turns: [{ id: 'done', status: 'completed', items: [] }] } };
     throw Error('隔离测试不启动模型');
   } };
-  const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root, appServerClient: client });
+  const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root, appServerClient: client,
+    selectGroupAgent: selectedAgent('manager') });
   t.after(async () => { await service.close(); await room.close(); await fs.rm(root, { recursive: true, force: true }); });
   await service.enqueueDiscussion({ agentIds: ['manager'], sourceMessageId: 'extra', requestText: '补充' });
   await service.enqueueDiscussion({ agentIds: ['manager'], sourceMessageId: 'extra', requestText: '补充' });
@@ -357,6 +690,9 @@ test('其他群或其他员工不能续派来源员工的后台任务', async t 
   const created = await call(0, { action: 'background', requestId: 'bg', title: '执行', instructions: '验证' });
   assert.equal(created.status, 200); const task = await created.json();
   await until(() => starts.length === 2);
+  for (const started of starts.slice(0, 2)) {
+    assert.equal((started.instructions.match(/处理交互时，先写清用户点了什么/g) || []).length, 1);
+  }
   assert.match(starts[0].instructions, /每次标注一手来源/);
   assert.match(starts[1].instructions, /每次标注一手来源/);
   await growthService.changeRule('dev', rule.id, 'disabled');
@@ -389,7 +725,8 @@ test('运营与产品往返，研发与风控修复后复验', async t => {
       queueMicrotask(() => emit('turn/started', thread, turn)); return { turn }; }
     return {};
   } };
-  const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root, appServerClient: client });
+  const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root, appServerClient: client,
+    selectGroupAgent: selectedAgent('manager') });
   t.after(async () => { await service.close(); await room.close(); await fs.rm(root, { recursive: true, force: true }); });
   const send = (id, text) => service.receive({ requestId: id, agentIds: [], message: { type: 'human', authorId: 'fixture', authorName: '测试', text, attachments: [] } });
   const handoff = async (index, agentId, requestId, instructions) => {
@@ -412,8 +749,12 @@ test('运营与产品往返，研发与风控修复后复验', async t => {
   finish(5, '已修复并请复验'); finish(6, '复验通过'); await until(() => turns.length === 8);
   assert.match(JSON.stringify(turns[7].input), /复验通过/); finish(7, '研发完成');
   await until(() => !service.hasPendingWork() && service.deliveries().every(item => item.state === 'delivered'));
-  for (const [text, agentId] of [['产品分析结果', 'product'], ['发现问题', 'risk'], ['复验通过', 'risk']])
-    assert.equal(room.snapshot().messages.filter(message => message.text === text && message.agentId === agentId).length, 1);
+  assert.equal(room.snapshot().messages.some(message => ['产品分析结果', '发现问题', '复验通过'].includes(message.text)), false);
+  for (const [agentId, text] of [['manager', '运营继续'], ['dev', '研发完成']]) {
+    const status = room.snapshot().messages.filter(message => message.itemId === 'public-status' && message.agentId === agentId);
+    assert.equal(status.length, 1);
+    assert.equal(status[0].text, text);
+  }
 });
 
 test('group intake keeps sender IDs, routes ordinary messages, @ takes priority, task tool delivers back to source', async t => {
@@ -450,6 +791,7 @@ test('group intake keeps sender IDs, routes ordinary messages, @ takes priority,
   const service = await createGroupTaskService({ stateRoot: root, room, projectRoot: root, appServerClient: client,
     modelProviders: { providers: () => [{ id: 'ccswitch_deepseek', displayName: 'DeepSeek', models: [{ model: 'deepseek-flash' }] }],
       isProviderConfigured: async () => true, resolveRoute: ({ model, modelProviderId }) => ({ model, modelProviderId }), getClient: async () => client },
+    selectGroupAgent: async () => { selectionCalls += 1; return 'manager'; },
     queue, execution: { getStatus: () => ({ active: false }) }, registerSession: async (...args) => registered.push(args),
     bindings: { bindRuntime: async () => {} }, resolveAttachments: ids => ids.map(id => ({ id, name: 'fixture.txt', mimeType: 'text/plain', url: '/fixture', path: '/tmp/fixture.txt' })) });
   t.after(async () => { await service.close(); await room.close(); await fs.rm(root, { recursive: true, force: true }); });
@@ -459,11 +801,12 @@ test('group intake keeps sender IDs, routes ordinary messages, @ takes priority,
   assert.equal((await send('ordinary', '帮我研究一下')).message.id, first.message.id);
   await until(() => turns.length === 1);
   assert.equal(service.tasks()[0].agentId, 'manager');
+  assert.equal(selectionCalls, 1);
   complete(turns[0].threadId, turns[0].turn, '研究结果');
   await until(() => service.deliveries()[0]?.state === 'delivered');
   await send('mention', '@助手 请委派研究员查资料');
   await until(() => turns.length === 2);
-  assert.equal(selectionCalls, 0);
+  assert.equal(selectionCalls, 1);
   const source = service.tasks().find(task => task.source.messageId !== first.message.id);
   const config = threads.get(turns[1].threadId).config['mcp_servers.negus_handoffs'];
   const response = await fetch(config.env.NEGUS_HANDOFF_ENDPOINT, { method: 'POST',
@@ -478,8 +821,10 @@ test('group intake keeps sender IDs, routes ordinary messages, @ takes priority,
   complete(turns[3].threadId, turns[3].turn, '根据研究结果汇总');
   await until(() => service.deliveries().length === 4 && service.deliveries().every(item => item.state === 'delivered'));
   assert.equal(room.snapshot().messages.filter(message => message.type === 'human').length, 2);
-  assert.equal(room.snapshot().messages.filter(message => message.type === 'agent').length, 4);
-  assert.equal(room.snapshot().messages.filter(message => message.text === '来源核查完成' && message.agentId === 'b').length, 1);
+  assert.equal(room.snapshot().messages.filter(message => message.type === 'agent').length, 2);
+  assert.equal(room.snapshot().messages.some(message => message.text === '来源核查完成'), false);
+  assert.equal(room.snapshot().messages.find(message => message.itemId === 'public-status' && message.workId === source.id).text,
+    '根据研究结果汇总');
   assert.equal(room.snapshot().agents.length, 2);
   assert.equal(service.hasPendingWork(), false);
 
@@ -506,7 +851,9 @@ test('group intake keeps sender IDs, routes ordinary messages, @ takes priority,
   complete(turns[7].threadId, turns[7].turn, '处理回访结果');
   await until(() => !service.hasPendingWork() && service.deliveries().every(item => item.state === 'delivered'));
   assert.equal(turns.length, 8, '纯告知不唤醒来源员工');
-  assert.equal(room.snapshot().messages.filter(message => message.text === '请教结果' && message.agentId === 'manager').length, 1);
+  assert.equal(room.snapshot().messages.some(message => message.text === '请教结果'), false);
+  assert.deepEqual(room.snapshot().messages.filter(message => message.itemId === 'public-status'
+    && message.agentId === 'b').map(message => message.text), ['处理回访结果']);
 
   await send('background', '@研究员 请执行验证');
   await until(() => turns.length === 9);
@@ -547,12 +894,51 @@ test('group intake keeps sender IDs, routes ordinary messages, @ takes priority,
   await until(() => turns.length === 12);
   assert.match(JSON.stringify(turns[11].input), /补充证据/);
   complete(turns[11].threadId, turns[11].turn, '复核完成');
-  await until(() => !service.hasPendingWork() && service.deliveries().every(item => item.state === 'delivered'));
+  for (let index = 0; index < 12; index += 1) {
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const pending = service.tasks().find(task => !['completed', 'failed', 'interrupted'].includes(task.state)
+      && task.runtime?.turnId);
+    if (!pending) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      if (!service.tasks().some(task => !['completed', 'failed', 'interrupted'].includes(task.state))) break;
+      continue;
+    }
+    const entry = turns.find(item => item.turn.id === pending.runtime.turnId);
+    assert.ok(entry, `missing turn for ${pending.id}`);
+    complete(entry.threadId, entry.turn, `自动续接${index + 1}完成`);
+    await until(() => service.tasks().find(task => task.id === pending.id)?.state !== 'running');
+  }
+  const settleDeadline = Date.now() + 20000;
+  while ((service.hasPendingWork() || service.deliveries().some(item => item.state !== 'delivered'))
+    && Date.now() < settleDeadline) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(service.hasPendingWork() || service.deliveries().some(item => item.state !== 'delivered'), false,
+    JSON.stringify({ tasks: service.tasks().filter(task => !['completed', 'failed', 'interrupted'].includes(task.state))
+      .map(task => ({ id: task.id, agentId: task.agentId, kind: task.kind, state: task.state, background: task.background,
+        parentTaskId: task.parentTaskId, resultOf: task.resultOf, runtime: task.runtime })),
+    deliveries: service.deliveries().filter(item => item.state !== 'delivered'),
+    queued }));
   assert.equal(service.tasks().filter(task => task.kind === 'followup').length, 1);
   assert.equal(room.snapshot().agents.find(agent => agent.id === 'b').active, false);
   await send('stop-followup', '@研究员 继续验证', [{ id: 'fixture-file', name: 'fixture.txt', mimeType: 'text/plain', url: '/fixture' }]);
-  await until(() => turns.length === 13);
-  const stopConfig = threads.get(turns[12].threadId).config['mcp_servers.negus_handoffs'];
+  assert.deepEqual(room.snapshot().messages.findLast(message => message.text === '@研究员 继续验证').attachments.map(file => file.id), ['fixture-file']);
+  await untilSlow(() => service.tasks().some(task => task.attachmentIds?.includes('fixture-file')));
+  let stopSource = service.tasks().find(task => task.attachmentIds?.includes('fixture-file'));
+  for (let index = 0; index < 3 && stopSource.state !== 'running'; index += 1) {
+    const blocker = service.tasks().find(task => task.state === 'running' && task.lane === stopSource.lane && task.id !== stopSource.id);
+    if (!blocker) break;
+    const blockerTurn = threads.get(blocker.runtime.threadId)?.turns.at(-1);
+    if (!blockerTurn) break;
+    complete(blocker.runtime.threadId, blockerTurn, '最终核对完成');
+    await until(() => service.tasks().find(task => task.id === stopSource.id)?.state === 'running');
+    stopSource = service.tasks().find(task => task.id === stopSource.id);
+  }
+  assert.ok(stopSource, JSON.stringify(service.tasks().map(task => ({ id: task.id, state: task.state, threadId: task.runtime.threadId,
+    attachmentIds: task.attachmentIds, requestKey: task.requestKey }))));
+  await untilSlow(() => service.tasks().find(task => task.id === stopSource.id)?.state === 'running');
+  stopSource = service.tasks().find(task => task.id === stopSource.id);
+  assert.equal(stopSource.state, 'running');
+  assert.deepEqual(stopSource.attachmentIds, ['fixture-file']);
+  const stopConfig = threads.get(stopSource.runtime.threadId).config['mcp_servers.negus_handoffs'];
   const stopResponse = await fetch(stopConfig.env.NEGUS_HANDOFF_ENDPOINT, { method: 'POST',
     headers: { Authorization: `Bearer ${stopConfig.env.NEGUS_HANDOFF_TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'followup', taskId: background.id, requestId: 'stop-queued', instructions: '不再执行' }) });
@@ -564,9 +950,10 @@ test('group intake keeps sender IDs, routes ordinary messages, @ takes priority,
   assert.equal(queued.length, 0);
   assert.equal(service.tasks().find(task => task.id === background.id).inputs.find(item => item.requestId === 'stop-queued').cancelled, true);
   await until(() => !service.hasPendingWork() && service.deliveries().every(item => item.state === 'delivered'));
-  await send('stop-running-followup', '@研究员 再次验证');
-  await until(() => turns.length === 14);
-  const runningConfig = threads.get(turns[13].threadId).config['mcp_servers.negus_handoffs'];
+  const stopRunningMessage = await send('stop-running-followup', '@研究员 再次验证');
+  await until(() => service.tasks().some(task => task.source?.messageId === stopRunningMessage.message.id && task.state === 'running'));
+  const runningSource = service.tasks().find(task => task.source?.messageId === stopRunningMessage.message.id && task.state === 'running');
+  const runningConfig = threads.get(runningSource.runtime.threadId).config['mcp_servers.negus_handoffs'];
   const runningResponse = await fetch(runningConfig.env.NEGUS_HANDOFF_ENDPOINT, { method: 'POST',
     headers: { Authorization: `Bearer ${runningConfig.env.NEGUS_HANDOFF_TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'followup', taskId: background.id, requestId: 'stop-running', instructions: '检查中' }) });

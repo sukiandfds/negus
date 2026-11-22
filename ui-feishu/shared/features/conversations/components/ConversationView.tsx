@@ -1,3 +1,4 @@
+import { terminalPhases } from "../../../../../windows/server/execution/protocol.mjs";
 import { executionHandoff } from "../state/executionHandoff";
 import { Fragment, type ReactNode, type Ref, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { CalendarClock, Clock3, LoaderCircle, Target } from "lucide-react";
@@ -243,7 +244,7 @@ export function ConversationView({
   const agentScoped = Boolean(locationParams.get("agent"));
   const employeeScoped = Boolean(locationParams.get("employee"));
   const executionMatchesSession = executionStatus.threadId === session?.threadId;
-  const completedExecution = ["completed", "failed", "interrupted", "systemError"].includes(executionStatus.phase);
+  const completedExecution = terminalPhases.has(executionStatus.phase);
   const { showExecution, waitingForReply } = executionHandoff(session?.threadId || "", messages, executionStatus);
   const transcript = projectTranscript({
     threadId: session?.threadId || "",

@@ -1,4 +1,4 @@
-import { rememberSentImage } from "../../attachments/data/sentImagePreviews";
+import { MessageInput } from "./MessageInput";
 import { useEffect, useId, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
 import { ListEnd, Send, Sparkles, Square } from "lucide-react";
 import { AttachmentButton, AttachmentPreviews } from "../../attachments/components/AttachmentDraft";
@@ -70,7 +70,7 @@ interface ConversationComposerProps {
   sendPreparationError?: string;
   onPrepareSend?: (queue: boolean) => Promise<string | false>;
   onSend: (text: string, attachments?: MediaFile[], preparedThread?: string, finishUpload?: (submissionId: string) => Promise<MediaFile[]>) => Promise<boolean>;
-  onQueue: (text: string, attachments?: MediaFile[]) => Promise<boolean>;
+  onQueue: (text: string, attachments?: MediaFile[], finishUpload?: (id: string) => Promise<MediaFile[]>) => Promise<boolean>;
   queueing: boolean;
   editingMessage: SessionMessage | null;
   onCancelEdit: () => void;
@@ -118,7 +118,7 @@ export function ConversationComposer({
   const [withdrawing, setWithdrawing] = useState(false);
   const inputDisabled = sendingDraft || withdrawing || !selected || archived || queueing || draft.uploading || goalBusy;
   const editing = Boolean(editingMessage);
-  const sendToQueue = queueNext && !editing;
+  const sendToQueue = (queueNext || contextStatus.phase === "compacting") && !editing;
   const sendLabel = editing ? "重新发送" : sendToQueue ? "加入等候队列" : status.active ? "插入发送" : "发送";
   const inheritedAttachments = editingMessage?.blocks?.flatMap((block) => (
     "file" in block && block.file ? [block.file] : []
@@ -270,42 +270,27 @@ export function ConversationComposer({
     try {
       const preparedThread = !goalMatch && onPrepareSend ? await onPrepareSend(sendToQueue) : undefined;
       if (preparedThread === false) return;
+      const send = async (files: MediaFile[], finish?: (id: string) => Promise<MediaFile[]>) => {
+        const accepted = sendToQueue ? await onQueue(messageText, files, finish)
+          : await onSend(messageText, files, preparedThread || undefined, finish);
+        if (accepted && sendToQueue) setQueueNext(false);
+        return accepted;
+      };
       setText("");
       setSlash(null);
-      if (!editing && !goalMatch && !sendToQueue && draft.attachments.length) {
-        const temporaryUrls: string[] = [];
-        const previews = draft.attachments.map(({ id, file, previewUrl }) => {
-          if (!(file instanceof File)) return file;
-          const url = previewUrl || URL.createObjectURL(file);
-          if (!previewUrl) temporaryUrls.push(url);
-          return { id, name: file.name, mimeType: file.type || "application/octet-stream", url };
-        });
+      if (!editing && !goalMatch && draft.attachments.length) {
+        const transfer = draft.prepareMessageAttachments();
         setSendingDraft(true);
         setQuote(null);
         let accepted: boolean;
         try {
-          accepted = await onSend(messageText, previews, preparedThread || undefined, async submissionId => {
-            const files = uploaded = await draft.uploadAll();
-            const retained = new Set<string>();
-            let imageIndex = 0;
-            files.forEach((media, index) => {
-              const { file, previewUrl } = draft.attachments[index];
-              if (!media.mimeType.startsWith("image/")) return;
-              if (file instanceof File && previewUrl) {
-                rememberSentImage(submissionId, imageIndex, previewUrl, file.size);
-                retained.add(previewUrl);
-              }
-              ++imageIndex;
-            });
-            draft.clear(retained);
-            setSendingDraft(false);
-            return files;
-          });
+          const finish = async (id: string) => uploaded = await transfer.finishUpload(id);
+          accepted = await send(transfer.previews, finish);
         } catch (error) {
           draft.setError(error instanceof Error ? error.message : "附件发送失败");
           accepted = false;
         } finally {
-          temporaryUrls.forEach(url => URL.revokeObjectURL(url));
+          transfer.dispose();
         }
         if (!accepted) {
           if (uploaded.length) draft.restoreFiles(uploaded);
@@ -324,10 +309,7 @@ export function ConversationComposer({
         ? (goalMatch[1]?.trim() || submittedAttachments.length
           ? await onSetGoal(goalMatch[1]?.trim() || "", submittedAttachments)
           : await onChangeGoalStatus("active"))
-        : sendToQueue
-          ? await onQueue(messageText, submittedAttachments)
-          : await onSend(messageText, submittedAttachments, preparedThread || undefined);
-      if (accepted && sendToQueue && !goalMatch) setQueueNext(false);
+        : await send(submittedAttachments);
       if (!accepted) {
         setQuote(current => current || submittedQuote);
         if (uploaded.length) draft.restoreFiles(uploaded);
@@ -399,10 +381,9 @@ export function ConversationComposer({
         {sendPreparationError ? <small role="alert">{sendPreparationError}</small> : null}
         <QuoteDraft quote={quote} onClear={() => setQuote(null)} />
         {sendToQueue ? <div className={styles.editingBar} role="status">消息将进入等候队列</div> : null}
-        <textarea
+        <MessageInput
           id={promptId}
           ref={textareaRef}
-          rows={2}
           value={text}
           placeholder={!selected ? "请选择一个对话" : archived ? "已归档，请先恢复对话" : !sendToQueue && status.active && status.phase !== "submitted" ? "追加指令，引导当前任务" : "给 Codex 发送指令"}
           disabled={inputDisabled}
@@ -410,14 +391,9 @@ export function ConversationComposer({
             setText(event.target.value);
             updateSlash(event.target.value, event.target.selectionStart);
           }}
-          onPaste={(event) => {
-            if (!event.clipboardData.files.length) return;
-            event.preventDefault();
-            draft.addFiles(event.clipboardData.files);
-          }}
+          submit={submit} onFiles={draft.addFiles}
           onClick={(event) => updateSlash(event.currentTarget.value, event.currentTarget.selectionStart)}
           onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) return;
             if (slash && visibleSlashOptions.length) {
               if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                 event.preventDefault();
@@ -444,10 +420,6 @@ export function ConversationComposer({
                 setSlash(null);
                 return;
               }
-            }
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              void submit();
             }
           }}
         />

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { zstdCompressSync, zstdDecompressSync } from 'node:zlib';
 import '../server/register.mjs';
-import { setTransferredProvider } from '../server/employee-provider-integration.mjs';
+import { setTransferredProvider } from '../../windows/server/provider-transfer.mjs';
 const { createEmployeeProjectRegistry } = await import('../../windows/server/employee-project-registry.mjs');
 const { createEmployeeRuntimeService } = await import('../../windows/server/employee-runtime-service.mjs');
 
@@ -31,6 +31,7 @@ async function fixture(t, { defaultModelSettings = null, initialEmployee = null 
     const listeners = new Set();
     let active = false;
     let currentTurnId = "";
+    let activeThreadId = "original-thread";
     const runtime = { model: 'model-a', effort: 'medium' };
     const c = {
       subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
@@ -38,7 +39,7 @@ async function fixture(t, { defaultModelSettings = null, initialEmployee = null 
       emit(m) { if (m.method === 'turn/completed') active = false; for (const fn of listeners) fn(m); },
       async request(method, params) {
         calls.push({ id, method, params });
-        const thread = { id: 'original-thread', cwd: root, path: path.join(root, id, 'rollout.jsonl'), status: { type: active ? 'active' : 'idle' } };
+        const thread = { id: params.threadId, cwd: root, path: params.path || path.join(root, id, `rollout-${params.threadId}.jsonl`), status: { type: active ? 'active' : 'idle' } };
         if (method === 'config/read') return { config: { model_provider: id === 'current' ? 'native-current' : id } };
         if (method === 'thread/read') return { thread };
         if (method === 'thread/resume') {
@@ -47,10 +48,15 @@ async function fixture(t, { defaultModelSettings = null, initialEmployee = null 
           runtime.effort = params.config?.model_reasoning_effort || runtime.effort;
           return { thread, model: runtime.model, reasoningEffort: runtime.effort };
         }
+        if (method === 'thread/compact/start') {
+          c.emit({ method: 'turn/completed', params: { threadId: params.threadId, turn: { id: 'compact', status: 'completed' } } });
+        }
         if (method === 'thread/settings/update') Object.assign(runtime, { ...(params.model ? { model: params.model } : {}), ...(params.effort ? { effort: params.effort } : {}) });
         if (method === 'turn/start') {
+          assert.equal((params.developerInstructions.match(/处理交互时，先写清用户点了什么/g) || []).length, 1);
+          assert.match(params.developerInstructions, /research/);
           active = true;
-          assert.equal(params.threadId, 'original-thread');
+          activeThreadId = params.threadId;
           const history = histories.get(id);
           if (!history) throw Error(`missing history for ${id}: ${[...histories.keys()].join(',')}`);
           history.push(params.input[0].text);
@@ -60,6 +66,7 @@ async function fixture(t, { defaultModelSettings = null, initialEmployee = null 
         return {};
       },
       get currentTurnId() { return currentTurnId; },
+      get activeThreadId() { return activeThreadId; },
     };
     clients.set(id, c); return c;
   }
@@ -69,12 +76,13 @@ async function fixture(t, { defaultModelSettings = null, initialEmployee = null 
       return { modelProviderId: modelProviderId || prefix || 'current', model: name };
     },
     async getClient(route) { return client(route.modelProviderId); },
-    async prepareResumeFile(id, info) {
+    async prepareResumeFile(id, info, _, { threadId } = {}) {
       const source = path.basename(path.dirname(info.path));
       histories.set(id, [...histories.get(source)]);
       await fs.mkdir(path.join(root, id), { recursive: true });
-      await fs.writeFile(path.join(root, id, 'rollout.jsonl'), JSON.stringify({ type: 'session_meta', payload: { id: 'original-thread', model_provider: source } }) + '\n');
-      return { ...info, path: path.join(root, id, 'rollout.jsonl') };
+      const target = path.join(root, id, `rollout-${threadId || info.id}.jsonl`);
+      await fs.writeFile(target, JSON.stringify({ type: 'session_meta', payload: { id: info.id, model_provider: source } }) + '\n');
+      return { ...info, path: target };
     },
   };
   const binding = { conversationId: 'original-conversation', runtimeSessionId: 'original-thread', runtimeKind: 'codex', conversationKind: 'direct', agentId: 'researcher' };
@@ -87,7 +95,7 @@ async function fixture(t, { defaultModelSettings = null, initialEmployee = null 
   return { root, stateFile, get service() { return service; }, get registry() { return options.registry; }, providers, histories, calls, events, client,
     fail: () => { failTarget = true; },
     complete: id => client(id).emit({ method: 'turn/completed', params: {
-      threadId: 'original-thread', turn: { id: client(id).currentTurnId, status: 'completed' },
+      threadId: client(id).activeThreadId, turn: { id: client(id).currentTurnId, status: 'completed' },
     } }),
     restart: async ({ defaultModelSettings: nextDefaults = defaultModelSettings } = {}) => {
       service.close();
@@ -98,6 +106,18 @@ async function fixture(t, { defaultModelSettings = null, initialEmployee = null 
     },
   };
 }
+
+test('employee changes model and effort on the same native thread in one request', async t => {
+  const f = await fixture(t);
+  await f.service.updateModelSettings('researcher', { model: 'model-new', reasoningEffort: 'high' });
+  const result = await f.service.sendMessage({ employeeId: 'researcher', text: 'same configuration' });
+  assert.ok(result);
+  const changes = f.calls.filter(call => call.method === 'thread/settings/update');
+  assert.deepEqual(changes.map(call => call.params), [{ threadId: 'original-thread', model: 'model-new', effort: 'high' }]);
+  assert.equal(f.calls.find(call => call.method === 'turn/start').params.threadId, 'original-thread');
+  assert.equal(f.registry.get('researcher').runtimeThreadIds.length, 0);
+  assert.ok(!f.registry.get('researcher').modelSwitchPending);
+});
 
 test('employee switches providers and returns with full history and stable conversation identity', async t => {
   const f = await fixture(t);
@@ -223,7 +243,7 @@ test('all subscribed providers reach employee runtime; only the current turn can
   f.client('current').emit({ method: 'item/agentMessage/delta', params: {
     threadId: 'original-thread', turnId: sent.turnId, itemId: 'current-delta', delta: 'reaches handler',
   } });
-  assert.equal(f.events.filter(event => event.type === 'employee_assistant_delta').length, deltasBefore + 1);
+  assert.equal(f.events.filter(event => event.type === 'employee_assistant_delta').length, deltasBefore);
 
   f.client('current').emit({ method: 'turn/completed', params: {
     threadId: 'original-thread', turn: { id: 'old-provider-turn', status: 'completed' },
@@ -247,7 +267,7 @@ test('all subscribed providers reach employee runtime; only the current turn can
   assert.equal(f.events.filter(event => event.type === 'employee_message_completed').length, messagesBefore);
 
   f.client('ccswitch_vip').emit({ method: 'item/completed', params: {
-    threadId: 'original-thread', turnId: sent.turnId,
+    threadId: f.client('ccswitch_vip').activeThreadId, turnId: sent.turnId,
     item: { id: 'current-final', type: 'agentMessage', phase: 'final_answer', text: 'current answer' },
   } });
   status = (await f.service.getStatus('researcher')).status;
@@ -256,7 +276,7 @@ test('all subscribed providers reach employee runtime; only the current turn can
   assert.equal(f.events.filter(event => event.type === 'employee_message_completed').length, messagesBefore + 1);
 
   f.client('ccswitch_vip').emit({ method: 'turn/completed', params: {
-    threadId: 'original-thread', turn: { id: sent.turnId, status: 'completed' },
+    threadId: f.client('ccswitch_vip').activeThreadId, turn: { id: sent.turnId, status: 'completed' },
   } });
   status = (await f.service.getStatus('researcher')).status;
   assert.equal(status.active, false);

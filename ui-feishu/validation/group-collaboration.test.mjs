@@ -41,17 +41,25 @@ async function fixture(t, roomId = 'room', options = {}) {
     ? { ...options.modelProviders, getClient: async route => { providerRequests.push(route); return client; } }
     : { providers:()=>[{id:'deepseek',displayName:'DeepSeek',models:[{model:'deepseek-flash'}]}],isProviderConfigured:async()=>true,
       resolveRoute: settings=>settings,getClient:async route=>{ providerRequests.push(route); return client; } };
+  const selectGroupAgent = options.selectGroupAgent ?? (async ({ members }) => {
+    const selected = members.find(member => member.id === 'manager') || members[0];
+    return { agentIds: selected ? [selected.id] : [], selection: {
+      model: 'deepseek-flash', modelProviderId: 'deepseek', reasoningEffort: 'low', durationMs: 1,
+    } };
+  });
   const service = await createGroupTaskService({stateRoot:root,room,projectRoot:root,appServerClient:client,broadcast:event=>events.push(event),
-    modelProviders,
+    modelProviders, selectGroupAgent,
     transferThread: options.transferThread,
     registerSession:async (...args)=>registered.push(args), bindings:{bindRuntime:async()=>{}},queue:{list:()=>[]},execution:{} });
   t.after(async()=>{ for (const bridge of bridges) await bridge.close(); await service.close(); await room.close(); await fs.rm(root,{recursive:true,force:true}); });
   const send = async (id, agentIds=[], text=id) => { const result = await service.receive({requestId:id,agentIds,message:{type:'human',authorId:'fixture',authorName:'fixture',text,attachments:[]}}); await until(()=>service.tasks().some(task=>task.state==='running')); return result.message; };
   const running = agentId => service.tasks().findLast(task=>task.agentId===agentId && task.state==='running');
   const complete = async (task,status='completed',{duplicate=false}={}) => { const turn=threads.get(task.runtime.threadId).turns.at(-1); turn.status=status; turn.items.push({id:`final-${turn.id}`,type:'agentMessage',text:`result ${task.agentId}`}); emit('turn/completed',{threadId:task.runtime.threadId,turn}); if (duplicate) emit('turn/completed',{threadId:task.runtime.threadId,turn}); await until(()=>service.deliveries().some(d=>d.taskId===task.id && d.state==='delivered')); };
+  const ownerStatus = taskOrId => { const id=typeof taskOrId==='string'?taskOrId:taskOrId.id; return room.snapshot().messages.find(message=>message.workId===id&&message.itemId==='public-status'); };
+  const ownerFinal = taskOrId => { const id=typeof taskOrId==='string'?taskOrId:taskOrId.id; return service.tasks().find(task=>task.publication?.role==='owner-final'&&task.publication.ownerTaskId===id); };
   const bridge = async task => { const config=threads.get(task.runtime.threadId).config['mcp_servers.negus_handoffs']; const mcp=new Client({name:'isolated-group-test',version:'1'}); await mcp.connect(new StdioClientTransport({command:config.command,args:config.args,env:{...process.env,...config.env}})); bridges.push(mcp); return mcp; };
   const call = async (mcp,name,args={}) => mcp.callTool({name,arguments:args});
-  return {root,room,service,events,registered,calls,turnStarts,threadStarts,resumeStarts,providerRequests,threads,emit,health,send,running,complete,bridge,call};
+  return {root,room,service,events,registered,calls,turnStarts,threadStarts,resumeStarts,providerRequests,threads,emit,health,send,running,complete,ownerStatus,ownerFinal,bridge,call};
 }
 
 test('group completed commentary is durable, ordered, deduplicated and survives failure/reconnect', async t=>{
@@ -88,44 +96,97 @@ test('group completed commentary is durable, ordered, deduplicated and survives 
   assert.equal(reloaded.snapshot().messages.filter(m=>m.phase==='commentary').length,3); await reloaded.close();
 });
 
-test('explicit group collaboration creates each requested employee task once through delegate_task', async t=>{
-  const f=await fixture(t,'collaboration-tool');
-  const request='资料核实、代码实现、发布验收，几个人相互做好职责合作完成。';
-  await f.send('collaboration-tool',[],request);
+test('discussion and explicit mentions answer once in the responsible employee bubble', async t=>{
+  const f=await fixture(t,'direct-and-mention');
+  await f.send('discussion',[],'讨论一下这个方案');
   await until(()=>f.running('manager'));
   const manager=f.running('manager');
-  const plan=manager.source.coordination;
-  assert.deepEqual(plan.assignments.map(item=>item.agentId),['researcher','developer','reviewer']);
-  assert.equal(f.service.tasks().some(task=>task.parentTaskId===manager.id),false);
-  assert.equal(f.room.snapshot().messages.some(message=>message.workId===`coordination:${manager.source.messageId}`),false);
-  const mcp=await f.bridge(manager);
-  for (const [index, assignment] of plan.assignments.entries()) {
-    const result=await f.call(mcp,'delegate_task',{requestId:assignment.requestId,agentId:assignment.agentId,
-      title:assignment.title,instructions:assignment.instructions,notifySource:index===0});
-    assert.notEqual(result.isError,true);
-    if (index < plan.assignments.length - 1)
-      assert.equal(f.room.snapshot().messages.some(message=>message.workId===`coordination:${manager.source.messageId}`),false);
-  }
-  const planMessage=f.room.snapshot().messages.find(message=>message.workId===`coordination:${manager.source.messageId}`);
-  assert.equal(planMessage.agentId,'manager');
-  assert.match(planMessage.text,/产品分析负责核实需求、资料与用户流程/);
-  assert.match(planMessage.text,/对应任务已经创建/);
-  await until(()=>['researcher','developer','reviewer'].every(id=>f.running(id)));
-  const routed=f.service.tasks().filter(task=>task.parentTaskId===manager.id);
-  assert.ok(routed.every(task=>task.modelProviderId==='deepseek'&&task.model==='deepseek-flash'));
-  const outsider=await f.call(mcp,'delegate_task',{requestId:'outsider',agentId:'grok',title:'越界派工',instructions:'不应创建'});
-  assert.equal(outsider.isError,true);
-  assert.equal(f.service.tasks().some(task=>task.agentId==='grok'),false);
+  f.emit('item/completed',{threadId:manager.runtime.threadId,turnId:manager.runtime.turnId,
+    item:{id:'manager-opinion',type:'agentMessage',phase:'commentary',text:'独立意见：先核对范围'}});
   await f.complete(manager);
-  assert.deepEqual(['researcher','developer','reviewer'].map(id=>f.service.tasks().filter(task=>task.agentId===id&&task.kind==='delegation').length),[1,1,1]);
-  assert.equal(f.service.tasks().some(task=>task.agentId==='grok'),false);
-  assert.equal(f.service.tasks().some(task=>task.kind==='continuation'),false);
-  for (const agentId of ['researcher','developer','reviewer']) await f.complete(f.running(agentId));
+  assert.equal(f.room.snapshot().messages.filter(message=>message.agentId==='manager'&&message.type==='agent').length,2);
+  assert.equal(f.room.snapshot().messages.some(message=>message.itemId==='public-status'),false);
+
+  await f.send('mention',[],'@技术研发 直接回答');
+  await until(()=>f.running('developer'));
+  await f.complete(f.running('developer'));
+  assert.equal(f.room.snapshot().messages.filter(message=>message.agentId==='developer'&&message.type==='agent').length,1);
+  assert.equal(f.room.snapshot().messages.filter(message=>message.agentId==='manager'&&message.type==='agent').length,2);
+});
+
+test('delegated execution exposes blockers immediately without posting worker conclusions', async t=>{
+  const f=await fixture(t,'delegated-blocker');
+  await f.send('blocker-source',[],'@运营管理 安排技术核查');
+  await until(()=>f.running('manager'));
+  const manager=f.running('manager');
+  const mcp=await f.bridge(manager);
+  assert.notEqual((await f.call(mcp,'delegate_task',{requestId:'blocker-child',agentId:'developer',
+    title:'检查实现',instructions:'检查并返回证据'})).isError,true);
+  await until(()=>f.running('developer'));
+  await f.complete(manager);
+  await f.complete(f.running('developer'),'failed');
+  await until(()=>f.ownerStatus(manager)?.failure===true);
+  assert.match(f.ownerStatus(manager).text,/技术研发执行失败/);
+  assert.equal(f.room.snapshot().messages.some(message=>message.agentId==='developer'),false);
+  assert.equal(f.ownerFinal(manager),undefined);
+  assert.equal(f.room.snapshot().messages.filter(message=>message.itemId==='public-status'&&message.workId===manager.id).length,1);
+});
+
+test('delegated risks and decisions update the same bubble and survive routine progress', async t => {
+  const f=await fixture(t,'delegated-notice');
+  await f.send('notice-source',[],'@运营管理 安排技术核查');
+  const manager=f.running('manager');
+  const mcp=await f.bridge(manager);
+  const notice={requestId:'data-risk',kind:'decision',text:'继续会删除现有数据，需要您确认。'};
+  assert.equal((await f.call(mcp,'publish_group_notice',notice)).isError,true);
+  assert.notEqual((await f.call(mcp,'delegate_task',{requestId:'notice-child',agentId:'developer',
+    title:'检查影响',instructions:'检查并返回证据'})).isError,true);
+  const statusId=f.ownerStatus(manager).id;
+  const child=f.running('developer');
+  assert.notEqual((await f.call(mcp,'publish_group_notice',notice)).isError,true);
+  assert.notEqual((await f.call(mcp,'publish_group_notice',notice)).isError,true);
+  assert.equal(f.ownerStatus(manager).text,notice.text);
+  f.emit('item/completed',{threadId:child.runtime.threadId,turnId:child.runtime.turnId,
+    item:{id:'internal-check',type:'agentMessage',phase:'commentary',text:'后台逐项核对'}});
+  await until(()=>f.service.tasks().find(task=>task.id===child.id)?.progress?.length===1);
+  await f.complete(manager);
+  assert.equal(f.ownerStatus(manager).id,statusId);
+  assert.equal(f.ownerStatus(manager).text,notice.text);
+  assert.equal(f.service.tasks().find(task=>task.id===manager.id).progress.filter(item=>item.phase==='group-notice').length,1);
+  await f.complete(child);
+  await until(()=>f.ownerFinal(manager)?.state==='running');
+  await f.complete(f.ownerFinal(manager));
+  assert.equal(f.ownerStatus(manager).id,statusId);
+  assert.match(f.ownerStatus(manager).text,/需要您确认.*result manager/s);
+});
+
+test('model-selected multiple employees reply in their own identities and persist public authorship', async t=>{
+  const selections=[];
+  const f=await fixture(t,'model-multi-selection',{
+    selectGroupAgent:async ({text,members})=>{
+      selections.push({text,members:members.map(member=>member.id)});
+      return {agentIds:['researcher','developer'],selection:{model:'deepseek-flash',modelProviderId:'deepseek',
+        reasoningEffort:'low',durationMs:1}};
+    },
+  });
+  await f.send('model-multi',[],'请产品分析和技术研发共同处理这个任务');
+  await until(()=>f.running('researcher')&&f.running('developer'));
+  assert.equal(selections.length,1);
+  assert.equal(selections[0].text,'请产品分析和技术研发共同处理这个任务');
+  const source=f.room.snapshot().messages.find(message=>message.text===selections[0].text);
+  const tasks=f.service.tasks().filter(task=>task.source?.messageId===source.id);
+  assert.deepEqual(tasks.map(task=>task.agentId).sort(),['developer','researcher']);
+  assert.ok(tasks.every(task=>task.source.routing.reason==='selected'));
+  assert.equal(f.service.tasks().some(task=>task.agentId==='manager'),false);
+  await f.complete(f.running('researcher'));
+  await f.complete(f.running('developer'));
   await until(()=>f.service.deliveries().every(item=>item.state==='delivered'));
-  for (const agentId of ['researcher','developer','reviewer']) {
-    const result=f.room.snapshot().messages.find(message=>message.agentId===agentId&&message.type==='agent'&&!message.phase);
-    assert.ok(result,`${agentId} result should return to the room`);
-    assert.equal(result.authorName,{researcher:'产品分析',developer:'技术研发',reviewer:'风控质量'}[agentId]);
+  const persisted=JSON.parse(await fs.readFile(path.join(f.root,'room.json'),'utf8'));
+  for (const [agentId,authorName] of [['researcher','产品分析'],['developer','技术研发']]) {
+    const reply=persisted.messages.find(message=>message.agentId===agentId&&message.type==='agent'&&message.replyTo?.id===source.id);
+    assert.ok(reply);
+    assert.equal(reply.authorId,agentId);
+    assert.equal(reply.authorName,authorName);
   }
 });
 
@@ -190,40 +251,6 @@ test('group task transfers an existing employee thread to the selected fallback 
   assert.equal(f.room.getAgent('manager').model,'alpha');
 });
 
-test('verbatim iPhone 18 Pro request includes the developer through the real MCP task chain', async t=>{
-  const f=await fixture(t,'collaboration-iphone-18-pro');
-  const request='安排更新 iPhone 18pro 系列的数据。几个人相互做好自己职责合作完成。我要看等效光圈的对比。';
-  await f.send('iphone-18-pro',[],request);
-  await until(()=>f.running('manager'));
-  const manager=f.running('manager');
-  const plan=manager.source.coordination;
-  assert.equal(plan.reason,'explicit-collaboration');
-  assert.deepEqual(plan.assignments.map(item=>item.agentId),['researcher','developer']);
-  const developerAssignment=plan.assignments.find(item=>item.agentId==='developer');
-  assert.ok(developerAssignment);
-  assert.match(developerAssignment.instructions,/本次用户要求：[\s\S]*iPhone 18pro/);
-  const mcp=await f.bridge(manager);
-  for (const assignment of plan.assignments) {
-    const result=await f.call(mcp,'delegate_task',{requestId:assignment.requestId,agentId:assignment.agentId,
-      title:assignment.title,instructions:assignment.instructions,notifySource:false});
-    assert.notEqual(result.isError,true);
-  }
-  await until(()=>f.running('researcher') && f.running('developer'));
-  const tasks=f.service.tasks().filter(task=>task.parentTaskId===manager.id);
-  assert.deepEqual(tasks.map(task=>task.agentId).sort(),['developer','researcher']);
-  assert.equal(tasks.some(task=>task.agentId==='reviewer'),false);
-  assert.ok(tasks.every(task=>task.taskRouting?.selectedProviderId && task.taskRouting?.selectedModel));
-  const planMessage=f.room.snapshot().messages.find(message=>message.workId===`coordination:${manager.source.messageId}`);
-  assert.match(planMessage.text,/技术研发负责完成代码实现与定向验证/);
-  await f.complete(manager);
-  await f.complete(f.running('researcher'));
-  await f.complete(f.running('developer'));
-  for (const agentId of ['researcher','developer']) {
-    const result=f.room.snapshot().messages.find(message=>message.agentId===agentId&&message.type==='agent'&&!message.phase);
-    assert.equal(result.authorName,{researcher:'产品分析',developer:'技术研发'}[agentId]);
-  }
-});
-
 for (const [id, request] of [
   ['database-avatar-field', '帮我更新一下数据库里的头像字段'],
   ['homepage-data-display', '修复首页数据不显示'],
@@ -238,129 +265,6 @@ for (const [id, request] of [
   assert.equal(f.service.tasks().some(task=>task.agentId!=='manager'),false);
   await f.complete(manager);
   assert.equal(f.service.tasks().some(task=>task.agentId==='researcher'),false);
-});
-
-test('generic explicit collaboration asks for concrete roles without inventing employee tasks', async t=>{
-  const f=await fixture(t,'collaboration-explicit-minimum');
-  await f.send('explicit-minimum',[],'你们几个人一起看看这个');
-  await until(()=>f.running('manager'));
-  const manager=f.running('manager');
-  assert.equal(manager.source.coordination.reason,'clarification');
-  assert.deepEqual(manager.source.coordination.assignments,[]);
-  assert.match(f.turnStarts.find(call=>call.threadId===manager.runtime.threadId).developerInstructions,/询问/);
-  await f.complete(manager);
-  assert.equal(f.service.tasks().some(task=>task.parentTaskId===manager.id),false);
-  assert.equal(f.service.tasks().some(task=>task.agentId!=='manager'),false);
-  assert.equal(f.room.snapshot().messages.some(message=>message.workId===`coordination:${manager.source.messageId}`),false);
-});
-
-test('manager omission still creates the announced plan once and workers report by their own identity', async t=>{
-  const f=await fixture(t,'collaboration-fallback');
-  await f.send('collaboration-fallback',[],'先核实资料，再修复代码，最后发布验收。');
-  await until(()=>f.running('manager'));
-  const manager=f.running('manager');
-  assert.ok(manager.source.coordination);
-  assert.equal(manager.agentId,'manager');
-  assert.equal(manager.parentTaskId,undefined);
-  assert.equal(manager.resultOf,undefined);
-  assert.equal(['continuation','delegation','followup'].includes(manager.kind),false);
-  assert.equal(f.service.tasks().filter(task=>task.parentTaskId===manager.id).length,0);
-  await f.complete(manager,'completed',{duplicate:true});
-  await until(()=>['researcher','developer','reviewer'].every(id=>f.running(id)));
-  const children=f.service.tasks().filter(task=>task.parentTaskId===manager.id&&task.kind==='delegation');
-  assert.deepEqual(children.map(task=>task.agentId).sort(),['developer','researcher','reviewer']);
-  assert.deepEqual(children.map(task=>task.agentId).sort(),[...new Set(children.map(task=>task.agentId))].sort());
-  assert.ok(children.every(task=>task.taskRouting?.selectedProviderId&&task.taskRouting?.selectedModel));
-  const plan=f.room.snapshot().messages.find(message=>message.workId===`coordination:${manager.source.messageId}`);
-  assert.equal(f.room.snapshot().messages.find(message=>message.type==='agent')?.id,plan.id);
-  for (const child of children) await f.complete(f.running(child.agentId));
-  await until(()=>f.service.deliveries().every(item=>item.state==='delivered'));
-  assert.equal(f.room.snapshot().messages.filter(message=>message.workId===children[0].id&&!message.phase).length,1);
-  for (const child of children) assert.equal(f.room.snapshot().messages.find(message=>message.workId===child.id&&!message.phase)?.agentId,child.agentId);
-});
-
-test('authoritative completed history recovers omitted collaboration without duplicate tasks or plan', async t=>{
-  const f=await fixture(t,'collaboration-history-recovery');
-  await f.send('history-recovery',[],'先核实资料，再修复代码，最后发布验收。');
-  await until(()=>f.running('manager'));
-  const manager=f.running('manager');
-  const turn=f.threads.get(manager.runtime.threadId).turns.at(-1);
-  turn.status='completed';
-  turn.items.push({id:`final-${turn.id}`,type:'agentMessage',text:'历史终态'});
-  f.health.forEach(listener=>listener({phase:'recovered'}));
-  f.health.forEach(listener=>listener({phase:'recovered'}));
-  await until(()=>f.service.tasks().find(task=>task.id===manager.id)?.state==='completed');
-  await until(()=>['researcher','developer','reviewer'].every(id=>f.running(id)));
-  const children=f.service.tasks().filter(task=>task.parentTaskId===manager.id);
-  assert.deepEqual(children.map(task=>task.agentId).sort(),['developer','researcher','reviewer']);
-  assert.equal(f.room.snapshot().messages.filter(message=>message.workId===`coordination:${manager.source.messageId}`).length,1);
-  for (const child of children) await f.complete(f.running(child.agentId));
-});
-
-test('failed reception does not announce a team before any employee task exists', async t=>{
-  const f=await fixture(t,'collaboration-no-false-plan');
-  const message=await f.send('collaboration-no-false-plan',[],'资料核实、代码实现、发布验收，几个人相互做好职责合作完成。');
-  await until(()=>f.running('manager'));
-  const manager=f.running('manager');
-  assert.ok(manager.source.coordination);
-  assert.equal(f.room.snapshot().messages.some(item=>item.workId===`coordination:${message.id}`),false);
-  await f.complete(manager,'failed');
-  assert.equal(f.service.tasks().some(task=>task.parentTaskId===manager.id),false);
-  assert.equal(f.room.snapshot().messages.some(item=>item.workId===`coordination:${message.id}`),false);
-  assert.equal(f.service.tasks().some(task=>task.agentId!=='manager'),false);
-});
-
-test('simple group work stays on reception and earlier collaboration does not poison a later request', async t=>{
-  const f=await fixture(t,'collaboration-simple');
-  const collaboration=await f.send('old-collaboration',[],'资料核实、代码实现、发布验收，几个人相互做好职责合作完成。');
-  await until(()=>f.running('manager'));
-  const first=f.running('manager');
-  await f.complete(first,'failed');
-  assert.ok(first.source.coordination);
-  const simpleMessage=await f.send('simple-work',[],'帮我整理这一句话');
-  const simple=f.service.tasks().find(task=>task.requestKey===`message:${simpleMessage.id}:manager`);
-  assert.ok(simple);
-  assert.equal(simple.agentId,'manager');
-  assert.equal(simple.source.coordination,undefined);
-  assert.equal(simple.source.messageId,simpleMessage.id);
-  assert.equal(f.room.snapshot().messages.some(message=>message.workId===`coordination:${collaboration.id}`),false);
-  assert.equal(f.service.tasks().some(task=>task.agentId!=='manager'),false);
-  await f.complete(simple);
-});
-
-test('question mark returns live status without starting a model task', async t=>{
-  const f=await fixture(t,'collaboration-status');
-  const emptyQuestion=await f.service.receive({requestId:'empty-question',agentIds:[],message:{type:'human',authorId:'fixture',authorName:'fixture',text:'?',attachments:[]}});
-  await until(()=>f.room.snapshot().messages.some(message=>message.workId===`status:${emptyQuestion.message.id}`));
-  assert.equal(f.service.tasks().length,0);
-  assert.equal(f.threads.size,0);
-  assert.match(f.room.snapshot().messages.find(message=>message.workId===`status:${emptyQuestion.message.id}`).text,/目前没有正在执行的任务/);
-  await f.send('simple-work',[],'帮我整理这一句话');
-  const simple=f.service.tasks()[0];
-  assert.equal(simple.agentId,'manager');
-  assert.equal(simple.source.coordination,undefined);
-  const question=f.service.receive({requestId:'question',agentIds:[],message:{type:'human',authorId:'fixture',authorName:'fixture',text:'？',attachments:[]}});
-  const answer=await question;
-  assert.equal(answer.message.text,'？');
-  await until(()=>f.room.snapshot().messages.some(message=>message.workId===`status:${answer.message.id}`));
-  assert.equal(f.service.tasks().length,1);
-  const status=f.room.snapshot().messages.find(message=>message.workId===`status:${answer.message.id}`);
-  assert.equal(status.agentId,'manager');
-  assert.match(status.text,/运营管理/);
-  assert.match(status.text,/执行中/);
-  assert.match(status.text,/您想确认哪一项/);
-  await f.complete(simple);
-});
-
-test('question mark asks for clarification in a room without employees', async t=>{
-  const f=await fixture(t,'collaboration-empty-status',{agentDefinitions:[]});
-  const question=await f.service.receive({requestId:'empty-room-question',agentIds:[],message:{type:'human',authorId:'fixture',authorName:'fixture',text:'？',attachments:[]}});
-  await until(()=>f.room.snapshot().messages.some(message=>message.workId===`status:${question.message.id}`));
-  const answer=f.room.snapshot().messages.find(message=>message.workId===`status:${question.message.id}`);
-  assert.equal(answer.type,'system');
-  assert.match(answer.text,/没有可回复的员工/);
-  assert.equal(f.service.tasks().length,0);
-  assert.equal(f.threads.size,0);
 });
 
 test('explicit mention wins over collaboration planning', async t=>{

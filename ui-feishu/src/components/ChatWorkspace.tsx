@@ -1,3 +1,4 @@
+import { isOptimisticId } from "../../../windows/server/message-identity.mjs";
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, Files, PanelRight, Pencil, Share2, X } from 'lucide-react';
@@ -16,7 +17,7 @@ import { isInternalTaskResult, isVisibleTaskMessage } from '../taskNotice';
 import type { ChatTab, Conversation, ConversationState, UsageState } from '../types';
 import { conversationApi } from '../../shared/features/conversations/data/conversationApi';
 import { mergeMessageList } from '../../shared/features/conversations/state/conversationMerge';
-import { createOptimisticMessage } from '../../shared/features/conversations/state/optimisticMessage';
+import { queuedTranscriptMessage } from '../../shared/features/conversations/state/optimisticMessage';
 import dialogStyles from '../../shared/features/conversations/components/ConversationActions.module.css';
 
 type Props = {
@@ -79,9 +80,8 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
   const projectRoot = c.session?.cwd || selected?.session?.cwd || c.project?.root;
   const displaySession = useMemo(() => c.session ? {
     ...c.session, messages: mergeMessageList(
-      c.queueItems.filter(item => item.state === 'dispatching' && !isInternalTaskResult(item.text)).map(item => ({ ...createOptimisticMessage(item.text, item.attachments, item.dispatchSubmissionId || item.submissionId, item.sentAt || item.createdAt), deliveryState: 'sending' as const,
-        authorId: item.authorId, authorName: item.authorName, displaySourceAgentId: item.displaySourceAgentId })),
-      c.session.messages.filter(m => isVisibleTaskMessage(m) && (!m.submissionId || !m.id.startsWith('optimistic-') || !c.queueItems.some(item => item.state !== 'dispatching' && (m.submissionId === item.submissionId || m.submissionId === item.dispatchSubmissionId)))))
+      c.queueItems.filter(item => item.state === 'dispatching' && !isInternalTaskResult(item.text)).map(item => ({ ...queuedTranscriptMessage(item, item.dispatchSubmissionId || item.submissionId), deliveryState: 'sending' as const })),
+      c.session.messages.filter(m => isVisibleTaskMessage(m) && (!m.submissionId || !isOptimisticId(m.id) || !c.queueItems.some(item => item.state !== 'dispatching' && (m.submissionId === item.submissionId || m.submissionId === item.dispatchSubmissionId)))))
       .map(m => ({ ...m, authorName: m.authorName || (m.role === 'user' ? '我' : selectedName) })),
   } : null, [c.session, c.queueItems, selectedName]);
   const files = c.session?.messages.filter(m => m.blocks?.some(b => b.type !== 'markdown' && b.type !== 'options')) || [];
@@ -131,8 +131,8 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
             <ConversationView ref={viewRef} selectedMessages={selectedIds} onSelectMessage={toggleSelection} queue={c.queueError ? <FollowUpQueue items={[]} busy={c.queueBusy} error={c.queueError}
               onEdit={async () => false} onRemove={c.removeQueueItem} onMove={c.moveQueueItem} onRetry={c.retryQueueItem} onSendNow={c.sendQueueItem} /> : null}
               queuedMessages={c.queueItems.filter(item => item.state !== 'dispatching' && !isInternalTaskResult(item.text)).map(item => ({
-                message: createOptimisticMessage(item.text, item.attachments, item.submissionId, item.createdAt),
-                content: <FollowUpQueue items={c.queueItems} onlyId={item.id} busy={c.queueBusy} error=""
+                message: queuedTranscriptMessage(item),
+                content: <FollowUpQueue compacting={c.contextStatus.threadId === item.threadId && c.contextStatus.phase === 'compacting'} items={c.queueItems} onlyId={item.id} busy={c.queueBusy} error=""
                   onEdit={queued => activeComposer()?.editQueuedMessage(queued, c.removeQueueItem) ?? Promise.resolve(false)}
                   onRemove={c.removeQueueItem} onMove={c.moveQueueItem} onRetry={c.retryQueueItem} onSendNow={c.sendQueueItem} />,
               }))} session={displaySession} key={c.composerKey || 'conversation'} active={visible && tab === 'messages'}
@@ -166,10 +166,10 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
         onClose={() => setForwardDialog(false)} onForward={target => void forward(target)} />
       {c.providerSwitch && createPortal(<dialog ref={providerDialogRef} className={dialogStyles.dialog} aria-label="切换模型配置" onCancel={event => { event.preventDefault(); if (!c.providerSwitchBusy) c.cancelProviderSwitch(); }}>
         <header><strong>切换模型配置</strong><button type="button" aria-label="关闭" disabled={c.providerSwitchBusy} onClick={() => c.cancelProviderSwitch()}><X /></button></header>
-        <p>切换配置将使用完整上下文创建新对话，是否创建？</p>
+        <p>继续在当前会话中发送，或带着完整上下文创建新对话。</p>
         <p className={dialogStyles.source}>目标配置：{c.providerSwitch.providerName} · {c.providerSwitch.model.split("::").at(-1)}</p>
         {c.providerSwitchError ? <p role="alert" className={dialogStyles.error}>{c.providerSwitchError}</p> : null}
-        <footer><button type="button" disabled={c.providerSwitchBusy} onClick={() => void c.confirmProviderSwitch()}>{c.providerSwitchBusy ? "正在创建…" : "创建新对话"}</button><button type="button" disabled={c.providerSwitchBusy} onClick={() => c.cancelProviderSwitch()}>取消</button></footer>
+        <footer>{!c.session?.conversationKind && <button type="button" disabled={c.providerSwitchBusy} onClick={c.continueProviderSwitch}>继续当前会话</button>}<button type="button" disabled={c.providerSwitchBusy} onClick={() => void c.confirmProviderSwitch()}>{c.providerSwitchBusy ? "正在创建…" : "创建新对话"}</button><button type="button" disabled={c.providerSwitchBusy} onClick={() => c.cancelProviderSwitch()}>取消</button></footer>
       </dialog>, document.body)}
     </section>;
 }

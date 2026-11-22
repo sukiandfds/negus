@@ -1,0 +1,11 @@
+export function optimisticMessageId(submissionId: string): string;
+export function isOptimisticId(id: string | undefined): boolean;
+export function optimisticSubmissionId(id: string | undefined): string;
+type Identity = { clientUserMessageId?: string; clientId?: string; client_id?: string; id?: string; role?: string; authorId?: string; submissionId?: string; clientMessageId?: string | null; workId?: string | null; itemId?: string | null };
+export function sameSubmission(left: Identity, right: Identity): boolean;
+export function sameMessage(left: Identity, right: Identity): boolean;
+export function submissionIdOf(value: Identity): string;
+export function receiptMatches(left: Identity & {turnId?: string}, right: Identity & {turnId?: string}): boolean;
+export function mergeIdentified<T extends Identity>(messages: Iterable<T>, resolve: (previous: T, incoming: T) => T): T[];
+export function protocolUserSubmission(item?: Identity & {type?: string}): string;
+export function containsSubmittedInput(items: (Identity & {type?: string})[] | undefined, submissionId: string): boolean;

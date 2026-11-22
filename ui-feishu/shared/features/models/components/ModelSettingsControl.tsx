@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Pencil, RefreshCw } from "lucide-react";
-import { ChannelManager, useChannelCatalog } from "./ChannelManager";
+import { ChannelManager, readChannels, useChannelCatalog } from "./ChannelManager";
 import type { CodexModel } from "../model/types";
-import { channelProviderId, chooseEffort, providerIdForModel, useModelDefaults } from "../model/modelDefaults";
+import { channelProviderId, chooseEffort, providerIdForModel } from "../model/modelDefaults";
 import { formatModelDisplayName } from "../model/modelDisplayName";
 import { formatReasoningEffort } from "../model/reasoningEffortLabels";
 import { ModelSelect } from "./ModelSelect";
@@ -36,17 +36,13 @@ export function ModelSettingsControl({
   const current = models.find(entry => entry.model === currentModel);
   const buttonLabel = [currentModel ? formatModelDisplayName(currentModel, current?.displayName?.split(" · ").at(-1)) : "选择模型",
     formatReasoningEffort(currentEffort)].filter(Boolean).join(" · ");
-  const defaults = useModelDefaults();
-  const { allChannels, canonical, managed } = useChannelCatalog(models, currentModel, open);
+  const { channelOptions, canonical, managed } = useChannelCatalog(models, currentModel, open);
   useEffect(() => {
     if (open) void refreshModelCatalog("", undefined, false).catch(() => {});
   }, [open]);
   const providerOf = (model: string) => providerIdForModel(models, model);
   const provider = providerOf(currentModel);
   const selectedProvider = canonical(provider);
-  const channelOptions = allChannels.filter(entry => entry.switchable !== false
-    && !defaults.archivedProviderIds.map(canonical).includes(canonical(channelProviderId(entry)))
-    && models.some(model => canonical(providerOf(model.model)) === canonical(channelProviderId(entry))));
   const candidates = models.filter(model => canonical(providerOf(model.model)) === selectedProvider);
   const local = candidates.filter(model => providerOf(model.model) === provider);
   const visibleModels = local.length ? local : candidates;
@@ -71,6 +67,7 @@ export function ModelSettingsControl({
         return;
       }
       const results = await refreshConfiguredModels(provider);
+      await readChannels(true);
       setRefreshError(results.filter(entry => entry.error).map(entry => entry.error).join("；"));
       setEmptyResults(results.filter(entry => entry.count === 0));
     } catch (reason) {

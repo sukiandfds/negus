@@ -53,7 +53,7 @@ export const buildBuiltInChannels = (models: CodexModel[], currentModel: string,
 export function useChannelCatalog(models: CodexModel[], currentModel: string, active = true) {
   const cached = useSyncExternalStore(channelCatalog.subscribe, channelCatalog.getSnapshot);
   const channels = cached.data?.channels || [];
-  const pricing = cached.data?.pricing;
+  const defaults = useModelDefaults();
   const builtInChannels = buildBuiltInChannels(models, currentModel, channels);
   const load = async (force = false) => {
     const next = await readChannels(force);
@@ -79,18 +79,19 @@ export function useChannelCatalog(models: CodexModel[], currentModel: string, ac
   const managed = channels.some(entry => entry.owner);
   const allChannels = managed ? channels.map(entry => {
     const id = channelProviderId(entry);
-    const available = models.filter(model => (model.modelProviderId || 'current') === id);
+    const available = models.filter(model => model.available !== false && canonical(model.modelProviderId || 'current') === canonical(id));
     const preferred = available.find(model => model.model.split('::').at(-1) === entry.model)
       || available.find(model => model.isDefault) || available[0];
     return { ...entry, availableModel: preferred?.model };
   }) : [...builtInChannels, ...sharedChannels];
-  return { channels, allChannels, load, pricing, canonical, managed };
+  const archived = defaults.archivedProviderIds.map(canonical);
+  const channelOptions = allChannels.filter(entry => entry.switchable !== false && entry.availableModel && !archived.includes(canonical(channelProviderId(entry))));
+  return { channels, channelOptions, load, canonical, managed, defaults };
 }
 
 export function ChannelManager({ onClose, currentModel, models }: { onClose: () => void; currentModel: string; models: CodexModel[] }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const defaults = useModelDefaults();
-  const { channels, allChannels, load, pricing, canonical, managed } = useChannelCatalog(models, currentModel);
+  const { channels, channelOptions, load, canonical, managed, defaults } = useChannelCatalog(models, currentModel);
   const [editing, setEditing] = useState(false);
   const [menu, setMenu] = useState('');
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
@@ -225,17 +226,14 @@ export function ChannelManager({ onClose, currentModel, models }: { onClose: () 
     <header><button type="button" aria-label="返回" disabled={busy} onClick={editing ? back : close}><ArrowLeft size={18} /></button>
       <h2>{editing ? testing ? '测试配置' : draft.id ? '编辑配置' : '添加配置' : '配置'}</h2>
       <button type="button" aria-label="关闭" disabled={busy} onClick={close}><X size={18} /></button></header>
-    <div className={styles.toolbar}><span>{editing ? draft.name : allChannels.length + ' 个配置'}</span>
+    <div className={styles.toolbar}><span>{editing ? draft.name : channelOptions.length + ' 个配置'}</span>
       <button type="button" title="添加配置" aria-label="添加配置" disabled={busy} onClick={() => open()}><Plus size={18} /></button>
       <button type="button" title="刷新配置" aria-label="刷新配置" disabled={busy} onClick={() => void refreshConfiguration()}><RefreshCw size={18} /></button>
       <button type="button" title="保存" aria-label="保存" disabled={busy || (!dirty && !defaultDirty)} onClick={() => void save()}><Save size={18} /></button>
     </div>
-    {!editing && pricing ? <section aria-label="供应商公开分组倍率"><strong>供应商公开分组倍率</strong>
-      <ul>{Object.entries(pricing).map(([group, ratio]) => <li key={group}>{group} {ratio.toFixed(2)}×</li>)}</ul>
-    </section> : null}
     {emptyResults.length ? <ModelCatalogFeedback results={emptyResults} onClose={() => setEmptyResults([])}
       onDeleted={() => { void load(true).catch(() => {}); void refreshModelCatalog().catch(() => {}); void refreshModelDefaults().catch(() => {}); }} /> : null}
-    {!editing ? <div className={styles.channels}>{allChannels.map(entry => {
+    {!editing ? <div className={styles.channels}>{channelOptions.map(entry => {
       const active = Boolean(currentModel) && matches(entry, currentProvider);
       const isDefault = matches(entry, pendingDefault ? channelProviderId(pendingDefault) : defaults.providerId);
       const linked = entry.id === 'current' ? channels.find(c => c.id === currentLink) : entry;
@@ -245,7 +243,7 @@ export function ChannelManager({ onClose, currentModel, models }: { onClose: () 
           {entry.codexInUse ? <span className={styles.badge}>ccswitch供codex使用中</span> : linked?.isCurrent ? <span className={styles.badge}>CC Switch 占用中</span> : null}
           {isDefault ? <span className={styles.badge}>默认配置</span> : null}</div>
           {entry.availableModel || entry.model ? <small>{(entry.availableModel || entry.model || '').split('::').at(-1)}</small> : null}</div>
-        <span className={styles.ratio} title={entry.priceGroup || '供应商倍率'}>{entry.priceRatio !== undefined ? entry.priceRatio.toFixed(2) + '×' : '未获取'}</span>
+        {entry.priceRatio !== undefined ? <span className={styles.ratio} title={entry.priceGroup}>{entry.priceRatio.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 20 })}×</span> : null}
         <div className={styles.actions} data-channel-menu>
           <button type="button" className={styles.iconButton} aria-label={'操作 ' + entry.name} aria-expanded={menu === entry.id} disabled={busy} onClick={event => { const box = event.currentTarget.getBoundingClientRect(); setMenuPosition({ left: Math.max(8, Math.min(box.right - 144, window.innerWidth - 152)), top: Math.max(8, Math.min(box.bottom + 4, window.innerHeight - 202)) }); setMenu(menu === entry.id ? '' : entry.id); }}><MoreHorizontal size={18} /></button>
           {menu === entry.id ? <div className={styles.actionMenu} style={menuPosition} role="menu">

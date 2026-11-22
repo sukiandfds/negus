@@ -134,13 +134,10 @@ test("employee runtime binds one main thread with main-agent host access", async
   assert.equal(turnStart.params.cwd, "D:\\project");
   assert.equal(turnStart.params.sandboxPolicy.type, "dangerFullAccess");
   assert.equal(turnStart.params.approvalPolicy, "never");
-  const role = turnStart.params.additionalContext['negus.employee'];
-  assert.equal(role.kind, 'application');
-  assert.match(role.value, /替代对话中旧的员工身份/);
-  assert.match(role.value, /技术研发/u);
-  assert.ok(role.value.includes(path.resolve('employees/developer/system-prompt.md')));
-  assert.equal(role.value.includes('默认提示词 1.'), false, 'role update must not repeat global rules and crowd out the employee identity');
-  assert.equal(turnStart.params.developerInstructions, undefined);
+  const role = turnStart.params.developerInstructions;
+  assert.ok(role.includes(registry.require("developer").instructions), "each turn carries the current employee's actual role");
+  assert.ok(role.includes(path.resolve("employees/developer/system-prompt.md")));
+  assert.equal(turnStart.params.additionalContext["negus.model"].kind, "application");
   assert.equal((events.find((event) => event.type === "employee_status")?.modificationConfirmed), true);
   listener({ method: "turn/completed", params: { threadId: "employee-thread", turn: { status: "completed" } } });
   await runtime.confirmModification("developer");
@@ -707,7 +704,7 @@ test('product leader starts with task tools and sends first message without resu
   const start = f.calls.find(c => c.method === 'thread/start');
   assert.ok(start.params.config['mcp_servers.negus_tasks']);
   assert.match(start.params.developerInstructions, /委派后台调研/);
-  assert.match(f.calls.find(c => c.method === 'turn/start').params.additionalContext['negus.employee'].value, /委派后台调研/);
+  assert.match(f.calls.find(c => c.method === 'turn/start').params.developerInstructions, /委派后台调研/);
 });
 
 for (const state of ['idle', 'active', 'unknown']) test(`existing product leader tool reload does not gate on ${state} state`, async t => {

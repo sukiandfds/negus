@@ -98,7 +98,7 @@ test("retries a message after a dispatch failure instead of deduplicating it for
   assert.equal(humanMessages[0].failure, false);
 });
 
-test("directive-prefixed broadcast queues and persists one target per employee", async (t) => {
+test("broadcast wording without a structured target stays visible and does not auto-dispatch", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "negus-group-route-broadcast-"));
   const room = await createGroupRoomStore({ stateFile: path.join(directory, "group-room.json"), project: "negus", broadcast: () => {} });
   let execution = null;
@@ -122,11 +122,11 @@ test("directive-prefixed broadcast queues and persists one target per employee",
   const result = await response.json();
   const employeeIds = room.snapshot().agents.map((agent) => agent.id);
   assert.equal(response.status, 202);
-  assert.equal(result.execution.mode, "broadcast");
-  assert.deepEqual(result.execution.agentIds, employeeIds);
-  assert.deepEqual(result.message.targetAgentIds, employeeIds);
-  assert.deepEqual(execution.agentIds, employeeIds);
-  assert.deepEqual(result.execution.targets.map((target) => target.state), employeeIds.map(() => "queued"));
+  assert.equal(result.execution, null);
+  assert.equal(result.listening, true);
+  assert.deepEqual(result.message.targetAgentIds, []);
+  assert.equal(execution, null);
+  assert.ok(employeeIds.length > 0);
 });
 
 test("replying to an employee message keeps the follow-up with that employee", async (t) => {

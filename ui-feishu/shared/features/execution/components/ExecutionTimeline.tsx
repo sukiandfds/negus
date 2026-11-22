@@ -51,6 +51,7 @@ export function ExecutionTimeline({
     ? elapsedText(liveDurationMs)
     : Number.isFinite(status.durationMs) ? elapsedText(status.durationMs || 0) : "";
   const compacting = contextStatus.threadId === status.threadId && contextStatus.phase === "compacting";
+  if (compacting && status.phase === "completed") return null;
   const label = compacting ? "正在压缩上下文" : status.phase === "submitted" ? "连接状态" : status.label.replace(/^Codex\s*/u, "");
 
   return (

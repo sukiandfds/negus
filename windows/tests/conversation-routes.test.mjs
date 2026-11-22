@@ -484,40 +484,33 @@ test("reads an external-provider employee session through employee runtime", asy
   assert.equal(JSON.parse(call.response.body).messages[0].text, "grok reply");
 });
 
-test("adds external models only for an owned employee conversation", async () => {
-  const binding = {
-    conversationId: "employee-conversation",
-    agentId: "developer",
-    runtimeSessionId: "employee-thread",
-    conversationKind: "direct",
-  };
+test("ordinary and employee model menus return the same already merged catalog", async () => {
+  const models = [{ model: "vip::gpt-6.2-sol", supportedReasoningEfforts: [{ reasoningEffort: "ultra" }] }];
   const route = createConversationRoutes({
-    conversations: {
-      listModels: async () => [{ id: "gpt", model: "gpt-5.6-terra" }],
-    },
-    execution: { getStatus: () => ({ active: false, turnId: "" }) },
-    contextManagement: {},
-    media: { resolveMany: () => [] },
-    agentConversationStore: { resolve: async () => binding },
-    employeeRuntime: {
-      supportsEmployee: () => true,
-      ownsConversation: (value) => value === binding,
-    },
-    modelProviders: {
-      listModels: async (current) => [...current, {
-        id: "grok",
-        model: "grok-4.6",
-        modelProviderId: "fusheng-grok",
-        available: true,
-      }],
-    },
+    conversations: { listModels: async () => models },
+    modelProviders: { listModels: () => { throw Error("catalog merged twice"); } },
   });
+  for (const suffix of ["", "?conversationId=employee-conversation"]) {
+    const call = invokeGet(route, "/api/models" + suffix);
+    await call.promise;
+    assert.equal(call.response.status, 200);
+    assert.deepEqual(JSON.parse(call.response.body), models);
+  }
+});
 
-  const call = invokeGet(route, "/api/models?conversationId=employee-conversation");
+test("employee model switch preserves an explicitly cleared effort", async () => {
+  const binding = { conversationId: "employee", runtimeSessionId: "thread", conversationKind: "direct", agentId: "developer" };
+  let selected;
+  const route = createConversationRoutes({
+    conversations: {}, execution: { getStatus: () => ({ active: false }) },
+    agentConversationStore: { resolve: async () => binding },
+    employeeRuntime: { ownsConversation: () => true, supportsEmployee: () => true,
+      updateModelSettings: async (_id, settings) => ({ employee: selected = settings }) },
+  });
+  const call = invokePost(route, "/api/session/model", { threadId: "thread", conversationId: "employee", model: "vip::compact", reasoningEffort: "" });
   await call.promise;
-
   assert.equal(call.response.status, 200);
-  assert.deepEqual(JSON.parse(call.response.body).map((model) => model.model), ["gpt-5.6-terra", "grok-4.6"]);
+  assert.deepEqual(selected, { model: "vip::compact", reasoningEffort: "" });
 });
 
 test("routes employee attachments through employee runtime", async () => {

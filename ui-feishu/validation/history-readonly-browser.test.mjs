@@ -23,7 +23,9 @@ page.on('pageerror', error => errors.push(error.message));
 await page.addInitScript(() => {
   const sources = [];
   window.EventSource = class { constructor() { sources.push(this); setTimeout(() => this.onopen?.(), 0); } close() {} };
-  window.emitHistory = event => sources.forEach(source => source.onmessage?.({ data: JSON.stringify(event) }));
+  window.emitHistory = event => sources.at(-1)?.onmessage?.({ data: JSON.stringify(event) });
+  window.historyConnectionCount = () => sources.length;
+  window.disconnectHistory = () => sources.at(-1)?.onerror?.();
 });
 // Observe the actual store without replacing its readers, commit or pagination behavior.
 await page.route('**/useProjectConversations.ts*', async route => {
@@ -171,6 +173,49 @@ try {
   assert.equal((await read()).goal.objective, 'fixture goal');
   assert.ok(timings.slice(crossVersionStart).find(t => t.fields.includes('details')).ms < 230);
   console.log('PASS slow version checks fit first-packet budget; cross-version continuation keeps goal and existing refresh reloads body');
+  const turnId = 'steer-live';
+  const text = '运行中同文追加';
+  const sentIds = [];
+  const write = (...entries) => fs.appendFile(f.file, entries.map(JSON.stringify).join('\n') + '\n');
+  await write({ type: 'event_msg', payload: { type: 'task_started', turn_id: turnId } });
+  f.execution.handleProtocolMessage({ method: 'turn/started', params: { threadId: f.id, turn: { id: turnId } } });
+  await page.evaluate(event => window.emitHistory(event), f.execution.getStatus(f.id));
+  await wait(async () => (await read()).executionStatus.active);
+  f.controls.steer = async (_thread, turn, message, _attachments, submissionId) => {
+    assert.equal(turn, turnId); assert.equal(message, text);
+    sentIds.push(submissionId);
+    const timestamp = new Date().toISOString();
+    await write({ type: 'response_item', timestamp, payload: { type: 'message', role: 'user', id: `msg-${submissionId}`,
+      content: [{ type: 'input_text', text }], internal_chat_message_metadata_passthrough: {
+        turn_id: turn, content_item_kinds: ['user.text'], content_item_metadata: [{ provenance: { type: 'user' } }],
+      } } }, { type: 'event_msg', timestamp, payload: { type: 'item_completed', turn_id: turn, completed_at_ms: Date.parse(timestamp),
+        item: { type: 'UserMessage', id: `item-${submissionId}`, client_id: submissionId, content: [{ type: 'text', text }] } } });
+    return {};
+  };
+  const seen = async count => {
+    await wait(async () => (await read()).session?.messages.filter(message => message.text === text && !message.id.startsWith('optimistic-')).length === count);
+    assert.equal(await bubble(text).count(), count);
+    assert.deepEqual((await read()).session.messages.filter(message => message.text === text).map(message => message.submissionId), sentIds);
+  };
+  for (const count of [1, 2]) {
+    await composer().fill(text);
+    const sent = page.waitForResponse(response => new URL(response.url()).pathname === '/api/session/message');
+    await page.getByRole('button', { name: '插入发送', exact: true }).click();
+    assert.equal((await sent).status(), 202);
+    await wait(() => sentIds.length === count);
+    await page.evaluate(event => window.emitHistory(event), { type: 'sessions_changed', threadId: f.id });
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await seen(count);
+  }
+  const connections = await page.evaluate(() => window.historyConnectionCount());
+  await page.evaluate(() => window.disconnectHistory());
+  await page.waitForFunction(previous => window.historyConnectionCount() > previous, connections);
+  await page.evaluate(() => window.emitHistory({ type: 'connected', eventId: 1, gap: true }));
+  await seen(2);
+  await page.reload();
+  await seen(2);
+  console.log('PASS active turn: one click yields one bubble, two equal sends have distinct IDs, reconnect and reload retain both');
+
   } else {
     assert.equal((await read()).contextStatus.lastSuccessfulSettings.reasoningEffort, 'high');
     console.log('PASS cold legacy A success / B final_answer then aborted displays A/model-a with A effort');
@@ -235,10 +280,67 @@ try {
     console.log('PASS same mobile retry: accepted send retains A; matching successful completion updates model-b and clears sent draft');
 
   }
+  if (!failedFinal) {
+    // Hold upload open: neither the queue nor group can use a server reply to pass this assertion.
+    for (const kind of ['queue', 'group']) {
+      if (kind === 'group') {
+        await page.route('**/api/group/snapshot*', route => route.fulfill({ json: { room: { id: 'room-a', name: '群' },
+          messages: [], agents: [], members: [], activeWorks: [] } }));
+        await page.goto(new URL('/validation/group-workspace.html',origin).href);
+      } else await page.getByRole('button', { name: '等候队列', exact: true }).last().click();
+      let release, received;
+      const gate = new Promise(r => { release = r; });
+      const observed = new Promise(r => { received = r; });
+      const file = { id: 'photo-confirmed', name: 'photo.png', mimeType: 'image/png', url: '/api/media/photo' };
+      await page.route('**/api/uploads?*', async route => { await gate; await route.fulfill({ json: file }); });
+      const endpoint = kind === 'group' ? '/api/group/message' : '/api/session/queue';
+      const text = kind + ' 带图发送';
+      await page.route('**' + endpoint, async route => {
+        const body = route.request().postDataJSON();
+        const now = new Date().toISOString();
+        const data = kind === 'group' ? { message: { ...body, id:'confirmed', authorId:body.memberId, type:'human', createdAt:now, attachments:[file] } }
+          : {items:[{...body, id:body.submissionId, state:'pending', attachments:[file], createdAt:now, updatedAt:now, position:0}]};
+        await route.fulfill({json:data}); received(body);
+      });
+      const input = page.locator('textarea:visible').last();
+      await input.fill(text);
+      await page.locator('input[type=file]').last().setInputFiles({ name:file.name, mimeType:file.mimeType, buffer:png });
+      await page.getByRole('button',{name:kind === 'group' ? '发送' : '加入等候队列', exact:true}).last().click();
+      try {
+        await bubble(text).waitFor();
+        assert.equal(await bubble(text).count(),1);
+        assert.ok(await page.locator('.chat-messages img[src^="blob:"]').count());
+      } finally { release(); }
+      assert.deepEqual((await observed).attachmentIds,[file.id]);
+      if (kind === 'group') await page.locator('[data-message-id="confirmed"]').waitFor();
+      await bubble(text).waitFor(); assert.equal(await bubble(text).count(),1);
+      console.log('PASS',kind,'photo and text in transcript before upload, one row after confirmation');
+    }
+    const attempts = [];
+    await page.route('**/api/group/message', async route => {
+      const body = route.request().postDataJSON();
+      attempts.push(body);
+      if (attempts.length === 1) return route.fulfill({ status: 409, json: { error: '测试拒收' } });
+      return route.fulfill({ json: { message: { ...body, id:'retried', type:'human', authorId:body.memberId,
+        createdAt:new Date().toISOString(), attachments:[] } } });
+    });
+    const field = page.locator('textarea:visible').last();
+    await field.fill('重新发送');
+    await field.press('Shift+Enter');
+    assert.equal(attempts.length, 0);
+    await field.press('Enter');
+    await page.locator('.chat-messages').getByText('测试拒收', {exact:true}).waitFor();
+    await page.getByRole('button', { name:'重新确认指令' }).click();
+    await page.locator('[data-message-id="retried"]').waitFor();
+    assert.equal(attempts.length, 2);
+    assert.equal(attempts[0].clientMessageId, attempts[1].clientMessageId);
+    assert.equal(await bubble('重新发送').count(), 1);
+    console.log('PASS group Enter sends, Shift+Enter keeps draft; failed send retries with original identity and one confirmed row');
+  }
   assert.deepEqual(errors, []);
   await fs.writeFile(`${artifactRoot}/browser-evidence.json`, JSON.stringify({ calls, timings, counters: f.calls, coldModelCounters, modelCounters: f.modelCalls, pages: failedFinal ? 1 : 4, messages: failedFinal ? 97 : 96, errors }, null, 2));
 } catch (error) {
   await page.screenshot({ path: `${artifactRoot}/browser-failure.png` });
   console.error(errors, calls.slice(-10), (await page.locator('body').innerText()).slice(-3500));
   throw error;
-} finally { await browser.close(); await vite.close(); await f.close(); }
+} finally { await page.goto("about:blank"); await page.unrouteAll({behavior:"wait"}); await browser.close(); await vite.close(); await f.close(); }

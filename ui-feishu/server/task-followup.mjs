@@ -1,3 +1,4 @@
+import { containsSubmittedInput } from "../../windows/server/message-identity.mjs";
 import { createHash } from 'node:crypto';
 
 export async function followupTask({ kernel, source, target, input, queue, execution, clientFor, providerForThread, actor, attachments = [] }) {
@@ -15,8 +16,7 @@ export async function followupTask({ kernel, source, target, input, queue, execu
     if (prior.accepted && !pending) {
       const client = await clientFor({ modelProviderId: target.runtime.modelProviderId || await providerForThread(threadId), model: '' });
       const history = await client.request('thread/read', { threadId, includeTurns: true });
-      const confirmed = history.thread?.turns?.some(turn => turn.items?.some(item => item.type === 'userMessage'
-        && (item.clientId === submissionId || item.clientUserMessageId === submissionId)));
+      const confirmed = history.thread?.turns?.some(turn => containsSubmittedInput(turn.items, submissionId));
       return { taskId: target.id, threadId, submissionId, status: confirmed ? 'confirmed' : 'needs-reconciliation' };
     }
     if (pending && !pending.held) return { taskId: target.id, threadId, submissionId, status: pending.state };

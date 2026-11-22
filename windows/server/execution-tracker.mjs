@@ -1,8 +1,14 @@
+import { protocolUserSubmission } from "./message-identity.mjs";
+import { acceptedInputEvent } from "./conversation-input.mjs";
+import { threadPhase, turnCompletion, waitingPhaseFor } from "./execution/protocol.mjs";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { activityFromItem, detailFromItem, stateFromItem, terminalPhases } from "./execution/activity.mjs";
 import { messageFromThreadItem } from "./content-blocks.mjs";
 import { writeJsonFileAtomic } from "./persistence/json-file.mjs";
+
+const phaseLabels = { idle: "Codex 已就绪", working: "Codex 正在处理任务", systemError: "Codex 连接异常",
+  waitingOnApproval: "需要在电脑端确认", waitingOnUserInput: "Codex 正在等待补充信息" };
 
 export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTerminal = () => {}, registerMedia = () => null }) => {
   const statuses = new Map();
@@ -271,7 +277,7 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
       if (isRetiredTurn(threadId, turnId) || (turnId && completedTurns.get(threadId)?.has(turnId))) return;
       protocolEventTimes.set(threadId, new Date().toISOString());
       reasoningBuffers.delete(threadId);
-      const phase = params.turn?.status || "completed";
+      const { status: phase, error } = turnCompletion(params.turn);
       const failed = phase === "failed";
       const finalItems = Array.isArray(params.turn?.items)
         ? params.turn.items.filter(item => item.type === "agentMessage" && item.phase === "final_answer") : [];
@@ -279,7 +285,7 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
         phase,
         turnId,
         label: failed ? "Codex 执行失败" : phase === "interrupted" ? "Codex 已中断" : "Codex 已完成",
-        detail: params.turn?.error?.message || "",
+        detail: error,
         hasFinalAnswer: current?.hasFinalAnswer ?? (finalItems.length
           ? finalItems.some(item => Boolean(String(item.text || "").trim())) : undefined),
         durationMs: Number.isFinite(params.turn?.durationMs) ? params.turn.durationMs : null,
@@ -321,25 +327,17 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
       // current turn. The turn completion event or authoritative probe owns
       // the terminal transition once a turn has actually started.
       if (status.type === "idle" && current?.active && current.phase !== "submitted") return;
-      if (status.type === "systemError") {
-        publish(threadId, { phase: "systemError", label: "Codex 连接异常" });
-      } else if (status.type === "active" && status.activeFlags?.includes("waitingOnApproval")) {
-        publish(threadId, { phase: "waitingOnApproval", label: "需要在电脑端确认" });
-      } else if (status.type === "active" && status.activeFlags?.includes("waitingOnUserInput")) {
-        publish(threadId, { phase: "waitingOnUserInput", label: "Codex 正在等待补充信息" });
-      } else if (status.type === "active" && (current?.active || current?.phase === "submitted")) {
-        publish(threadId, { phase: "working", label: "Codex 正在处理任务" });
-      } else if (status.type === "idle" && !terminalPhases.has(statuses.get(threadId)?.phase)) {
-        publish(threadId, { phase: "idle", label: "Codex 已就绪" });
-      }
+      const phase = threadPhase(status);
+      if (phase === "working" && !current?.active && current?.phase !== "submitted") return;
+      if (phase === "idle" && terminalPhases.has(current?.phase)) return;
+      if (phase !== "unknown") publish(threadId, { phase, label: phaseLabels[phase] });
       return;
     }
     if (method === "item/started") {
       const itemId = String(params.item?.id || "");
       if (itemId) rememberItemTurn(threadId, itemId, eventTurnId);
-      if (params.item?.type === "userMessage" && params.item.clientId) broadcastThreadEvent(threadId, {
-        type: "user_message_accepted", threadId, turnId: eventTurnId, submissionId: params.item.clientId,
-      });
+      const submissionId = protocolUserSubmission(params.item);
+      if (submissionId) broadcastThreadEvent(threadId, acceptedInputEvent(threadId, submissionId, eventTurnId));
       if (params.item?.type === "agentMessage") messagePhases.set(itemKey(threadId, itemId), params.item.phase);
       const state = stateFromItem(params.item);
       if (state) publish(threadId, {
@@ -389,11 +387,11 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
     }
     // FEAT-001: transport remains realtime, but text is published only at item completion.
     if (method === "item/agentMessage/delta") return;
-    if (method?.endsWith("/requestApproval")) {
+    if (waitingPhaseFor(method) === "waitingOnApproval") {
       publish(threadId, { phase: "waitingOnApproval", label: "需要在电脑端确认" });
       return;
     }
-    if (method === "item/tool/requestUserInput" || method === "mcpServer/elicitation/request") {
+    if (waitingPhaseFor(method) === "waitingOnUserInput") {
       publish(threadId, { phase: "waitingOnUserInput", label: "Codex 正在等待补充信息" });
       if (method === "item/tool/requestUserInput") {
         broadcastThreadEvent(threadId, {
@@ -514,19 +512,9 @@ export const createExecutionTracker = ({ broadcast, stateFile = "", onTurnTermin
   const reconcile = (threadId, authoritativeStatus) => {
     const current = statuses.get(threadId);
     if (!current?.active) return getStatus(threadId);
-    const type = authoritativeStatus?.type;
-    const flags = authoritativeStatus?.activeFlags || [];
-    if (type === "idle") {
-      publish(threadId, { phase: "idle", label: "Codex 已就绪" });
-    } else if (type === "systemError") {
-      publish(threadId, { phase: "systemError", label: "Codex 连接异常" });
-    } else if (type === "active" && flags.includes("waitingOnApproval")) {
-      publish(threadId, { phase: "waitingOnApproval", label: "需要在电脑端确认" });
-    } else if (type === "active" && flags.includes("waitingOnUserInput")) {
-      publish(threadId, { phase: "waitingOnUserInput", label: "Codex 正在等待补充信息" });
-    } else if (type === "active") {
-      publish(threadId, { phase: "working", label: "Codex 正在处理任务" });
-    } else {
+    const phase = threadPhase(authoritativeStatus);
+    if (phase !== "unknown") publish(threadId, { phase, label: phaseLabels[phase] });
+    else {
       publish(threadId, {
         phase: "unknown",
         label: "状态暂时无法确认",

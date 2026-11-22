@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { rememberSentImage } from "../data/sentImagePreviews";
 import { uploadAttachment } from "../data/attachmentApi";
 import { withAccessToken } from "../../../shared/api/http";
 import type { MediaFile } from "../../../shared/model/media";
@@ -149,8 +150,36 @@ export function useAttachmentDraft() {
     }
   }, []);
 
+  const prepareMessageAttachments = () => {
+    const items = attachmentsRef.current.slice();
+    const temporary: string[] = [];
+    const previews = items.map(({ id, file, previewUrl }) => {
+      if (!(file instanceof File)) return file;
+      const url = previewUrl || URL.createObjectURL(file);
+      if (!previewUrl) temporary.push(url);
+      return { id, name: file.name, mimeType: file.type || "application/octet-stream", url };
+    });
+    const finishUpload = async (submissionId: string) => {
+      const files = await uploadAll();
+      const retained = new Set<string>();
+      let imageIndex = 0;
+      files.forEach((media, index) => {
+        if (!media.mimeType.startsWith("image/")) return;
+        const { file, previewUrl } = items[index];
+        if (file instanceof File && previewUrl) {
+          rememberSentImage(submissionId, imageIndex, previewUrl, file.size);
+          retained.add(previewUrl);
+        }
+        ++imageIndex;
+      });
+      clear(retained);
+      return files;
+    };
+    return { previews, finishUpload, dispose: () => temporary.forEach(url => URL.revokeObjectURL(url)) };
+  };
+
   return {
     attachments, error, uploading, uploadSlow,
-    addFiles, restoreFiles, removeFile, clear, uploadAll, cancelUpload, setError,
+    addFiles, restoreFiles, removeFile, clear, uploadAll, prepareMessageAttachments, cancelUpload, setError,
   };
 }

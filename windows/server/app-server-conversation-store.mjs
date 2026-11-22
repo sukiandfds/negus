@@ -1,3 +1,5 @@
+import { startConversationThread, resumeConversationThread, startTurn, steerTurn, interruptTurn } from "./execution/protocol.mjs";
+import { receiptMatches } from "./message-identity.mjs";
 import { latestRolloutFile, openRollout } from './rollout-file.mjs';
 import { communicationInstructions } from "./base-prompt.mjs";
 import fs from "node:fs/promises";
@@ -540,7 +542,7 @@ export const createAppServerConversationStore = ({
       ...runtimeOptions?.resume,
     });
     if (model) params.model = model;
-    const result = await client.request("thread/start", params);
+    const result = await startConversationThread(client, params);
     let thread = result.thread;
     if (!thread?.id) throw new Error("Codex did not return the newly created Thread.");
     if (!thread.cwd) {
@@ -595,7 +597,7 @@ export const createAppServerConversationStore = ({
     // turn/start can still be pending when the response deadline expires.
     void response.catch(() => {});
     try {
-      await client.request("turn/start", {
+      await startTurn(client, {
         threadId: titleThreadId,
         input: [{ type: "text", text: titlePromptFrom(text), text_elements: [] }],
         outputSchema: AUTO_TITLE_SCHEMA,
@@ -765,7 +767,7 @@ export const createAppServerConversationStore = ({
         session.messages = session.messages.map((message) => {
           if (message.createdAt || (message.role !== 'user' && message.phase !== 'commentary')) return message;
           const matches = message.role === 'user'
-            ? (history?.userMessageEvents || []).filter(item => item.turnId === message.turnId && ((message.itemId && item.itemId === message.itemId) || (message.submissionId && item.submissionId === message.submissionId)))
+            ? (history?.userMessageEvents || []).filter(item => receiptMatches(message, item))
             : (history?.messages || []).filter(item => item.itemId && item.itemId === message.itemId && item.createdAt);
           const times = [...new Set(matches.map(item => item.createdAt).filter(Boolean))];
           return times.length === 1 ? { ...message, createdAt: times[0] } : message;
@@ -813,8 +815,8 @@ export const createAppServerConversationStore = ({
     // New threads already start with their requested policy;
     // empty threads cannot be resumed before their first persisted turn.
     if (freshRuntime) return freshRuntime;
-    return client.request("thread/resume", await withDeveloperInstructions({
-      threadId, persistExtendedHistory: true,
+    return resumeConversationThread(client, await withDeveloperInstructions({
+      threadId,
       ...runtimeOptions?.resume,
     }));
   };
@@ -858,7 +860,7 @@ export const createAppServerConversationStore = ({
     try {
       const runtime = await resumeThread(threadId);
       const { runtimeOptions } = await ensureProjectThread(threadId);
-      const result = await client.request("turn/start", await withDeveloperInstructions({
+      const result = await startTurn(client, await withDeveloperInstructions({
         threadId,
         input: await inputFromAttachments(promptFromSlashCommand(text, attachments), attachments, attachmentContent),
         additionalContext: {
@@ -888,18 +890,17 @@ export const createAppServerConversationStore = ({
   const steerMessage = async (threadId, turnId, text, attachments = [], submissionId = "") => {
     await assertAccessibleThread(await getThread(threadId));
     const developerInstructions = await getUserProfilePrompt();
-    return client.request("turn/steer", {
+    return steerTurn(client, {
       threadId,
-      expectedTurnId: turnId,
       input: await inputFromAttachments(promptFromSlashCommand(text, attachments), attachments, attachmentContent),
       ...(developerInstructions ? { developerInstructions } : {}),
       ...(submissionId ? { clientUserMessageId: submissionId } : {}),
-    });
+    }, turnId);
   };
 
   const interrupt = async (threadId, turnId) => {
     await assertAccessibleThread(await getThread(threadId));
-    return client.request("turn/interrupt", { threadId, turnId });
+    return interruptTurn(client, threadId, turnId);
   };
 
   const readSettingsThread = async (threadId, options = {}) => {
@@ -1013,11 +1014,10 @@ export const createAppServerConversationStore = ({
     }
     let resumed;
     try {
-      resumed = await client.request("thread/resume", {
+      resumed = await resumeConversationThread(client, {
         threadId,
         excludeTurns: true,
-        persistExtendedHistory: true,
-      });
+        });
     } catch (error) {
       if (missingPersistedThread(error)) throw persistedThreadError();
       throw error;
@@ -1070,7 +1070,7 @@ export const createAppServerConversationStore = ({
       excludeTurns: true,
     };
     const result = await client.request('thread/resume', params).catch(error => {
-      if (!/with stale path:.*omit path and resume by thread id/su.test(String(error.message))) throw error;
+      if (options.strictPath || !/with stale path:.*omit path and resume by thread id/su.test(String(error.message))) throw error;
       const { path: stalePath, ...byId } = params;
       return client.request('thread/resume', byId);
     });

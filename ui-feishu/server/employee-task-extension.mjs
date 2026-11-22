@@ -1,4 +1,8 @@
-import { backgroundTaskRoute, employeeTaskRoute, requestedBackgroundRoute } from '../../windows/server/background-tasks/model-policy.mjs';
+import { registerTaskThread, taskThreadOptions } from "../kernel/task-thread.mjs";
+import { startConversationThread, resumeConversationThread } from "../../windows/server/execution/protocol.mjs";
+import { containsSubmittedInput } from "../../windows/server/message-identity.mjs";
+import { taskStartupReceipt } from "../kernel/task-startup.mjs";
+import { backgroundTaskRoute, routeForTask } from '../../windows/server/background-tasks/model-policy.mjs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { createTaskKernel, terminalStates } from '../kernel/task-kernel.mjs';
@@ -40,29 +44,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     return followupTask({ kernel, source, target, input, queue, execution, clientFor, providerForThread,
       actor: source.source?.actor || (source.agentId ? { id: source.agentId, name: registry.require(source.agentId).name } : null) });
   };
-  const startupFor = async task => {
-    const current = await kernel.waitForStart(task.id, 15000);
-    const confirmed = current.state === 'running' || current.state === 'completed';
-    const message = confirmed ? '已确认任务开始执行'
-      : current.state === 'failed' ? `启动或执行失败：${current.error || '任务未产生错误详情'}`
-        : current.state === 'queued' ? '任务已创建，仍在等待调度，尚未确认启动'
-          : current.state === 'starting' ? '任务已创建，正在建立执行会话，尚未确认启动'
-            : current.state === 'needs-reconciliation' ? '任务已创建，启动响应不确定，正在核对真实状态'
-              : `任务已创建，当前状态为 ${current.state || '未知'}，尚未确认正常启动`;
-    return { ...current, startup: { confirmed, state: current.state, message,
-      threadId: current.runtime?.threadId || '', turnId: current.runtime?.turnId || '',
-      modelProviderId: current.runtime?.modelProviderId || current.modelProviderId || '',
-      model: current.runtime?.model || current.model || '',
-      reasoningEffort: current.runtime?.reasoningEffort || current.reasoningEffort || '',
-      routing: current.taskRouting || null,
-      error: confirmed ? '' : current.error || message } };
-  };
-  const routeForTask = async (employee, input) => {
-    if (input.modelProviderId || input.model)
-      return requestedBackgroundRoute(modelProviders, { modelProviderId: input.modelProviderId, model: input.model }, kernel.list());
-    return modelProviders && employeeTaskRoute(modelProviders, employee, kernel.list());
-  };
-  const tools = await createTaskTools({ background: true, invoke: async (scope, input) => {
+ const tools = await createTaskTools({ background: true, invoke: async (scope, input) => {
     const employeeScope = scope.startsWith('employee:');
     const ordinary = scope.startsWith('ordinary:');
     let source;
@@ -116,7 +98,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     if (!background && source.agentId) hierarchy.assertCanDelegate(source.agentId, agentId);
     if (agentId) registry.require(agentId);
     else if (source.source?.kind !== 'conversation' || !background) throw Object.assign(Error('执行员工不存在'), { statusCode: 400 });
-    const selection = await routeForTask(agentId ? registry.require(agentId) : null, input);
+    const selection = await routeForTask(modelProviders, agentId ? registry.require(agentId) : null, input, kernel.list());
     const reasoningEffort = input.reasoningEffort || selection?.reasoningEffort || '';
     const conversationId = `handoff-${createHash('sha256').update(`${source.id}:${input.requestId}`).digest('hex').slice(0,32)}`;
     const handoff = { requestId: input.requestId, agentId, background, title: input.title, instructions: input.instructions,
@@ -132,7 +114,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       const requestKey = `handoff:${source.runtime.threadId}:${input.requestId}`;
       task = await kernel.enqueue({ ...handoff, kind: 'delegation', parentTaskId: source.id, requestKey });
     } else task = await kernel.delegate(source.id, handoff);
-    return startupFor(task);
+    return taskStartupReceipt(kernel, task);
   } });
   const runtime = createNativeTaskRuntime({ log, resolve: async (task, controls, { recovering }) => {
     const agentless = task.source?.kind === 'conversation' && !task.agentId;
@@ -156,25 +138,18 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
           if (response.thread?.status?.type === 'notLoaded') throw Error('thread not loaded');
         } catch (error) {
           if (!/thread not loaded/i.test(error.message)) throw error;
-          await client.request('thread/resume', { ...executionPolicy, threadId, persistExtendedHistory: true });
+          await resumeConversationThread(client, { ...executionPolicy, threadId });
         }
       }
       return { client, threadId };
     }
     if (!registerSession) throw Error('任务对话登记服务未连接');
-    const register = async () => {
-      if (!await providerForThread(threadId)) await registerSession({ threadId, source: 'codex', title: task.title,
-        cwd: employee.projectRoot, updatedAt: task.createdAt, archived: false, conversationKind: 'task' },
-      modelProviderId, modelProviderId !== 'current' && employee.model && !employee.model.includes('::')
-        ? `${modelProviderId}::${employee.model}` : employee.model || '',
-      { createdBy: 'assistant', reasoningEffort: employee.reasoningEffort || '' });
-      if (!agentless) await bindings.bindRuntime({ conversationId: task.conversationId, agentId: employee.id, runtimeKind: 'codex', runtimeSessionId: threadId, conversationKind: 'task', title: task.title });
-    };
+    const register = () => registerTaskThread({ task, threadId, actor: employee, modelProviderId, cwd: employee.projectRoot,
+      providerForThread, registerSession, bindings: agentless ? null : bindings });
     const taskInstructions = agentless
       ? employeeTurnInstructions('', backgroundInstructions)
       : instructions(employee, task.background);
-    const options = { ...executionPolicy, developerInstructions: taskInstructions, config: task.background ? backgroundToolConfig : tools.config(task.id),
-      ...(employee.model ? { model: employee.model } : {}) };
+    const options = taskThreadOptions(executionPolicy, taskInstructions, task.background ? backgroundToolConfig : tools.config(task.id), employee.model);
     if (recovering) {
       if (threadId) await register();
       return { client, threadId };
@@ -183,10 +158,10 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     if (threadId) {
       try {
         await register();
-        await client.request('thread/resume', { ...options, threadId, persistExtendedHistory: true });
+        await resumeConversationThread(client, { ...options, threadId });
       } catch (error) { throw Object.assign(error, { ambiguous: true }); }
     } else {
-      const started = await client.request('thread/start', { ...options, cwd: employee.projectRoot, ephemeral: false, serviceName: 'negus' });
+      const started = await startConversationThread(client, { ...options, cwd: employee.projectRoot, ephemeral: false, serviceName: 'negus' });
       threadId = started.thread.id;
       await controls.checkpoint({ threadId, modelProviderId, model: employee.model, reasoningEffort: employee.reasoningEffort,
         registrationPending: true });
@@ -399,8 +374,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
         const history = await client.request('thread/read', { threadId, includeTurns: true });
         userItems = history.thread?.turns?.find(turn => turn.id === turnId)?.items?.filter(item => item.type === 'userMessage') || [];
       }
-      const matched = candidates.flatMap(task => (task.inputs || []).flatMap(input => userItems.some(item =>
-        item.clientId === input.submissionId || item.clientUserMessageId === input.submissionId) ? [{ task, input }] : []))[0];
+      const matched = candidates.flatMap(task => (task.inputs || []).flatMap(input => containsSubmittedInput(userItems, input.submissionId) ? [{ task, input }] : []))[0];
       const existing = tracked.find(task => task.kind === 'followup' && task.runtime.threadId === threadId && task.runtime.turnId === turnId);
       if (existing) {
         if (matched && !existing.assistantFollowup) {

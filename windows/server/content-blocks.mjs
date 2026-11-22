@@ -1,3 +1,4 @@
+import { submissionIdOf } from "./message-identity.mjs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 
@@ -334,7 +335,7 @@ export const messageFromItem = (item, registerMedia) => {
     blocks,
     ...(role === "assistant" && payload.phase ? { phase: payload.phase } : {}),
     ...(itemId ? { itemId } : {}),
-    ...(role === "user" && payload.client_id ? { submissionId: payload.client_id } : {}),
+    ...(role === "user" && submissionIdOf(payload) ? { submissionId: submissionIdOf(payload) } : {}),
     ...(metadata.turn_id || item.turnId ? { turnId: metadata.turn_id || item.turnId } : {}),
   };
 };
@@ -375,7 +376,7 @@ export const messageFromThreadItem = (item, registerMedia) => {
     const blocks = userBlocksFromContent(item.content, registerMedia);
     const text = visibleText(blocks);
     if (!isUsefulUserMessage(text, blocks)) return null;
-    const submissionId = String(item.clientUserMessageId || item.clientId || "").trim();
+    const submissionId = submissionIdOf(item);
     return {
       id: item.id || blockId("message", JSON.stringify(blocks)),
       role: "user",

@@ -1,4 +1,6 @@
-import { transferEmployeeThread } from "../../ui-feishu/server/employee-provider-integration.mjs";
+import { acceptedInputEvent } from "./conversation-input.mjs";
+import { startConversationThread, resumeConversationThread, turnCompletion, waitingPhaseFor, startTurn, steerTurn, interruptTurn } from "./execution/protocol.mjs";
+import { transferConversationThread } from "./conversation-provider-handoff.mjs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
@@ -14,10 +16,6 @@ const statusError = (message, statusCode) => Object.assign(new Error(message), {
 const isOccupiedError = (error) => error?.statusCode === 409 || /already active|already running|in progress|busy|occupied/iu.test(String(error?.message || error));
 const isEndedTurnError = (error) => error?.statusCode === 409
   && /turn.*(?:ended|inactive|not active|no longer active|finished|completed)|(?:ended|inactive|not active|no longer active|finished|completed).*turn/iu.test(String(error?.message || error));
-const waitingPhaseFor = (method) => method?.endsWith("/requestApproval")
-  ? "waitingOnApproval"
-  : ["item/tool/requestUserInput", "mcpServer/elicitation/request"].includes(method) ? "waitingOnUserInput" : "";
-
 const textFromContent = (value) => {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.map(textFromContent).filter(Boolean).join("\n");
@@ -314,9 +312,8 @@ export const createEmployeeRuntimeService = ({
       // product-level "employee unavailable" gate.
       await runtimeClient.request("thread/unsubscribe", { threadId }).catch(() => {});
     }
-    const result = await runtimeClient.request("thread/resume", {
+    const result = await resumeConversationThread(runtimeClient, {
       threadId,
-      persistExtendedHistory: true,
       ...(Object.keys(config || {}).length ? { config,
         developerInstructions: employeeTurnInstructions(employee.instructions, taskService?.leaderInstructions(employee.id)),
       } : {}),
@@ -367,7 +364,7 @@ export const createEmployeeRuntimeService = ({
   const startThread = async (employee) => {
     const runtimeClient = await clientForEmployee(employee);
     const route = routeForEmployee(employee);
-    const result = await runtimeClient.request("thread/start", {
+    const result = await startConversationThread(runtimeClient, {
       cwd: clean(employee.projectRoot, 400) || projectRoot,
       developerInstructions: employeeTurnInstructions(employee.instructions, taskService?.leaderInstructions(employee.id)),
       config: taskService?.leaderConfig(employee.id),
@@ -620,9 +617,7 @@ export const createEmployeeRuntimeService = ({
         }
         return;
       }
-      if (method.endsWith("/requestApproval")
-        || method === "item/tool/requestUserInput"
-        || method === "mcpServer/elicitation/request") {
+      if (waitingPhaseFor(method)) {
         initialSubmission.earlyEvents.push(structuredClone(message));
         return;
       }
@@ -658,11 +653,10 @@ export const createEmployeeRuntimeService = ({
       return;
     }
     if (method === "turn/completed") {
-      const status = String(params.turn?.status || "completed");
+      const { status, error } = turnCompletion(params.turn);
       const eventTurnId = turnIdFromMessage(message);
       const turnId = eventTurnId || clean(statusFor(employeeId).turnId, 160);
       const current = statusFor(employeeId);
-      const error = String(params.turn?.error?.message || "");
       const submission = sendLocks.get(employeeId);
       if (!eventTurnId && submission?.requestMethod === "turn/start" && !submission.boundTurnId) return;
       if (!eventTurnId && !current.active) return;
@@ -866,21 +860,19 @@ export const createEmployeeRuntimeService = ({
           active: true,
           turnId: requestMethod === "turn/steer" ? expectedTurnId : "",
         });
-        const requestTurn = method => runtimeClient.request(method, {
+        const requestTurn = method => (method === "turn/steer" ? steerTurn : startTurn)(runtimeClient, {
           threadId,
           input,
           clientUserMessageId: cleanRequestId,
-          ...(method === "turn/steer" ? { expectedTurnId } : {
+          ...(method === "turn/start" ? {
             cwd: clean(employee.projectRoot, 400) || projectRoot,
             ...turnPolicyFor(),
-          }),
-          ...(method === "turn/start" ? {
             developerInstructions: employeeTurnInstructions(employee.instructions, [context, taskService?.leaderInstructions(employee.id)].filter(Boolean).join("\n")),
             ...(employee.model ? { model: employee.model } : {}),
             ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}),
             additionalContext: { 'negus.model': { kind: 'application', value: `本轮调用模型：${employee.model || '未取得'}。回答模型身份时以本轮请求为准，不以历史回复或全局默认配置推断。此标识不证明供应商内部实际模型。` } },
           } : {}),
-        });
+        }, expectedTurnId);
         let result;
         try {
           assertSubmissionOpen();
@@ -973,9 +965,7 @@ export const createEmployeeRuntimeService = ({
           } catch (error) {
             console.warn("[employee-runtime] model switch notice storage failed:", error.message);
           }
-          execution?.publishThreadEvent?.(threadId, {
-            type: "user_message_accepted", threadId, submissionId: cleanRequestId, turnId: completedTurnId, modelSwitch: model,
-          });
+          execution?.publishThreadEvent?.(threadId, acceptedInputEvent(threadId, cleanRequestId, completedTurnId, { modelSwitch: model }));
         }
         if (currentStatus.active && (!currentStatus.turnId || currentStatus.turnId === completedTurnId)) {
           const waiting = ["waitingOnApproval", "waitingOnUserInput"].includes(currentStatus.phase);
@@ -1030,9 +1020,8 @@ export const createEmployeeRuntimeService = ({
     const employee = registry.require(employeeId);
     const { threadId } = await ensureOpen(employee.id);
     const runtimeClient = await clientForThread(threadId, employee);
-    await runtimeClient.request("thread/resume", {
+    await resumeConversationThread(runtimeClient, {
       threadId,
-      persistExtendedHistory: true,
       ...policyFor(),
     });
     // Keep this legacy endpoint idempotent for older clients. Confirmation
@@ -1119,7 +1108,7 @@ export const createEmployeeRuntimeService = ({
         const original = await clientForThread(threadId, employee);
         replacementId = randomUUID();
         nativeThreads.set(replacementId, employee.id);
-        replacement = await transferEmployeeThread({ source: original.nativeClient || original, target: runtimeClient, providers: modelProviders,
+        replacement = await transferConversationThread({ source: original.nativeClient || original, target: runtimeClient, providers: modelProviders,
           threadId: nativeThreadId(employee), nextThreadId: replacementId, route: requestedRoute, reasoningEffort,
           config: { ...taskService?.leaderConfig(employee.id), ...(reasoningEffort ? { model_reasoning_effort: reasoningEffort } : {}) },
           instructions: employeeTurnInstructions(employee.instructions, taskService?.leaderInstructions(employee.id)),
@@ -1205,7 +1194,7 @@ export const createEmployeeRuntimeService = ({
     if (!current.active || !current.turnId) return { employeeId: employee.id, status: "idle" };
     const { threadId } = await ensureOpen(employee.id);
     const runtimeClient = await clientForThread(threadId, employee);
-    await runtimeClient.request("turn/interrupt", { threadId, turnId: current.turnId });
+    await interruptTurn(runtimeClient, threadId, current.turnId);
     publishStatus(employee.id, {
       phase: "interrupted",
       label: "已中断",

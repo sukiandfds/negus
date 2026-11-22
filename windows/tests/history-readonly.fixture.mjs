@@ -109,6 +109,7 @@ export const createHistoryFixture = async ({ legacySuccess = false, failedFinal 
     updateModel: async (_id, model, options) => ({ model, reasoningEffort: options.reasoningEffort }),
     resumeProviderSession: async () => { calls.resumes++; },
     sendMessage: async () => { calls.sends++; if (controls.sendFail) throw new Error('fixture 402'); return { turn: { id: 'successful-turn' } }; },
+    steerMessage: async (...args) => controls.steer(...args),
     getPendingUserInput: async () => null, close() {} };
   const providers = {
     refreshShared: async () => { calls.refresh++; }, providers: () => controls.configured ? [{ id: 'ccswitch_removed', displayName: '配置A' }] : [],

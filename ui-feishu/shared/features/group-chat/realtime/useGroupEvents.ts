@@ -1,11 +1,12 @@
+import { historyReadIsStale, mergeMessageList } from "../../conversations/state/historyMerge.ts";
 import { useEffect, useRef, useState } from "react";
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, SetStateAction, RefObject } from "react";
 import { groupApi } from "../data/groupApi";
-import { createPendingAgentMessage, removePendingAgentMessages, upsertGroupMessage } from "../data/groupMessageState";
-import { reconcileGroupSnapshot } from "../data/groupSnapshot";
+import { createPendingAgentMessage, removePendingAgentMessages } from "../data/groupMessageState";
+import { unfinishedGroupWorks, reconcileGroupSnapshot } from "../data/groupSnapshot";
 import type { GroupEvent, GroupSnapshot, GroupStreamingMessage } from "../model/types";
 
-export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapshot | null>>, roomId: string, reviewingHistory = false) {
+export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapshot | null>>, roomId: string, reviewingHistory: boolean, bodyRevision: RefObject<number>) {
   const [connected, setConnected] = useState(false);
   const [unseenLiveCount, setUnseenLiveCount] = useState(0);
   const [streaming, setStreaming] = useState<Record<string, GroupStreamingMessage>>({});
@@ -36,16 +37,13 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
 
     const reconcileSnapshot = async () => {
       try {
+        const revision = bodyRevision.current;
         const next = await groupApi.snapshot(roomId);
+        if (historyReadIsStale(bodyRevision.current, revision)) return;
         if (disposed) return;
-        const completedWorkIds = new Set(next.messages
-          .filter((message) => !message.pending && message.workId && message.phase !== "commentary")
-          .map((message) => message.workId));
-        const activeWorkIds = new Set((next.activeWorks || [])
-          .filter((work) => !completedWorkIds.has(work.workId))
-          .map((work) => work.workId));
+        const activeWorkIds = new Set(unfinishedGroupWorks(next.activeWorks, next.messages).map(work => work.workId));
         const nextBuffer = Object.fromEntries(Object.entries(streamingBuffer.current)
-          .filter(([workId]) => activeWorkIds.has(workId) && !completedWorkIds.has(workId)));
+          .filter(([workId]) => activeWorkIds.has(workId)));
         streamingBuffer.current = nextBuffer;
         setStreaming(nextBuffer);
         setSnapshot((current) => reconcileGroupSnapshot(next, current));
@@ -82,6 +80,7 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
         const event = JSON.parse(message.data) as GroupEvent;
         const eventRoomId = "roomId" in event ? event.roomId : "";
         if (event.type.startsWith("group_") && eventRoomId && eventRoomId !== roomId) return;
+        if (["group_message_created", "group_message_updated", "group_agent_started", "group_agent_updated"].includes(event.type)) ++bodyRevision.current;
         if (event.type === "group_message_created") {
           if (reviewingHistoryRef.current) setUnseenLiveCount((count) => count + 1);
           setSnapshot((current) => {
@@ -90,7 +89,7 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
             if (reviewingHistoryRef.current) return { ...current, activeWorks };
             return {
               ...current,
-              messages: upsertGroupMessage(current.messages, event.message),
+              messages: mergeMessageList(current.messages, event.message),
               activeWorks,
             };
           });
@@ -110,7 +109,7 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
             if (reviewingHistoryRef.current && !current.messages.some((message) => message.id === event.message.id)) return current;
             return {
               ...current,
-              messages: upsertGroupMessage(current.messages, event.message),
+              messages: mergeMessageList(current.messages, event.message),
             };
           });
         } else if (event.type === "group_agent_updated") {
@@ -137,7 +136,7 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
             ...current,
             messages: reviewingHistoryRef.current
               ? current.messages
-              : upsertGroupMessage(current.messages, createPendingAgentMessage(event)),
+              : mergeMessageList(current.messages, createPendingAgentMessage(event)),
             activeWorks: [
               ...(current.activeWorks || []).filter((work) => work.workId !== event.workId),
               {
@@ -176,7 +175,7 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
             if (!current || reviewingHistoryRef.current || current.messages.some((message) => message.workId === workId && message.phase !== "commentary")) return current;
             return {
               ...current,
-              messages: upsertGroupMessage(current.messages, createPendingAgentMessage({
+              messages: mergeMessageList(current.messages, createPendingAgentMessage({
                 workId,
                 agentId: event.agentId,
                 agentName: current.agents.find((agent) => agent.id === event.agentId)?.name,
@@ -217,7 +216,7 @@ export function useGroupEvents(setSnapshot: Dispatch<SetStateAction<GroupSnapsho
       if (streamingFrame.current) window.cancelAnimationFrame(streamingFrame.current);
       streamingFrame.current = 0;
     };
-  }, [roomId, setSnapshot]);
+  }, [roomId, setSnapshot, bodyRevision]);
 
   return { connected, streaming, unseenLiveCount };
 }

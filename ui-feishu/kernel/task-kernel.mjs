@@ -1,8 +1,9 @@
+import { turnOutcomes as terminalStates } from "../../windows/server/execution/protocol.mjs";
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-export const terminalStates = new Set(['completed', 'failed', 'interrupted']);
+export { terminalStates };
 const maxReconciliationFailures = 3;
 const copy = value => structuredClone(value);
 const fail = (message, statusCode = 409) => Object.assign(new Error(message), { statusCode });

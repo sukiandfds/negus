@@ -1,12 +1,14 @@
+import { isOptimisticId } from "../server/message-identity.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
-import { ConversationStore, mergeOlderMessages } from "./frontend-conversation-store.mjs";
+import { ConversationStore, mergeMessageList } from "./frontend-conversation-store.mjs";
 import ts from "../../ui-feishu/node_modules/typescript/lib/typescript.js";
 
 const compile = (source) => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
 const moduleUrl = (source) => `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
-const mergeUrl = moduleUrl(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/conversations/state/conversationMerge.ts", import.meta.url), "utf8")));
+const historyUrl = new URL("../../ui-feishu/shared/features/conversations/state/historyMerge.ts", import.meta.url).href;
+const wireHistory = source => source.replace('"../../conversations/state/historyMerge.ts"', JSON.stringify(historyUrl));
 const source = compile(await fs.readFile(new URL("../../ui-feishu/shared/features/conversations/hooks/useConversationSession.ts", import.meta.url), "utf8"));
 const detail = (threadId) => ({ threadId, messages: [{ id: `${threadId}-message`, role: "user", text: threadId }], contentVersion: 1 });
 
@@ -19,7 +21,7 @@ async function harness(cachedSessions = [], partialSessionIds = []) {
   };
   const api = { session(id, options, signal) { return new Promise((resolve, reject) => pending.push({ id, options, signal, resolve, reject })); } };
   const key = `__loadingTest${Math.random().toString(36).slice(2)}`;
-  globalThis[key] = { ...hooks, conversationApi: api, ConversationStore, mergeOlderMessages, isPendingThread: id => id.startsWith("pending:") };
+  globalThis[key] = { ...hooks, isOptimisticId, conversationApi: api, ConversationStore, mergeMessageList, isPendingThread: id => id.startsWith("pending:") };
   const rewritten = source.replace(/^import\s+\{([^}]+)\}\s+from\s+[^;]+;/gm, (_, names) => `const {${names}}=globalThis.${key};`);
   const { useConversationSession } = await import(moduleUrl(rewritten));
   delete globalThis[key];
@@ -86,11 +88,11 @@ test("switching during a read clears the prior error and keeps the destination e
   assert.equal(h.render().selectedId, "");
 });
 
-const groupSource = compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/hooks/useGroupRoom.ts", import.meta.url), "utf8"));
-const groupMessageUrl = moduleUrl(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/data/groupMessageState.ts", import.meta.url), "utf8")));
+const groupSource = wireHistory(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/hooks/useGroupRoom.ts", import.meta.url), "utf8")));
+const groupMessageUrl = moduleUrl(wireHistory(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/data/groupMessageState.ts", import.meta.url), "utf8"))));
 const mentionsUrl = moduleUrl(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/model/agentMentions.ts", import.meta.url), "utf8")));
 const storageUrl = moduleUrl(compile(await fs.readFile(new URL("../../ui-feishu/shared/shared/state/storage.ts", import.meta.url), "utf8")));
-const groupSnapshotUrl = moduleUrl(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/data/groupSnapshot.ts", import.meta.url), "utf8"))
+const groupSnapshotUrl = moduleUrl(wireHistory(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/data/groupSnapshot.ts", import.meta.url), "utf8")))
   .replace('"./groupMessageState"', JSON.stringify(groupMessageUrl)).replace('"../../../shared/state/storage"', JSON.stringify(storageUrl)));
 const groupSnapshot = (id, text = id) => ({ room: { id }, messages: [{ id: `${id}-message`, text, sequence: 1 }], agents: [], members: [] });
 const groupPage = (text) => ({ messages: [{ id: text, text, sequence: 1 }], found: true, hasOlder: false, hasNewer: false, oldestSequence: 1, newestSequence: 1 });
@@ -105,8 +107,8 @@ async function groupHarness() {
   const api = Object.fromEntries(["snapshot", "messages"].map((kind) => [kind, (id, ...args) => new Promise((resolve, reject) => pending.push({ kind, id, args, resolve, reject }))]));
   const key = `__groupLoadingTest${Math.random().toString(36).slice(2)}`;
   globalThis[key] = { hooks, api };
-  const rewritten = groupSource.replace(/import .* from "react";/, `const {useState,useRef,useCallback,useEffect}=globalThis.${key}.hooks;`)
-    .replace(/import .* from ".*clientId";/, 'const createClientId=()=>"test";')
+  const rewritten = groupSource.replace(/"[^"]+message-identity.mjs"/, JSON.stringify(new URL("../server/message-identity.mjs", import.meta.url).href)).replace(/import .* from "react";/, `const {useState,useRef,useCallback,useEffect}=globalThis.${key}.hooks;`)
+    .replace('"../../conversations/state/optimisticMessage"', JSON.stringify(new URL('../../ui-feishu/shared/features/conversations/state/optimisticMessage.ts', import.meta.url).href))
     .replace(/import .* from ".*groupMemberStorage";/, 'const readStoredMember=()=>null,writeStoredMember=()=>{},createMemberId=()=>"test",getOrCreateMember=()=>({id:"test",name:"我"});')
     .replace(/import .* from ".*groupApi";/, `const groupApi=globalThis.${key}.api;`)
     .replace('"../model/agentMentions"', JSON.stringify(mentionsUrl))
@@ -167,7 +169,7 @@ test("quick group switches preserve a just-loaded snapshot before debounce persi
 });
 
 test("group switch cancels the old frame and new-room deltas still paint; closed sources cannot mutate state", async () => {
-  const source = compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/realtime/useGroupEvents.ts", import.meta.url), "utf8"));
+  const source = wireHistory(compile(await fs.readFile(new URL("../../ui-feishu/shared/features/group-chat/realtime/useGroupEvents.ts", import.meta.url), "utf8")));
   const slots = []; let cursor = 0; let effect; let cleanup; let frameId = 0;
   const frames = new Map(); const sources = [];
   const hooks = {
@@ -196,7 +198,7 @@ test("group switch cancels the old frame and new-room deltas still paint; closed
   globalThis.document = { addEventListener() {}, removeEventListener() {} };
   let snapshot = groupSnapshot("a");
   const setSnapshot = (next) => { snapshot = typeof next === "function" ? next(snapshot) : next; };
-  const render = (room) => { cursor = 0; return useGroupEvents(setSnapshot, room); };
+  const render = (room) => { cursor = 0; return useGroupEvents(setSnapshot, room, false, hooks.useRef(0)); };
   const delta = (room, text) => ({ data: JSON.stringify({ type: "group_agent_delta", roomId: room, workId: `${room}-work`, agentId: "agent", itemId: "item", delta: text }) });
   try {
     render("a"); cleanup = effect();
@@ -246,7 +248,7 @@ test("background receipt updates survive before the destination session is loade
 });
 
 test('inserted message keeps its position when acceptance adds the active turn id', async () => {
-  const { mergeMessageList } = await import(mergeUrl);
+  const { mergeMessageList } = await import(historyUrl);
   const time = seconds => new Date(1700000000000 + seconds * 1000).toISOString();
   const history = [
     { id: 'start', role: 'user', text: 'start', turnId: 't', turnItemIndex: 0, turnStartedAtMs: 1700000000000, createdAt: time(0) },

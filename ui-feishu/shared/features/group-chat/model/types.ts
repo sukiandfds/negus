@@ -38,6 +38,7 @@ export interface GroupMessage {
   targetAgentIds?: string[];
   replyTo?: { id: string; authorName: string; text: string; sequence?: number } | null;
   failure?: boolean;
+  deliveryError?: string;
   text: string;
   editedAt?: string | null;
   editHistory?: Array<{ text: string; editedAt: string }>;

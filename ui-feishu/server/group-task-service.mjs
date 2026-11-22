@@ -1,4 +1,8 @@
-import { backgroundTaskRoute, employeeTaskRoute, requestedBackgroundRoute } from '../../windows/server/background-tasks/model-policy.mjs';
+import { registerTaskThread, taskThreadOptions } from "../kernel/task-thread.mjs";
+import { containsSubmittedInput } from "../../windows/server/message-identity.mjs";
+import { startConversationThread, resumeConversationThread, waitingPhaseFor, steerTurn, interruptTurn } from "../../windows/server/execution/protocol.mjs";
+import { taskStartupReceipt } from "../kernel/task-startup.mjs";
+import { backgroundTaskRoute, routeForTask } from '../../windows/server/background-tasks/model-policy.mjs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { createTaskKernel, terminalStates } from '../kernel/task-kernel.mjs';
@@ -14,7 +18,7 @@ import { buildDiscussionPrompt } from '../../windows/server/multi-agent/discussi
 import { backgroundToolConfig, executionPolicy, turnExecutionPolicy } from './execution-policy.mjs';
 import { buildGroupSelectionContext, createGroupMessageSelector } from './group-message-selector.mjs';
 import { followupTask } from './task-followup.mjs';
-import { transferEmployeeThread } from './employee-provider-integration.mjs';
+import { transferConversationThread } from '../../windows/server/conversation-provider-handoff.mjs';
 
 const clip = (value, length) => String(value || '').trim().slice(0, length);
 const taskStatusLabel = state => ({
@@ -24,7 +28,7 @@ const taskStatusLabel = state => ({
 }[state] || state || '状态待确认');
 
 export async function migrateGroupAgentThread({
-  agent, room, modelProviders, clientFor, transferThread = transferEmployeeThread,
+  agent, room, modelProviders, clientFor, transferThread = transferConversationThread,
 }) {
   const pending = agent?.pendingModelSettings;
   if (!agent?.threadId || !pending || !modelProviders) return agent;
@@ -72,7 +76,7 @@ const logMigrationFailure = (agent, error) => {
 };
 
 export async function createGroupTaskService({ stateRoot, room, projectRoot, employeeWorkRoots = {}, modelProviders,
-  appServerClient, broadcast = () => {}, attachmentContent, resolveAttachments = () => [], resolveArtifacts = () => [], onContextDelivered = async () => {}, bindings, agentTasks, queue, execution, registerSession, growthService = null, providerForThread = async () => null, transferThread = transferEmployeeThread, selectGroupAgent = null }) {
+  appServerClient, broadcast = () => {}, attachmentContent, resolveAttachments = () => [], resolveArtifacts = () => [], onContextDelivered = async () => {}, bindings, agentTasks, queue, execution, registerSession, growthService = null, providerForThread = async () => null, transferThread = transferConversationThread, selectGroupAgent = null }) {
   const roomId = room.snapshot().room.id;
   const log = event => console.log(JSON.stringify({ scope: 'negus-tasks', roomId, at: new Date().toISOString(), ...event }));
   let kernel;
@@ -184,30 +188,8 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
   const clientFor = async agent => modelProviders
     ? modelProviders.getClient(modelProviders.resolveRoute({ modelProviderId: agent.modelProviderId || 'current', model: agent.model || '' }))
     : appServerClient;
-  const startupFor = async task => {
-    const current = await kernel.waitForStart(task.id, 15000);
-    const confirmed = current.state === 'running' || current.state === 'completed';
-    const message = confirmed ? '已确认任务开始执行'
-      : current.state === 'failed' ? `启动或执行失败：${current.error || '任务未产生错误详情'}`
-        : current.state === 'queued' ? '任务已创建，仍在等待调度，尚未确认启动'
-          : current.state === 'starting' ? '任务已创建，正在建立执行会话，尚未确认启动'
-            : current.state === 'needs-reconciliation' ? '任务已创建，启动响应不确定，正在核对真实状态'
-              : `任务已创建，当前状态为 ${current.state || '未知'}，尚未确认正常启动`;
-    return { ...current, startup: { confirmed, state: current.state, message,
-      threadId: current.runtime?.threadId || '', turnId: current.runtime?.turnId || '',
-      modelProviderId: current.runtime?.modelProviderId || current.modelProviderId || '',
-      model: current.runtime?.model || current.model || '',
-      reasoningEffort: current.runtime?.reasoningEffort || current.reasoningEffort || '',
-      routing: current.taskRouting || null,
-      error: confirmed ? '' : current.error || message } };
-  };
-  const routeForTask = async (employee, input) => {
-    if (input.modelProviderId || input.model)
-      return requestedBackgroundRoute(modelProviders, input, kernel.list());
-    return modelProviders && employeeTaskRoute(modelProviders, employee, kernel.list());
-  };
-  const routingFields = async agentId => {
-    const selection = await routeForTask(room.getAgent(agentId), {});
+ const routingFields = async agentId => {
+    const selection = await routeForTask(modelProviders, room.getAgent(agentId), {}, kernel.list());
     if (!selection) return {};
     const reasoningEffort = selection.reasoningEffort || '';
     return {
@@ -248,7 +230,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
     }
     if (input.action === 'background') {
       if (!registerSession || !queue || !execution) throw Object.assign(Error('后台任务服务未连接'), { statusCode: 503 });
-      const selection = await routeForTask(room.getAgent(source.agentId), input);
+      const selection = await routeForTask(modelProviders, room.getAgent(source.agentId), input, kernel.list());
       const reasoningEffort = input.reasoningEffort || selection?.reasoningEffort || '';
       const conversationId = `handoff-${createHash('sha256').update(`${sourceId}:${input.requestId}`).digest('hex').slice(0, 32)}`;
       const task = await kernel.delegate(sourceId, { requestId: input.requestId, agentId: source.agentId, background: true,
@@ -260,7 +242,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
         attachmentIds: source.attachmentIds || [], source: { ...delegationSource(source),
           threadId: source.runtime.threadId } });
       await writeOwnerStatus(source, `正在执行：${input.title}。`);
-      return startupFor(task);
+      return taskStartupReceipt(kernel, task);
     }
     if (input.action !== 'delegate') throw Object.assign(Error('不支持的任务操作'), { statusCode: 400 });
     if (!room.getAgent(input.agentId) || input.agentId === source.agentId) throw Object.assign(Error('交接对象必须是群内其他员工'), { statusCode: 400 });
@@ -278,7 +260,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
     }
     if (visited.size >= 24) throw Object.assign(Error('交接链已达到轮次上限'), { statusCode: 409 });
     const planned = coordination?.assignments.some(assignment => assignment.agentId === input.agentId);
-    const selection = await routeForTask(room.getAgent(input.agentId), input);
+    const selection = await routeForTask(modelProviders, room.getAgent(input.agentId), input, kernel.list());
     const reasoningEffort = input.reasoningEffort || selection?.reasoningEffort || '';
     const delegated = await kernel.delegate(sourceId, { requestId: input.requestId, agentId: input.agentId, title: input.title, instructions: input.instructions,
       conversationId: roomId, lane: `${roomId}:${input.agentId}`, suppressContinuation: true,
@@ -289,7 +271,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       source: delegationSource(source) });
     await writeOwnerStatus(source, `正在执行：${room.getAgent(input.agentId)?.name || input.agentId}负责「${clip(input.title, 80)}」。`);
     if (coordination) await publishCoordinationIfReady(kernel.get(sourceId));
-    return startupFor(delegated);
+    return taskStartupReceipt(kernel, delegated);
   } });
   const instructionsFor = agent => employeeTurnInstructions(agent.instructions,
     `你是${agent.name}，只以自己的身份回复。普通讨论和明确点名由你本人直接回答。以用户原话为准，先回答用户实际问的每一项。只保留支撑回答的必要事实，以及会影响用户判断、决定或下一步行动的重要信息。其余背景、排查步骤和技术细节留在任务记录，用户追问时再补。能自行查证的先在后台查证，再给结论和必要依据。中间回复仅在有关键进展、独立且有用的意见、重要风险或需要用户决定时发，每次限一两句。不要预报检查步骤、直播排查、复述前文或堆技术细节。证据不足时说清缺哪项事实、怎样取得，避免用“不能确定”代替结论。需要执行工作时优先调用 Negus 的 create_background_task，追加要求使用 followup_background_task。需要群内同事协作时调用 negus_handoffs.delegate_task，写明目标、问题和所需结果；仅在文字中 @ 同事不会创建任务。委派执行时不要在群内连续汇报过程，也不要让子任务各自向群聊报完成；任务详情保留完整进度和子任务结果，群聊由系统原位更新一条负责人状态，子任务与复验全部结束后由负责人只交付一次。协作中发现重要风险、需要用户决策或不可恢复阻塞时，立即调用 negus_handoffs.publish_group_notice，用一两句写清影响和需要用户决定的问题。涉及待确认的操作，等用户答复后再继续。派工路由读取 runtime/model-routing.json：目标模型首选渠道不可用时，先尝试同一模型的其他渠道，再按配置顺序尝试其他模型；实际选择和回退原因以 taskRouting 记录为准。工具返回 startup.confirmed=true 才表示任务真实启动；false 时按 startup.state 和 startup.error 说明已创建未启动、启动失败或等待状态，不得提前宣称已安排。结果通知不是新的委派请求，不要重复派发相同工作。简单且已授权的事项直接处理；复杂事项若仍有影响结果的需求歧义、风险或方案取舍，先向用户说明预期效果和需要决定的选项，结束本轮等待答复，再按确认结果实施；不得重复询问已有授权。现有员工：${JSON.stringify(room.snapshot().agents.map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`);
@@ -357,15 +339,9 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       const independent = task.conversationId !== roomId;
       let threadId = task.runtime.threadId || task.resumeThreadId || (recovering || independent ? '' : agent.threadId);
       const taskInstructions = [task.background ? `${basePrompt}\n你是独立后台任务执行者，执行已授权工作并验证，结果返回来源员工；不得再次派工。` : instructionsFor(agent), coordinationInstructions(task), growthService?.getContext(agent.id)].filter(Boolean).join('\n');
-      const options = { ...executionPolicy, developerInstructions: taskInstructions, config: task.background ? backgroundToolConfig : tools.config(task.id),
-        ...(agent.model ? { model: agent.model } : {}) };
-      const registerBackground = async () => {
-        if (!registerSession) throw Error('后台任务登记服务未连接');
-        if (!await providerForThread(threadId)) await registerSession({ threadId, source: 'codex', title: task.title, cwd: projectRoot, updatedAt: task.createdAt, archived: false, conversationKind: 'task' }, modelProviderId,
-          modelProviderId !== 'current' && agent.model && !agent.model.includes('::') ? `${modelProviderId}::${agent.model}` : agent.model || '', { createdBy: 'assistant', reasoningEffort: agent.reasoningEffort || '' });
-        await bindings?.bindRuntime({ conversationId: task.conversationId, agentId: agent.id, runtimeKind: 'codex', runtimeSessionId: threadId,
-          conversationKind: 'task', title: task.title, targetProjectId: room.snapshot().room.projectId, executionRoot: projectRoot });
-      };
+      const options = taskThreadOptions(executionPolicy, taskInstructions, task.background ? backgroundToolConfig : tools.config(task.id), agent.model);
+      const registerBackground = () => registerTaskThread({ task, threadId, actor: agent, modelProviderId, cwd: projectRoot,
+        providerForThread, registerSession, bindings, bindingScope: { targetProjectId: room.snapshot().room.projectId, executionRoot: projectRoot } });
       if (recovering) {
         if (threadId && independent) await registerBackground();
         return { client, threadId, onHistory: async turn => {
@@ -385,12 +361,12 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
             // process before installing this task's capability (FEAT-002).
             await client.request('thread/unsubscribe', { threadId });
           }
-          await client.request('thread/resume', { threadId, ...options, persistExtendedHistory: true });
+          await resumeConversationThread(client, { threadId, ...options });
         }
         catch (error) { if (!/thread(?:\s+id)?\s+not\s+found/iu.test(error.message)) throw error; threadId = ''; }
       }
       if (!threadId) {
-        const value = await client.request('thread/start', { ...options, cwd: employeeWorkRoots[agent.id] || projectRoot, ephemeral: false, serviceName: 'negus' });
+        const value = await startConversationThread(client, { ...options, cwd: employeeWorkRoots[agent.id] || projectRoot, ephemeral: false, serviceName: 'negus' });
         threadId = value.thread.id;
         await controls.checkpoint({ threadId, modelProviderId, model: agent.model, reasoningEffort: agent.reasoningEffort || '', ...(independent ? { registrationPending: true } : {}) });
         if (independent) {
@@ -436,13 +412,13 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       const { method, params } = event;
       if (task.background) return;
       if (terminalStates.has(kernel?.get(task.id)?.state)) return;
-      if (method === 'item/tool/requestUserInput' || method === 'mcpServer/elicitation/request') {
+      if (waitingPhaseFor(method) === 'waitingOnUserInput') {
         const root = rootTaskOf(task);
         if (isDelegatedOwner(root) || task.publication?.role === 'owner-final')
           await writeOwnerStatus(root || task, `${room.getAgent(task.agentId)?.name || task.agentId}需要您补充信息后才能继续。`, { important: true });
         return;
       }
-      if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') {
+      if (waitingPhaseFor(method) === 'waitingOnApproval') {
         const root = rootTaskOf(task);
         if (isDelegatedOwner(root) || task.publication?.role === 'owner-final')
           await writeOwnerStatus(root || task, `${room.getAgent(task.agentId)?.name || task.agentId}正在等待您确认风险操作。`, { important: true });
@@ -568,7 +544,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
     const children = kernel.list().filter(candidate => candidate.parentTaskId === task.id);
     const missing = plan.assignments.filter(assignment => !children.some(candidate => candidate.agentId === assignment.agentId));
     for (const assignment of missing) {
-      const selection = await routeForTask(room.getAgent(assignment.agentId), {});
+      const selection = await routeForTask(modelProviders, room.getAgent(assignment.agentId), {}, kernel.list());
       await kernel.delegate(task.id, {
         requestId: assignment.requestId, agentId: assignment.agentId, title: assignment.title,
         instructions: assignment.instructions, coordinationRole: assignment.focus,
@@ -605,8 +581,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
         let delivered = prior?.accepted;
         if (prior && !delivered) {
           const history = await client.request('thread/read', { threadId: running.runtime.threadId, includeTurns: true });
-          delivered = history.thread?.turns?.some(turn => turn.items?.some(item => item.type === 'userMessage'
-            && (item.clientId === requestKey || item.clientUserMessageId === requestKey)));
+          delivered = history.thread?.turns?.some(turn => containsSubmittedInput(turn.items, requestKey));
           if (!delivered) {
             const turn = history.thread?.turns?.find(turn => turn.id === running.runtime.turnId);
             if (!turn || !terminalStates.has(turn.status)) throw Object.assign(Error('正在核对补充消息是否送达，请稍后重试'), { statusCode: 409 });
@@ -622,8 +597,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
           if (files.length !== attachments.length) throw Object.assign(Error('补充消息附件不可用'), { statusCode: 400 });
           const input = await inputFromAttachments(requestText, files, attachmentContent);
           await kernel.recordInput(running.id, { requestId: requestKey, submissionId: requestKey, messageId: sourceMessageId, turnId: running.runtime.turnId, text: requestText });
-          await client.request('turn/steer', { threadId: running.runtime.threadId, expectedTurnId: running.runtime.turnId,
-            clientUserMessageId: requestKey, input });
+          await steerTurn(client, { threadId: running.runtime.threadId, clientUserMessageId: requestKey, input }, running.runtime.turnId);
         }
         await kernel.acceptInput(running.id, requestKey);
         tasks.push(running);
@@ -695,8 +669,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
         const history = await client.request('thread/read', { threadId, includeTurns: true });
         items = history.thread?.turns?.find(item => item.id === turnId)?.items || [];
       }
-      const matched = (target.inputs || []).find(input => input.requestId !== 'initial' && items.some(item => item.type === 'userMessage'
-        && (item.clientId === input.submissionId || item.clientUserMessageId === input.submissionId)));
+      const matched = (target.inputs || []).find(input => input.requestId !== 'initial' && containsSubmittedInput(items, input.submissionId));
       if (!matched || matched.cancelled) return;
       if (target.runtime.turnId === turnId) { await kernel.linkInput(target.id, matched.requestId, turnId); return; }
       const source = kernel.get(matched.sourceTaskId);
@@ -729,10 +702,9 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
             try { if (pending.state === 'dispatching') {
               const client = await clientFor({ modelProviderId: task.runtime.modelProviderId, model: '' });
               const history = await client.request('thread/read', { threadId: task.runtime.threadId, includeTurns: true });
-              const active = history.thread?.turns?.find(turn => !terminalStates.has(turn.status) && turn.items?.some(item => item.type === 'userMessage'
-                && (item.clientId === input.submissionId || item.clientUserMessageId === input.submissionId)));
+              const active = history.thread?.turns?.find(turn => !terminalStates.has(turn.status) && containsSubmittedInput(turn.items, input.submissionId));
               if (!active?.id) { unresolved++; continue; }
-              await client.request('turn/interrupt', { threadId: task.runtime.threadId, turnId: active.id });
+              await interruptTurn(client, task.runtime.threadId, active.id);
             } else await queue.remove(task.runtime.threadId, pending.id);
             await kernel.cancelInput(task.id, input.requestId);
             } catch { unresolved++; }
@@ -762,8 +734,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
           const client = await clientFor({ modelProviderId: target.runtime.modelProviderId, model: '' });
           const history = await client.request('thread/read', { threadId: target.runtime.threadId, includeTurns: true });
           for (const input of unresolved) {
-            const matches = (history.thread?.turns || []).filter(turn => turn.items?.some(item => item.type === 'userMessage'
-              && (item.clientId === input.submissionId || item.clientUserMessageId === input.submissionId)));
+            const matches = (history.thread?.turns || []).filter(turn => containsSubmittedInput(turn.items, input.submissionId));
             if (matches.length === 1) {
               await service.onProtocolMessage({ method: 'turn/completed', params: { threadId: target.runtime.threadId, turn: matches[0] } });
               const failed = queue?.list?.(target.runtime.threadId).find(item => item.submissionId === input.submissionId && item.state === 'failed');

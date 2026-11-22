@@ -1,3 +1,4 @@
+import { assertSameRequest } from "./request-fingerprint.mjs";
 const clean = (value, maxLength = 160) => String(value || "").trim().slice(0, maxLength);
 const statusError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
 
@@ -34,7 +35,7 @@ export const createAgentPublicationService = ({ conversationStore, conversations
     const fingerprint = fingerprintFor({ conversationId, messageId, roomId });
     const stored = publicationStore.get(cleanRequestId);
     if (stored) {
-      if (stored.fingerprint !== fingerprint) throw statusError("requestId 已用于其他分享", 409);
+      assertSameRequest(stored, fingerprint, "requestId 已用于其他分享");
       return {
         message: roomDirectory.require(stored.roomId).getMessage(stored.groupMessageId),
         conversationId: stored.conversationId,
@@ -44,7 +45,7 @@ export const createAgentPublicationService = ({ conversationStore, conversations
 
     const existing = inFlight.get(cleanRequestId);
     if (existing) {
-      if (existing.fingerprint !== fingerprint) throw statusError("requestId 已用于其他分享", 409);
+      assertSameRequest(existing, fingerprint, "requestId 已用于其他分享");
       return existing.promise;
     }
 

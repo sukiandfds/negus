@@ -75,7 +75,7 @@ test('queue ingress and actual ordinary provider store agree on max and ultra', 
  t.after(() => fs.rm(root, {recursive:true,force:true}));
  const sent = [], efforts = [];
  const conversations = createProviderConversationStore({
-  stateFile:path.join(root,'routes.json'),
+  stateFile:path.join(root,'routes.json'), historyFor:async()=>({getSessionResumeInfo:async()=>null}),
   current:{getSessionResumeInfo:async()=>({}),getRuntimeContext:async()=>({model:'test'}),updateModel:async()=>({threadId:'t'}),updateReasoningEffort:async(id,effort)=>efforts.push(effort),sendMessage:async(id,text)=>sent.push(text),close(){}},
   providers:{resolveRoute:({model})=>({modelProviderId:'current',model}),listModels:async()=>[]},createStore:()=>{throw Error('unexpected provider')}
  });
@@ -92,4 +92,22 @@ test('queue ingress and actual ordinary provider store agree on max and ultra', 
   assert.ok(sent.includes(effort));assert.ok(efforts.includes(effort));
  }
  await assert.rejects(conversations.updateModel('t','test',{reasoningEffort:'invalid'}),/无效/);
+});
+
+test("compaction holds both send paths, including before execution turns active", async t => {
+  const sent = [];
+  let compacting = true;
+  const queue = createFollowUpQueueService({
+    isCompacting: () => compacting, execution: { getStatus: () => ({ active: false, phase: "completed" }) },
+    media: { resolveMany: () => [] }, publishThreadEvent() {},
+    conversations: { sendMessage: async (_, text) => sent.push(text) },
+  });
+  t.after(() => queue.close());
+  const item = await queue.enqueue({threadId:"t", text:"after"});
+  assert.equal((await queue.sendNow("t", item.id)).state, "pending");
+  assert.deepEqual(sent, []);
+  compacting = false;
+  queue.handleTurnTerminal({threadId:"t", status:"completed"});
+  await queue.withThreadLock("t", async () => {});
+  assert.deepEqual(sent, ["after"]);
 });

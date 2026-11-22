@@ -1,9 +1,10 @@
+import { isOptimisticId, optimisticSubmissionId } from "../../../../../windows/server/message-identity.mjs";
+import { mergeHistory, mergeMessageList, readHistoryPage } from "../../conversations/state/historyMerge.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createClientId } from "../../../shared/id/clientId";
+import { beginOptimisticSend } from "../../conversations/state/optimisticMessage";
 import type { MediaFile } from "../../../shared/model/media";
 import { getOrCreateMember } from "../data/groupMemberStorage";
 import { groupApi } from "../data/groupApi";
-import { upsertGroupMessage } from "../data/groupMessageState";
 import { readGroupSnapshot, reconcileGroupSnapshot, writeGroupSnapshot } from "../data/groupSnapshot";
 import { mentionedAgentIds } from "../model/agentMentions";
 import type { GroupMessage, GroupMessagePage, GroupRoom, GroupSnapshot, StoredMember } from "../model/types";
@@ -79,7 +80,8 @@ export function useGroupRoom(initialRoomId = "current-project") {
   const historyLoadingRef = useRef(false);
   activeRoomIdRef.current = roomId;
   const reviewingHistory = Boolean(snapshot?.history?.date || snapshot?.history?.hasNewer);
-  const realtime = useGroupEvents(setSnapshot, roomId, reviewingHistory);
+  const bodyRevision = useRef(0);
+  const realtime = useGroupEvents(setSnapshot, roomId, reviewingHistory, bodyRevision);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -97,7 +99,7 @@ export function useGroupRoom(initialRoomId = "current-project") {
     const isCurrent = () => !signal?.aborted && generation === roomGenerationRef.current
       && roomId === activeRoomIdRef.current && version === refreshVersionRef.current;
     try {
-      const next = await groupApi.snapshot(roomId, signal);
+      const next = await readHistoryPage(() => groupApi.snapshot(roomId, signal), () => bodyRevision.current, isCurrent);
       if (!isCurrent()) return;
       setSnapshot((current) => isCurrent() ? reconcileGroupSnapshot(
         next,
@@ -116,8 +118,8 @@ export function useGroupRoom(initialRoomId = "current-project") {
     setSnapshot((current) => {
       if (!current || generation !== roomGenerationRef.current) return current;
       const messages = replace
-        ? page.messages
-        : page.messages.reduce((next, message) => upsertGroupMessage(next, message), current.messages);
+        ? mergeHistory([...pendingMessagesRef.current.values()], page.messages, page.hasOlder)
+        : mergeMessageList(page.messages, current.messages);
       const { messages: _messages, ...history } = page;
       const previous = current.history;
       const oldestSequence = messages[0]?.sequence || history.oldestSequence;
@@ -151,7 +153,7 @@ export function useGroupRoom(initialRoomId = "current-project") {
     setHistoryLoading(true);
     setError("");
     try {
-      const page = await groupApi.messages(roomId, params, controller.signal);
+      const page = await readHistoryPage(() => groupApi.messages(roomId, params, controller.signal), () => bodyRevision.current, isCurrent);
       if (!isCurrent()) return false;
       if (!page.found) {
         setHistoryNotice(params.around ? "没有找到被引用的原消息" : "当天无消息");
@@ -276,11 +278,11 @@ export function useGroupRoom(initialRoomId = "current-project") {
 
   const resolveReply = (replyTo: GroupMessage["replyTo"]) => {
     if (!replyTo?.id) return null;
-    if (!replyTo.id.startsWith("optimistic-")) return replyTo;
-    const clientMessageId = replyTo.id.slice("optimistic-".length);
+    const clientMessageId = optimisticSubmissionId(replyTo.id);
+    if (!clientMessageId) return replyTo;
     const confirmed = snapshotRef.current?.messages.find((message) => message.clientMessageId === clientMessageId
       && !message.pending
-      && !message.id.startsWith("optimistic-"));
+      && !isOptimisticId(message.id));
     if (!confirmed) return undefined;
     return {
       id: confirmed.id,
@@ -290,78 +292,90 @@ export function useGroupRoom(initialRoomId = "current-project") {
     };
   };
 
-  const send = useCallback(async (text: string, attachments: MediaFile[] = [], replyTo: GroupMessage["replyTo"] = null) => {
-    const attachmentIds = attachments.map((file) => file.id);
-    if (!member || sendingRef.current || (!text.trim() && !attachmentIds.length)) return false;
+  const deliver = useCallback(async (row: GroupMessage, sender: StoredMember, requestRoomId: string, sendGeneration: number) => {
+    const clientMessageId = row.clientMessageId!;
+    try {
+      const result = await groupApi.send(sender, requestRoomId, row.text, clientMessageId, (row.attachments || []).map(file => file.id), row.replyTo);
+      if (sendGeneration !== sendGenerationRef.current || activeRoomIdRef.current !== requestRoomId) return false;
+      pendingMessagesRef.current.delete(clientMessageId);
+      const confirmedMessage = {
+        ...result.message,
+        clientMessageId: result.message.clientMessageId || clientMessageId,
+      };
+      setSnapshot((current) => current && {
+        ...current,
+        messages: mergeMessageList(current.messages, confirmedMessage),
+      });
+      const followUp = describeSendResult(result);
+      queuedAgentIdsRef.current = followUp.agentIds;
+      if (followUp.agentIds.length) {
+        knownWorkIdsRef.current = new Set((snapshotRef.current?.activeWorks || []).map((work) => work.workId));
+      }
+      setNotice(followUp.notice);
+      return true;
+    } catch (reason) {
+      if (sendGeneration !== sendGenerationRef.current || activeRoomIdRef.current !== requestRoomId) return false;
+      const failedMessage: GroupMessage = { ...row, pending: false, failure: true, deliveryError: reason instanceof Error ? reason.message : String(reason) };
+      pendingMessagesRef.current.set(clientMessageId, failedMessage);
+      setSnapshot((current) => current && {
+        ...current,
+        messages: mergeMessageList(current.messages, failedMessage),
+      });
+      setError(failedMessage.deliveryError || "发送失败");
+      return false;
+    } finally {
+      if (sendGeneration === sendGenerationRef.current) {
+        sendingRef.current = false;
+        setSending(false);
+        setRetryingMessageId("");
+      }
+    }
+  }, []);
+
+  const send = useCallback(async (text: string, attachments: MediaFile[] = [], replyTo: GroupMessage["replyTo"] = null, finishUpload?: (id: string) => Promise<MediaFile[]>) => {
+    if (!member || sendingRef.current || (!text.trim() && !attachments.length)) return false;
     const resolvedReply = resolveReply(replyTo);
     if (replyTo?.id && resolvedReply === undefined) {
       setError("引用的消息还在发送，请稍后再发");
       return false;
     }
-    if (!(await ensureLiveTail()) || sendingRef.current) return false;
     sendingRef.current = true;
     setSending(true);
     setError("");
-    const clientMessageId = createClientId("group");
     const requestRoomId = roomId;
     const sendGeneration = ++sendGenerationRef.current;
-    const optimisticMessage: GroupMessage = {
-      id: `optimistic-${clientMessageId}`,
-      clientMessageId,
-      pending: true,
-      type: "human",
-      authorId: member.id,
-      authorName: member.name,
-      agentId: null,
-      targetAgentIds: mentionedAgentIds(text, snapshotRef.current?.agents || []),
-      replyTo: resolvedReply,
-      text: text.trim(),
-      attachments,
-      artifactIds: [],
-      createdAt: new Date().toISOString(),
+    const publish = (row: GroupMessage) => {
+      pendingMessagesRef.current.set(row.clientMessageId!, row);
+      setSnapshot(current => current && { ...current, messages: mergeMessageList(current.messages, row) });
+      return row;
     };
-    pendingMessagesRef.current.set(clientMessageId, optimisticMessage);
-    setSnapshot((current) => current && {
-      ...current,
-      messages: upsertGroupMessage(current.messages, optimisticMessage),
-    });
-    void (async () => {
-      try {
-        const result = await groupApi.send(member, requestRoomId, text.trim(), clientMessageId, attachmentIds, resolvedReply);
-        if (sendGeneration !== sendGenerationRef.current || activeRoomIdRef.current !== requestRoomId) return;
-        pendingMessagesRef.current.delete(clientMessageId);
-        const confirmedMessage = {
-          ...result.message,
-          clientMessageId: result.message.clientMessageId || clientMessageId,
-        };
-        setSnapshot((current) => current && {
-          ...current,
-          messages: upsertGroupMessage(current.messages, confirmedMessage),
-        });
-        const followUp = describeSendResult(result);
-        queuedAgentIdsRef.current = followUp.agentIds;
-        if (followUp.agentIds.length) {
-          knownWorkIdsRef.current = new Set((snapshotRef.current?.activeWorks || []).map((work) => work.workId));
-        }
-        setNotice(followUp.notice);
-      } catch (reason) {
-        if (sendGeneration !== sendGenerationRef.current || activeRoomIdRef.current !== requestRoomId) return;
-        const failedMessage: GroupMessage = { ...optimisticMessage, pending: false, failure: true };
-        pendingMessagesRef.current.set(clientMessageId, failedMessage);
-        setSnapshot((current) => current && {
-          ...current,
-          messages: upsertGroupMessage(current.messages, failedMessage),
-        });
-        setError(reason instanceof Error ? reason.message : String(reason));
-      } finally {
-        if (sendGeneration === sendGenerationRef.current) {
-          sendingRef.current = false;
-          setSending(false);
-        }
+    let optimisticMessage = beginOptimisticSend(text.trim(), attachments, row => publish({
+      id: row.id, clientMessageId: row.submissionId, createdAt: row.createdAt, text: row.text,
+      pending: true, type: "human", authorId: member.id, authorName: member.name, agentId: null,
+      targetAgentIds: mentionedAgentIds(text, snapshotRef.current?.agents || []), replyTo: resolvedReply, attachments, artifactIds: [],
+    }));
+    const clientMessageId = optimisticMessage.clientMessageId!;
+    try {
+      if (!(await ensureLiveTail())) throw new Error("最新消息加载失败");
+      if (sendGeneration !== sendGenerationRef.current || activeRoomIdRef.current !== requestRoomId) return false;
+      if (finishUpload) {
+        attachments = await finishUpload(clientMessageId);
+        if (sendGeneration !== sendGenerationRef.current || activeRoomIdRef.current !== requestRoomId) return false;
+        optimisticMessage = publish({ ...optimisticMessage, attachments });
       }
-    })();
+    } catch (reason) {
+      if (sendGeneration === sendGenerationRef.current && activeRoomIdRef.current === requestRoomId) {
+        pendingMessagesRef.current.delete(clientMessageId);
+        setSnapshot(current => current && { ...current, messages: current.messages.filter(m => m.id !== optimisticMessage.id) });
+        setError(reason instanceof Error ? reason.message : String(reason));
+        sendingRef.current = false;
+        setSending(false);
+      }
+      return false;
+    }
+    void deliver(optimisticMessage, member, requestRoomId, sendGeneration);
     return true;
-  }, [ensureLiveTail, member, roomId]);
+  }, [deliver, ensureLiveTail, member, roomId]);
 
   useEffect(() => {
     const waiting = queuedAgentIdsRef.current;
@@ -397,41 +411,8 @@ export function useGroupRoom(initialRoomId = "current-project") {
     setError("");
     const requestRoomId = roomId;
     const sendGeneration = ++sendGenerationRef.current;
-    try {
-      const result = await groupApi.send(
-        member,
-        requestRoomId,
-        message.text,
-        clientMessageId,
-        (message.attachments || []).map(file => file.id),
-        message.replyTo,
-      );
-      if (sendGeneration !== sendGenerationRef.current || activeRoomIdRef.current !== requestRoomId) return false;
-      pendingMessagesRef.current.delete(clientMessageId);
-      setSnapshot((current) => current && {
-        ...current,
-        messages: upsertGroupMessage(current.messages, {
-          ...result.message,
-          clientMessageId: result.message.clientMessageId || clientMessageId,
-        }),
-      });
-      const followUp = describeSendResult(result);
-      queuedAgentIdsRef.current = followUp.agentIds;
-      setNotice(followUp.notice);
-      return true;
-    } catch (reason) {
-      if (sendGeneration === sendGenerationRef.current) {
-        setError(reason instanceof Error ? reason.message : String(reason));
-      }
-      return false;
-    } finally {
-      if (sendGeneration === sendGenerationRef.current) {
-        sendingRef.current = false;
-        setSending(false);
-        setRetryingMessageId("");
-      }
-    }
-  }, [ensureLiveTail, member, roomId]);
+    return deliver(message, member, requestRoomId, sendGeneration);
+  }, [deliver, ensureLiveTail, member, roomId]);
 
   const edit = useCallback(async (message: GroupMessage, text: string) => {
     const content = text.trim();
@@ -444,7 +425,7 @@ export function useGroupRoom(initialRoomId = "current-project") {
       const result = await groupApi.edit(member, roomId, message.id, message.clientMessageId, content);
       setSnapshot((current) => current && {
         ...current,
-        messages: upsertGroupMessage(current.messages, result.message),
+        messages: mergeMessageList(current.messages, result.message),
       });
       setNotice("消息已更新");
       return true;

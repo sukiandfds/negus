@@ -44,17 +44,34 @@ test('only a declared conversation source can enqueue without an employee', asyn
   turns.get(accepted.id).resolve({ status: 'completed', text: 'done' });
 });
 
-test('routing honors explicit recipients, constrains model selection, and falls back without new employees', async () => {
-  const options = { members: [{ id: 'a' }, { id: 'b' }], receptionId: 'a' };
+test('routing honors explicit recipients and never replaces selection with a default receptionist', async () => {
+  const options = { members: [{ id: 'a' }, { id: 'b' }] };
   assert.deepEqual(await routeMessage({ ...options, explicitIds: ['b'], requestedIds: ['a'], select: () => { throw Error('must not call'); } }), { agentIds: ['b'], reason: 'explicit' });
   assert.deepEqual((await routeMessage({ ...options, select: async () => 'b' })).agentIds, ['b']);
-  assert.equal((await routeMessage({ ...options, select: async () => 'outside' })).reason, 'reception');
-  assert.equal((await routeMessage({ ...options, select: async () => { throw Error('offline'); } })).reason, 'reception');
-  assert.deepEqual(await routeMessage({ ...options, text: '各位请分别评估', select: () => { throw Error('broadcast must not select'); } }), { agentIds: ['a', 'b'], reason: 'broadcast' });
-  assert.deepEqual(await routeMessage({ ...options, text: '先每个人都出来打招呼', select: () => { throw Error('broadcast must not select'); } }), { agentIds: ['a', 'b'], reason: 'broadcast' });
+  assert.deepEqual((await routeMessage({ ...options, select: async () => ['a', 'b'] })).agentIds, ['a', 'b']);
+  assert.deepEqual(await routeMessage({ ...options, select: async () => 'outside' }), { agentIds: [], reason: 'selector-failed' });
+  assert.deepEqual(await routeMessage({ ...options, select: async () => { throw Error('offline'); } }),
+    { agentIds: [], reason: 'selector-failed' });
+  assert.deepEqual(await routeMessage(options), { agentIds: [], reason: 'selector-unavailable' });
   assert.deepEqual(await routeMessage({ ...options, replyAgentId: 'b', select: () => { throw Error('reply must not select'); } }), { agentIds: ['b'], reason: 'reply' });
-  await assert.rejects(routeMessage({ ...options, receptionId: 'outside' }), /属于/);
+  assert.deepEqual(await routeMessage({ ...options, requestedIds: ['b'], select: () => { throw Error('requested must not select'); } }), { agentIds: ['b'], reason: 'requested' });
   await assert.rejects(routeMessage({ members: [] }), /没有/);
+});
+
+test('ordinary wording has no broadcast or negation bypass and always reaches the selector', async () => {
+  const members = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const selected = [];
+  for (const text of ['大家都出来说句话', '先每个人都出来打招呼',
+    '大家都出来发言会打扰别人，请不要这样', '大家看看这个需求']) {
+    const result = await routeMessage({ text, members,
+      select: async input => { selected.push(input.text); return input.text.includes('打扰') ? 'c' : 'b'; } });
+    assert.equal(result.reason, 'selected');
+    assert.deepEqual(result.agentIds, [text.includes('打扰') ? 'c' : 'b']);
+  }
+  assert.deepEqual(selected, ['大家都出来说句话', '先每个人都出来打招呼',
+    '大家都出来发言会打扰别人，请不要这样', '大家看看这个需求']);
+  assert.deepEqual(await routeMessage({ text: '各位请分别评估', members: [{ id: 'a' }],
+    select: async () => ['a'] }), { agentIds: ['a'], reason: 'selected' });
 });
 
 test('acceptance is durable and fast, retries return the same task, lanes run independently', async t => {

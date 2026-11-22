@@ -19,7 +19,7 @@ const normalize = (definition, saved = {}, workspaceRoot, defaultModelSettings =
   const defaults = defaultModelSettings && !explicitSelection ? defaultModelSettings : null;
   const savedProviderId = clean(saved.modelProviderId, 80) || clean(definition.modelProviderId, 80) || CURRENT_MODEL_PROVIDER_ID;
   const savedModel = clean(saved.model, 120) || clean(definition.model, 120) || "";
-  const savedEffort = clean(saved.reasoningEffort, 40) || clean(definition.reasoningEffort, 40) || "";
+  const savedEffort = clean(saved.reasoningEffort ?? definition.reasoningEffort, 40);
   const defaultProviderId = defaults?.providerId || defaults?.modelProviderId || '';
   const defaultModel = defaults?.model || '';
   const defaultEffort = defaults?.effort || defaults?.reasoningEffort || '';

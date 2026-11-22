@@ -1,3 +1,4 @@
+import { transferConversationThread } from "./conversation-provider-handoff.mjs";
 import { readPersistedThreadGoal, expandGoalObjective } from './thread-goal-objective.mjs';
 import { backgroundTaskRoute } from './background-tasks/model-policy.mjs';
 import { isReasoningEffort } from './reasoning-efforts.mjs';
@@ -92,6 +93,10 @@ export const createProviderConversationStore = ({ current, providers, createStor
     return configured || providerId;
   };
   const decorate = (session) => session && ({ ...session,
+    ...(session.messages && routes[session.threadId]?.switchNotices ? { messages: session.messages.map(message => {
+      const notice = message.role === "user" && (routes[session.threadId].switchNotices[message.submissionId] || routes[session.threadId].switchNotices[message.protocolTurnId || message.turnId]);
+      return notice ? { ...message, modelSwitch: notice } : message;
+    }) } : {}),
     createdBy: routes[session.threadId]?.createdBy || session.createdBy,
     ...(routes[session.threadId]?.manualTitle ? { title: routes[session.threadId].manualTitle } : {}),
     model: routes[session.threadId]?.model || session.model || "",
@@ -198,29 +203,27 @@ export const createProviderConversationStore = ({ current, providers, createStor
     }
     await restoring.get(key);
   };
-  const activatePending = async (id) => {
-    const route = routes[id];
-    if (!route?.pendingProviderId) return;
-    const sourceProviderId = owner(id);
-    const source = (await providerConfigured(sourceProviderId)) ? await storeFor(sourceProviderId) : null;
+  const continueOnProvider = async (id, route, submissionId = "") => {
+    const previous = owner(id);
+    const source = await providerConfigured(previous) ? await storeFor(previous) : null;
     const target = await storeFor(route.pendingProviderId);
-    const info = source ? await source.getSessionResumeInfo(id) : await storedRouteInfo(id, sourceProviderId);
-    if (!info?.path) throw Object.assign(new Error("原对话配置已移除，且找不到原对话记录"), { statusCode: 409 });
+    const info = source ? await source.getSessionResumeInfo(id) : await storedRouteInfo(id, previous);
+    if (!info?.path) throw Object.assign(new Error("找不到原对话记录，未切换配置"), { statusCode: 409 });
     if (source && source !== target) await source.releaseSession(id);
-    restored.delete(`${owner(id)}:${id}`);
-    const destinationInfo = providers.prepareResumeFile ? await providers.prepareResumeFile(route.pendingProviderId, info) : info;
-    if (source !== target) {
-      await setTransferredProvider(destinationInfo.path, info.path, id, route.pendingProviderId, id, {
-        model: route.runtimeModel, reasoningEffort: route.reasoningEffort,
-      });
-      await target.resumeProviderSession(id, { ...destinationInfo, model: route.runtimeModel,
-        modelProvider: route.pendingProviderId === 'current' ? undefined : route.pendingProviderId,
-        reasoningEffort: route.reasoningEffort });
-    }
-    routes[id] = { ...route, providerId: route.pendingProviderId, pendingProviderId: undefined, resumeInfo: destinationInfo, activeModel: route.runtimeModel };
+    restored.delete(`${previous}:${id}`);
+    const destination = source === target ? info : await transferConversationThread({ providers, threadId: id,
+      target: submissionId ? await providers.getClient({ modelProviderId: route.pendingProviderId }) : null,
+      sourceInfo: { ...info, path: await latestRolloutFile(info.path) },
+      route: { modelProviderId: route.pendingProviderId, model: route.runtimeModel }, reasoningEffort: route.reasoningEffort,
+      resume: (id, options) => target.resumeProviderSession(id, options) });
+    const before = routes[id];
+    routes[id] = { ...route, providerId: route.pendingProviderId, pendingProviderId: undefined,
+      resumeInfo: destination, activeModel: route.runtimeModel,
+      ...(submissionId ? { switchNotices: { ...route.switchNotices, [submissionId]: route.model } } : {}) };
+    try { await save(); } catch (error) { routes[id] = before; throw error; }
     restored.add(`${owner(id)}:${id}`);
-    await save();
   };
+  const activatePending = id => continueOnProvider(id, routes[id]);
   for (const method of ["renameSession", "sendMessage", "steerMessage", "interrupt",
     "updateReasoningEffort", "getThreadStatus",
     "revertSession", "compactContext", "reviewSession", "setGoal", "clearGoal",
@@ -284,6 +287,8 @@ export const createProviderConversationStore = ({ current, providers, createStor
       }
       if (method === "sendMessage" && routes[id]?.attemptSettings && result?.turn?.id) {
         routes[id].attemptSettings.turnId = result.turn.id;
+        const notices = routes[id].switchNotices;
+        if (notices?.[args[2]]) { notices[result.turn.id] = notices[args[2]]; await save(); }
       }
       if (method === "updateReasoningEffort") {
         routes[id].reasoningEffort = args[0];
@@ -537,7 +542,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
     }
   };
   const switching = new Map();
-  service.updateModel = async (id, model, { allowProviderSwitch = false, reasoningEffort = "", allowRetired = false } = {}) => {
+  service.updateModel = async (id, model, { allowProviderSwitch = false, reasoningEffort = "", allowRetired = false, continueSubmission = "" } = {}) => {
     await ready();
     if (switching.has(id) || activating.has(id)) throw Object.assign(new Error("正在切换模型，请稍候"), { statusCode: 409 });
     const task = (async () => {
@@ -560,25 +565,14 @@ export const createProviderConversationStore = ({ current, providers, createStor
         await ensureRestored(id);
         const result = await source.updateModel(id, target.model || model, { reasoningEffort });
         routes[id] = { ...routes[id], providerId: owner(id), pendingProviderId: undefined, model, runtimeModel: target.model || model, activeModel: target.model || model, ...(reasoningEffort ? { reasoningEffort } : {}) };
+        if (continueSubmission) routes[id].switchNotices = { ...routes[id].switchNotices, [continueSubmission]: model };
         await save();
-        return { ...result, model };
+        return { ...result, model, ...(continueSubmission ? { switched: true, modelProvider: sourceProviderId } : {}) };
       }
-      if (!sourceConfigured) {
-        const info = await storedRouteInfo(id, sourceProviderId);
-        if (!info?.path) throw Object.assign(new Error("原对话配置已移除，且找不到原对话记录"), { statusCode: 409 });
-        const targetStore = await storeFor(target.modelProviderId);
-        const destinationInfo = providers.prepareResumeFile ? await providers.prepareResumeFile(target.modelProviderId, info) : info;
-        await setTransferredProvider(destinationInfo.path, info.path, id, target.modelProviderId);
-        await targetStore.resumeProviderSession(id, { ...destinationInfo, model: target.model || model,
-          modelProvider: target.modelProviderId === 'current' ? undefined : target.modelProviderId,
-          reasoningEffort });
-        routes[id] = { ...routes[id], providerId: target.modelProviderId, pendingProviderId: undefined,
-          model, runtimeModel: target.model || model, activeModel: target.model || model, reasoningEffort,
-          resumeInfo: destinationInfo, summary: { ...routes[id]?.summary, threadId: id, cwd: info.cwd, model: target.model || model } };
-        restored.delete(`${sourceProviderId}:${id}`);
-        restored.add(`${target.modelProviderId}:${id}`);
-        await save();
-        return { threadId: id, model, modelProvider: target.modelProviderId, reasoningEffort };
+      if (continueSubmission || !sourceConfigured) {
+        await continueOnProvider(id, { ...routes[id], pendingProviderId: target.modelProviderId, model,
+          runtimeModel: target.model || model, reasoningEffort }, continueSubmission);
+        return { threadId: id, model, modelProvider: target.modelProviderId, reasoningEffort, switched: true };
       }
       if (source.isFreshSession?.(id)) {
         const targetStore = await storeFor(target.modelProviderId);

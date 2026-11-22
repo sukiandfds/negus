@@ -1,3 +1,4 @@
+import { MessageInput } from "../../conversations/components/MessageInput";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Send, Sparkles, Square } from "lucide-react";
 import { AttachmentButton, AttachmentPreviews } from "../../attachments/components/AttachmentDraft";
@@ -41,7 +42,7 @@ export function GroupComposer({ disabled, busy = false, error, notice = "", quot
   editingMessage?: { id: string; text: string } | null;
   copy?: Partial<GroupComposerCopy>;
   onClearQuote?: () => void;
-  onSend: (text: string, attachments?: MediaFile[], replyTo?: { id: string; authorName: string; text: string } | null) => Promise<boolean>;
+  onSend: (text: string, attachments?: MediaFile[], replyTo?: { id: string; authorName: string; text: string } | null, finishUpload?: (id: string) => Promise<MediaFile[]>) => Promise<boolean>;
   onEdit?: (messageId: string, text: string) => Promise<boolean>;
   onCancelEdit?: () => void;
   onInterrupt: () => Promise<boolean>;
@@ -86,17 +87,17 @@ export function GroupComposer({ disabled, busy = false, error, notice = "", quot
   const submit = async () => {
     if (submittingRef.current || disabled || draft.uploading || (!text.trim() && !draft.attachments.length)) return;
     submittingRef.current = true;
+    const transfer = !editingMessage && draft.attachments.length ? draft.prepareMessageAttachments() : null;
     try {
-      const uploaded = editingMessage ? [] : await draft.uploadAll();
       const accepted = editingMessage && onEdit
         ? await onEdit(editingMessage.id, text)
-        : await onSend(text, uploaded, quote);
-      if (accepted) {
-        setText("");
-        draft.clear();
-      }
-    } catch {}
-    finally { submittingRef.current = false; }
+        : await onSend(text, transfer?.previews || [], quote, transfer?.finishUpload);
+      if (accepted) setText("");
+    } finally {
+      transfer?.dispose();
+      submittingRef.current = false;
+    }
+
   };
 
   useEffect(() => {
@@ -158,26 +159,13 @@ export function GroupComposer({ disabled, busy = false, error, notice = "", quot
         />
         <label className={composerStyles.srOnly} htmlFor={inputId}>发送群聊消息</label>
         <QuoteDraft quote={editingMessage ? null : quote} onClear={onClearQuote} />
-        <textarea
+        <MessageInput
           id={inputId}
           ref={textareaRef}
           value={text}
-          rows={2}
           placeholder={editingMessage ? "修改自己的消息" : copy.placeholder}
           onChange={(event) => setText(event.target.value)}
-          onPaste={(event) => {
-            if (editingMessage) return;
-            if (!event.clipboardData.files.length) return;
-            event.preventDefault();
-            draft.addFiles(event.clipboardData.files);
-          }}
-          onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) return;
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              void submit();
-            }
-          }}
+          submit={submit} onFiles={editingMessage ? undefined : draft.addFiles}
           disabled={disabled}
         />
         <div className={composerStyles.footer}>

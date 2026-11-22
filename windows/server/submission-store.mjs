@@ -1,3 +1,4 @@
+import { optimisticMessageId } from "./message-identity.mjs";
 import fs from "node:fs";
 import { cloneJson, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 
@@ -65,7 +66,7 @@ export const createSubmissionStore = ({ stateFile = "", ttlMs = defaultTtlMs } =
       submissionId,
       threadId: String(entry.threadId || ""),
       fingerprint: String(entry.fingerprint || ""),
-      messageId: String(entry.messageId || `optimistic-${submissionId}`),
+      messageId: String(entry.messageId || optimisticMessageId(submissionId)),
       createdAt,
       expiresAt: new Date((Date.parse(createdAt) || Date.now()) + ttlMs).toISOString(),
       state: "pending",

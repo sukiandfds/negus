@@ -42,13 +42,15 @@ export const createCcSwitchConfigService = ({ database = path.join(os.homedir(),
   let cachedListAt = 0;
   let listRequest = null;
   const list = async (lookupRatios, { force = false } = {}) => {
+    const loadEntries = async () => (await records(force)).map(row => {
+      try { return decode(row); } catch { return { id: row.id, name: row.name, configured: false, editable: false, switchable: false, multiplier: row.cost_multiplier }; }
+    });
+    if (!lookupRatios) return (await loadEntries()).map(publicEntry);
     if (!force && cachedList && now() - cachedListAt < cacheMs) return cachedList;
     if (listRequest) return listRequest;
     listRequest = (async () => {
-      const entries = (await records(force)).map((row) => {
-      try { return decode(row); } catch { return { id: row.id, name: row.name, configured: false, editable: false, switchable: false, multiplier: row.cost_multiplier }; }
-      });
-      const ratios = lookupRatios ? await lookupRatios(entries).catch(() => ({})) : {};
+      const entries = await loadEntries();
+      const ratios = await lookupRatios(entries).catch(() => ({}));
       const result = entries.map((entry) => ({ ...publicEntry(entry), ...(ratios[entry.id] || {}) }));
       cachedList = result;
       cachedListAt = now();

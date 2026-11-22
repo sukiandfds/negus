@@ -14,5 +14,5 @@ const bundle = await build({ stdin: { contents: `export { ConversationStore } fr
   resolveDir: new URL('../../ui-feishu', import.meta.url).pathname, loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', write: false });
 const loaded = { exports: {} };
 new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(loaded, loaded.exports, require);
-export const { ConversationStore, conversationApi, mergeMessageList, mergeOlderMessages, mergePendingOptimisticMessages,
+export const { ConversationStore, conversationApi, mergeMessageList, mergePendingOptimisticMessages,
   writeConversationSnapshot, readConversationSnapshot, readInitialConversationState } = loaded.exports;

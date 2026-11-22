@@ -1,3 +1,4 @@
+import { turnOutcomes } from "../execution/protocol.mjs";
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -85,7 +86,7 @@ export const selectTaskRoute = async (providers, request = {}, {
   const routeFailurePattern = /无可用渠道|distributor|\b(?:401|403|408|409|42[0-9]|5\d\d)\b|timeout|timed out|超时|rate.?limit|限流|network|fetch failed|ECONN|unauthori[sz]ed|authentication failed|auth(?:entication)? error|not authenticated|invalid (?:api key|token)|token expired|access token[^\n]*expired|鉴权失败|认证失败|未认证|身份(?:验证|认证)失败|令牌过期|令牌无效|凭据无效|凭证无效|无效(?:的)?\s*(?:token|令牌|凭证|凭据)|credential|凭证|model[^\n]*(?:not available|unavailable|not found|不支持|不可用)/iu;
   const latestTerminalRoutes = new Map();
   for (const task of _tasks || []) {
-    if (!['completed', 'failed', 'interrupted'].includes(task?.state)) continue;
+    if (!turnOutcomes.has(task?.state)) continue;
     const providerId = task.modelProviderId || task.runtime?.modelProviderId;
     const model = task.model || task.runtime?.model;
     if (!providerId || !model) continue;
@@ -231,3 +232,7 @@ export const backgroundTaskRoute = async (providers, policy = null) => {
   });
   return { ...route, reasoningEffort: route.reasoningEffort || selectedPolicy.reasoningEffort };
 };
+
+export const routeForTask = (providers, employee, input, tasks) => input.modelProviderId || input.model
+  ? requestedBackgroundRoute(providers, input, tasks)
+  : providers && employeeTaskRoute(providers, employee, tasks);

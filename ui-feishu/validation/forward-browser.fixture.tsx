@@ -8,7 +8,7 @@ import '../src/style.css';
 const messages = [
   { id: 'first', role: 'user', text: '第一条', createdAt: '2026-10-28T01:02:03Z', authorName: '研发员工', displaySourceAgentId: 'developer' },
   { id: 'middle', role: 'assistant', text: '跳过' },
-  { id: 'last', role: 'assistant', text: '最后一条', blocks: [{ id: 'text', type: 'markdown', text: '最后一条' }, { id: 'image', type: 'image', source: '/image' }] },
+  { id: 'last', role: 'assistant', text: '最后一条', createdAt: '2026-10-28T01:03:03Z', blocks: [{ id: 'text', type: 'markdown', text: '最后一条' }, { id: 'image', type: 'image', source: '/image' }] },
   { id: 'file', role: 'user', text: '', blocks: [{ id: 'attachment', type: 'file', source: '/file', name: 'file.txt' }] },
 ];
 const targets = ['source', 'target', 'employee', 'task', 'readonly', 'archived'].map(threadId => ({ id: threadId, threadId, name: threadId, subtitle: '项目', agentId: threadId === 'employee' || threadId === 'task' ? 'agent-one' : '', conversationId: threadId === 'task' ? 'task-conversation' : threadId === 'employee' ? 'employee-conversation' : '', session: { archived: threadId === 'archived', readOnly: false } }));

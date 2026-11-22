@@ -82,8 +82,8 @@ test('connection placeholder stays hidden while submitted, but errors and notice
 const { projectTranscript } = await load('liveTranscript');
 const createLiveTranscriptMemory = () => ({});
 const advanceLiveTranscript = (_memory, input) => projectTranscript(input);
-const { mergeMessageList, mergePendingOptimisticMessages, mergeSessionRefresh } = await load('conversationMerge');
-const { createOptimisticMessage } = await load('optimisticMessage');
+const { mergeMessageList, mergePendingOptimisticMessages, mergeSessionRefresh } = await import('../../ui-feishu/shared/features/conversations/state/conversationMerge.ts');
+const { createOptimisticMessage } = await import('../../ui-feishu/shared/features/conversations/state/optimisticMessage.ts');
 const status = {threadId:'a',turnId:'protocol',startedAt:'2026-10-27T05:55:04Z',phase:'completed',hasFinalAnswer:true};
 const commentary = {id:'comment',role:'assistant',text:'checking',turnId:'internal',protocolTurnId:'protocol',phase:'commentary',createdAt:'2026-10-27T05:55:57.434Z'};
 const final = {...commentary,id:'final',text:'done',phase:'final_answer',createdAt:'2026-10-27T05:56:25.045Z'};
@@ -167,7 +167,7 @@ test('queued image message remains present from dispatch through acceptance and 
     publishThreadEvent:(_thread,event)=>events.push(event),
     conversations:{steerMessage:async (threadId,turnId,_text,_attachments,clientId)=>{
       assert.equal(threadId, 't'); assert.equal(turnId, 'turn');
-      tracker.handleProtocolMessage({method:'item/started',params:{threadId,turnId,item:{type:'userMessage',id:'native',clientId}}});
+      tracker.handleProtocolMessage({method:'item/started',params:{threadId,turnId,item:{type:'userMessage',id:'native',clientUserMessageId:clientId}}});
     }},
   });
   try {

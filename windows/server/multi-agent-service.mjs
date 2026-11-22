@@ -1,3 +1,4 @@
+import { startConversationThread, resumeConversationThread, startTurn, interruptTurn } from "./execution/protocol.mjs";
 import { randomUUID } from "node:crypto";
 import { createAppServerClient } from "./app-server-client.mjs";
 import { inputFromAttachments } from "./app-server-conversation-store.mjs";
@@ -245,7 +246,7 @@ export const createMultiAgentService = ({
     run.interruptSent = true;
     try {
       const runtimeClient = run.client || threadClients.get(run.threadId) || defaultClient;
-      await runtimeClient.request("turn/interrupt", { threadId: run.threadId, turnId: run.turnId });
+      await interruptTurn(runtimeClient, run.threadId, run.turnId);
       return true;
     } catch (error) {
       run.interruptSent = false;
@@ -259,7 +260,7 @@ export const createMultiAgentService = ({
       const runtimeClient = await clientForAgent(currentAgent);
       if (currentAgent.threadId) {
         try {
-          await runtimeClient.request("thread/resume", { threadId: currentAgent.threadId, persistExtendedHistory: true, ...executionPolicy });
+          await resumeConversationThread(runtimeClient, { threadId: currentAgent.threadId, ...executionPolicy });
         } catch (error) {
           if (!isMissingThreadError(error)) throw error;
           currentAgent = await clearAgentThread(currentAgent);
@@ -275,7 +276,7 @@ export const createMultiAgentService = ({
       }
 
       const route = routeForAgent(currentAgent);
-      const result = await runtimeClient.request("thread/start", {
+      const result = await startConversationThread(runtimeClient, {
         cwd: employeeWorkRoots[agent.id] || projectRoot,
         ...executionPolicy,
         developerInstructions: employeeTurnInstructions(currentAgent.instructions),
@@ -429,7 +430,7 @@ export const createMultiAgentService = ({
     };
 
     try {
-      const started = await runtimeClient.request("turn/start", {
+      const started = await startTurn(runtimeClient, {
         threadId,
         input: await inputFromAttachments(prompt, inputAttachments, attachmentContent),
         cwd: projectRoot,

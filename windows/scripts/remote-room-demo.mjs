@@ -218,6 +218,7 @@ let conversations = createConversationService({
 conversations = await withExistingConversations(conversations, conversationStoreOptions);
 followUpQueue = createFollowUpQueueService({
   stateFile: path.join(projectRoot, "runtime", "follow-up-queues.json"),
+  isCompacting: threadId => contextManagement?.getStatus(threadId).phase === "compacting",
   execution,
   conversations: {
     ...conversations,
@@ -258,6 +259,7 @@ contextManagement = await createContextManagementService({
     else console.warn("[context-management] stale compaction request failed; execution unchanged", { threadId, compactionRevision: meta?.compactionRevision });
   },
   stateFile: path.join(projectRoot, "runtime", "context-settings.json"),
+  onCompacted: threadId => followUpQueue.handleTurnTerminal({ threadId, status: "completed" }),
   broadcast: realtime.broadcast,
   getExecutionStatus: execution.getStatus,
   getRuntimeContext: (threadId) => employeeRuntime?.ownsThread?.(threadId)

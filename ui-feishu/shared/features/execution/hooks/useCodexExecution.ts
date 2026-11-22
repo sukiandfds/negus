@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createClientId } from "../../../shared/id/clientId";
+import { createSubmissionId } from "../../conversations/state/optimisticMessage";
 import { executionApi } from "../data/executionApi";
 import type { SendMessageAttempt, SubmissionStatusResult } from "../data/executionApi";
 import type { ExecutionStatus, ProjectEvent } from "../model/types";
@@ -165,7 +165,7 @@ export function useCodexExecution(threadId: string, store: ConversationStore) {
     if (!targetThreadId || (!message && !attachmentIds.length) || sendingThreads.has(targetThreadId)) return null;
     sendingThreads.add(targetThreadId);
     markSending(targetThreadId, true);
-    const acceptedSubmissionId = submissionId || createClientId();
+    const acceptedSubmissionId = submissionId || createSubmissionId();
     const slowTimer = window.setTimeout(() => setSlowIds(current => new Set(current).add(targetThreadId)), SEND_SLOW_NOTICE_MS);
     const steering = status.active;
     const previousTurnId = status.turnId;

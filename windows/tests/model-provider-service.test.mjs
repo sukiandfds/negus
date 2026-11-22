@@ -96,6 +96,55 @@ test("manual provider discovery adds new Grok models, persists routing and retai
   });
 });
 
+test("manual provider refresh replaces removed models, persists the exact catalog and retains the last success on failure", async () => {
+  await withTemporaryRoot(async (root) => {
+    let source = ["grok-4.5", "grok-4.7"];
+    let fail = false;
+    let calls = 0;
+    const options = { currentApiConfiguration: async () => null, projectRoot: root,
+      sharedConfig: { runtimeProviders: async () => [] },
+      credentialStore: { read: async () => "test-key", isConfigured: async () => true },
+      fetchModels: async () => {
+        calls += 1;
+        if (fail) throw new Error("offline");
+        return { ok: true, json: async () => ({ data: source.map(id => ({ id })) }) };
+      },
+    };
+    const service = createModelProviderService(options);
+    try {
+      await service.refreshProviderModels(GROK_MODEL_PROVIDER_ID);
+      assert.deepEqual(service.providers().find(provider => provider.id === GROK_MODEL_PROVIDER_ID).models.map(model => model.model),
+        ["grok-4.5", "grok-4.7"]);
+
+      source = ["grok-4.7-latest"];
+      await service.refreshProviderModels(GROK_MODEL_PROVIDER_ID);
+      assert.deepEqual(service.providers().find(provider => provider.id === GROK_MODEL_PROVIDER_ID).models.map(model => model.model),
+        ["grok-4.7-latest"]);
+      assert.equal(service.resolveRoute({ model: "grok-4.7-latest" }).modelProviderId, GROK_MODEL_PROVIDER_ID);
+      assert.throws(() => service.resolveRoute({ model: `${GROK_MODEL_PROVIDER_ID}::grok-4.5` }), /does not belong|已不在此配置目录/);
+
+      fail = true;
+      await assert.rejects(service.refreshProviderModels(GROK_MODEL_PROVIDER_ID), /目录读取失败/);
+      assert.deepEqual((await service.listModels()).filter(model => model.modelProviderId === GROK_MODEL_PROVIDER_ID).map(model => model.model),
+        ["grok-4.7-latest"]);
+      assert.equal(service.resolveRoute({ model: "grok-4.7-latest" }).model, "grok-4.7-latest");
+    } finally {
+      service.close();
+    }
+
+    const restored = createModelProviderService({ ...options, fetchModels: async () => { throw new Error("must not fetch on reload"); } });
+    try {
+      const models = (await restored.listModels()).filter(model => model.modelProviderId === GROK_MODEL_PROVIDER_ID);
+      assert.deepEqual(models.map(model => model.model), ["grok-4.7-latest"]);
+      assert.equal(restored.resolveRoute({ model: "grok-4.7-latest" }).modelProviderId, GROK_MODEL_PROVIDER_ID);
+      assert.throws(() => restored.resolveRoute({ model: `${GROK_MODEL_PROVIDER_ID}::grok-4.5` }), /does not belong|已不在此配置目录/);
+    } finally {
+      restored.close();
+    }
+    assert.equal(calls, 3);
+  });
+});
+
 test("refreshing one provider makes its new models routable without exposing them on another channel", async () => {
   await withTemporaryRoot(async (root) => {
     const sharedConfig = {
@@ -122,7 +171,7 @@ test("refreshing one provider makes its new models routable without exposing the
       assert.deepEqual(afterAlpha.ccswitch_alpha.models.map(model => model.model), ['alpha-base', 'alpha-new']);
       assert.deepEqual(afterAlpha.ccswitch_beta.models.map(model => model.model), ['beta-base']);
       assert.equal(service.resolveRoute({ modelProviderId: 'ccswitch_alpha', model: 'alpha-new' }).model, 'alpha-new');
-      assert.throws(() => service.resolveRoute({ modelProviderId: 'ccswitch_beta', model: 'beta-new' }), /does not belong/);
+      assert.throws(() => service.resolveRoute({ modelProviderId: 'ccswitch_beta', model: 'beta-new' }), /does not belong|已不在此配置目录/);
 
       await service.refreshProviderModels('ccswitch_beta');
       assert.equal(service.resolveRoute({ modelProviderId: 'ccswitch_beta', model: 'beta-new' }).model, 'beta-new');
@@ -290,7 +339,7 @@ test("current API configuration refresh reads supplier models, keeps native IDs 
     assert.equal(current[0].supportedReasoningEfforts[0].reasoningEffort, "high");
     assert.deepEqual(current[1].supportedReasoningEfforts.map(e => e.reasoningEffort), ["low", "medium", "high", "xhigh", "max", "ultra"]);
     assert.equal(service.resolveRoute({ model: "gpt-6.1-sol" }).modelProviderId, "current");
-    assert.equal(service.resolveRoute({ model: "gpt-6.1-sol" }).model, "gpt-6-sol");
+    assert.equal(service.resolveRoute({ model: "gpt-6.1-sol" }).model, "gpt-6.1-sol");
     assert.equal(service.resolveRoute({}).model, "gpt-6-sol");
     fail = true;
     await assert.rejects(service.refreshProviderModels("current"), /目录读取失败/);
@@ -343,7 +392,7 @@ test("current catalog collisions retain explicit routing and legacy Grok routing
     assert.equal(await service.getClient({ model: current.model }), defaultClient);
     assert.equal(service.resolveRoute({ model: "grok-4.5", modelProviderId: "current" }).modelProviderId, "current");
     assert.equal(service.resolveRoute({ model: "grok-4.5" }).modelProviderId, "fusheng-grok", "old saved unqualified routes remain unchanged");
-    assert.throws(() => service.resolveRoute({ model: "fusheng-grok::unknown" }), /does not belong/);
+    assert.throws(() => service.resolveRoute({ model: "fusheng-grok::unknown" }), /does not belong|已不在此配置目录/);
     service.close();
   });
 });
@@ -459,5 +508,42 @@ test('current and an isolated provider sharing CODEX_HOME reuse one writer witho
     assert.equal(await fs.readFile(path.join(home, 'config.toml'), 'utf8'), '# existing runtime config');
     service.close();
     assert.equal(closed, false, 'borrowed default client must not be closed');
+  });
+});
+
+test('provider text completion sends no tools and keeps credentials out of the result', async () => {
+  await withTemporaryRoot(async root => {
+    let request;
+    const service = createModelProviderService({
+      projectRoot: root,
+      currentApiConfiguration: async () => null,
+      sharedConfig: {
+        runtimeProviders: async () => [{ id: 'ccswitch_deepseek', displayName: 'DeepSeek',
+          baseUrl: 'https://deepseek.test/v1', defaultModel: 'deepseek-flash',
+          models: [{ model: 'deepseek-flash' }] }],
+        readCredential: async () => 'synthetic-secret',
+      },
+      fetchResponse: async (url, init) => {
+        request = { url, init, body: JSON.parse(init.body) };
+        return { ok: true, json: async () => ({ output: [{ content: [{ type: 'output_text', text: '{"agentIds":["reviewer"]}' }] }] }) };
+      },
+    });
+    try {
+      const result = await service.complete({ modelProviderId: 'ccswitch_deepseek', model: 'deepseek-flash',
+        reasoningEffort: 'low' }, { instructions: 'route', input: 'check risk', maxOutputTokens: 2048,
+        textFormat: { type: 'json_schema', name: 'group_agent_selection',
+          schema: { type: 'object', properties: { agentIds: { type: 'array', items: { type: 'string' } } },
+            required: ['agentIds'], additionalProperties: false } } });
+      assert.equal(request.url, 'https://deepseek.test/v1/responses');
+      assert.equal(request.init.headers.Authorization, 'Bearer synthetic-secret');
+      assert.equal(request.body.model, 'deepseek-flash');
+      assert.deepEqual(request.body.reasoning, { effort: 'low' });
+      assert.deepEqual(request.body.text, { format: { type: 'json_schema', name: 'group_agent_selection',
+        schema: { type: 'object', properties: { agentIds: { type: 'array', items: { type: 'string' } } },
+          required: ['agentIds'], additionalProperties: false } } });
+      assert.equal(Object.hasOwn(request.body, 'tools'), false);
+      assert.equal(result.text, '{"agentIds":["reviewer"]}');
+      assert.equal(JSON.stringify(result).includes('synthetic-secret'), false);
+    } finally { service.close(); }
   });
 });

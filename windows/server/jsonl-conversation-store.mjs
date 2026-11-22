@@ -1,3 +1,4 @@
+import { submissionIdOf, receiptMatches, mergeIdentified } from "./message-identity.mjs";
 import { latestRolloutFile, openRollout, orderedRolloutFiles } from './rollout-file.mjs';
 import fs from "node:fs";
 import fsp from "node:fs/promises";
@@ -156,7 +157,7 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
     lastKey: "",
     messageSequence: 0,
     messages: [],
-    userMessageEvents: [],
+    userMessageEvents: new Map(),
     pendingAssistantMedia: [],
     decoder: new StringDecoder("utf8"),
   });
@@ -178,6 +179,8 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
     if (!line.trim()) return;
     try {
       const item = JSON.parse(line);
+      const precedingUserInput = state.precedingUserInput;
+      state.precedingUserInput = null;
       if (item.type === "event_msg" && item.payload?.item?.type === "ContextCompaction" && item.payload.type === "item_completed") {
         const { turn_id, started_at_ms, completed_at_ms } = item.payload;
         // Codex exposes this operation as ContextCompaction, not as an assistant answer.
@@ -187,12 +190,21 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
       }
       if (item.type === "event_msg" && item.payload?.type === "item_completed" && item.payload.item?.type === "UserMessage") {
         const event = item.payload;
+        if (state.userMessageEvents.has(JSON.stringify([event.turn_id, event.item.id]))) {
+          state.precedingUserInput = precedingUserInput;
+          return;
+        }
         const completed = new Date(event.completed_at_ms);
         const time = Number.isFinite(event.completed_at_ms) && Number.isFinite(completed.getTime()) ? completed.toISOString() : item.timestamp;
         if (time && Number.isFinite(Date.parse(time))) {
-          state.userMessageEvents.push({ itemId: event.item.id, submissionId: event.item.client_id, turnId: event.turn_id, createdAt: time });
-          const message = state.messages.findLast(message => message.itemId === event.item.id);
-          if (message) Object.assign(message, { createdAt: time, ...(event.item.client_id ? { submissionId: event.item.client_id } : {}) });
+          const receipt = { itemId: event.item.id, submissionId: submissionIdOf(event.item), turnId: event.turn_id, createdAt: time };
+          state.userMessageEvents.set(JSON.stringify([event.turn_id, event.item.id]), receipt);
+          // Codex writes the actual input response immediately before its confirmation.
+          // They share the turn but can have different item IDs. Pair individual records,
+          // never all the inputs in the turn or all messages with the same text.
+          const message = state.messages.findLast(message => message.role === "user" && receiptMatches(message, receipt))
+            || (precedingUserInput?.turnId === event.turn_id && !precedingUserInput?.submissionId ? precedingUserInput : null);
+          if (message) Object.assign(message, { createdAt: time, ...(receipt.submissionId ? { submissionId: receipt.submissionId } : {}) });
         }
       }
       if (item.type === "event_msg" && item.payload?.type === "task_started") state.currentTurnId = item.payload.turn_id;
@@ -239,8 +251,13 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
       const identity = itemId || `${item.timestamp || "unknown"}:${messageIndex}`;
       message.id = itemId && turnId ? `codex:${encodeURIComponent(state.currentTurnId || turnId)}:${encodeURIComponent(String(itemId))}`
         : `jsonl:${encodeURIComponent(state.threadId)}:${encodeURIComponent(String(turnId || "unknown"))}:${encodeURIComponent(String(identity))}`;
-      const event = state.userMessageEvents.findLast(event => event.itemId === itemId);
+      const event = state.userMessageEvents.get(JSON.stringify([turnId, itemId]));
       if (message.role === 'user' && event) Object.assign(message, { createdAt: event.createdAt, ...(event.submissionId ? { submissionId: event.submissionId } : {}) });
+      const metadata = item.payload?.internal_chat_message_metadata_passthrough;
+      if (message.role === "user" && item.type === "response_item" && metadata?.turn_id
+        && metadata.content_item_metadata?.some(entry => entry.provenance?.type === "user")) {
+        state.precedingUserInput = message;
+      }
       const previous = state.messages.at(-1);
       const mirrored = previous && state.lastOrigin !== item.type && ['event_msg', 'response_item'].includes(state.lastOrigin)
         && previous.role === message.role && previous.text === message.text
@@ -249,12 +266,15 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
       state.lastOrigin = item.type;
       if (mirrored) {
         const preferred = item.type === 'response_item' ? message : previous;
-        state.messages[state.messages.length - 1] = { ...preferred, blocks: mergeBlocks(previous.blocks, message.blocks) };
+        const merged = { ...preferred, blocks: mergeBlocks(previous.blocks, message.blocks) };
+        state.messages[state.messages.length - 1] = merged;
+        if (state.precedingUserInput) state.precedingUserInput = merged;
         return;
       }
       const logicalKey = `${message.role}:${turnId}:${identity}:${item.timestamp || ""}`;
       if (previous?.role === message.role && previous.text === message.text && state.lastKey.startsWith(`${logicalKey}:`)) {
         previous.blocks = mergeBlocks(previous.blocks, message.blocks);
+        if (state.precedingUserInput) state.precedingUserInput = previous;
         state.lastKey = `${logicalKey}:${previous.blocks.map(blockKey).join("|")}`;
         return;
       }
@@ -381,30 +401,16 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
     const ordered = await Promise.all(files.map(async file => ({ header: headers.find(header => header.file === file), stat: await fsp.stat(file) })));
     const header = ordered.at(-1).header;
     const fileRevision = ordered.map(({ stat }) => conversationSourceRevision(stat)).join('|');
-    const sourceRevision = 'history-v3:' + fileRevision;
+    const sourceRevision = 'history-input-id-v4:' + fileRevision;
     if (metadataOnly) return { id: threadId, path: header.file, paths: files, cwd: header.cwd, name: header.title, sourceRevision };
     const parts = await Promise.all(ordered.map(({ header }) => readSession(header)));
     const after = await Promise.all(files.map(file => fsp.stat(file).then(conversationSourceRevision)));
     if (after.join('|') !== fileRevision) throw Object.assign(new Error("对话更新中，请重试同步"), { statusCode: 409 });
-    const messages = [...new Map(parts.flatMap(part => part.messages).map(message => [message.id, message])).values()];
-    // Response items and protocol items have separate IDs but share the turn ID.
-    // Only a one-to-one turn can establish identity without an exact item match.
-    const users = new Map(), confirmations = new Map();
-    for (const message of messages) if (message.role === 'user' && message.turnId)
-      users.set(message.turnId, users.has(message.turnId) ? null : message);
-    for (const { header } of ordered) for (const event of sessionCache.get(header.file).userMessageEvents) {
-      const prior = confirmations.get(event.turnId);
-      if (prior === undefined) confirmations.set(event.turnId, event);
-      else if (prior?.itemId !== event.itemId || prior?.submissionId !== event.submissionId) confirmations.set(event.turnId, null);
-    }
-    for (const [index, message] of messages.entries()) {
-      const event = confirmations.get(message.turnId);
-      if (users.get(message.turnId) === message && !message.submissionId && event?.submissionId)
-        messages[index] = { ...message, submissionId: event.submissionId };
-    }
+    const messages = mergeIdentified(parts.flatMap(part => part.messages), (previous, latest) =>
+      previous.submissionId && !latest.submissionId ? { ...latest, submissionId: previous.submissionId } : latest);
     let session = { ...parts.at(-1), messages: messages.map((message, sequence) => ({ ...message, sequence })), messageCount: messages.length, sourceRevision };
     if (source !== "all" && session.source !== source) return null;
-    if (includeEventTimes) session = { ...session, userMessageEvents: ordered.flatMap(({ header }) => sessionCache.get(header.file).userMessageEvents) };
+    if (includeEventTimes) session = { ...session, userMessageEvents: ordered.flatMap(({ header }) => [...sessionCache.get(header.file).userMessageEvents.values()]) };
     if (!limit) return session;
     const anchor = beforeMessageId ? session.messages.findIndex(message => message.id === beforeMessageId || message.itemId === beforeMessageId) : -1;
     if (beforeMessageId && anchor < 0) throw Object.assign(new Error("历史分页位置已变化，请刷新对话后重试"), { statusCode: 409 });

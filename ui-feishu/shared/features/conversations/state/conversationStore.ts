@@ -1,3 +1,6 @@
+import { terminalPhases } from "../../../../../windows/server/execution/protocol.mjs";
+import { isOptimisticId } from "../../../../../windows/server/message-identity.mjs";
+import { historyReadIsStale } from "./historyMerge.ts";
 import { goalCompletionKey } from '../../goals/model/types';
 import type { ConversationPresentation, SessionDetail, SessionMessage } from '../model/types';
 import type { InitialConversationState } from './initialConversation';
@@ -5,7 +8,7 @@ import { idleStatus } from '../../execution/hooks/useCodexExecution';
 import { emptyStatus } from '../../context-management/hooks/useContextManagement';
 import { conversationApi, type ConversationRead } from '../data/conversationApi';
 import { mergeMessageList, mergePendingOptimisticMessages, mergeSessionRefresh, sameSubmission } from './conversationMerge';
-import { createOptimisticMessage } from './optimisticMessage';
+import { queuedTranscriptMessage } from './optimisticMessage';
 import { readModelCatalog } from '../../models/data/modelCatalogCache';
 import { readModelDefaults, resolveVisibleEffort } from '../../models/model/modelDefaults';
 
@@ -13,7 +16,7 @@ export type ThreadSnapshot = Pick<ConversationPresentation, 'executionStatus' | 
   session: SessionDetail | null;
 };
 type Patch = Partial<ThreadSnapshot>;
-const persistedPending = (messages: SessionMessage[]) => JSON.stringify(messages.filter(message => message.id.startsWith('optimistic-')
+const persistedPending = (messages: SessionMessage[]) => JSON.stringify(messages.filter(message => isOptimisticId(message.id)
   && (message.deliveryState === 'failed' || message.deliveryState === 'occupied')));
 const signature = (value: unknown, omitStream = false) => JSON.stringify(value,
   function (this: { phase?: string; type?: string; id?: string }, key, field) {
@@ -25,7 +28,7 @@ const signature = (value: unknown, omitStream = false) => JSON.stringify(value,
 type ExecutionEvidence = { phase?: string; active?: boolean; turnId?: string | null;
   eventEpoch?: string; eventSeq?: number; updatedAt?: string | null; startedAt?: string | null };
 export const terminalExecution = (status?: ExecutionEvidence) => Boolean(status && !status.active
-  && ['completed', 'failed', 'interrupted', 'systemError'].includes(status.phase || ''));
+  && terminalPhases.has(status.phase || ''));
 const executionOrder = (candidate: ExecutionEvidence, baseline: ExecutionEvidence): number | null => {
   if (candidate.eventEpoch && candidate.eventEpoch === baseline.eventEpoch
     && candidate.eventSeq != null && baseline.eventSeq != null) return candidate.eventSeq - baseline.eventSeq;
@@ -51,7 +54,7 @@ export class ConversationStore {
   private completedMessages = new Map<string, SessionMessage[]>();
   clearCompletedMessages = (id: string) => { this.completedMessages.delete(id); };
   completeMessage = (id: string, message: SessionMessage) => {
-    this.completedMessages.set(id, mergeMessageList(this.completedMessages.get(id) || [], [message]));
+    this.completedMessages.set(id, mergeMessageList(this.completedMessages.get(id) || [], message));
     ++this.persistVersion;
     this.notify();
   };
@@ -71,10 +74,7 @@ export class ConversationStore {
     for (const item of items) {
       if (item.dispatchSubmissionId && (!snapshot || !this.queueDispatches.has(JSON.stringify([id, item.submissionId])))) this.linkQueuedMessage(id, item.submissionId, item.dispatchSubmissionId);
       const dispatchId = this.queueDispatches.get(JSON.stringify([id, item.submissionId]));
-      if (dispatchId && this.acceptedSubmissions.has(JSON.stringify([id, dispatchId]))) this.addMessage(id, {
-        ...createOptimisticMessage(item.text, item.attachments, dispatchId, item.sentAt || item.createdAt),
-        authorId: item.authorId, authorName: item.authorName, displaySourceAgentId: item.displaySourceAgentId,
-      });
+      if (dispatchId && this.acceptedSubmissions.has(JSON.stringify([id, dispatchId]))) this.addMessage(id, queuedTranscriptMessage(item, dispatchId));
     }
   };
   private visibleQueue = (id: string, items: ThreadSnapshot['queueItems']) => items.flatMap(item => {
@@ -123,14 +123,14 @@ export class ConversationStore {
   constructor(initial: InitialConversationState) {
     for (const id of initial.partialSessionIds) this.freshBodies.add(id);
     for (const detail of initial.cachedSessions) {
-      const pending = detail.messages.filter(message => message.id.startsWith('optimistic-'));
+      const pending = detail.messages.filter(message => isOptimisticId(message.id));
       if (pending.length) this.localPending.set(detail.threadId, pending);
       const view = initial.presentation?.[detail.threadId];
       this.committed.set(detail.threadId, { ...this.empty(detail.threadId),
         executionStatus: { ...idleStatus(detail.threadId), ...view?.executionStatus },
         contextStatus: { ...emptyStatus(detail.threadId), ...view?.contextStatus },
         goal: view?.goal || null, queueItems: view?.queueItems || [], userInputRequest: view?.userInputRequest || null,
-        session: { ...detail, messages: detail.messages.filter(message => !message.id.startsWith('optimistic-')) } });
+        session: { ...detail, messages: detail.messages.filter(message => !isOptimisticId(message.id)) } });
     }
   }
   empty = (id: string): ThreadSnapshot => ({ session: null, executionStatus: idleStatus(id), contextStatus: emptyStatus(id),
@@ -238,10 +238,10 @@ export class ConversationStore {
     const snapshot = (result: ConversationRead): ThreadSnapshot => {
       const previous = this.get(id);
       const current = this.committed.get(id)?.session;
-      if ((this.bodyRevisions.get(id) || 0) > revision) return previous;
+      if (historyReadIsStale(this.bodyRevisions.get(id) || 0, revision)) return previous;
       const incoming = result.session;
       const bodyReady = Object.hasOwn(result, 'session');
-      const session = incoming && current ? current.contentVersion && incoming.contentVersion && current.contentVersion > incoming.contentVersion
+      const session = incoming && current ? current.contentVersion && incoming.contentVersion && historyReadIsStale(current.contentVersion, incoming.contentVersion)
         ? current : refreshSession(current, incoming) : incoming || current || null;
       const context = result.context || previous.contextStatus;
       const selectedSettings = this.committed.get(id)?.contextStatus.selectedSettings;
@@ -277,7 +277,7 @@ export class ConversationStore {
     const wasDirty = this.dirty.has(id);
     const wasSynced = this.synced.has(id);
     this.rememberQueue(id, snapshot.queueItems, true);
-    for (const message of snapshot.session?.messages || []) if (message.role === 'user' && message.submissionId && !message.id.startsWith('optimistic-')) this.rememberAccepted(id, message.submissionId);
+    for (const message of snapshot.session?.messages || []) if (message.role === 'user' && message.submissionId && !isOptimisticId(message.id)) this.rememberAccepted(id, message.submissionId);
     snapshot = { ...snapshot, queueItems: this.visibleQueue(id, snapshot.queueItems) };
     if (snapshot.goal?.status === 'complete' && this.dismissedGoals.get(id) === goalCompletionKey(snapshot.goal)) snapshot = { ...snapshot, goal: null };
     const latest = this.committed.get(id);
@@ -298,7 +298,7 @@ export class ConversationStore {
       const context = key === 'contextStatus' ? this.live.get(id)?.contextStatus : undefined;
       if (context) snapshot = { ...snapshot, contextStatus: { ...context,
         usageSourceRevision: context.model === snapshot.contextStatus.model
-          && (this.bodyRevisions.get(id) || 0) <= revision
+          && !historyReadIsStale(this.bodyRevisions.get(id) || 0, revision)
           ? snapshot.contextStatus.usageSourceRevision : undefined,
         model: snapshot.contextStatus.model, reasoningEffort: snapshot.contextStatus.reasoningEffort,
         selectedSettings: snapshot.contextStatus.selectedSettings,
@@ -313,7 +313,7 @@ export class ConversationStore {
     const current = latest?.session;
     if (current && snapshot.session) snapshot = { ...snapshot, session: refreshSession(current, snapshot.session) };
     if (snapshot.contextStatus.usageSourceRevision !== (snapshot.session?.sourceRevision || '')
-      || (this.bodyRevisions.get(id) || 0) > revision) snapshot = { ...snapshot,
+      || historyReadIsStale(this.bodyRevisions.get(id) || 0, revision)) snapshot = { ...snapshot,
       contextStatus: { ...snapshot.contextStatus, usageSourceRevision: undefined } };
     const pending = this.localPending.get(id);
     if (pending && snapshot.session) {
@@ -324,7 +324,7 @@ export class ConversationStore {
     this.committed.set(id, snapshot);
     const local = this.localPending.get(id);
     if (local && snapshot.session) {
-      const remaining = mergePendingOptimisticMessages(snapshot.session, local).messages.filter(message => message.id.startsWith('optimistic-'));
+      const remaining = mergePendingOptimisticMessages(snapshot.session, local).messages.filter(message => isOptimisticId(message.id));
       if (remaining.length) this.localPending.set(id, remaining); else this.localPending.delete(id);
     }
     const live = this.live.get(id);
@@ -338,13 +338,13 @@ export class ConversationStore {
       if (status !== snapshot.executionStatus) live.executionStatus = status;
       else delete live.executionStatus;
     }
-    if (live && (this.bodyRevisions.get(id) || 0) <= revision) {
+    if (live && !historyReadIsStale(this.bodyRevisions.get(id) || 0, revision)) {
       for (const key of Object.keys(live) as (keyof Patch)[]) {
         if (key !== 'executionStatus' && (this.fieldRevisions.get(id)?.[key] || 0) <= revision) delete live[key];
       }
     }
     if (live && !Object.keys(live).length) this.live.delete(id);
-    if ((this.bodyRevisions.get(id) || 0) <= revision) {
+    if (!historyReadIsStale(this.bodyRevisions.get(id) || 0, revision)) {
       this.dirty.delete(id); this.freshBodies.delete(id);
     }
     this.finish(id);
@@ -362,8 +362,8 @@ export class ConversationStore {
   addMessage = (id: string, message: SessionMessage) => {
     if ([...(this.committed.get(id)?.session?.messages || []), ...(this.localPending.get(id) || [])].some(item => item.id === message.id || sameSubmission(item, message))) return;
     if (!this.committed.has(id)) this.committed.set(id, this.empty(id));
-    this.localPending.set(id, mergeMessageList(this.localPending.get(id) || [], [message]));
-    if (message.id.startsWith('optimistic-') && (message.deliveryState === 'failed' || message.deliveryState === 'occupied')) ++this.persistVersion;
+    this.localPending.set(id, mergeMessageList(this.localPending.get(id) || [], message));
+    if (isOptimisticId(message.id) && (message.deliveryState === 'failed' || message.deliveryState === 'occupied')) ++this.persistVersion;
     this.notify();
   };
   changeMessages = (id: string, update: (messages: SessionMessage[]) => SessionMessage[]) => {

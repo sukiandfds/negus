@@ -1,21 +1,11 @@
 import { readJson, sendJson } from "../http/request-utils.mjs";
 
-export const createConversationSettingsRoutes = ({ conversations, execution, contextManagement, agentConversationStore, employeeRuntime, modelProviders, authorizeAgentThread, isEmployeeDirectBinding, sessionSource }) => {
+export const createConversationSettingsRoutes = ({ conversations, execution, contextManagement, employeeRuntime, modelProviders, authorizeAgentThread, isEmployeeDirectBinding, sessionSource }) => {
   return async (request, response, url) => {
   if (url.pathname === "/api/models" && request.method === "GET") {
     const refreshProvider = url.searchParams.get("refreshProvider");
     if (refreshProvider && modelProviders) await modelProviders.refreshProviderModels(refreshProvider);
-    const currentModels = await conversations.listModels();
-    let includeAgentProviders = url.searchParams.get("scope") === "agents";
-    const conversationId = String(url.searchParams.get("conversationId") || "").trim();
-    if (!includeAgentProviders && conversationId && agentConversationStore) {
-      try {
-        includeAgentProviders = isEmployeeDirectBinding(await agentConversationStore.resolve({ conversationId }));
-      } catch {}
-    }
-    sendJson(response, modelProviders
-      ? await modelProviders.listModels(currentModels)
-      : currentModels);
+    sendJson(response, await conversations.listModels());
     return true;
   }
   if (url.pathname === "/api/session/model" && request.method === "POST") {
@@ -33,8 +23,8 @@ export const createConversationSettingsRoutes = ({ conversations, execution, con
       return true;
     }
     if (isEmployeeDirectBinding(binding)) {
-      const reasoningEffort = typeof body.reasoningEffort === "string" && body.reasoningEffort ? body.reasoningEffort : undefined;
-      const result = await employeeRuntime.updateModelSettings(binding.agentId, { model, ...(reasoningEffort ? { reasoningEffort } : {}) });
+      const result = await employeeRuntime.updateModelSettings(binding.agentId, { model,
+        ...(typeof body.reasoningEffort === "string" ? { reasoningEffort: body.reasoningEffort } : {}) });
       sendJson(response, {
         model: result.employee.model || model,
         modelProvider: result.employee.modelProviderId || "current",
@@ -42,7 +32,8 @@ export const createConversationSettingsRoutes = ({ conversations, execution, con
       });
       return true;
     }
-    sendJson(response, await conversations.updateModel(threadId, model, { allowProviderSwitch: binding?.conversationKind !== "task" && body.allowProviderSwitch === true, reasoningEffort: body.reasoningEffort }));
+    sendJson(response, await conversations.updateModel(threadId, model, { allowProviderSwitch: binding?.conversationKind !== "task" && body.allowProviderSwitch === true,
+      continueSubmission: !binding && typeof body.continueSubmission === "string" ? body.continueSubmission.slice(0, 120) : "", reasoningEffort: body.reasoningEffort }));
     return true;
   }
   if (url.pathname === "/api/session/reasoning-effort" && request.method === "POST") {

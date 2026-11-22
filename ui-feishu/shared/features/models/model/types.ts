@@ -15,6 +15,7 @@ export interface CodexModel {
 }
 
 export interface ModelUpdateResult {
+  switched?: boolean;
   threadId?: string;
   model: string;
   modelProvider: string;

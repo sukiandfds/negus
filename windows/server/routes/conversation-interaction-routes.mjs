@@ -1,3 +1,4 @@
+import { publishSubmitted } from "../conversation-input.mjs";
 import { resolveIncoming } from "../cos-attachments.mjs";
 import { readJson, sendJson } from "../http/request-utils.mjs";
 
@@ -121,7 +122,7 @@ export const createConversationInteractionRoutes = ({ execution, media, publishT
         blocks: [{ id: `goal:${submissionId}:text`, type: "markdown", text: "/goal " + objectiveText },
           ...goalAttachments.map(file => ({ id: file.id, type: file.mimeType?.startsWith("image/") ? "image" : "file", source: file.url, file: publicAttachment(file) }))] };
       execution.recordMessage?.(threadId, message);
-      publishThreadEvent(threadId, { type: "user_message_submitted", threadId, submissionId, messageId: message.id,
+      publishSubmitted(publishThreadEvent, { threadId, submissionId, messageId: message.id,
         text: message.text, attachments: goalAttachments.map(publicAttachment), createdAt });
       publishThreadEvent(threadId, { type: "sessions_changed", threadId });
     }

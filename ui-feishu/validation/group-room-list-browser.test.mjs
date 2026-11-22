@@ -10,13 +10,14 @@ try {
   await page.route('**/api/group/rooms', route => {
     roomRequests += 1;
     return route.fulfill({ json: { rooms: [
-      { id: 'room-a', name: '群聊 A', projectId: 'p', lastActivityAt: '2026-11-18T01:00:00Z' },
+      { id: 'room-a', name: '群聊 A', projectId: 'p', lastActivityAt: '2026-11-18T01:00:00Z', latestMessage: { id: 'stored', sequence: 0, text: '已保存消息' } },
       { id: 'room-b', name: '群聊 B', projectId: 'p', lastActivityAt: '2026-11-18T01:00:00Z' },
     ] } });
   });
   await page.goto('http://127.0.0.1:5197/validation/group-room-list.html');
   await page.waitForFunction(() => document.querySelector('[data-room-list]')?.textContent.includes('room-a'));
   assert.equal(roomRequests, 1);
+  assert.match(await page.locator('[data-room-list]').textContent(), /已保存消息/);
   await page.evaluate(async () => {
     const { publishProjectStream } = await import('/src/projectEvents.ts');
     window.emit = event => publishProjectStream('message', new MessageEvent('message', { data: JSON.stringify(event) }));
@@ -51,6 +52,19 @@ try {
   assert.equal(roomRequests, 1, 'new group messages must not refetch the room list');
   assert.equal(activityA, '2026-11-18T01:05:00Z');
   assert.equal(activityB, '2026-11-18T01:06:00Z');
+  assert.equal(state.rooms.find(room => room.id === 'room-a').latestMessage.text, '消息 5');
+  assert.equal(state.rooms.find(room => room.id === 'room-b').latestMessage.text, '另一个群的消息');
+  await page.evaluate(() => {
+    window.emit({ type: 'group_message_updated', roomId: 'room-a', message: {
+      id: 'message-5', sequence: 5, text: '最新消息原位更新', createdAt: '2026-11-18T01:05:00Z',
+    } });
+    window.emit({ type: 'group_message_updated', roomId: 'room-a', message: {
+      id: 'message-4', sequence: 4, text: '旧消息原位更新', createdAt: '2026-11-18T01:04:00Z',
+    } });
+  });
+  await page.waitForFunction(() => document.querySelector('[data-room-list]')?.textContent.includes('最新消息原位更新'));
+  assert.equal(roomRequests, 1);
+
   await page.evaluate(() => window.emit({ type: 'sessions_changed', roomId: 'room-a' }));
   await page.waitForTimeout(260);
   assert.equal(roomRequests, 2, 'room metadata changes must still refresh the room list');
@@ -100,6 +114,7 @@ try {
   await racePage.waitForTimeout(120);
   const afterStale = await racePage.locator('[data-room-list]').evaluate(node => JSON.parse(node.textContent || '{}'));
   assert.equal(afterStale.rooms.find(room => room.id === 'room-a').lastActivityAt, '2026-11-18T01:05:00Z');
+  assert.equal(afterStale.rooms.find(room => room.id === 'room-a').latestMessage.text, '竞态期间的新消息');
   assert.equal(afterStale.rooms.find(room => room.id === 'room-b').name, '群聊 B（已刷新）');
   await racePage.evaluate(() => window.emit({ type: 'sessions_changed', roomId: 'room-a' }));
   await racePage.waitForTimeout(300);

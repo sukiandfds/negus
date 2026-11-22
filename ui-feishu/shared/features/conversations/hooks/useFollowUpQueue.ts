@@ -4,7 +4,7 @@ import type { MediaFile } from "../../../shared/model/media";
 import type { ProjectEvent } from "../../execution/model/types";
 import { followUpQueueApi } from "../data/followUpQueueApi";
 import type { FollowUpQueueItem } from "../model/followUpQueue";
-import { createSubmissionId } from "../state/optimisticMessage";
+import { beginOptimisticSend, createSubmissionId } from "../state/optimisticMessage";
 
 import type { ConversationStore } from "../state/conversationStore";
 
@@ -46,15 +46,20 @@ export function useFollowUpQueue(threadId: string, store: ConversationStore) {
     setBusy(false);
   }, [threadId]);
 
-  const enqueue = useCallback(async (text: string, attachments: MediaFile[] = [], targetThreadId = threadId, modelSettings?: { model: string; reasoningEffort: string }) => {
-    const submissionId = `queue-${createSubmissionId()}`;
-    const createdAt = new Date().toISOString();
-    setPendingItems(items => [...items, { id: submissionId, threadId: targetThreadId, submissionId,
-      text: text.trim(), attachments, attachmentIds: attachments.map(item => item.id),
-      state: 'pending', error: '', createdAt, updatedAt: createdAt, position: items.length }]);
+  const enqueue = useCallback(async (text: string, attachments: MediaFile[] = [], targetThreadId = threadId, modelSettings?: { model: string; reasoningEffort: string }, finishUpload?: (id: string) => Promise<MediaFile[]>, resolveThread?: (id: string) => Promise<string | null>) => {
+    const submissionId = beginOptimisticSend(text, attachments, row => {
+      setPendingItems(items => [...items, { id: row.submissionId, threadId: targetThreadId, submissionId: row.submissionId,
+        text: row.text, attachments, attachmentIds: attachments.map(item => item.id),
+        state: 'pending', error: '', createdAt: row.createdAt, updatedAt: row.createdAt, position: items.length }]);
+      return row.submissionId;
+    }, `queue-${createSubmissionId()}`);
     try {
-      return await run(targetThreadId, () => followUpQueueApi.enqueue(
-        targetThreadId, text.trim(), attachments.map(attachment => attachment.id), submissionId, modelSettings, conversationId,
+      const id = resolveThread ? await resolveThread(targetThreadId) : targetThreadId;
+      if (!id) return false;
+      if (id !== targetThreadId) setPendingItems(items => items.map(item => item.submissionId === submissionId ? { ...item, threadId: id } : item));
+      const files = finishUpload ? await finishUpload(submissionId) : attachments;
+      return await run(id, () => followUpQueueApi.enqueue(
+        id, text.trim(), files.map(attachment => attachment.id), submissionId, modelSettings, conversationId,
       ), true);
     } finally {
       setPendingItems(items => items.filter(item => item.submissionId !== submissionId));

@@ -1,3 +1,6 @@
+import { assertSameRequest } from "../request-fingerprint.mjs";
+import { assertTurnReady, publishSubmitted, submitThreadInput } from "../conversation-input.mjs";
+import { optimisticMessageId } from "../message-identity.mjs";
 import { resolveIncoming } from "../cos-attachments.mjs";
 import { randomUUID } from "node:crypto";
 import { readJson, sendJson } from "../http/request-utils.mjs";
@@ -18,11 +21,7 @@ export const createConversationMessageRoutes = ({ conversations, execution, foll
     if (!submissionId) return promise;
     const existing = inFlightSubmissions.get(submissionId);
     if (existing) {
-      if (existing.fingerprint !== fingerprint) {
-        const error = new Error("submissionId was already used for a different message");
-        error.statusCode = 409;
-        throw error;
-      }
+      assertSameRequest(existing, fingerprint);
       return existing.promise;
     }
     const timer = setTimeout(() => {
@@ -64,7 +63,7 @@ export const createConversationMessageRoutes = ({ conversations, execution, foll
     const binding = await authorizeAgentThread({ threadId, conversationId });
     const employeeDirect = isEmployeeDirectBinding(binding);
     const submissionId = String(body.submissionId || "").trim().slice(0, 160) || randomUUID();
-    const messageId = `optimistic-${submissionId}`;
+    const messageId = optimisticMessageId(submissionId);
     const createdAt = new Date().toISOString();
     const fingerprint = JSON.stringify({
       threadId,
@@ -74,42 +73,22 @@ export const createConversationMessageRoutes = ({ conversations, execution, foll
     });
     const cachedSubmission = inFlightSubmissions.get(submissionId);
     if (cachedSubmission) {
-      if (cachedSubmission.fingerprint !== fingerprint) {
-        const error = new Error("submissionId was already used for a different message");
-        error.statusCode = 409;
-        throw error;
-      }
+      assertSameRequest(cachedSubmission, fingerprint);
       const cachedResult = await cachedSubmission.promise;
       sendJson(response, cachedResult.body, cachedResult.statusCode);
       return true;
     }
     const storedSubmission = submissionStore?.get(submissionId);
     if (storedSubmission) {
-      if (storedSubmission.fingerprint !== fingerprint) {
-        const error = new Error("submissionId was already used for a different message");
-        error.statusCode = 409;
-        throw error;
-      }
+      assertSameRequest(storedSubmission, fingerprint);
       const resolved = await resolveStoredSubmission(storedSubmission);
       sendJson(response, resolved.body, resolved.statusCode);
       return true;
     }
     const run = async () => {
       const status = execution.getStatus(threadId);
-      if (!employeeDirect && status.active && !status.turnId) {
-        const error = new Error("Codex 正在启动当前任务，请稍后再试");
-        error.statusCode = 409;
-        throw error;
-      }
-      publishThreadEvent(threadId, {
-        type: "user_message_submitted",
-        threadId,
-        submissionId,
-        messageId,
-        text,
-        attachments: attachments.map(publicAttachment),
-        createdAt,
-      });
+      if (!employeeDirect) assertTurnReady(status);
+      publishSubmitted(publishThreadEvent, { threadId, submissionId, text, attachments: attachments.map(publicAttachment), createdAt });
       let result;
       try {
         if (employeeDirect) {
@@ -120,9 +99,7 @@ export const createConversationMessageRoutes = ({ conversations, execution, foll
             requestId: submissionId,
           });
         } else {
-          result = status.active
-            ? await conversations.steerMessage(threadId, status.turnId, text, attachments, submissionId)
-            : await conversations.sendMessage(threadId, text, attachments, submissionId);
+          result = await submitThreadInput(conversations, status, threadId, text, attachments, submissionId);
         }
       } catch (error) {
         if (employeeDirect) throw error;

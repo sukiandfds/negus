@@ -66,7 +66,10 @@ export async function setTransferredProvider(file, sourceFile, threadId, modelPr
     const db = new DatabaseSync(path.join(home, name));
     try {
       db.exec('PRAGMA busy_timeout=5000');
-      db.prepare('UPDATE threads SET model_provider=? WHERE id=? AND rollout_path=?').run(nativeProvider, targetThreadId, file);
+      if (settings.bindCopiedPath && path.resolve(file) !== path.resolve(sourceFile)) {
+        // This provider's index may still point to an archived copy of this ID.
+        db.prepare('UPDATE threads SET model_provider=?, rollout_path=?, archived=0 WHERE id=?').run(nativeProvider, file, targetThreadId);
+      } else db.prepare('UPDATE threads SET model_provider=? WHERE id=? AND rollout_path=?').run(nativeProvider, targetThreadId, file);
     } finally {
       db.close();
     }

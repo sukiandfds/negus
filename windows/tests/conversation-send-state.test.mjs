@@ -1,3 +1,6 @@
+import { terminalPhases } from "../server/execution/protocol.mjs";
+import { isOptimisticId, optimisticMessageId } from "../server/message-identity.mjs";
+import { deliveryPatch, messageContentBlocks, queuedTranscriptMessage, beginOptimisticSend } from "../../ui-feishu/shared/features/conversations/state/optimisticMessage.ts";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -8,13 +11,16 @@ const deferred = () => { let resolve; const promise = new Promise(done => { reso
 async function harness(file, dependencies) {
   const slots = []; let cursor = 0;
   const hooks = {
+    canonicalChannelId: id => id,
+    providerIdForModel: (models, model) => models.find(entry => entry.model === model)?.modelProviderId || (model.includes("::") ? model.split("::")[0] : "current"),
+    writeLocalCache: () => {},
     useState(value) { const i = cursor++; if (!(i in slots)) slots[i] = typeof value === 'function' ? value() : value;
       return [slots[i], next => { slots[i] = typeof next === 'function' ? next(slots[i]) : next; }]; },
     useRef(value) { const i = cursor++; return slots[i] ||= { current: value }; },
     useCallback: fn => fn, useEffect() {},
   };
   const key = `__conversationState${Math.random().toString(36).slice(2)}`;
-  globalThis[key] = { ...hooks, goalCompletionKey: goal => JSON.stringify([goal.createdAt, goal.updatedAt, goal.objective]), ...dependencies };
+  globalThis[key] = { ...hooks, terminalPhases, deliveryPatch, messageContentBlocks, isOptimisticId, optimisticMessageId, queuedTranscriptMessage, beginOptimisticSend, goalCompletionKey: goal => JSON.stringify([goal.createdAt, goal.updatedAt, goal.objective]), ...dependencies };
   const source = ts.transpileModule(await fs.readFile(new URL(`../../ui-feishu/shared/${file}`, import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
   }).outputText.replace(/import \{([^}]+)\} from "[^"]+";/g, (_, names) => `const {${names}} = globalThis.${key};`);
@@ -69,7 +75,7 @@ test('queue acceptance recovers a dispatching item when its submitted event was 
     currentConversationId: () => '', followUpQueueApi: {}, createSubmissionId: () => 'unused',
   });
   const queue = render('useFollowUpQueue', 't');
-  const item = {id:'queue',threadId:'t',submissionId:'queued',dispatchSubmissionId:'dispatch',state:'dispatching',text:'with image',sentAt:'2026-10-29T03:42:42Z',attachments:[{id:'image'}]};
+  const item = {id:'queue',threadId:'t',submissionId:'queued',dispatchSubmissionId:'dispatch',state:'dispatching',text:'with image',sentAt:'2026-10-29T03:42:42Z',attachments:[{id:'image',name:'a.png',mimeType:'image/png',url:'/a'}]};
   queue.handleEvent({type:'queue_changed',threadId:'t',items:[item]});
   assert.deepEqual(queue.handleEvent({type:'user_message_accepted',threadId:'other',turnId:'turn',submissionId:'dispatch'}),undefined);
   assert.deepEqual(queue.handleEvent({type:'user_message_accepted',threadId:'t',turnId:'turn',submissionId:'dispatch'}),item);
@@ -113,7 +119,7 @@ test('failed enqueue removes only its local waiting bubble and reports the error
 test('switching conversations keeps both sends alive and independent', async () => {
   const calls = [];
   const render = await harness('features/execution/hooks/useCodexExecution.ts', {
-    createClientId: () => 'submission',
+    createSubmissionId: () => 'submission',
     executionApi: { sendMessage(...args) { const gate = deferred(); calls.push({ args, gate }); return gate.promise; } },
   });
   const a = render('useCodexExecution', 'a');
@@ -175,7 +181,7 @@ test('first send creates one draft with final settings and survives navigating a
       calls.push(['send', ...args]); return { outcome: 'failed', result: null };
     } }),
     useFollowUpQueue: () => ({handleEvent: event => event.type === 'user_message_accepted' && event.submissionId === 'queued-dispatch'
-      ? {text:'queued image',attachments:[{id:'image'}],sentAt:'2026-10-29T03:42:43Z'} : undefined}), useThreadGoal: () => ({handleEvent: noop}),
+      ? {text:'queued image',attachments:[{id:'image',name:'a.png',mimeType:'image/png',url:'/a'}],sentAt:'2026-10-29T03:42:43Z'} : undefined}), useThreadGoal: () => ({handleEvent: noop}),
     useConversationEvents: (_changed, handler) => { receiveEvent = handler; return {}; },
     useModels: () => ({ models: [{ model: 'chosen', modelProviderId: 'provider-chosen' }], clearPending: noop }),
     readInitialConversationState: () => ({}), readModelCatalog: () => [{ model: 'chosen', modelProviderId: 'provider-chosen' }],
@@ -193,7 +199,7 @@ test('first send creates one draft with final settings and survives navigating a
   hook = render('useProjectConversations');
   await hook.changeModel('chosen', 'high');
   hook = render('useProjectConversations');
-  const sending = hook.sendMessage('hello', [{ id: 'attachment' }]);
+  const sending = hook.sendMessage('hello', [{ id: 'attachment', name: 'file.txt', mimeType: 'text/plain', url: '/api/media/attachment' }]);
   await new Promise(setImmediate);
   receiveEvent({type:'user_message_submitted',threadId:'real',messageId:'optimistic-receipt',submissionId:'receipt',text:'hello',attachments:[],createdAt:'2026-10-29T03:42:42Z'});
   assert.equal(sessions.get('real').messages[0].createdAt,'2026-10-29T03:42:42Z');
@@ -201,7 +207,7 @@ test('first send creates one draft with final settings and survives navigating a
   assert.equal(sessions.get('real').messages.length,1);
   receiveEvent({type:'user_message_accepted',threadId:'real',turnId:'turn',submissionId:'queued-dispatch'});
   assert.equal(sessions.get('real').messages[1].text,'queued image');
-  assert.equal(sessions.get('real').messages[1].blocks[0].id,'image');
+  assert.equal(sessions.get('real').messages[1].blocks.find(block=>block.type==='image').file.id,'image');
   assert.equal(sessions.get('real').messages[1].serverTimestamp,true);
   select('b'); sessions.set('b', { threadId: 'b', model: 'another', messages: [] });
   render('useProjectConversations');
@@ -275,6 +281,8 @@ test('realtime recovery rechecks the selected session once and applies backend t
     readModelDefaults: () => ({}), useModelDefaults: () => ({}),
     resolveVisibleModel: (_models, _defaults, recorded, session) => recorded || session || 'model',
     resolveVisibleEffort: (_models, _defaults, _model, effort) => effort || 'high',
+    canonicalChannelId: id => id,
+    providerIdForModel: (models, model) => models.find(entry => entry.model === model)?.modelProviderId || (model.includes("::") ? model.split("::")[0] : "current"),
     providerIdOf: entry => entry.modelProviderId, readLocalCache: () => null,
     createClientId: () => 'id', createSubmissionId: () => 'submission',
     createOptimisticMessage: () => ({}), isPendingThread: id => id.startsWith('pending:'),
@@ -310,7 +318,7 @@ test('realtime recovery rechecks the selected session once and applies backend t
 for (const phase of ['completed', 'failed']) test(`late send response cannot replace ${phase} received in real time`, async () => {
   const gate = deferred();
   const render = await harness('features/execution/hooks/useCodexExecution.ts', {
-    createClientId: () => 'submission',
+    createSubmissionId: () => 'submission',
     executionApi: { sendMessage: () => gate.promise },
   });
   const h = render('useCodexExecution', 'a');
@@ -327,7 +335,7 @@ for (const phase of ['completed', 'failed']) test(`late send response cannot rep
 
 test('accepted new turn drops old failure notices without erasing steering progress', async () => {
   const render = await harness('features/execution/hooks/useCodexExecution.ts', {
-    createClientId: () => 'new-send', executionApi: { sendMessage: async () => ({threadId:'retry-error',turnId:'new-turn',status:'accepted'}) },
+    createSubmissionId: () => 'new-send', executionApi: { sendMessage: async () => ({threadId:'retry-error',turnId:'new-turn',status:'accepted'}) },
   });
   let h = render('useCodexExecution','retry-error');
   h.handleEvent({type:'execution_status',threadId:'retry-error',turnId:'old-turn',phase:'failed',active:false,notices:['403 quota'],detail:'403 quota',label:'failed',activities:[]});

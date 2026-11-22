@@ -23,7 +23,7 @@ const emptyStatus = (threadId, threshold) => ({
 });
 
 export const createContextManagementService = async ({
-  stateFile, broadcast, getExecutionStatus, getRuntimeContext, compactContext, onError = () => {},
+  stateFile, broadcast, getExecutionStatus, getRuntimeContext, compactContext, onCompacted = () => {}, onError = () => {},
 }) => {
   const states = new Map();
   let settings = { version: 1, defaultThreshold: DEFAULT_THRESHOLD, threads: {} };
@@ -61,6 +61,7 @@ export const createContextManagementService = async ({
     }
     states.set(threadId, next);
     broadcast(publicStatus(next));
+    if (current.phase === "compacting" && patch.phase === "completed") onCompacted(threadId);
     return next;
   };
 

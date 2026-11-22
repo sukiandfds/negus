@@ -139,11 +139,16 @@ export const createFushengUsageService = ({
     await Promise.all(entries.map(async entry => {
       try {
         if (!entry.key || !entry.baseUrl || new URL(entry.baseUrl).origin !== origin) return;
-        const token = await requestJson(fetchImpl, new URL("/api/usage/token/", origin), { Authorization: `Bearer ${entry.key}` });
-        const groups = token.data?.group ? [token.data.group] : Number(account?.data?.total || items.length) <= items.length
-          ? [...new Set(items.filter(item => item.name === token.data?.name).map(item => item.group).filter(Boolean))] : [];
-        if (groups.length !== 1 || !Object.hasOwn(pricing, groups[0])) return;
-        result[entry.id] = { priceRatio: pricing[groups[0]], priceGroup: groups[0], ratioSource: "supplier" };
+        const headers = { Authorization: `Bearer ${entry.key}` };
+        const token = await requestJson(fetchImpl, new URL("/api/usage/token/", origin), headers).catch(() => null);
+        const groups = token?.data?.group ? [token.data.group] : Number(account?.data?.total || items.length) <= items.length
+          ? [...new Set(items.filter(item => item.name === token?.data?.name).map(item => item.group).filter(Boolean))] : [];
+        let group = groups.length === 1 ? groups[0] : null;
+        if (!group) {
+          const log = await requestJson(fetchImpl, new URL("/api/log/token", origin), headers);
+          if (log.success !== false && Array.isArray(log.data)) group = log.data.find(row => row?.type === 2)?.group;
+        }
+        if (group && Object.hasOwn(pricing, group)) result[entry.id] = { priceRatio: pricing[group], priceGroup: group, ratioSource: "supplier" };
       } catch { /* A configuration without a verified group has no assigned ratio. */ }
     }));
     return result;
