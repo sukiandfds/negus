@@ -8,7 +8,7 @@ import { materializeGoalObjective, expandGoalObjective, readThreadGoal } from ".
 import { createAppServerClient } from "./app-server-client.mjs";
 import { inputFromAttachments } from "./app-server-conversation-store.mjs";
 import { messagesFromTurns } from "./codex-thread-history.mjs";
-import { employeeTurnInstructions } from "./employee-definitions.mjs";
+import { conversationPrompt, modelContext, employeeContext } from "./conversation-prompt.mjs";
 import { CURRENT_MODEL_PROVIDER_ID } from "./model-provider-service.mjs";
 
 const clean = (value, maxLength = 200) => String(value || "").trim().slice(0, maxLength);
@@ -315,7 +315,7 @@ export const createEmployeeRuntimeService = ({
     const result = await resumeConversationThread(runtimeClient, {
       threadId,
       ...(Object.keys(config || {}).length ? { config,
-        developerInstructions: employeeTurnInstructions(employee.instructions, taskService?.leaderInstructions(employee.id)),
+        developerInstructions: conversationPrompt(employee.instructions, taskService?.leaderInstructions(employee.id)),
       } : {}),
       ...policyFor(employee),
     });
@@ -366,7 +366,7 @@ export const createEmployeeRuntimeService = ({
     const route = routeForEmployee(employee);
     const result = await startConversationThread(runtimeClient, {
       cwd: clean(employee.projectRoot, 400) || projectRoot,
-      developerInstructions: employeeTurnInstructions(employee.instructions, taskService?.leaderInstructions(employee.id)),
+      developerInstructions: conversationPrompt(employee.instructions, taskService?.leaderInstructions(employee.id)),
       config: taskService?.leaderConfig(employee.id),
       ephemeral: false,
       serviceName: `negus-${employee.projectKey}`,
@@ -867,10 +867,10 @@ export const createEmployeeRuntimeService = ({
           ...(method === "turn/start" ? {
             cwd: clean(employee.projectRoot, 400) || projectRoot,
             ...turnPolicyFor(),
-            developerInstructions: employeeTurnInstructions(employee.instructions, [context, taskService?.leaderInstructions(employee.id)].filter(Boolean).join("\n")),
+            developerInstructions: conversationPrompt(employee.instructions, taskService?.leaderInstructions(employee.id)),
             ...(employee.model ? { model: employee.model } : {}),
             ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}),
-            additionalContext: { 'negus.model': { kind: 'application', value: `本轮调用模型：${employee.model || '未取得'}。回答模型身份时以本轮请求为准，不以历史回复或全局默认配置推断。此标识不证明供应商内部实际模型。` } },
+            additionalContext: { ...modelContext(employee.model), ...employeeContext(context) },
           } : {}),
         }, expectedTurnId);
         let result;
@@ -1111,7 +1111,7 @@ export const createEmployeeRuntimeService = ({
         replacement = await transferConversationThread({ source: original.nativeClient || original, target: runtimeClient, providers: modelProviders,
           threadId: nativeThreadId(employee), nextThreadId: replacementId, route: requestedRoute, reasoningEffort,
           config: { ...taskService?.leaderConfig(employee.id), ...(reasoningEffort ? { model_reasoning_effort: reasoningEffort } : {}) },
-          instructions: employeeTurnInstructions(employee.instructions, taskService?.leaderInstructions(employee.id)),
+          instructions: conversationPrompt(employee.instructions, taskService?.leaderInstructions(employee.id)),
           policy: policyFor(employee),
         });
       } else if (threadId && (switchingModel || reasoningEffort !== clean(employee.reasoningEffort, 40))) {

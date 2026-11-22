@@ -4,18 +4,15 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { basePrompt } from "../server/base-prompt.mjs";
-import { employeeTurnInstructions } from "../server/employee-definitions.mjs";
-import { loadUserProfilePrompt } from "../server/user-profile-prompt.mjs";
+import { negusToolPrompt } from "../server/negus-tool-prompt.mjs";
+import { negusSystemPrompt } from "../server/negus-system-prompt.mjs";
+import { conversationPrompt } from "../server/conversation-prompt.mjs";
 
-test("普通对话有无画像、员工角色均加载一份共用交互规则", async t => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-interaction-prompt-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const ordinary = await loadUserProfilePrompt(root);
-  await fs.writeFile(path.join(root, "USER_PROFILE.md"), "测试画像");
-  const profiled = await loadUserProfilePrompt(root);
-  assert.match(profiled, /测试画像/);
-  for (const prompt of [basePrompt, ordinary, profiled, employeeTurnInstructions("隔离员工角色")]) {
+test("普通对话和员工角色均加载一份共用交互规则", () => {
+  const ordinary = conversationPrompt();
+  assert.equal(ordinary, [negusSystemPrompt, negusToolPrompt()].join("\n\n"));
+  assert.equal(conversationPrompt("岗位"), ordinary + "\n\n岗位");
+  for (const prompt of [negusSystemPrompt, ordinary, conversationPrompt("隔离员工角色")]) {
     assert.equal((prompt.match(/处理交互时，先写清用户点了什么/g) || []).length, 1);
     assert.match(prompt, /可撤回的选择与真正提交/);
     assert.match(prompt, /执行以用户明确授权为准/);
@@ -98,10 +95,12 @@ test("普通后台实际首次创建、首轮、恢复、后续轮次和分支�
   assert.deepEqual(protocol.map(request => request.method), ["thread/start", "turn/start", "thread/resume", "turn/start", "thread/fork"]);
   for (const { method, params } of protocol) {
     const instructions = params.developerInstructions;
-    for (const marker of ["区分可撤回的选择与真正提交", "隔离画像标记", "你是临时后台任务执行者"]) {
+    for (const marker of ["区分可撤回的选择与真正提交", "你是临时后台任务执行者"]) {
       assert.equal(instructions.split(marker).length - 1, 1, method + ": " + marker);
     }
-    assert.equal(instructions.includes("隔离成长标记"), method === "turn/start");
+    assert.ok(!instructions.includes("前台使用用户选择的模型"));
+    assert.ok(!params.additionalContext?.["negus.communication"]);
+    assert.equal(Boolean(params.additionalContext?.["negus.employee"]?.value.includes("隔离成长标记")), method === "turn/start");
     assert.equal("additionalDeveloperInstructions" in params, false);
   }
   assert.equal(protocol[1].params.clientUserMessageId, "task-" + startup.id);

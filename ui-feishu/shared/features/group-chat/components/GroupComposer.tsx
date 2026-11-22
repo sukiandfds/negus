@@ -1,3 +1,4 @@
+import { toolOptions } from "../../conversations/components/toolOptions";
 import { MessageInput } from "../../conversations/components/MessageInput";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Send, Sparkles, Square } from "lucide-react";
@@ -27,10 +28,7 @@ export const defaultGroupComposerCopy: GroupComposerCopy = {
 const createCapabilityOptions = (copy: GroupComposerCopy): SlashCommandOption[] => [
   { id: "stop", command: "/stop", group: "会话", label: copy.stopLabel, detail: copy.stopDetail },
   ...goalCapabilityOptions,
-  { id: "file", command: "/file", group: "文件", label: "读取附件", detail: "按问题读取并处理已上传文件" },
-  { id: "image", command: "/image", group: "MCP 工具", label: "生成或修改图片", detail: "调用已配置的图片能力" },
-  { id: "skill", command: "/skill", group: "Skills", label: "使用 Skill", detail: "选择并遵循匹配的 Skill" },
-  { id: "app", command: "/app", group: "Apps", label: "使用 App", detail: "选择当前可用连接器" },
+  ...toolOptions,
 ];
 
 export function GroupComposer({ disabled, busy = false, error, notice = "", quote = null, editingMessage = null, copy: copyOverrides, onClearQuote, onSend, onEdit, onCancelEdit, onInterrupt }: {

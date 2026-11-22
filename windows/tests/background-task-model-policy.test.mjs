@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { basePrompt, communicationInstructions } from '../server/base-prompt.mjs';
 import {
   backgroundTaskRoute,
   employeeTaskRoute,
@@ -11,17 +10,6 @@ import {
   modelDefaultsFromRoute,
   requestedBackgroundRoute,
 } from '../server/background-tasks/model-policy.mjs';
-
-test('global communication and assembled prompts default background work to DeepSeek Flash High', () => {
-  for (const prompt of [communicationInstructions, basePrompt]) {
-    assert.match(prompt, /后台实操.*及审核默认使用 DeepSeek Flash High/);
-    assert.match(prompt, /模型 deepseek-flash，思考等级 high/);
-    assert.match(prompt, /先尝试目标模型在首选渠道，再尝试同一模型的其他渠道，随后按配置顺序尝试其他模型/);
-    assert.match(prompt, /必须先发现并优先使用.*Negus 后台任务工具/);
-    assert.match(prompt, /startup\.confirmed=true/);
-    assert.doesNotMatch(prompt, /gpt-6\.1-terra|\bTerra\b/);
-  }
-});
 
 test('routing config loads without models and ignores legacy model lists', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-routing-policy-'));

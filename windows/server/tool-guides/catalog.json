@@ -1,0 +1,50 @@
+[
+  {
+    "id": "image",
+    "command": "/image",
+    "group": "MCP 工具",
+    "label": "生成或修改图片",
+    "detail": "按要求生成图片，或根据参考图修改",
+    "path": "image/SKILL.md"
+  },
+  {
+    "id": "github",
+    "command": "/skill github",
+    "group": "Skills",
+    "label": "操作 GitHub",
+    "detail": "查询或管理 GitHub 仓库",
+    "path": "github/SKILL.md"
+  },
+  {
+    "id": "computer",
+    "command": "/skill computer",
+    "group": "Skills",
+    "label": "操作图形界面",
+    "detail": "操作真实界面或做视觉验收；文件、日志和 API 优先直接读取",
+    "path": "computer/SKILL.md"
+  },
+  {
+    "id": "cloudflare",
+    "command": "/skill cloudflare",
+    "group": "Skills",
+    "label": "管理 Cloudflare",
+    "detail": "查询或管理已连接的 Cloudflare 资源",
+    "path": "cloudflare/SKILL.md"
+  },
+  {
+    "id": "maintenance",
+    "command": "/skill maintenance",
+    "group": "Skills",
+    "label": "维护 Negus",
+    "detail": "检查、恢复或发布 Negus 自身",
+    "path": "maintenance/SKILL.md"
+  },
+  {
+    "id": "user-choice",
+    "command": "/skill user-choice",
+    "group": "Skills",
+    "label": "请用户选择",
+    "detail": "需要用户在几种方案中决定时，展示可点击选项",
+    "path": "user-choice/SKILL.md"
+  }
+]

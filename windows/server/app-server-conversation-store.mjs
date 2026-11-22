@@ -1,7 +1,6 @@
 import { startConversationThread, resumeConversationThread, startTurn, steerTurn, interruptTurn } from "./execution/protocol.mjs";
 import { receiptMatches } from "./message-identity.mjs";
 import { latestRolloutFile, openRollout } from './rollout-file.mjs';
-import { communicationInstructions } from "./base-prompt.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -9,7 +8,7 @@ import { materializeGoalObjective, expandGoalObjective, readThreadGoal } from ".
 import { messageFromItem, messagePreview, previewText } from "./content-blocks.mjs";
 import { createAppServerClient } from "./app-server-client.mjs";
 import { messagesFromTurns, readRecentThreadPage } from "./codex-thread-history.mjs";
-import { loadUserProfilePrompt } from "./user-profile-prompt.mjs";
+import { conversationPrompt, modelContext } from "./conversation-prompt.mjs";
 import { readJsonFile, writeJsonFileAtomic } from "./persistence/json-file.mjs";
 import { conversationSourceRevision } from "./conversation-version-store.mjs";
 
@@ -231,25 +230,6 @@ export const inputFromAttachments = async (text, attachments = []) => {
   return input;
 };
 
-const promptFromSlashCommand = (text, attachments = []) => {
-  const match = /^\s*\/(image|file|skill|app)(?:\s+([\s\S]*?))?\s*$/iu.exec(String(text || ""));
-  if (!match) return text;
-  const detail = String(match[2] || "").trim();
-  const command = match[1].toLocaleLowerCase();
-  if (command === "image") {
-    return attachments.length
-      ? `请直接调用已配置的图片生成 MCP 工具，使用我上传的图片作为参考并按以下要求修改：${detail || "请先分析参考图片，再给出适当的修改结果。"}`
-      : `请直接调用已配置的图片生成 MCP 工具，按以下要求生成图片：${detail || "请根据当前对话中已经明确的画面要求生成图片。"}`;
-  }
-  if (command === "file") {
-    return `请读取并处理我上传的文件。${detail || "先理解文件内容和结构，再回答我的问题。"}`;
-  }
-  if (command === "skill") {
-    return `请使用与以下任务最匹配的 Codex Skill，并完成任务：${detail || "根据当前对话选择合适的 Skill。"}`;
-  }
-  return `请使用当前可用的 Codex App 或连接器完成以下任务：${detail || "根据当前对话选择合适的 App。"}`;
-};
-
 export const createAppServerConversationStore = ({
   projectRoot, projectRoots = [projectRoot], registerMedia, onProtocolMessage, onSubmitted, onFailed, onHealthState,
   goalAttachmentRoot = path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "attachments"),
@@ -290,11 +270,6 @@ export const createAppServerConversationStore = ({
   const autoTitles = new Map();
   let autoTitlesLoaded = false;
   let autoTitlesLoading = null;
-  let userProfilePrompt;
-  const getUserProfilePrompt = async () => {
-    userProfilePrompt ??= loadUserProfilePrompt(projectRoot);
-    return userProfilePrompt;
-  };
   const monitorIntervalMs = supervision.intervalMs ?? 5000;
   const staleAfterMs = supervision.staleAfterMs ?? 30000;
   const finalizingAfterMs = supervision.finalizingAfterMs ?? 10000;
@@ -528,7 +503,8 @@ export const createAppServerConversationStore = ({
     if (inherit && developerInstructions == null && !additionalDeveloperInstructions) return params;
     return {
       ...params,
-      developerInstructions: [developerInstructions ?? await getUserProfilePrompt(), additionalDeveloperInstructions].filter(Boolean).join("\n"),
+      developerInstructions: developerInstructions ? [developerInstructions, additionalDeveloperInstructions].filter(Boolean).join("\n")
+        : conversationPrompt("", additionalDeveloperInstructions),
     };
   };
 
@@ -862,13 +838,10 @@ export const createAppServerConversationStore = ({
       const { runtimeOptions } = await ensureProjectThread(threadId);
       const result = await startTurn(client, await withDeveloperInstructions({
         threadId,
-        input: await inputFromAttachments(promptFromSlashCommand(text, attachments), attachments, attachmentContent),
-        additionalContext: {
-          "negus.communication": { kind: "application", value: communicationInstructions },
-          "negus.model": { kind: "application", value: `本轮调用模型：${settings.model || runtime?.model || "未取得"}。这是当前请求的模型标识，回答模型身份时以此为准；不得用 ~/.codex/config.toml 的全局默认值、Codex 工具名称或历史回复推断当前模型。未取得时如实说明。此标识不证明供应商内部的实际模型。` },
-        },
+        input: await inputFromAttachments(text, attachments, attachmentContent),
         ...(submissionId ? { clientUserMessageId: submissionId } : {}),
         ...(runtimeOptions?.turn || {}),
+        additionalContext: { ...modelContext(settings.model || runtime?.model), ...runtimeOptions?.turn?.additionalContext },
         ...(settings.model ? { model: settings.model } : {}),
         ...(settings.reasoningEffort ? { effort: settings.reasoningEffort } : {}),
       }));
@@ -889,11 +862,9 @@ export const createAppServerConversationStore = ({
 
   const steerMessage = async (threadId, turnId, text, attachments = [], submissionId = "") => {
     await assertAccessibleThread(await getThread(threadId));
-    const developerInstructions = await getUserProfilePrompt();
     return steerTurn(client, {
       threadId,
-      input: await inputFromAttachments(promptFromSlashCommand(text, attachments), attachments, attachmentContent),
-      ...(developerInstructions ? { developerInstructions } : {}),
+      input: await inputFromAttachments(text, attachments, attachmentContent),
       ...(submissionId ? { clientUserMessageId: submissionId } : {}),
     }, turnId);
   };
@@ -1064,7 +1035,7 @@ export const createAppServerConversationStore = ({
     if (!isAllowedProjectRoot(options.cwd) || !path.isAbsolute(options.path)) throw new Error('无法验证原会话记录的位置');
     const params = {
       threadId, path: options.path, cwd: options.cwd, model: options.model,
-      developerInstructions: await getUserProfilePrompt(),
+      developerInstructions: conversationPrompt(),
       ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
       ...(options.reasoningEffort ? { config: { model_reasoning_effort: options.reasoningEffort } } : {}),
       excludeTurns: true,

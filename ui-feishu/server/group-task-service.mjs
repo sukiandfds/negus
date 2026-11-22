@@ -12,8 +12,7 @@ import { createMessageInbox } from '../kernel/message-inbox.mjs';
 import { routeMessage } from '../kernel/message-routing.mjs';
 import { mentionedAgentIds } from '../../windows/server/multi-agent/agent-routing.mjs';
 import { inputFromAttachments } from '../../windows/server/app-server-conversation-store.mjs';
-import { employeeTurnInstructions } from '../../windows/server/employee-definitions.mjs';
-import { basePrompt } from '../../windows/server/base-prompt.mjs';
+import { conversationPrompt, employeeContext, workerInstructions } from '../../windows/server/conversation-prompt.mjs';
 import { buildDiscussionPrompt } from '../../windows/server/multi-agent/discussion-prompt.mjs';
 import { backgroundToolConfig, executionPolicy, turnExecutionPolicy } from './execution-policy.mjs';
 import { buildGroupSelectionContext, createGroupMessageSelector } from './group-message-selector.mjs';
@@ -48,7 +47,7 @@ export async function migrateGroupAgentThread({
       route,
       reasoningEffort: pending.reasoningEffort,
       config: pending.reasoningEffort ? { model_reasoning_effort: pending.reasoningEffort } : {},
-      instructions: employeeTurnInstructions(agent.instructions),
+      instructions: conversationPrompt(agent.instructions),
       policy: executionPolicy,
     });
     await room.updateAgent(agent.id, {
@@ -273,8 +272,8 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
     if (coordination) await publishCoordinationIfReady(kernel.get(sourceId));
     return taskStartupReceipt(kernel, delegated);
   } });
-  const instructionsFor = agent => employeeTurnInstructions(agent.instructions,
-    `你是${agent.name}，只以自己的身份回复。普通讨论和明确点名由你本人直接回答。以用户原话为准，先回答用户实际问的每一项。只保留支撑回答的必要事实，以及会影响用户判断、决定或下一步行动的重要信息。其余背景、排查步骤和技术细节留在任务记录，用户追问时再补。能自行查证的先在后台查证，再给结论和必要依据。中间回复仅在有关键进展、独立且有用的意见、重要风险或需要用户决定时发，每次限一两句。不要预报检查步骤、直播排查、复述前文或堆技术细节。证据不足时说清缺哪项事实、怎样取得，避免用“不能确定”代替结论。需要执行工作时优先调用 Negus 的 create_background_task，追加要求使用 followup_background_task。需要群内同事协作时调用 negus_handoffs.delegate_task，写明目标、问题和所需结果；仅在文字中 @ 同事不会创建任务。委派执行时不要在群内连续汇报过程，也不要让子任务各自向群聊报完成；任务详情保留完整进度和子任务结果，群聊由系统原位更新一条负责人状态，子任务与复验全部结束后由负责人只交付一次。协作中发现重要风险、需要用户决策或不可恢复阻塞时，立即调用 negus_handoffs.publish_group_notice，用一两句写清影响和需要用户决定的问题。涉及待确认的操作，等用户答复后再继续。派工路由读取 runtime/model-routing.json：目标模型首选渠道不可用时，先尝试同一模型的其他渠道，再按配置顺序尝试其他模型；实际选择和回退原因以 taskRouting 记录为准。工具返回 startup.confirmed=true 才表示任务真实启动；false 时按 startup.state 和 startup.error 说明已创建未启动、启动失败或等待状态，不得提前宣称已安排。结果通知不是新的委派请求，不要重复派发相同工作。简单且已授权的事项直接处理；复杂事项若仍有影响结果的需求歧义、风险或方案取舍，先向用户说明预期效果和需要决定的选项，结束本轮等待答复，再按确认结果实施；不得重复询问已有授权。现有员工：${JSON.stringify(room.snapshot().agents.map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`);
+  const groupGuidance = agent =>
+    `你是${agent.name}，只以自己的身份回复。普通讨论和明确点名由你本人直接回答。以用户原话为准，先回答用户实际问的每一项。只保留支撑回答的必要事实，以及会影响用户判断、决定或下一步行动的重要信息。其余背景、排查步骤和技术细节留在任务记录，用户追问时再补。能自行查证的先在后台查证，再给结论和必要依据。中间回复仅在有关键进展、独立且有用的意见、重要风险或需要用户决定时发，每次限一两句。不要预报检查步骤、直播排查、复述前文或堆技术细节。证据不足时说清缺哪项事实、怎样取得，避免用“不能确定”代替结论。需要执行工作时优先调用 Negus 的 create_background_task，追加要求使用 followup_background_task。需要群内同事协作时调用 negus_handoffs.delegate_task，写明目标、问题和所需结果；仅在文字中 @ 同事不会创建任务。委派执行时不要在群内连续汇报过程，也不要让子任务各自向群聊报完成；任务详情保留完整进度和子任务结果，群聊由系统原位更新一条负责人状态，子任务与复验全部结束后由负责人只交付一次。协作中发现重要风险、需要用户决策或不可恢复阻塞时，立即调用 negus_handoffs.publish_group_notice，用一两句写清影响和需要用户决定的问题。涉及待确认的操作，等用户答复后再继续。派工路由读取 runtime/model-routing.json：目标模型首选渠道不可用时，先尝试同一模型的其他渠道，再按配置顺序尝试其他模型；实际选择和回退原因以 taskRouting 记录为准。工具返回 startup.confirmed=true 才表示任务真实启动；false 时按 startup.state 和 startup.error 说明已创建未启动、启动失败或等待状态，不得提前宣称已安排。结果通知不是新的委派请求，不要重复派发相同工作。简单且已授权的事项直接处理；复杂事项若仍有影响结果的需求歧义、风险或方案取舍，先向用户说明预期效果和需要决定的选项，结束本轮等待答复，再按确认结果实施；不得重复询问已有授权。现有员工：${JSON.stringify(room.snapshot().agents.map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`;
   const coordinationInstructions = task => {
     const plan = task.source?.coordination;
     if (!plan || task.parentTaskId || task.resultOf
@@ -338,7 +337,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       const client = await clientFor({ ...agent, modelProviderId });
       const independent = task.conversationId !== roomId;
       let threadId = task.runtime.threadId || task.resumeThreadId || (recovering || independent ? '' : agent.threadId);
-      const taskInstructions = [task.background ? `${basePrompt}\n你是独立后台任务执行者，执行已授权工作并验证，结果返回来源员工；不得再次派工。` : instructionsFor(agent), coordinationInstructions(task), growthService?.getContext(agent.id)].filter(Boolean).join('\n');
+      const taskInstructions = conversationPrompt(task.background ? workerInstructions : agent.instructions, task.background ? '' : groupGuidance(agent));
       const options = taskThreadOptions(executionPolicy, taskInstructions, task.background ? backgroundToolConfig : tools.config(task.id), agent.model);
       const registerBackground = () => registerTaskThread({ task, threadId, actor: agent, modelProviderId, cwd: projectRoot,
         providerForThread, registerSession, bindings, bindingScope: { targetProjectId: room.snapshot().room.projectId, executionRoot: projectRoot } });
@@ -406,7 +405,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
         },
         // Group employees are user-visible agents. Keep the same host-level
         // access on the turn as on the thread, regardless of their cwd.
-        turnOptions: { cwd: projectRoot, ...turnExecutionPolicy, developerInstructions: taskInstructions, ...(task.background ? { clientUserMessageId: task.id } : {}), ...(agent.reasoningEffort ? { effort: agent.reasoningEffort } : {}) } };
+        turnOptions: { cwd: projectRoot, ...turnExecutionPolicy, developerInstructions: taskInstructions, additionalContext: employeeContext([coordinationInstructions(task), growthService?.getContext(agent.id)].filter(Boolean).join("\n")), ...(task.background ? { clientUserMessageId: task.id } : {}), ...(agent.reasoningEffort ? { effort: agent.reasoningEffort } : {}) } };
     },
     onEvent: async (task, event) => {
       const { method, params } = event;

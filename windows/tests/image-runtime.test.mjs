@@ -2,9 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import TOML from "@iarna/toml";
 import path from "node:path";
-import { imageMcpArguments, imageInstructions } from "../server/image-generation/image-runtime.mjs";
-import { employeeTurnInstructions } from "../server/employee-definitions.mjs";
-import { loadUserProfilePrompt } from "../server/user-profile-prompt.mjs";
+import { imageMcpArguments } from "../server/image-generation/image-runtime.mjs";
+import { conversationPrompt } from "../server/conversation-prompt.mjs";
 
 test("MCP overrides use absolute paths and contain no credentials", () => {
   const args = imageMcpArguments();
@@ -18,6 +17,6 @@ test("MCP overrides use absolute paths and contain no credentials", () => {
   assert.equal(config.env.NEGUS_FAST_IMAGE_MODEL, process.env.NEGUS_FAST_IMAGE_MODEL || "gpt-image-2.5-flare");
 });
 test("ordinary and employee instructions share the same image policy", async () => {
-  assert.ok((await loadUserProfilePrompt("/nonexistent-negus-test-root")).includes(imageInstructions()));
-  assert.ok(employeeTurnInstructions("employee").includes(imageInstructions()));
+  assert.ok((conversationPrompt()).includes("image/SKILL.md"));
+  assert.ok(conversationPrompt("employee").includes("image/SKILL.md"));
 });

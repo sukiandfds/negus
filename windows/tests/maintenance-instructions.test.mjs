@@ -1,46 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { loadUserProfilePrompt } from "../server/user-profile-prompt.mjs";
-import { employeeTurnInstructions } from "../server/employee-definitions.mjs";
-import { maintenanceInstructions } from "../server/maintenance-instructions.mjs";
-test("maintenance instructions reach new deployments without a user profile and survive profile truncation", async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-prompt-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const missing = await loadUserProfilePrompt(root);
-  assert.match(missing, /negus_service_maintenance/);
-  assert.match(missing, /gh api user\/repos/);
-  assert.ok(!missing.includes(JSON.stringify(root)), "user project is not the Negus installation");
-  await fs.writeFile(path.join(root, "USER_PROFILE.md"), "用户偏好" + "x".repeat(13000));
-  const full = await loadUserProfilePrompt(root);
-  assert.match(full, /用户偏好/);
-  assert.match(full, /gh api user\/repos/);
-  assert.match(full, /runtime\/negus-backend-result.json/);
-  assert.equal(full.split("<negus_service_maintenance>").length, 2);
-});
-test("employee and group instruction builder preserves role and context and includes maintenance rules", () => {
-  const prompt = employeeTurnInstructions("角色职责", "本轮上下文");
+import { conversationPrompt } from "../server/conversation-prompt.mjs";
+import { readFileSync } from "node:fs";
+const manual = readFileSync(new URL("../server/tool-guides/maintenance/SKILL.md", import.meta.url), "utf8");
+test("the shared prefix lists maintenance without preloading its commands", () => {
+  const prompt = conversationPrompt("角色职责", "本轮上下文");
+  assert.match(prompt, /maintenance\/SKILL.md/);
   assert.match(prompt, /角色职责/);
-  assert.match(prompt, /gh api user\/repos/);
   assert.match(prompt, /本轮上下文/);
-  assert.match(prompt, /negus_service_maintenance/);
-  assert.match(prompt, /scheduled 仅代表已安排/);
+  assert.doesNotMatch(prompt, /gh api user\/repos|scheduled 仅代表已安排/);
   assert.match(prompt, /::file\{path="文件的服务器绝对路径"\}/);
 });
 test("employee replies use the unconditional prohibited-wording ban and answer the latest question first", () => {
-  const prompt = employeeTurnInstructions("角色职责");
+  const prompt = conversationPrompt("角色职责");
   assert.match(prompt, /任何最终回复都严禁使用.*本条不设例外/u);
   assert.match(prompt, /第一句必须直接回答用户最后一条问题/u);
   assert.match(prompt, /原始任务停在技术修复，质量复核后继续发布/u);
 });
 test("maintenance instructions identify host platform and keep unsupported recovery explicit", () => {
-  const mac = maintenanceInstructions({ platform: "darwin", root: "/apps/Negus" });
-  assert.match(mac, /node scripts\/negus.mjs rebuild/);
-  assert.match(mac, /连续失败3次后恢复/);
-  const windows = maintenanceInstructions({ platform: "win32" });
-  assert.match(windows, /restart-web-demo.ps1/);
-  assert.doesNotMatch(windows, /node scripts\/negus-supervisor.mjs restart/);
-  assert.match(maintenanceInstructions({ platform: "linux" }), /系统自动恢复未适配/);
+  assert.match(manual, /macOS：.*node scripts\/negus.mjs rebuild/);
+  assert.match(manual, /连续失败3次后恢复/);
+  assert.match(manual, /Windows：.*restart-web-demo.ps1/);
+  assert.match(manual, /系统自动恢复未适配/);
 });

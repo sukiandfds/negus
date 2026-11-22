@@ -1,3 +1,4 @@
+import { conversationContext } from "./conversation-context.mjs";
 import { executionParams } from "../../ui-feishu/server/execution-policy.mjs";
 import { cloudflareMcpArguments } from './connections/cloudflare-runtime.mjs';
 import { imageMcpArguments } from "./image-generation/image-runtime.mjs";
@@ -208,7 +209,11 @@ export const createAppServerClient = ({
   const healthListeners = new Set();
   const stderrLines = [];
 
+  const promptContext = conversationContext(process.env.NEGUS_INSTALL_ROOT || workingDirectory);
   const emit = (message) => {
+    if (message.method === "thread/compacted" || (message.method === "item/completed" && message.params?.item?.type === "contextCompaction")) {
+      if (message.params?.threadId) promptContext.reset(message.params.threadId);
+    }
     for (const listener of listeners) {
       try { listener(message); } catch {}
     }
@@ -354,10 +359,8 @@ export const createAppServerClient = ({
   const request = async (method, params = {}, options = {}) => {
     if (restartPromise) await restartPromise;
     await initialize();
-    return requestWithNeutralIdentity(method, params, (method, params) => {
-
-    return requestRaw(method, executionParams(method, params), options.timeoutMs);
-    }, neutralThreads);
+    return promptContext.send(method, params, (method, params) => requestWithNeutralIdentity(method, params,
+      (method, params) => requestRaw(method, executionParams(method, params), options.timeoutMs), neutralThreads));
   };
 
   const restart = (reason = "health check failed", threadId = "") => {

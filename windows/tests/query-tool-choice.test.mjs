@@ -3,15 +3,17 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { computerInstructions } from '../server/computer-control/runtime.mjs';
-import { loadUserProfilePrompt } from '../server/user-profile-prompt.mjs';
-import { loadEmployeeDefinitions, employeeTurnInstructions } from '../server/employee-definitions.mjs';
+const guide = await fs.readFile(new URL('../server/tool-guides/computer/SKILL.md', import.meta.url), 'utf8');
+import { conversationPrompt } from "../server/conversation-prompt.mjs";
+import { loadEmployeeDefinitions } from '../server/employee-definitions.mjs';
 import { createBackgroundTaskService } from '../server/background-tasks/service.mjs';
 import { extendEmployeeTasks } from '../../ui-feishu/server/employee-task-extension.mjs';
 
 // Prompt contract, not a simulated model decision or a live provider/UI test.
 function check(prompt, label) {
-  assert.ok(prompt.includes(computerInstructions()), `${label}: shared rule inherited`);
+  assert.ok(prompt.includes("computer/SKILL.md"), label);
+  assert.ok(!prompt.includes(guide), label);
+  prompt = guide;
   const query = prompt.split('\n').find(line => line.startsWith('查询工具选择：'));
   for (const scenario of ['项目文件', '代码', '日志', 'API', 'Git', '服务/运行状态']) {
     assert.ok(query.includes(scenario), `${label}: ${scenario} uses direct data`);
@@ -37,11 +39,9 @@ test('generated frontend, employee and background developer instructions share q
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const evidence = [];
   const verify = (label, prompt) => { check(prompt, label); evidence.push({ label, sharedRule: true, queryCases: 6, uiCases: 3, developerInstructions: prompt }); };
-  verify('frontend without profile', await loadUserProfilePrompt(root));
-  await fs.writeFile(path.join(root, 'USER_PROFILE.md'), '测试画像');
-  verify('frontend with profile', await loadUserProfilePrompt(root));
+  verify('frontend', conversationPrompt());
   const employees = await loadEmployeeDefinitions();
-  for (const employee of employees) verify(`employee:${employee.id}`, employeeTurnInstructions(employee.instructions));
+  for (const employee of employees) verify(`employee:${employee.id}`, conversationPrompt(employee.instructions));
   const employee = { ...employees[0], projectRoot: root };
   const registry = { list: () => [employee], require: () => employee };
   const stateFile = path.join(root, 'legacy.json');

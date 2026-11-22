@@ -2,7 +2,7 @@ import { startConversationThread, resumeConversationThread, startTurn, interrupt
 import { randomUUID } from "node:crypto";
 import { createAppServerClient } from "./app-server-client.mjs";
 import { inputFromAttachments } from "./app-server-conversation-store.mjs";
-import { employeeTurnInstructions } from "./employee-definitions.mjs";
+import { conversationPrompt, employeeContext } from "./conversation-prompt.mjs";
 import { buildDiscussionPrompt } from "./multi-agent/discussion-prompt.mjs";
 import { cleanAgentIds, mentionedAgentIds, resolveAgentRouting } from "./multi-agent/agent-routing.mjs";
 import { completeOutputJob } from "./multi-agent/output-job.mjs";
@@ -279,7 +279,7 @@ export const createMultiAgentService = ({
       const result = await startConversationThread(runtimeClient, {
         cwd: employeeWorkRoots[agent.id] || projectRoot,
         ...executionPolicy,
-        developerInstructions: employeeTurnInstructions(currentAgent.instructions),
+        developerInstructions: conversationPrompt(currentAgent.instructions),
         ephemeral: false,
         serviceName: "negus",
         ...(route.model ? { model: route.model } : {}),
@@ -435,7 +435,8 @@ export const createMultiAgentService = ({
         input: await inputFromAttachments(prompt, inputAttachments, attachmentContent),
         cwd: projectRoot,
         ...turnExecutionPolicy,
-        developerInstructions: employeeTurnInstructions(agent.instructions, growthService?.getContext(agent.id)),
+        developerInstructions: conversationPrompt(agent.instructions),
+        additionalContext: employeeContext(growthService?.getContext(agent.id)),
       });
       try {
         await onContextDelivered({

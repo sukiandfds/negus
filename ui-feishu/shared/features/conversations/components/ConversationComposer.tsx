@@ -1,3 +1,4 @@
+import { toolOptions } from "./toolOptions";
 import { MessageInput } from "./MessageInput";
 import { useEffect, useId, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
 import { ListEnd, Send, Sparkles, Square } from "lucide-react";
@@ -31,10 +32,7 @@ const slashCommands: SlashCommandOption[] = [
   { id: "stop", command: "/stop", group: "会话", label: "停止任务", detail: "停止当前正在运行的任务" },
   { id: "review", command: "/review", group: "Codex", label: "审查当前项目", detail: "调用原生 Codex reviewer" },
   ...goalCapabilityOptions,
-  { id: "file", command: "/file", group: "文件", label: "读取附件", detail: "按问题读取并处理已上传文件" },
-  { id: "image", command: "/image", group: "MCP 工具", label: "生成或修改图片", detail: "调用已配置的 Negus image MCP" },
-  { id: "skill", command: "/skill", group: "Skills", label: "使用 Skill", detail: "让 Codex 选择并遵循匹配的 Skill" },
-  { id: "app", command: "/app", group: "Apps", label: "使用 App", detail: "让 Codex 选择当前可用连接器" },
+  ...toolOptions,
 ];
 
 const findSlash = (value: string, caret: number): SlashState | null => {

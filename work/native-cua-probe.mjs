@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import {createAppServerClient} from '../windows/server/app-server-client.mjs';
-import {computerInstructions} from '../windows/server/computer-control/runtime.mjs';
+import { readFileSync as readGuide } from 'node:fs';
 const c=createAppServerClient({label:'negus-live-probe'});
 let id;let done;const finished=new Promise(r=>done=r);const records=[];
 c.subscribe(m=>{
@@ -11,7 +11,7 @@ c.subscribe(m=>{
  if(m.method==='turn/completed'){console.log('TURN',m.params.turn.status,JSON.stringify(m.params.turn.error));done();}
 });
 try{
- const s=await c.request('thread/start',{cwd:process.cwd(),ephemeral:true,sandbox:'danger-full-access',approvalPolicy:'never',developerInstructions:computerInstructions()},{timeoutMs:30000});id=s.thread.id;console.log('THREAD',id,'MODEL',s.model);
+ const s=await c.request('thread/start',{cwd:process.cwd(),ephemeral:true,sandbox:'danger-full-access',approvalPolicy:'never',developerInstructions:readGuide(new URL('../windows/server/tool-guides/computer/SKILL.md', import.meta.url), 'utf8')},{timeoutMs:30000});id=s.thread.id;console.log('THREAD',id,'MODEL',s.model);
  await c.request('turn/start',{threadId:id,input:[{type:'text',text:'只读调查Codex现有电脑操控：如果可用，请调用cua_repl的js工具，严格使用首次调用 await cua.getState(); 。报告工具返回的可用表面和是否需要授权。不要实际点击、输入、导航、修改设置或文件，也不要读取用户网页正文。如果工具不存在或失败，报告原始错误。',text_elements:[]}]},{timeoutMs:30000});
  const timer=setTimeout(()=>done(),120000);await finished;clearTimeout(timer);
  await fs.writeFile('work/native-cua-probe-result.json',JSON.stringify(records,null,2));

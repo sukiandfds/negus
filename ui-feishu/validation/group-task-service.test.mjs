@@ -664,7 +664,7 @@ test('其他群或其他员工不能续派来源员工的后台任务', async t 
     const thread = threads.get(params.threadId);
     if (method === 'thread/resume') { thread.config = params.config; return { thread }; }
     if (method === 'thread/read') return { thread };
-    if (method === 'turn/start') { const turn = { id: `v${starts.length}`, status: 'inProgress', items: [] }; thread.turns.push(turn); starts.push({ thread, turn, instructions: params.developerInstructions });
+    if (method === 'turn/start') { const turn = { id: `v${starts.length}`, status: 'inProgress', items: [] }; thread.turns.push(turn); starts.push({ thread, turn, instructions: params.developerInstructions, growth: params.additionalContext?.["negus.employee"]?.value || "" });
       queueMicrotask(() => listeners.forEach(callback => callback({ method: 'turn/started', params: { threadId: thread.id, turn } }))); return { turn }; }
     if (method === 'turn/interrupt') { const turn = thread.turns.find(item => item.id === params.turnId); turn.status = 'interrupted';
       queueMicrotask(() => listeners.forEach(callback => callback({ method: 'turn/completed', params: { threadId: thread.id, turn } }))); }
@@ -693,14 +693,14 @@ test('其他群或其他员工不能续派来源员工的后台任务', async t 
   for (const started of starts.slice(0, 2)) {
     assert.equal((started.instructions.match(/处理交互时，先写清用户点了什么/g) || []).length, 1);
   }
-  assert.match(starts[0].instructions, /每次标注一手来源/);
-  assert.match(starts[1].instructions, /每次标注一手来源/);
+  assert.match(starts[0].growth, /每次标注一手来源/);
+  assert.match(starts[1].growth, /每次标注一手来源/);
   await growthService.changeRule('dev', rule.id, 'disabled');
   await send(services[1], 'two', '@技术研发 工作');
   await send(services[0], 'three', '@运营管理 工作');
   await until(() => starts.length === 4);
-  assert.doesNotMatch(starts[2].instructions, /每次标注一手来源/);
-  assert.match(starts[1].instructions, /每次标注一手来源/);
+  assert.doesNotMatch(starts[2].growth, /每次标注一手来源/);
+  assert.match(starts[1].growth, /每次标注一手来源/);
   for (const index of [2, 3]) {
     const response = await call(index, { action: 'followup', taskId: task.id, requestId: 'wrong', instructions: '不允许' });
     assert.equal(response.status, 403);

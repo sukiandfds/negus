@@ -293,7 +293,7 @@ test("three execution paths load the same rule snapshot at the start of a turn",
   for (let i = 0; i < 100 && !delivered; i++) await new Promise(resolve => setImmediate(resolve));
   assert.equal(delivered, true);
   const groupStart = requests.find(call => call.method === "turn/start" && call.params.threadId === "group-thread");
-  assert.match(groupStart.params.developerInstructions, /每次标注一手来源/);
+  assert.match(groupStart.params.additionalContext["negus.employee"].value, /每次标注一手来源/);
   await group.close();
 
   await registry.bindMainThread("developer", "leader");
@@ -309,7 +309,7 @@ test("three execution paths load the same rule snapshot at the start of a turn",
   t.after(() => tasks.close());
   await tasks.create("developer", { title: "调研", instructions: "调查来源" });
   for (let i = 0; i < 100 && !tasks.runtimeOptions({ id: "worker" }); i++) await new Promise(resolve => setTimeout(resolve, 2));
-  const snapshot = tasks.runtimeOptions({ id: "worker" }).turn.developerInstructions;
+  const snapshot = tasks.runtimeOptions({ id: "worker" }).turn.additionalContext["negus.employee"].value;
   assert.match(snapshot, /每次标注一手来源/);
   await growth.changeRule("developer", rule.id, "disabled");
   assert.equal(growth.getContext("developer"), "");
@@ -323,8 +323,8 @@ test("three execution paths load the same rule snapshot at the start of a turn",
   await groupAfterDisable.enqueueDiscussion({ agentIds: ["developer"], requestText: "停用后的调研" });
   for (let i = 0; i < 100 && !delivered; i++) await new Promise(resolve => setImmediate(resolve));
   const latestGroup = requests.filter(call => call.method === "turn/start" && call.params.threadId === "group-thread").at(-1);
-  assert.doesNotMatch(latestGroup.params.developerInstructions, /每次标注一手来源/);
-  assert.doesNotMatch(tasks.runtimeOptions({ id: "worker" }).turn.developerInstructions, /每次标注一手来源/);
+  assert.doesNotMatch(latestGroup.params.additionalContext["negus.employee"].value, /每次标注一手来源/);
+  assert.doesNotMatch(tasks.runtimeOptions({ id: "worker" }).turn.additionalContext["negus.employee"].value, /每次标注一手来源/);
   assert.match(snapshot, /每次标注一手来源/);
 });
 

@@ -28,7 +28,7 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
       if (method === 'thread/read') return { thread: threads.get(params.threadId) };
       if (method === 'turn/start') {
         const turn = { id: `child-turn-${starts.length}`, status: 'inProgress', items: [] };
-        threads.get(params.threadId).turns.push(turn); starts.push({ threadId: params.threadId, turn, effort: params.effort, instructions: params.developerInstructions });
+        threads.get(params.threadId).turns.push(turn); starts.push({ threadId: params.threadId, turn, effort: params.effort, instructions: params.developerInstructions, growth: params.additionalContext?.["negus.employee"]?.value || "" });
         queueMicrotask(() => listeners.forEach(callback => callback({ method: 'turn/started', params: { threadId: params.threadId, turn } })));
         return { turn };
       }
@@ -61,13 +61,13 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
   await until(() => starts.length === 1);
   assert.equal(created[0].model, 'deepseek-flash');
   assert.equal(starts[0].effort, 'high');
-  assert.match(starts[0].instructions, /每次标注一手来源/);
-  assert.match(extension.runtimeOptions({ id: starts[0].threadId }).turn.developerInstructions, /每次标注一手来源/);
+  assert.match(starts[0].growth, /每次标注一手来源/);
+  assert.match(extension.runtimeOptions({ id: starts[0].threadId }).turn.additionalContext["negus.employee"].value, /每次标注一手来源/);
   await growthService.changeRule(background ? 'a' : 'b', rule.id, 'disabled');
-  assert.doesNotMatch(extension.runtimeOptions({ id: starts[0].threadId }).turn.developerInstructions, /每次标注一手来源/);
-  assert.match(starts[0].instructions, /每次标注一手来源/);
+  assert.doesNotMatch(extension.runtimeOptions({ id: starts[0].threadId }).turn.additionalContext["negus.employee"].value, /每次标注一手来源/);
+  assert.match(starts[0].growth, /每次标注一手来源/);
   await growthService.changeRule(background ? 'a' : 'b', rule.id, 'deleted');
-  assert.doesNotMatch(extension.runtimeOptions({ id: starts[0].threadId }).turn.developerInstructions, /每次标注一手来源/);
+  assert.doesNotMatch(extension.runtimeOptions({ id: starts[0].threadId }).turn.additionalContext["negus.employee"].value, /每次标注一手来源/);
   const agentId = background ? 'a' : 'b';
   assert.equal(bindings.length, 1); assert.equal(bindings[0].conversationKind, 'task'); assert.equal(bindings[0].agentId, agentId);
   assert.notEqual(starts[0].threadId, 'main');
