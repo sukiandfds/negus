@@ -1,3 +1,4 @@
+import { shortConversationTitle } from './conversation-title.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -18,7 +19,8 @@ export async function readLocalThreadIndex(home, projectRoots, archived = false)
     return rows.map(row => ({
       id: row.id, cwd: row.cwd, path: row.rollout_path, model: row.model,
       source: row.source.startsWith('{') ? JSON.parse(row.source) : row.source,
-      cliVersion: row.cli_version, name: row.name || row.title,
+      cliVersion: row.cli_version, name: row.name || (row.title && [row.preview, row.first_user_message].includes(row.title)
+        ? shortConversationTitle(row.title) : row.title),
       preview: row.preview || row.first_user_message, updatedAt: row.updated_at,
       forkedFromId: row.forked_from_id || null,
     }));

@@ -27,7 +27,7 @@ export function StatusPanel({thread,revision,name,connected,status,context,goal,
   const panel=useRef<HTMLElement>(null);
   useEffect(()=>{
     const key=(e:KeyboardEvent)=>{if(e.key==='Escape' && !document.querySelector('dialog[open]'))onClose();};
-    const outside=(e:PointerEvent)=>{if(e.target instanceof Element && !panel.current?.contains(e.target) && !e.target.closest('[aria-label="对话详情"],[aria-label="查看助手状态"],dialog'))onClose();};
+    const outside=(e:PointerEvent)=>{if(e.target instanceof Element && !panel.current?.contains(e.target) && !e.target.closest('[aria-label="对话详情"],[aria-label="查看助手状态"],.list-filters,dialog'))onClose();};
     document.addEventListener('keydown',key);document.addEventListener('pointerdown',outside);
     return()=>{document.removeEventListener('keydown',key);document.removeEventListener('pointerdown',outside);};
   },[onClose]);

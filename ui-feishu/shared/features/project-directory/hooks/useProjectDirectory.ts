@@ -6,11 +6,12 @@ import type { ConversationStore } from '../../conversations/state/conversationSt
 const emptyProjects: DirectoryProject[] = [];
 // Conversation events are consumed once, by useConversationEvents. Directory membership is a shared resource.
 export function useProjectDirectory(store: ConversationStore) {
+  const [ready, setReady] = useState(false);
   const [goalRecovery, setGoalRecovery] = useState(0);
   const cached = useSyncExternalStore(projectDirectoryResource.subscribe, projectDirectoryResource.getSnapshot);
   const projects = cached.data ?? emptyProjects;
   const refresh = useCallback(async (signal?: AbortSignal, invalidate = false) => {
-    try { await projectDirectoryApi.list(signal, invalidate); } catch { /* Shared resource retains its last good value. */ }
+    try { await projectDirectoryApi.list(signal, invalidate); if (!signal?.aborted) setReady(true); } catch { /* Shared resource retains its last good value. */ }
   }, []);
   useEffect(() => {
     const controller = new AbortController();
@@ -22,7 +23,7 @@ export function useProjectDirectory(store: ConversationStore) {
     return () => { window.removeEventListener('negus:realtime-recovered', recovered); controller.abort(); window.removeEventListener('negus:directory-changed', changed); };
   }, [refresh]);
   const entries = [...store.committed.keys()].map(id => [id, store.get(id)] as const);
-  return { projects, goalRecovery, loading: cached.data === null && !cached.error, error: cached.error, refresh,
+  return { projects, ready, goalRecovery, loading: cached.data === null && !cached.error, error: cached.error, refresh,
     statusByThread: Object.fromEntries(entries.map(([id, view]) => [id, view.executionStatus])),
     contextByThread: Object.fromEntries(entries.map(([id, view]) => [id, view.contextStatus.phase])),
     contextTimeByThread: Object.fromEntries(entries.map(([id, view]) => [id, view.contextStatus.compactionUpdatedAt])),

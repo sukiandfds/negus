@@ -1,3 +1,4 @@
+import { shortConversationTitle } from './conversation-title.mjs';
 import { submissionIdOf, mergeIdentified } from "./message-identity.mjs";
 import { latestRolloutFile, openRollout, orderedRolloutFiles } from './rollout-file.mjs';
 import fs from "node:fs";
@@ -302,7 +303,7 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
       file: path.basename(header.file),
       source: state.cliVersion === "0.122.0" ? "happy" : "codex",
       title: header.title?.trim()
-        || previewText(state.messages.find((item) => item.role === "user" && item.text?.trim())?.text || "", 36)
+        || shortConversationTitle(state.messages.find((item) => item.role === "user" && item.text?.trim())?.text)
         || `新对话 · ${state.threadId.slice(-6)}`,
       updatedAt: state.messages.findLast((item) => (item.role === "user" || item.role === "assistant") && item.createdAt)?.createdAt || stat.mtime.toISOString(),
       messageCount: state.messages.length,

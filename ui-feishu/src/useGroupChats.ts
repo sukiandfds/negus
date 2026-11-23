@@ -17,6 +17,7 @@ function compareActivity(left: RoomActivity, right: RoomActivity) {
 
 export function useGroupChats() {
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
+  const [ready, setReady] = useState(false);
   const requestVersion = useRef(0);
   const eventVersion = useRef(0);
   const observedActivity = useRef(new Map<string, { activity: RoomActivity; version: number }>());
@@ -36,6 +37,7 @@ export function useGroupChats() {
         observedActivity.current.delete(room.id);
         return room;
       }));
+      setReady(true);
     }
     catch { /* Original conversation connection handles service recovery. */ }
   }, []);
@@ -93,5 +95,5 @@ export function useGroupChats() {
       ? { ...item, name: room.name, archived: room.archived } : item));
     return room;
   }, []);
-  return { rooms, refresh, update };
+  return { rooms, ready, refresh, update };
 }

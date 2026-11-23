@@ -35,6 +35,20 @@ for(const width of [1440,412]){
  const geometry=()=>p.locator('.chat-primary').evaluate(el=>({w:el.clientWidth,h:el.clientHeight,scroll:[...el.querySelectorAll('*')].filter(e=>e.scrollHeight>e.clientHeight&&e.scrollTop>0).map(e=>e.scrollTop)}));
  const before=await geometry();await p.getByRole('button',{name:'对话详情',exact:true}).click();const panel=p.getByRole('complementary',{name:'对话详情'});
  assert.equal(await panel.getByText('user history 47',{exact:true}).count(),0);await panel.getByText('两台设备显示相同顺序').waitFor();assert.equal(await panel.getByText('统一对话体验').count(),0);
+ if(process.env.MUSE_RELOAD_CHECK){
+   if(width===1440) for(const name of ['员工','项目','后台','全部']){
+     await p.locator('.list-filters').getByRole('button',{name,exact:true}).click();
+     assert.ok(await panel.isVisible());
+   }
+   await p.getByRole('button',{name:'关闭对话详情'}).click();
+   await p.waitForFunction(()=>document.querySelector('.list-footer span')?.textContent==='1');
+   await p.evaluate(async()=>{const {flushConversationSnapshot}=await import('/shared/features/conversations/data/conversationSnapshot.ts');await flushConversationSnapshot();});
+   let resume;const network=new Promise(resolve=>{resume=resolve;});
+   await p.route(url=>url.pathname.startsWith('/api/'),async route=>{await network;await route.fallback();});
+   try {await p.reload({waitUntil:'domcontentloaded'});await p.locator('.chat-messages').getByText('assistant history 47',{exact:true}).waitFor();assert.match(await p.locator('.list-footer').innerText(),/同步中/);}
+   finally {resume();}
+   console.log(width,'px: cached body before network; partial count hidden; panel filters passed');await p.close();continue;
+ }
  await panel.getByText('跨设备置顶',{exact:true}).click();await panel.locator('section[aria-label="本次产物"] img').first().waitFor({state:'attached'});assert.deepEqual(await geometry(),before);
  const block=panel.locator('.sp-commands').filter({hasText:'执行命令 · 3 次'});assert.equal(await block.count(),1);
  const box=block.locator('pre');assert.equal(await box.isVisible(),false);await block.locator('summary').click();

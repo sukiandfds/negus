@@ -117,7 +117,6 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
         children: uniqueConversations([...rows.filter(row => !row.main), ...groupRows]),
       };
       employees.push(employee);
-      projects.push({ ...employee, id: `project:${project.id}`, kind: 'project', subtitle: '员工' });
       const employeeRows = rows.map(row => row.main
         ? { ...row, active: employee.active, label: employee.label, time: employee.time }
         : row);

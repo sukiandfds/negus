@@ -72,6 +72,7 @@ export function ExecutionTimeline({
       {(
         <div className={`${styles.activitiesWrap} ${expanded ? styles.open : ""}`} aria-hidden={!expanded}>
         <div className={styles.activities}>
+          {status.commentary && <p>{status.commentary}</p>}
           {activities.length ? activities.map((activity) => {
             const Icon = iconFor(activity);
             return (

@@ -94,6 +94,7 @@ const readLegacySnapshot = (): ConversationSnapshot | null => selectNewestSnapsh
 let restored: ConversationSnapshot | null = null;
 let database: Promise<IDBDatabase> | undefined;
 let writes = Promise.resolve(true);
+export const flushConversationSnapshot = () => writes;
 const persisted = new Map<string, string>();
 export const openConversationCache = () => database ||= new Promise<IDBDatabase>((resolve, reject) => {
   const request = indexedDB.open('negus-conversations', 1);

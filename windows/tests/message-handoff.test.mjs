@@ -82,8 +82,7 @@ test('connection placeholder stays hidden while submitted, but errors and notice
 const { projectTranscript } = await load('liveTranscript');
 const createLiveTranscriptMemory = () => ({});
 const advanceLiveTranscript = (_memory, input) => projectTranscript(input);
-const { mergeMessageList, mergePendingOptimisticMessages, mergeSessionRefresh } = await import('../../ui-feishu/shared/features/conversations/state/conversationMerge.ts');
-const { createOptimisticMessage } = await import('../../ui-feishu/shared/features/conversations/state/optimisticMessage.ts');
+const { mergeMessageList, mergePendingOptimisticMessages, mergeSessionRefresh, createOptimisticMessage } = await import('./frontend-conversation-store.mjs');
 const status = {threadId:'a',turnId:'protocol',startedAt:'2026-10-27T05:55:04Z',phase:'completed',hasFinalAnswer:true};
 const commentary = {id:'comment',role:'assistant',text:'checking',turnId:'internal',protocolTurnId:'protocol',phase:'commentary',createdAt:'2026-10-27T05:55:57.434Z'};
 const final = {...commentary,id:'final',text:'done',phase:'final_answer',createdAt:'2026-10-27T05:56:25.045Z'};
@@ -92,8 +91,9 @@ test('completion before history, commentary only, remount, final handoff and dif
     const handoff = executionHandoff('a',messages,status);
     assert.equal(handoff.waitingForReply,true);
     const view = advanceLiveTranscript(createLiveTranscriptMemory(),{threadId:'a',messages,turnId:'protocol',streamingText:'',streamingItemId:'',active:false,showExecution:handoff.showExecution,retainPlaceholder:handoff.waitingForReply,now:'2026-10-27T06:30:00Z'});
-    assert.equal(Boolean(view.placeholder), messages.length === 0);
+    assert.equal(Boolean(view.placeholder), true);
   }
+  assert.deepEqual(projectTranscript({ messages:[commentary, final], turnId:'protocol' }).persisted,[final]);
   const handoff = executionHandoff('a',[final,commentary],status);
   assert.equal(handoff.waitingForReply,false);
   assert.equal(handoff.latestReplyAt,final.createdAt);
@@ -216,7 +216,7 @@ test('empty completion keeps placeholder through late final, remount and next-tu
     const handoff=executionHandoff('a',messages,current);
     assert.equal(handoff.waitingForReply,expected);
     const view=advanceLiveTranscript(createLiveTranscriptMemory(),{threadId:'a',messages,turnId:current.turnId,streamingText:'',streamingItemId:'',active:false,showExecution:handoff.showExecution,retainPlaceholder:handoff.waitingForReply});
-    if(expected) assert.equal(Boolean(view.placeholder), !messages.some(message => (message.protocolTurnId || message.turnId) === current.turnId));
+    if(expected) assert.equal(Boolean(view.placeholder), !messages.some(message => message.phase !== "commentary" && (message.protocolTurnId || message.turnId) === current.turnId));
   };
   send('turn/started',{turn:{id:'protocol'}});
   send('turn/completed',{turn:{id:'protocol',status:'completed',items:[]}});

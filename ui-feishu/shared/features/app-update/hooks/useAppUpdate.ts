@@ -1,3 +1,4 @@
+import { flushConversationSnapshot } from "../../conversations/data/conversationSnapshot";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { registerServiceWorker, type ServiceWorkerUpdateHandle } from "../../../pwa/registerServiceWorker";
 import { fetchWebVersion, type WebVersion } from "../data/versionApi";
@@ -72,6 +73,7 @@ export function useAppUpdate() {
     try {
       await serviceWorker.current?.activateUpdate(availableVersion?.buildId);
     } finally {
+      await flushConversationSnapshot();
       window.location.reload();
     }
   }, [applying, availableVersion?.buildId]);

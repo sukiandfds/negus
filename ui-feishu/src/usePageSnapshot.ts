@@ -210,14 +210,14 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
     project: shown.project,
     sessionError: store.errors.get(c.selectedId) || c.sessionError,
     listError: c.listError || (store.errors.size ? `${store.errors.size} 个对话同步失败，保留已有内容；可刷新重试。` : ''),
-    loadingSession: c.loadingSession,
+    loadingSession: c.loadingSession || Boolean(c.selectedId && !isPendingThread(c.selectedId) && !store.committed.get(c.selectedId)?.session && !session?.messages.length && !store.errors.has(c.selectedId)),
     refresh: () => {
       controller.current?.abort(); ++generation.current; running.current = false; observed.current.clear(); cancelIndependent();
       wake(value => value + 1);
       return c.refresh();
     } };
   useEffect(() => {
-    if (isPendingThread(c.selectedId)) return;
+    if (!c.initialSyncReady || directory.loading || isPendingThread(c.selectedId)) return;
     // FEAT-001: persist the same directory-backed summaries that the list displays.
     const sessions = buildConversationDirectory({ ...directory, projects: shown.projects }, display.sessions,
       c.archivedView, shown.project?.root, c.cachedSessions, c.archivedByThread).all.flatMap(row => {
@@ -227,7 +227,7 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
     });
     writeConversationSnapshot({ selectedId: c.selectedId, sessions, session: c.cachedSessions.get(c.selectedId) || null, cachedSessions: c.cachedSessions,
       presentation: Object.fromEntries(states.map(([id, { session: _session, ...view }]) => [id, { ...view, visibleModel: '', visibleEffort: '', usageModel: '', streamingText: '', commentaryText: '' }])) });
-  }, [shown, c.sessions, c.selectedId, store.getPersistSnapshot()]);
+  }, [shown, c.initialSyncReady, directory.loading, c.sessions, c.selectedId, store.getPersistSnapshot()]);
   return { committed: shown.committed, conversations: display, directory: { ...directory, projects: shown.projects,
     statusByThread,
     contextByThread: Object.fromEntries(states.map(([id, view]) => [id, view.contextStatus.phase])),

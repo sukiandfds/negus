@@ -11,7 +11,7 @@ export interface LiveTranscriptInput {
 
 // Completed messages are ordinary history entries; execution never creates text fragments.
 export const projectTranscript = (input: LiveTranscriptInput) => {
-  const messages = input.messages;
+  const messages = input.messages.filter(message => message.role !== "assistant" || message.phase !== "commentary");
   const target = messages.filter(message => message.role === "assistant"
     && Boolean(input.turnId) && (message.protocolTurnId || message.turnId) === input.turnId).at(-1);
   const placeholder: SessionMessage | null = !target && (input.active || input.retainPlaceholder) ? {

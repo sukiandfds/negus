@@ -50,7 +50,7 @@ export function ConversationList({ c, section, query, filter, origins, onOrigins
         {(initialReady || hasRoster) ? <ConversationRows items={visibleRoster} c={c} opening={opening} query={query} onOpen={onOpen} pinned={filter === 'all' || filter === 'background' ? pinned : undefined} onTogglePin={filter === 'all' || filter === 'background' ? onTogglePin : undefined} onRenameRoom={onRenameRoom} onArchiveRoom={onArchiveRoom} selectedRoomId={selectedRoomId} /> : null}
 
       </div>
-      <footer className="list-footer"><ListFilter size={14} />{c.archivedView ? '已归档对话' : '聊天'}<span>{visibleRoster.length}</span></footer>
+      <footer className="list-footer"><ListFilter size={14} />{filter === 'employees' ? '员工人数' : filter === 'projects' ? '项目数' : c.archivedView ? '已归档对话' : '对话数'}<span>{initialReady ? visibleRoster.length : '同步中…'}</span></footer>
       {archiveRange && <ArchiveRangeDialog items={visibleRoster} archive={c.archiveSession} onClose={() => setArchiveRange(false)} />}
     </aside>;
 }

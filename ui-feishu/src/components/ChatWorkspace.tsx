@@ -119,7 +119,7 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
   return <section className="chat-workspace" aria-label="聊天工作区">
       <ChatHeader avatar={agentId ? chatAvatar : <button type="button" className="sp-avatar-button" aria-label="查看助手状态" aria-expanded={details} onClick={()=>setDetails(!details)}>{chatAvatar}</button>}
         title={<><ConversationOrigin origin={selected?.origin} nativeSubagent={selected?.nativeSubagent} /><span>{agentId ? selectedName : selected?.name || c.session?.title || selectedName}</span></>}
-        subtitle={selected?.label || conversationStatus(c.executionStatus, c.contextStatus.threadId === c.selectedId ? c.contextStatus.phase : undefined, projectRoot || '未关联')}
+        subtitle={selected?.label || conversationStatus(c.executionStatus, c.contextStatus.threadId === c.selectedId ? c.contextStatus.phase : undefined, projectRoot || (!initialReady && c.selectedId ? '正在恢复对话…' : '未关联'))}
         onBack={onBack} tab={tab} onTabChange={setTab} fileCount={files.length}
         actions={<>
           <button className="icon-button" title="分享当前对话" aria-label="分享当前对话" disabled={!c.session} onClick={onShare}><Share2 size={17} /></button>
@@ -139,7 +139,7 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
                   onRemove={c.removeQueueItem} onMove={c.moveQueueItem} onRetry={c.retryQueueItem} onSendNow={c.sendQueueItem} />,
               }))} session={displaySession} key={c.composerKey || 'conversation'} active={visible && tab === 'messages'}
               assistantName={selectedName} completedGoal={c.goal?.status === 'complete' ? c.goal : null}
-              loading={c.loadingSession} contentSyncState={c.contentSyncState} loadingOlder={c.loadingOlder}
+              loading={c.loadingSession || Boolean(c.selectedId && !displaySession && !initialReady)} contentSyncState={c.contentSyncState} loadingOlder={c.loadingOlder}
               error={c.sessionError} listAvailable={initialReady && !c.listError}
               executionStatus={c.executionStatus} contextStatus={c.contextStatus} onLoadOlder={c.loadOlder}
               onForkMessage={c.forkFromMessage} forkingMessageId={c.forkingMessageId} onEditMessage={c.beginEditMessage}
