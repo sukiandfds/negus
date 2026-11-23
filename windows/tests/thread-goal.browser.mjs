@@ -153,12 +153,12 @@ try {
   await page.screenshot({ path: "runtime/goal-desktop.png" });
   currentGoal = goal("paused", "Reopened paused goal");
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByRole("dialog", { name: "恢复已暂停的目标吗？" }).waitFor();
-  await page.getByRole("button", { name: "保持暂停", exact: true }).click();
+  await page.getByRole("button", { name: "恢复目标", exact: true }).waitFor();
+  assert.equal(await page.getByRole("dialog").count(), 0);
   assert.equal(currentGoal.status, "paused");
   await page.getByRole("button", { name: "恢复目标", exact: true }).click();
   await visible("进行中的目标");
-  console.log("PASS reopening paused goal asks before resuming");
+  console.log("PASS reopening paused goal stays paused until manually resumed");
   const longGoal = { ...goal("active", "Read the Codex goal objective file at C:/test/goal-objective.md before continuing."), displayObjective: "Readable long objective" };
   await emit(longGoal);
   await visible("Readable long objective");

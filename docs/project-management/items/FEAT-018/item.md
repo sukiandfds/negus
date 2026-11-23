@@ -15,7 +15,7 @@ docs_commit: pending
 audited_product_commit: pending
 sync_status: local_uncommitted
 next_action: 用户体验验收；保留未验证边界，不宣称所有细节完全一致
-last_user_visible_change: 单聊直接设置原生目标，输入框上方同步六种状态、计时与控制，恢复询问及完成清理对齐
+last_user_visible_change: 单聊直接设置原生目标，输入框上方同步六种状态、计时与控制，打开对话不询问恢复，保留手动恢复和完成清理
 ---
 
 # Codex 原生 Goal 目标模式入口

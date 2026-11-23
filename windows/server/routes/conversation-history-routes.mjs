@@ -289,7 +289,7 @@ export const createConversationHistoryRoutes = ({ projectRoot, conversations, ex
         // A locally validated body can ship while the independent version lookup is slow.
         if (!verified && (currentRevision === undefined || (bodyRevision !== undefined && currentRevision !== bodyRevision))) delete fields.context;
         return { ...fields, status: execution.getStatus(threadId), queue: followUpQueue.list(threadId),
-          sourceRevision: currentRevision === null ? null : bodyRevision ?? null, historyFormatVersion: 4,
+          sourceRevision: currentRevision === null ? null : bodyRevision ?? null, historyFormatVersion: 5,
           ...(refreshBody ? { refreshBody: true } : {}),
           ...(Object.keys(errors).length ? { detailErrors: { ...errors } } : {}) };
       };

@@ -46,5 +46,13 @@
     "label": "请用户选择",
     "detail": "需要用户在几种方案中决定时，展示可点击选项",
     "path": "user-choice/SKILL.md"
+  },
+  {
+    "id": "secret-input",
+    "command": "/skill secret-input",
+    "group": "Skills",
+    "label": "安全输入密钥",
+    "detail": "按当前任务说明安全填写凭据，仅保存到主机钥匙串",
+    "path": "secret-input/SKILL.md"
   }
 ]

@@ -60,6 +60,7 @@ export interface SessionSummary {
   latestUser: string;
   latestAssistant: string;
   latestMessage?: string;
+  latestMessageAt?: string;
   archived?: boolean;
   archivable?: boolean;
   conversationKind?: string;

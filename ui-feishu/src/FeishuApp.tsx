@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useProjectConversations } from '../shared/features/conversations/hooks/useProjectConversations';
 import { useProjectDirectory } from '../shared/features/project-directory/hooks/useProjectDirectory';
+import { SecretInputDialog } from '../shared/features/conversations/components/SecretInputDialog';
 import { UserInputDialog } from '../shared/features/conversations/components/UserInputDialog';
 import { openAgentConversation } from '../shared/features/agent-sharing/navigation/openAgentConversation';
 import { SettingsPage } from '../shared/features/settings/SettingsPage';
@@ -206,6 +207,7 @@ export function FeishuApp() {
     {section === 'border' && <BorderToolPage onBack={() => setSection('messages')} />}
     {creatingGroup && <CreateGroupDialog directory={directory} onClose={() => setCreatingGroup(false)} onCreated={room => { setCreatingGroup(false); void groups.refresh(); setSection('messages'); setFilter('all'); void open({ id: `group:${room.id}`, name: room.name, subtitle: '群聊', kind: 'group', roomId: room.id }); }} />}
     <ShareConversationDialog open={sharing} title={roomId ? groupRoom?.name || '群聊' : c.session?.title || selectedName} heading={roomId ? '分享当前群聊' : undefined} onClose={closeSharing} />
+    {section==='messages' && !roomId && viewC.selectedId && <SecretInputDialog key={viewC.selectedId} thread={viewC.selectedId} />}
     <UserInputDialog request={viewC.userInputRequest} busy={c.userInputBusy} error={c.userInputError} onSubmit={c.answerUserInput} />
     {settings && <div className="settings-overlay"><SettingsPage onClose={closeSettings} connected={c.connected} device={device} projectId={directory.projects.find(project => project.kind === 'personal')?.projectId || ''} projectRoot={c.project?.root || ''} /></div>}
   </div>;

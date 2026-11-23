@@ -15,7 +15,7 @@ test("attachment content stays available to the model but out of user prose and 
   const register = (source) => { registered.push(source); return { url: "/api/media/notes", name: "notes.md" }; };
   for (const message of [
     messageFromThreadItem({ id: "user", type: "userMessage", content }, register),
-    messageFromItem({ type: "response_item", payload: { role: "user", type: "message", content } }, register),
+    messageFromItem({ type: "event_msg", payload: { type: "item_completed", item: { type: "UserMessage", content } } }, register),
   ]) {
     assert.equal(message.text, "请阅读附件");
     assert.deepEqual(message.blocks.map((block) => block.type), ["markdown", "file"]);
@@ -175,7 +175,7 @@ test("user attachment envelopes hide paired image metadata and preserve literal 
   const payload = { type: "message", role: "user", content };
   const oldBlocks = blocksFromContent(content, registerMedia);
   for (const message of [
-    messageFromItem({ type: "response_item", payload }, registerMedia),
+    messageFromItem({ type: "event_msg", payload: { type: "item_completed", item: { type: "UserMessage", content } } }, registerMedia),
     messageFromThreadItem({ type: "userMessage", content }, registerMedia),
     messageFromItem({ type: "response_item", payload, negusCopy: { blocks: oldBlocks, text: oldBlocks.filter(b => b.type === "markdown").map(b => b.text).join("\n") } }, registerMedia),
   ]) {
@@ -192,7 +192,7 @@ test("Codex system notices are context, not user messages; identically worded us
       type: "message", role: "user", content, internal_chat_message_metadata_passthrough: { content_item_kinds: kinds },
     } }, registerMedia);
     assert.equal(parse([entry], [kind]), null);
-    assert.equal(parse([entry], ["user.text"]).text, text);
-    assert.equal(parse([entry, entry], [kind, "user.text"]).text, text);
+    assert.equal(parse([entry], ["user.text"]), null);
+    assert.equal(messageFromItem({ type: "event_msg", payload: { type: "user_message", message: text } }, registerMedia).text, text);
   }
 });

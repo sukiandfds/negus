@@ -6,18 +6,13 @@ import { isPendingThread } from '../shared/features/conversations/model/pendingT
 import { readConversationBatches } from '../shared/features/conversations/state/conversationBatch';
 import { terminalExecution, type ThreadSnapshot } from '../shared/features/conversations/state/conversationStore';
 import { buildConversationDirectory, mergeDirectoryProjects, snapshotStatusByThread } from './conversationDirectory';
-import { latestMessagePreview } from './taskNotice';
 
 // FEAT-001: batch initial reads, then sync changed threads independently into the same store.
 export function usePageSnapshot(conversations: ConversationState, directory: DirectoryState) {
   const c = conversations, store = c.store;
   const live = useRef({ conversations, directory });
   live.current = { conversations, directory };
-  const [shown, setShown] = useState(() => ({ sessions: c.sessions.map((summary): typeof summary => {
-    const cached = c.cachedSessions.get(summary.threadId);
-    return { ...summary, cwd: summary.cwd ?? cached?.cwd, createdBy: summary.createdBy ?? cached?.createdBy,
-      latestMessage: summary.latestMessage || cached?.latestMessage };
-  }), projects: directory.projects, project: c.project, committed: false }));
+  const [shown, setShown] = useState(() => ({ projects: directory.projects, project: c.project, committed: false }));
   const observed = useRef(new Map<string, string>());
   const running = useRef(false);
   const initialLoading = useRef(true);
@@ -99,13 +94,7 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
     // Directory membership is visible immediately; body reads fill the same row later.
     setShown(previous => {
       const projects = mergeDirectoryProjects(previous.projects, directory.projects);
-      const sessions = previous.sessions.map(item => {
-        const summary = c.sessions.find(next => next.threadId === item.threadId);
-        return !summary || (item.title === summary.title && item.updatedAt === summary.updatedAt) ? item
-          : { ...item, title: summary.title, updatedAt: summary.updatedAt };
-      });
-      return JSON.stringify(projects) === JSON.stringify(previous.projects)
-        && sessions.every((item, index) => item === previous.sessions[index]) ? previous : { ...previous, projects, sessions };
+      return JSON.stringify(projects) === JSON.stringify(previous.projects) ? previous : { ...previous, projects };
     });
     const synchronize = (batch: typeof candidates, abort: AbortController, isCurrent: () => boolean, initial: boolean) => {
       const pendingPriority = new Set(batch.filter(entry => entry.priority).map(entry => entry.id));
@@ -113,7 +102,6 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
       const earlyPublished = new Set<string>();
       const publish = (results: { entry: typeof candidates[number]; error: string }[]) => {
         if (!mounted.current || abort.signal.aborted || !isCurrent()) return;
-        const good = new Set(results.filter(result => !result.error).map(result => result.entry.id));
         let changed = false;
         for (const { entry } of results) pendingPriority.delete(entry.id);
         if (initial) setSyncing(pendingPriority.size > 0);
@@ -127,21 +115,10 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
         }
         setShown(previous => {
           const current = live.current.conversations;
-          const sessions = current.sessions.map(summary => {
-            const existing = previous.sessions.find(item => item.threadId === summary.threadId);
-            if (!good.has(summary.threadId)) return existing || summary;
-            const detail = store.committed.get(summary.threadId)?.session;
-            const latestMessage = latestMessagePreview(detail?.messages) || '';
-            const { messages: _messages, sourceSignature: _signature, ...fields } = detail || { ...summary, messages: [], sourceSignature: undefined };
-            const next = { ...summary, ...fields, title: summary.title, updatedAt: summary.updatedAt, latestMessage };
-            return existing && JSON.stringify(existing) === JSON.stringify(next) ? existing : next;
-          });
           const projects = mergeDirectoryProjects(previous.projects, live.current.directory.projects);
           if (previous.committed && JSON.stringify(previous.project) === JSON.stringify(current.project)
-            && JSON.stringify(previous.projects) === JSON.stringify(projects)
-            && sessions.length === previous.sessions.length
-            && sessions.every((session, index) => session === previous.sessions[index])) return previous;
-          return { sessions, committed: true, project: current.project, projects };
+            && JSON.stringify(previous.projects) === JSON.stringify(projects)) return previous;
+          return { committed: true, project: current.project, projects };
         });
         if (changed) store.notify();
       };
@@ -188,10 +165,8 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
       initialLoading.current = false;
       setSyncing(false);
       const projects = mergeDirectoryProjects(shown.projects, directory.projects);
-      if (!shown.committed || JSON.stringify(projects) !== JSON.stringify(shown.projects)
-        || shown.sessions.some(item => !c.sessions.some(next => next.threadId === item.threadId))) {
-        setShown(previous => ({ ...previous, committed: true, project: c.project, projects,
-          sessions: previous.sessions.filter(item => c.sessions.some(next => next.threadId === item.threadId)) }));
+      if (!shown.committed || JSON.stringify(projects) !== JSON.stringify(shown.projects)) {
+        setShown({ committed: true, project: c.project, projects });
       }
       return;
     }
@@ -232,8 +207,7 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
   const display = { ...c, ...selected, queueItems: c.queueItems, session, executionStatus, goal: c.goal || selected.goal, userInputRequest: c.userInputRequest,
     streamingText: executionStatus.streamingText || '', commentaryText: executionStatus.commentary || '',
     syncing,
-    project: shown.project, sessions: c.sessions.map(summary => summary.threadId === c.selectedId
-      ? shown.sessions.find(item => item.threadId === summary.threadId) || summary : summary),
+    project: shown.project,
     sessionError: store.errors.get(c.selectedId) || c.sessionError,
     listError: c.listError || (store.errors.size ? `${store.errors.size} 个对话同步失败，保留已有内容；可刷新重试。` : ''),
     loadingSession: c.loadingSession,

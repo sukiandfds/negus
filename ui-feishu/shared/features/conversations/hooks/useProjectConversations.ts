@@ -903,8 +903,6 @@ export function useProjectConversations() {
     goal: goal.goal,
     goalBusy: goal.busy,
     goalError: goal.error,
-    goalResumePrompt: goal.resumePrompt,
-    dismissGoalResumePrompt: goal.dismissResumePrompt,
     setGoal,
     editGoal: (objective: string) => setGoal(objective, [], false),
     changeGoalStatus: async (status: "active" | "paused") => {

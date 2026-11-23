@@ -12,10 +12,8 @@ interface Snapshot {
   revision: number;
   mutation: number;
   conversationId: string;
-  hydrated: boolean;
-  resumePrompt: boolean;
 }
-const empty = (): Snapshot => ({ goal: null, completed: null, error: "", busy: false, revision: 0, mutation: 0, conversationId: "", hydrated: false, resumePrompt: false });
+const empty = (): Snapshot => ({ goal: null, completed: null, error: "", busy: false, revision: 0, mutation: 0, conversationId: "" });
 
 import type { ConversationStore } from "../../conversations/state/conversationStore";
 
@@ -40,7 +38,6 @@ export function useThreadGoal(threadId: string, store: ConversationStore) {
     }
     store.update(id, { goal }, remote);
     if (goal && !remote) value.completed = goal.status === "complete" ? goal : null;
-    if (!goal || !["paused", "blocked", "usageLimited"].includes(goal.status)) value.resumePrompt = false;
     value.error = "";
     notify(id);
   }, [store, entry, notify]);
@@ -131,13 +128,6 @@ export function useThreadGoal(threadId: string, store: ConversationStore) {
 
   const value = entry(threadId);
   useEffect(() => {
-    if (!value.hydrated && store.synced.has(threadId)) {
-      value.hydrated = true;
-      value.resumePrompt = Boolean(value.goal && ['paused', 'blocked', 'usageLimited'].includes(value.goal.status));
-      notify(threadId);
-    }
-  });
-  useEffect(() => {
     if (value.goal?.objective.startsWith("Read the Codex goal objective file at ") && !value.goal.displayObjective) void refresh();
   }, [value.goal?.objective, value.goal?.updatedAt, value.busy, refresh]);
   const completedCleanup = useRef(new Map<string, string>());
@@ -154,10 +144,6 @@ export function useThreadGoal(threadId: string, store: ConversationStore) {
     }
   });
 
-  const dismissResumePrompt = useCallback(() => {
-    entry(threadId).resumePrompt = false;
-    notify(threadId);
-  }, [threadId, entry, notify]);
   return { goal: value.goal || value.completed, busy: value.busy, error: value.error,
-    resumePrompt: value.resumePrompt, dismissResumePrompt, refresh, update, clear, handleEvent };
+    refresh, update, clear, handleEvent };
 }

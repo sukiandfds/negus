@@ -64,7 +64,6 @@ const refresh = async () => { const close = page.getByRole('button', { name: '�
 try {
   await page.goto(`${origin}?thread=${f.id}`);
   await bubble(failedFinal ? 'B final before aborted' : 'assistant history 47').waitFor();
-  await page.getByRole('button', { name: '保持暂停', exact: true }).click();
   assert.equal((await read()).session.messages.length, 30);
   assert.equal(f.calls.client, 0); assert.equal(f.calls.credentials, 0);
   await page.getByRole('button', { name: '对话详情', exact: true }).click();
@@ -79,7 +78,6 @@ try {
   console.log('PASS real defaults/channels/models wiring: cold open and details read persisted data with empty defaults, zero credentials and wake');
   if (!failedFinal) {
   await page.reload(); await bubble('assistant history 47').waitFor();
-  await page.getByRole('button', { name: '保持暂停', exact: true }).click();
   assert.equal(calls.filter(call => call.pathname === '/api/models').length, 0);
   assert.deepEqual(f.modelCalls, { credentials: 0, currentConfig: 0, rpc: 0, initialization: 0, wake: 0 });
   await fs.utimes(f.original, new Date('2030-01-01'), new Date('2030-01-01'));
@@ -139,7 +137,6 @@ try {
   const catalogReads = calls.filter(call => call.pathname === '/api/models').length;
   await page.reload(); await bubble('A latest persisted reply').waitFor();
   assert.equal(calls.filter(call => call.pathname === '/api/models').length, catalogReads);
-  await page.getByRole('button', { name: '保持暂停', exact: true }).click();
   await page.getByRole('button', { name: '对话详情', exact: true }).click();
   await page.getByText('配置A · model-a', { exact: true }).waitFor();
   assert.ok((await read()).session.messages.some(message => message.text === 'A latest persisted reply'));
@@ -228,7 +225,6 @@ try {
     };
     const reloadWithA = async () => {
       await page.reload(); await bubble('B final before aborted').waitFor();
-      await page.getByRole('button', { name: '保持暂停', exact: true }).click();
       const failed = (await read()).session.messages.find(m => m.text === '旧会话附图失败后重试');
       assert.ok(failed); assert.ok(failed.blocks.some(b => b.type === 'image'));
       await page.getByRole('button', { name: '对话详情', exact: true }).click();
@@ -271,7 +267,6 @@ try {
     await f.primary.handleProtocolMessage({ method: 'turn/completed', params: { threadId: f.id, turn: { id: 'successful-turn', status: 'completed' } } });
     f.execution.handleProtocolMessage({ method: 'turn/completed', params: { threadId: f.id, turn: { id: 'successful-turn', status: 'completed' } } });
     await page.reload(); await bubble('B successful retry reply').waitFor();
-    await page.getByRole('button', { name: '保持暂停', exact: true }).click();
     await page.getByRole('button', { name: '对话详情', exact: true }).click();
     await page.getByText('配置A · model-b', { exact: true }).waitFor();
     assert.equal(await composer().inputValue(), '');

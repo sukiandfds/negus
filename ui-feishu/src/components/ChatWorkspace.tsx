@@ -156,7 +156,7 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
               shownModel={entry.state.visibleModel} shownEffort={entry.state.visibleEffort} models={entry.state.models} modelsLoading={entry.state.modelsLoading} modelChanging={entry.state.modelChanging} modelError={entry.state.modelError}
               selectedModelUnavailable={entry.state.selectedModelUnavailable} sendPreparationError={entry.state.sendPreparationError} onPrepareSend={entry.state.prepareSend} onSend={entry.state.sendMessage} onQueue={entry.state.queueMessage} queueing={entry.state.queueBusy}
               editingMessage={entry.state.editingMessage} onCancelEdit={entry.state.cancelEditMessage} onInterrupt={entry.state.interrupt} onReview={entry.state.review}
-              goal={entry.state.goal} goalBusy={entry.state.goalBusy} goalError={entry.state.goalError} goalResumePrompt={entry.state.goalResumePrompt} onDismissGoalResumePrompt={entry.state.dismissGoalResumePrompt}
+              goal={entry.state.goal} goalBusy={entry.state.goalBusy} goalError={entry.state.goalError}
               onChangeGoalStatus={entry.state.changeGoalStatus} onClearGoal={entry.state.clearGoal} onSetGoal={entry.state.setGoal} onEditGoal={entry.state.editGoal}
               onCompactContext={entry.state.compactContext} onAutoCompactThresholdChange={entry.state.setAutoCompactThreshold} onModelChange={entry.state.changeModel} onReasoningEffortChange={entry.state.changeReasoningEffort} />
             </div>)}

@@ -593,7 +593,7 @@ test('prefetched recent conversations survive reload without opening each one', 
 test('old history format is refreshed once while new format reuses the cache', () => {
   storage.clear();
   const legacy = session('legacy', 'old', '09');
-  const updated = { ...session('updated', 'new', '10'), historyFormatVersion: 3 };
+  const updated = { ...session('updated', 'new', '10'), historyFormatVersion: 5 };
   writeConversationSnapshot({ selectedId: 'legacy', sessions: [legacy, updated], session: legacy,
     cachedSessions: new Map([['legacy', legacy], ['updated', updated]]) });
   window.location.search = '?thread=legacy';
@@ -601,7 +601,7 @@ test('old history format is refreshed once while new format reuses the cache', (
   assert.ok(initial.partialSessionIds.includes('legacy'));
   assert.ok(!initial.partialSessionIds.includes('updated'));
   assert.equal(initial.session.messages[0].text, 'old');
-  const refreshed = { ...legacy, historyFormatVersion: 3 };
+  const refreshed = { ...legacy, historyFormatVersion: 5 };
   writeConversationSnapshot({ selectedId: 'legacy', sessions: [refreshed], session: refreshed, cachedSessions: new Map([['legacy', refreshed]]) });
   assert.ok(!readInitialConversationState().partialSessionIds.includes('legacy'));
 });
@@ -947,9 +947,9 @@ test('old cached notification bubbles reread the source; verified user quotation
   const detail = session('notice-cache', 'old', '10');
   detail.messages = [{ id: 'u', role: 'user', text: '<turn_aborted>example</turn_aborted>' }];
   window.location.search = '?thread=notice-cache';
-  for (const version of [3, 4]) {
+  for (const version of [4, 5]) {
     const record = { ...detail, historyFormatVersion: version };
     writeConversationSnapshot({ selectedId: detail.threadId, sessions: [detail], session: record });
-    assert.equal(Boolean(readInitialConversationState().session), version === 4);
+    assert.equal(Boolean(readInitialConversationState().session), version === 5);
   }
 });

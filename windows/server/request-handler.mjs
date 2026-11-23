@@ -1,6 +1,7 @@
 import { panelSignals } from './status-panel/resources.mjs';
 import { createGroupCreationRoute } from "../../ui-feishu/server/group-extension.mjs";
 import { createTaskRoutes } from "../../ui-feishu/server/task-routes.mjs";
+import { secureInputRoute } from './routes/secret-input.mjs';
 import { createConnectionRoutes } from './routes/connection-routes.mjs';
 import { createImageSettingsRoutes } from "./routes/image-settings-routes.mjs";
 import { createLynnWorkbenchRoutes } from "./routes/lynn-workbench-routes.mjs";
@@ -41,6 +42,7 @@ export const createRequestHandler = ({
   });
   const routes = [
     ...(roomDirectory?.create ? [createGroupCreationRoute({ roomDirectory }), createTaskRoutes({ roomDirectory, multiAgentDirectory, groupRoom, media, agentTasks, employeeProjectDirectory })] : []),
+    secureInputRoute,
     createConnectionRoutes(),
     createLynnWorkbenchRoutes(),
     createImageSettingsRoutes({ projectRoot }),

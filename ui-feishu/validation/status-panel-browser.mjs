@@ -32,7 +32,6 @@ for(const width of [1440,412]){
    await r.fulfill({json:({'/api/sessions':[row],'/api/project':{name:'隔离',root:f.root,mode:'interactive'},'/api/project-directory':{projects:[]},'/api/group/rooms':{rooms:[]}})[u.pathname]||{}});
  });
  await p.goto(vite.resolvedUrls.local[0]+'?thread='+f.id);await p.locator('.chat-messages').getByText('assistant history 47',{exact:true}).waitFor().catch(async e=>{console.log((await p.locator('body').innerText()).slice(0,900));throw e});
- const keep=p.getByRole('button',{name:'保持暂停',exact:true});if(await keep.isVisible())await keep.click();
  const geometry=()=>p.locator('.chat-primary').evaluate(el=>({w:el.clientWidth,h:el.clientHeight,scroll:[...el.querySelectorAll('*')].filter(e=>e.scrollHeight>e.clientHeight&&e.scrollTop>0).map(e=>e.scrollTop)}));
  const before=await geometry();await p.getByRole('button',{name:'对话详情',exact:true}).click();const panel=p.getByRole('complementary',{name:'对话详情'});
  await panel.getByText('统一对话体验').waitFor();assert.equal(await panel.getByText('user history 47',{exact:true}).count(),0);await panel.getByText('两台设备显示相同顺序').waitFor();

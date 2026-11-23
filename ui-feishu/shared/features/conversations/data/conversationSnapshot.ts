@@ -41,11 +41,8 @@ const validSnapshot = (value: ConversationSnapshot | null): ConversationSnapshot
       && entry.session.threadId !== value.selectedId,
     ))
     : [];
-  // Refetch only snapshots affected by the old attachment-as-prose parser.
-  // Keep selection/list state and unrelated cached conversations intact.
-  const needsHistoryReread = (session: SessionDetail) => session.messages.some((message) =>
-    message.role === "user" && ((message.text?.includes("[附件正文：") && message.text.includes("[附件正文结束]"))
-      || ((session.historyFormatVersion ?? 0) < 4 && /^<(?:turn_aborted|subagent_notification)>/.test(message.text || ""))));
+  // Cached model-input bubbles have no native item identity. Reread the old body once.
+  const needsHistoryReread = (session: SessionDetail) => session.historyFormatVersion !== undefined && session.historyFormatVersion < 5;
   const sanitized = new Set<string>();
   const cleanSession = (session: SessionDetail) => {
     const messages = session.messages.map(cleanStoredUserAttachments).filter(message => !message.id.startsWith("stream-")

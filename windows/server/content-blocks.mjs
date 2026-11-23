@@ -275,59 +275,34 @@ const typedInputs = (value, type) => {
   return items.map((item) => typeof item === "string" ? { type, path: item } : item);
 };
 
-// Protocol metadata, not tag-shaped prose, identifies Codex-generated input.
-const noticeKinds = new Set(["generic.turn_aborted", "multi_agent.subagent_notification"]);
-const visibleUserInput = (content, metadata) => {
-  const kinds = metadata?.content_item_kinds;
-  if (!Array.isArray(content) || !Array.isArray(kinds) || content.length !== kinds.length) return content;
-  return content.filter((_, index) => !noticeKinds.has(kinds[index]));
-};
-
-const isUsefulUserMessage = (text, blocks) => {
-  if (!text && !blocks.some((block) => block.type !== "markdown")) return false;
-  return !text.includes("<codex_delegation>") &&
-    !text.startsWith("# AGENTS.md") &&
-    !text.startsWith("# Options") &&
-    !text.startsWith("<environment_context>") &&
-    !text.startsWith("Warning: apply_patch was requested via shell") &&
-    !text.startsWith("Warning: apply_patch was requested via exec_command");
-};
-
 export const messageFromItem = (item, registerMedia) => {
   const payload = item?.payload;
   let role = "";
   let content;
 
-  if (item?.type === "event_msg" && payload?.type === "user_message") {
-    role = "user";
-    content = [
-      payload.message ?? payload.content,
-      ...typedInputs(payload.images, "image"),
-      ...typedInputs(payload.audio, "audio"),
-      ...typedInputs(payload.files, "file"),
-    ].filter(Boolean);
-  } else if (item?.type === "event_msg" && payload?.type === "agent_message" && payload?.phase === "final_answer") {
-    role = "assistant";
-    content = payload.message ?? payload.content ?? payload;
-  } else if (item?.type === "response_item" && payload?.type === "message" && ["user", "assistant"].includes(payload.role)) {
-    if (payload.role === "assistant" && payload.phase && !["final_answer", "commentary"].includes(payload.phase)) return null;
-    role = payload.role;
-    content = payload.content;
-  } else if (item?.type === "response_item" && payload?.type === "image_view") {
-    role = "assistant";
-    content = { type: "imageView", path: payload.path };
-  } else {
-    return null;
-  }
-
-  if (item.type === "response_item" && item.negusCopy && Array.isArray(item.negusCopy.blocks)) {
+  // Native history items, never model input/output, determine the visible conversation.
+  if (item?.negusCopy && Array.isArray(item.negusCopy.blocks)) {
     const { text, blocks, authorName, modelSwitch } = item.negusCopy;
-    return cleanStoredUserAttachments({ id: payload.id, itemId: payload.id, role, text, blocks, authorName, modelSwitch, phase: payload.phase });
+    return cleanStoredUserAttachments({ id: payload.id, itemId: payload.id, role: payload.role, text, blocks, authorName, modelSwitch, phase: payload.phase });
   }
-  const metadata = payload?.internal_chat_message_metadata_passthrough || {};
-  const blocks = role === "user" ? userBlocksFromContent(visibleUserInput(content, metadata), registerMedia) : assistantBlocksFromContent(content, registerMedia);
+  if (item?.type !== "event_msg") return null;
+  if (payload?.type === "item_completed") {
+    const native = payload.item;
+    if (!native?.type) return null;
+    const message = messageFromThreadItem({ ...native, type: native.type[0].toLowerCase() + native.type.slice(1),
+      text: native.text ?? native.content }, registerMedia);
+    return message && { ...message, itemId: native.id, turnId: payload.turn_id };
+  }
+  if (payload?.type === "user_message") {
+    role = "user";
+    content = [payload.message ?? payload.content, ...typedInputs(payload.images, "image"),
+      ...typedInputs(payload.local_images, "localImage"), ...typedInputs(payload.audio, "audio"), ...typedInputs(payload.files, "file")].filter(Boolean);
+  } else if (payload?.type === "agent_message") {
+    role = "assistant";
+    content = payload.message ?? payload.content;
+  } else return null;
+  const blocks = role === "user" ? userBlocksFromContent(content, registerMedia) : assistantBlocksFromContent(content, registerMedia);
   const text = visibleText(blocks);
-  if (role === "user" && !isUsefulUserMessage(text, blocks)) return null;
   if (!blocks.length) return null;
   const itemId = item.id || payload?.id || payload?.client_id || "";
   const idSource = itemId || `${role}:${JSON.stringify(blocks)}`;
@@ -339,7 +314,7 @@ export const messageFromItem = (item, registerMedia) => {
     ...(role === "assistant" && payload.phase ? { phase: payload.phase } : {}),
     ...(itemId ? { itemId } : {}),
     ...(role === "user" && submissionIdOf(payload) ? { submissionId: submissionIdOf(payload) } : {}),
-    ...(metadata.turn_id || item.turnId ? { turnId: metadata.turn_id || item.turnId } : {}),
+    ...(payload.turn_id || item.turnId ? { turnId: payload.turn_id || item.turnId } : {}),
   };
 };
 
@@ -376,9 +351,9 @@ export const dedupeAssistantMediaMessages = (messages, seen = new Set()) => (Arr
 
 export const messageFromThreadItem = (item, registerMedia) => {
   if (item?.type === "userMessage") {
-    const blocks = userBlocksFromContent(visibleUserInput(item.content, item.internal_chat_message_metadata_passthrough), registerMedia);
+    const blocks = userBlocksFromContent(item.content, registerMedia);
     const text = visibleText(blocks);
-    if (!isUsefulUserMessage(text, blocks)) return null;
+    if (!blocks.length) return null;
     const submissionId = submissionIdOf(item);
     return {
       id: item.id || blockId("message", JSON.stringify(blocks)),

@@ -109,3 +109,5 @@
 - 正式服务自动验收 exitCode=0，独立会话 01a0d991-7b25-7793-9aef-daa5c1eaed22。实际 API 与原生 SSE，无传输替身：/goal 直接创建、active/complete/cleared、原生目标 null、轮次结束输入框空闲、回复达成提示与命令顺序通过。
 - 证据 runtime/goal-deployment-verification.json、runtime/goal-deployment-verification.log、runtime/goal-http-complete.png。
 - 本次修改、构建、回归与正式实机验证已交付；未提交版本库。不能把已通过场景扩展为所有 Codex 细节完全相同：手机真机、全部富文本快捷键、附件供应商执行、完整重启后历史恢复仍为未验证边界。
+
+- 2026-11-23 用户要求删除恢复目标弹窗和触发逻辑。打开对话保持目标原状态；主动恢复直接执行，替换目标仍需确认。

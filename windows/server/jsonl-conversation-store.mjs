@@ -1,4 +1,4 @@
-import { submissionIdOf, receiptMatches, mergeIdentified } from "./message-identity.mjs";
+import { submissionIdOf, mergeIdentified } from "./message-identity.mjs";
 import { latestRolloutFile, openRollout, orderedRolloutFiles } from './rollout-file.mjs';
 import fs from "node:fs";
 import fsp from "node:fs/promises";
@@ -68,6 +68,7 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
             const header = {
               file,
               cwd: item.payload?.cwd || "",
+              historyMode: item.payload?.history_mode || "legacy",
               cliVersion: item.payload?.cli_version || "",
               threadId: item.payload?.id || item.payload?.session_id || threadIdFromFile(file),
               title: item.payload?.name || item.payload?.title || null,
@@ -169,18 +170,14 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
     return [...current, ...incoming.filter((block) => !seen.has(blockKey(block)))];
   };
 
-  const isFinalAssistantItem = (item) => (
-    (item?.type === "event_msg" && item.payload?.type === "agent_message" && item.payload?.phase === "final_answer")
-    || (item?.type === "response_item" && item.payload?.type === "message" && item.payload?.role === "assistant"
-      && (!item.payload?.phase || item.payload.phase === "final_answer"))
-  );
-
   const processLine = (state, line) => {
     if (!line.trim()) return;
     try {
       const item = JSON.parse(line);
-      const precedingUserInput = state.precedingUserInput;
-      state.precedingUserInput = null;
+      const eventType = item.payload?.type;
+      if (item.type === "event_msg" && (state.historyMode === "paginated"
+        ? ["user_message", "agent_message"].includes(eventType)
+        : eventType === "item_completed" && ["UserMessage", "AgentMessage"].includes(item.payload.item?.type))) return;
       if (item.type === "event_msg" && item.payload?.item?.type === "ContextCompaction" && item.payload.type === "item_completed") {
         const { turn_id, started_at_ms, completed_at_ms } = item.payload;
         // Codex exposes this operation as ContextCompaction, not as an assistant answer.
@@ -191,7 +188,6 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
       if (item.type === "event_msg" && item.payload?.type === "item_completed" && item.payload.item?.type === "UserMessage") {
         const event = item.payload;
         if (state.userMessageEvents.has(JSON.stringify([event.turn_id, event.item.id]))) {
-          state.precedingUserInput = precedingUserInput;
           return;
         }
         const completed = new Date(event.completed_at_ms);
@@ -199,12 +195,7 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
         if (time && Number.isFinite(Date.parse(time))) {
           const receipt = { itemId: event.item.id, submissionId: submissionIdOf(event.item), turnId: event.turn_id, createdAt: time };
           state.userMessageEvents.set(JSON.stringify([event.turn_id, event.item.id]), receipt);
-          // Codex writes the actual input response immediately before its confirmation.
-          // They share the turn but can have different item IDs. Pair individual records,
-          // never all the inputs in the turn or all messages with the same text.
-          const message = state.messages.findLast(message => message.role === "user" && receiptMatches(message, receipt))
-            || (precedingUserInput?.turnId === event.turn_id && !precedingUserInput?.submissionId ? precedingUserInput : null);
-          if (message) Object.assign(message, { createdAt: time, ...(receipt.submissionId ? { submissionId: receipt.submissionId } : {}) });
+
         }
       }
       if (item.type === "event_msg" && item.payload?.type === "task_started") state.currentTurnId = item.payload.turn_id;
@@ -230,14 +221,14 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
       if (!message) return;
       const timestamp = Date.parse(item.timestamp || "");
       if (Number.isFinite(timestamp)) message.createdAt = new Date(timestamp).toISOString();
-      if (isFinalAssistantItem(item) && state.pendingAssistantMedia.length) {
+      if (message.role === "assistant" && (message.phase || "final_answer") === "final_answer" && state.pendingAssistantMedia.length) {
         message.blocks = mergeBlocks(message.blocks, state.pendingAssistantMedia);
         state.pendingAssistantMedia = [];
       }
 
       const messageIndex = state.messageSequence;
       state.messageSequence += 1;
-      const itemId = item.id || item.payload?.id || item.payload?.client_id || message.itemId || "";
+      const itemId = message.itemId || item.id || item.payload?.id || item.payload?.client_id || "";
       const turnId = message.turnId || item.turnId || state.currentTurnId || "";
       if (state.currentTurnId) message.protocolTurnId = state.currentTurnId;
       if (turnId) {
@@ -253,28 +244,10 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
         : `jsonl:${encodeURIComponent(state.threadId)}:${encodeURIComponent(String(turnId || "unknown"))}:${encodeURIComponent(String(identity))}`;
       const event = state.userMessageEvents.get(JSON.stringify([turnId, itemId]));
       if (message.role === 'user' && event) Object.assign(message, { createdAt: event.createdAt, ...(event.submissionId ? { submissionId: event.submissionId } : {}) });
-      const metadata = item.payload?.internal_chat_message_metadata_passthrough;
-      if (message.role === "user" && item.type === "response_item" && metadata?.turn_id
-        && metadata.content_item_metadata?.some(entry => entry.provenance?.type === "user")) {
-        state.precedingUserInput = message;
-      }
       const previous = state.messages.at(-1);
-      const mirrored = previous && state.lastOrigin !== item.type && ['event_msg', 'response_item'].includes(state.lastOrigin)
-        && previous.role === message.role && previous.text === message.text
-        && (previous.protocolTurnId || previous.turnId) === (message.protocolTurnId || message.turnId)
-        && (previous.phase || 'final_answer') === (message.phase || 'final_answer');
-      state.lastOrigin = item.type;
-      if (mirrored) {
-        const preferred = item.type === 'response_item' ? message : previous;
-        const merged = { ...preferred, blocks: mergeBlocks(previous.blocks, message.blocks) };
-        state.messages[state.messages.length - 1] = merged;
-        if (state.precedingUserInput) state.precedingUserInput = merged;
-        return;
-      }
       const logicalKey = `${message.role}:${turnId}:${identity}:${item.timestamp || ""}`;
       if (previous?.role === message.role && previous.text === message.text && state.lastKey.startsWith(`${logicalKey}:`)) {
         previous.blocks = mergeBlocks(previous.blocks, message.blocks);
-        if (state.precedingUserInput) state.precedingUserInput = previous;
         state.lastKey = `${logicalKey}:${previous.blocks.map(blockKey).join("|")}`;
         return;
       }
@@ -401,7 +374,7 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
     const ordered = await Promise.all(files.map(async file => ({ header: headers.find(header => header.file === file), stat: await fsp.stat(file) })));
     const header = ordered.at(-1).header;
     const fileRevision = ordered.map(({ stat }) => conversationSourceRevision(stat)).join('|');
-    const sourceRevision = 'history-input-id-v4:' + fileRevision;
+    const sourceRevision = 'native-history-v5:' + fileRevision;
     if (metadataOnly) return { id: threadId, path: header.file, paths: files, cwd: header.cwd, name: header.title, sourceRevision };
     const parts = await Promise.all(ordered.map(({ header }) => readSession(header)));
     const after = await Promise.all(files.map(file => fsp.stat(file).then(conversationSourceRevision)));

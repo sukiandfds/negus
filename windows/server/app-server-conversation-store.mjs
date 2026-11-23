@@ -53,9 +53,9 @@ const isAssistantReplyRecord = (item) => {
     || (type === "response_item" && payloadType === "message" && role === "assistant" && (!phase || phase === "final_answer"));
 };
 
-const isConversationMessageRecord = (item) => isAssistantReplyRecord(item)
-  || (item?.type === "response_item" && item.payload?.type === "message"
-    && ["user", "assistant"].includes(item.payload?.role));
+const isConversationMessageRecord = item => item.negusCopy || (item.type === "event_msg"
+  && (["user_message", "agent_message"].includes(item.payload?.type)
+    || (item.payload?.type === "item_completed" && ["UserMessage", "AgentMessage"].includes(item.payload.item?.type))));
 
 // Lifecycle records can arrive after a different turn: only their turn ID owns the outcome.
 const successfulSettingsFromRecords = (records) => {

@@ -32,10 +32,10 @@ function Fixture() {
   const c = { session, selectedId: threadId, composerKey: threadId, connected: true, executionStatus, contextStatus, queueItems, queueError: '', queueBusy: false,
     loadingSession: false, contentSyncState: 'stable', loadingOlder: false, sessionError: '', listError: '', streamingText: '', goal: null,
     visibleModel: '', visibleEffort: '', models: [], modelsLoading: false, modelChanging: false, modelError: '', editingMessage: null,
-    editingMessageId: '', forkingMessageId: '', retryingMessageId: '', goalBusy: false, goalError: '', goalResumePrompt: false,
+    editingMessageId: '', forkingMessageId: '', retryingMessageId: '', goalBusy: false, goalError: '',
     removeQueueItem: ok, moveQueueItem: ok, retryQueueItem: ok, sendQueueItem: ok, loadOlder: async () => {}, forkFromMessage: ok,
     beginEditMessage: noop, retryPendingMessage: ok, sendMessage: send, queueMessage: send, cancelEditMessage: noop, interrupt: ok,
-    review: ok, dismissGoalResumePrompt: noop, changeGoalStatus: ok, clearGoal: ok, setGoal: ok, editGoal: ok, compactContext: ok,
+    review: ok, changeGoalStatus: ok, clearGoal: ok, setGoal: ok, editGoal: ok, compactContext: ok,
     setAutoCompactThreshold: ok, changeModel: ok, changeReasoningEffort: ok, renameSession: ok };
   (window as any).fixture = { select: setThreadId, fail: (value: boolean) => { sendResult = !value; }, submissions: () => submissions, clear: () => { submissions = []; } };
   const taskDirectory = { projects: [{ id: 'project', name: '验证项目', conversations: [

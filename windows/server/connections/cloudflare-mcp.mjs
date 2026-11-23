@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { fromJsonSchema } from '@modelcontextprotocol/client';
+import { requestSecret } from './secret-requests.mjs';
 import { z } from 'zod';
 import { createCloudflareConnection } from './cloudflare.mjs';
 
@@ -9,6 +10,7 @@ const connection = createCloudflareConnection();
 const result = value => ({ content: [{ type: 'text', text: JSON.stringify(value) }] });
 serveStdio(() => {
   const server = new McpServer({ name: 'negus-cloudflare', version: '1.0.0' });
+  server.registerTool('request_secret_input', {description:'Open a private credential dialog in the specified Negus conversation. Describe the required credential in the user’s language using this conversation. Never include secret values.',inputSchema:z.object({thread:z.string().regex(/^[\w-]{1,128}$/),kind:z.enum(['google','resend']),label:z.string().trim().min(1).max(80).describe('Specific name of the credential'),instruction:z.string().trim().min(1).max(500).describe('Where to obtain it, what to paste, and the required format for this task')})},async({thread,kind,label,instruction})=>result(await requestSecret(thread,kind,label,instruction)));
   server.registerTool('status', { description: 'Check the shared server-side Cloudflare connection. No credentials are returned.', inputSchema: z.object({}), annotations: { readOnlyHint: true } }, async () => result(await connection.status()));
   server.registerTool('discover', { description: 'List official Cloudflare tools and their input schemas. Read these before calling a tool.', inputSchema: z.object({}), annotations: { readOnlyHint: true } }, async () => {
     try { return result(await connection.tools()); } catch (e) { return { isError: true, content: [{ type: 'text', text: e.message }] }; }

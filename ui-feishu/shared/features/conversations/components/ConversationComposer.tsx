@@ -78,8 +78,6 @@ interface ConversationComposerProps {
   goal: ThreadGoal | null;
   goalBusy: boolean;
   goalError: string;
-  goalResumePrompt: boolean;
-  onDismissGoalResumePrompt: () => void;
   onChangeGoalStatus: (status: EditableGoalStatus) => Promise<boolean>;
   onClearGoal: () => Promise<boolean>;
   onSetGoal: (objective: string, attachments?: MediaFile[]) => Promise<boolean>;
@@ -98,14 +96,14 @@ export function ConversationComposer({
   models, modelsLoading, modelChanging, modelError,
   onSend, onPrepareSend, selectedModelUnavailable, sendPreparationError, onQueue, queueing,
   editingMessage, onCancelEdit,
-  onInterrupt, onReview, goal, goalBusy, goalError, goalResumePrompt, onDismissGoalResumePrompt, onChangeGoalStatus, onClearGoal, onSetGoal, onEditGoal,
+  onInterrupt, onReview, goal, goalBusy, goalError, onChangeGoalStatus, onClearGoal, onSetGoal, onEditGoal,
   onCompactContext, onAutoCompactThresholdChange, onModelChange,
   onReasoningEffortChange,
 }: ConversationComposerProps) {
   const [text, setText] = useState("");
   const [queueNext, setQueueNext] = useState(false);
   const [quote, setQuote] = useState<MessageQuote | null>(null);
-  const [goalConfirmation, setGoalConfirmation] = useState<"replace" | "resume" | null>(null);
+  const [goalConfirmation, setGoalConfirmation] = useState(false);
   const [slash, setSlash] = useState<SlashState | null>(null);
   const [activeSlash, setActiveSlash] = useState(0);
   const [collapsedSlashGroups, setCollapsedSlashGroups] = useState<Record<string, boolean>>({});
@@ -238,8 +236,8 @@ export function ConversationComposer({
     const disabled = inputDisabled || !hasContent;
     if (disabled || submittingRef.current) return;
     const goalMatch = !editing && !quote ? text.trim().match(/^\/goal(?:\s+([\s\S]*))?$/iu) : null;
-    if (goalMatch && !confirmedGoal && goal && goal.status !== "complete") {
-      setGoalConfirmation(goalMatch[1]?.trim() ? "replace" : "resume");
+    if (goalMatch && (goalMatch[1]?.trim() || draft.attachments.length) && !confirmedGoal && goal && goal.status !== "complete") {
+      setGoalConfirmation(true);
       return;
     }
     if (goalMatch && !goalMatch[1]?.trim() && !draft.attachments.length && !goal) return;
@@ -337,14 +335,11 @@ export function ConversationComposer({
         <GoalControl goal={goal} busy={goalBusy} error={goalError}
           disabled={!connected || !selected || archived}
           onStatusChange={onChangeGoalStatus} onClear={onClearGoal} onEdit={onEditGoal} />
-        {goalResumePrompt && goal ? <GoalConfirmation kind="resume" paused={goal.status === "paused"}
-          busy={goalBusy} error={goalError} objective={goal.displayObjective || goal.objective}
-          onCancel={onDismissGoalResumePrompt}
-          onConfirm={() => { void onChangeGoalStatus("active").then((ok) => { if (ok) onDismissGoalResumePrompt(); }); }} /> : null}
         {goalConfirmation ? <GoalConfirmation
-          kind={goalConfirmation} objective={goalConfirmation === "replace" ? text.replace(/^\s*\/goal\s*/iu, "") : goal?.displayObjective || goal?.objective || ""}
-          onCancel={() => setGoalConfirmation(null)}
-          onConfirm={() => { setGoalConfirmation(null); void submit(true); }} /> : null}
+          attachmentNames={draft.attachments.map(({ file }) => file.name)}
+          objective={text.replace(/^\s*\/goal\s*/iu, "")}
+          onCancel={() => setGoalConfirmation(false)}
+          onConfirm={() => { setGoalConfirmation(false); void submit(true); }} /> : null}
       <div
         className={styles.composer}
         aria-label="Codex 对话输入"

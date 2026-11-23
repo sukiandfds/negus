@@ -1,0 +1,1 @@
+{"name":"negus-account","private":true,"type":"module","scripts":{"test":"node --test"},"dependencies":{"better-auth":"1.7.27"},"devDependencies":{"@cloudflare/vite-plugin":"^2.0.0-rc.3","cf":"^1.0.0-rc.2","vite":"^8.3.8"}}

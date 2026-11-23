@@ -49,27 +49,26 @@ export const mergeDirectoryProjects = (previous: DirectoryState['projects'], nex
 
 // Every view points to the same conversation identity and existing navigation route.
 export function buildConversationDirectory(directory: DirectoryState, sessions: ConversationState['sessions'], archived: boolean, projectRoot = '', cachedSessions?: ConversationState['cachedSessions'], archivedByThread: Record<string, boolean> = {}) {
-  sessions = sessions.map(summary => {
+  const withPreview = (summary: typeof sessions[number]) => {
     const cached = cachedSessions?.get(summary.threadId);
-    return cached ? { ...summary, cwd: summary.cwd ?? cached.cwd, createdBy: summary.createdBy ?? cached.createdBy,
-      latestMessage: summary.latestMessage || latestMessagePreview(cached.messages) || cached.latestMessage } : summary;
-  });
+    if (!cached) return summary;
+    const preview = latestMessagePreview(cached.messages);
+    const listedAt = summary.latestMessageAt || summary.updatedAt;
+    return { ...summary, cwd: summary.cwd ?? cached.cwd, createdBy: summary.createdBy ?? cached.createdBy,
+      ...(preview && (!visibleTaskPreview(summary.latestMessage) || !listedAt || Date.parse(preview.latestMessageAt || '') >= Date.parse(listedAt)) ? preview : {}) };
+  };
+  sessions = sessions.map(withPreview);
   const summaries = new Map(sessions.map(s => [s.threadId, s]));
   const activityTime = (id: string, time?: string | null) => {
     const compaction = directory.contextTimeByThread?.[id];
     return compaction && Date.parse(compaction) > (Date.parse(time || '') || 0) ? compaction : time;
   };
-  const previewFromCache = (id = '') => latestMessagePreview(cachedSessions?.get(id)?.messages);
   const toConversation = (project: DirectoryProject, entry: Entry): Conversation => {
     const listed = summaries.get(entry.threadId || '');
     const cached = cachedSessions?.get(entry.threadId || '');
-    const session = cached && (!listed || (Date.parse(cached.updatedAt) || 0) > (Date.parse(listed.updatedAt) || 0))
-      ? { ...listed, ...cached, cwd: cached.cwd ?? listed?.cwd, createdBy: cached.createdBy ?? listed?.createdBy,
-        latestMessage: listed?.latestMessage ?? cached.latestMessage } : listed;
+    const session = listed || (cached && withPreview(cached));
     const isTask = /^(task|handoff)-/.test(entry.conversationId || '');
-    const messageTime = cached ? cached.messages.filter(message => message.role === 'user' || message.role === 'assistant')
-      .map(message => message.createdAt).filter(Boolean).sort((a, b) => (Date.parse(b || '') || 0) - (Date.parse(a || '') || 0))[0] : undefined;
-    const sessionTime = messageTime || session?.updatedAt;
+    const sessionTime = session?.latestMessageAt || session?.updatedAt;
     const directoryTime = entry.latestMessageAt || (visibleTaskPreview(entry.latestMessage) ? entry.lastActivityAt : undefined);
     const directoryIsNewer = Boolean(directoryTime) && (!sessionTime || Date.parse(directoryTime!) > (Date.parse(sessionTime) || 0));
     const status = directory.statusByThread[entry.threadId || ''] || entry.status;
@@ -82,7 +81,7 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
       projectId: entry.targetProjectId || project.projectId || project.id,
       time: activityTime(entry.threadId || '', directoryIsNewer ? directoryTime : sessionTime || entry.lastActivityAt || entry.updatedAt),
       active: Boolean(status?.active), label: conversationStatus(status, directory.contextByThread[entry.threadId || '']),
-      preview: (directoryIsNewer ? visibleTaskPreview(entry.latestMessage) : '') || session?.latestMessage || previewFromCache(entry.threadId || ''), session,
+      preview: (directoryIsNewer ? visibleTaskPreview(entry.latestMessage) : '') || session?.latestMessage, session,
     };
   };
   const all: Conversation[] = [];
@@ -137,10 +136,10 @@ export function buildConversationDirectory(directory: DirectoryState, sessions: 
     if (Boolean(archivedByThread[session.threadId] ?? session.archived) !== archived) continue;
     if (session.conversationKind === 'group' || all.some(row => row.threadId === session.threadId)) continue;
     all.push({ id: session.threadId, name: session.title || '未命名对话', subtitle: '项目对话',
-      threadId: session.threadId, time: activityTime(session.threadId, cachedSessions?.get(session.threadId)?.messages.filter(message => message.role === 'user' || message.role === 'assistant').map(message => message.createdAt).filter(Boolean).sort((a, b) => Date.parse(b!) - Date.parse(a!))[0] || session.updatedAt), session,
+      threadId: session.threadId, time: activityTime(session.threadId, session.latestMessageAt || session.updatedAt), session,
       origin: session.nativeSubagent ? 'assistant' : session.createdBy || 'codex', nativeSubagent: session.nativeSubagent,
       active: Boolean(directory.statusByThread[session.threadId]?.active),
-      label: conversationStatus(directory.statusByThread[session.threadId], directory.contextByThread[session.threadId]), preview: session.latestMessage || previewFromCache(session.threadId) });
+      label: conversationStatus(directory.statusByThread[session.threadId], directory.contextByThread[session.threadId]), preview: session.latestMessage });
   }
   // Only explicit project bindings establish membership; employee membership alone is insufficient.
   for (const project of projects) {

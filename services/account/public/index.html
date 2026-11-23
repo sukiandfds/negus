@@ -1,0 +1,8 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Negus 账号</title>
+<style>body{font:16px/1.6 system-ui;max-width:24rem;margin:12vh auto;padding:1rem}input,button{font:inherit;padding:.6rem;margin:.4rem 0;width:100%;box-sizing:border-box}button{cursor:pointer}p{min-height:1.6em}</style>
+<main><h1>Negus 账号</h1><section id="guest" hidden><button data-action="google">使用 Google 登录</button>
+<form id="form"><label>邮箱<input id="email" required type="email" autocomplete="email"></label>
+<label id="codeLabel" hidden>验证码<input id="code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}"></label>
+<button id="submit">发送验证码</button></form><button data-action="reset" hidden>更换邮箱或重新发送</button><small>首次验证邮箱后会创建账号。</small></section>
+<section id="member" hidden><strong id="identity"></strong><button data-action="link">关联 Google</button><button data-action="logout">退出登录</button></section>
+<p id="notice" role="status"></p></main><script type="module" src="/account.js"></script></html>
