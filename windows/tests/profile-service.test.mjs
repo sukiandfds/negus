@@ -11,7 +11,7 @@ import {
   rejectProfileCandidate,
 } from "../server/profile-service.mjs";
 
-const COMMENT = "<!-- 助手被纠正或用户愤怒后，把教训蒸馏成一行祈使句追加到这里，格式：- 规则（日期，吐血表条目编号）。已有同义规则时不重复添加，只在原规则后补记新条目编号。本区由系统每轮自动注入，写在这里的规则对所有新对话立即生效。 -->";
+const COMMENT = "<!-- 用户批准画像候选后，把教训蒸馏成一行祈使句追加到这里，格式：- 规则（日期，吐血表条目编号）。已有同义规则时不重复添加，只在原规则后补记新条目编号。本区由系统每轮自动注入，写在这里的规则对所有新对话立即生效。 -->";
 const SCAFFOLD = `优先用简短、具体的中文汇报，称呼用户为“您”。\n\n## 纠正沉淀\n\n${COMMENT}\n`;
 
 const createRoot = async (t, profile = SCAFFOLD) => {
@@ -86,12 +86,12 @@ test("待批准候选 approve 落盘、reject 不落盘，重复处理报错", a
   assert.equal((await listProfileCandidates(root, { status: "pending" })).length, 0);
 });
 
-test("愤怒候选直接落盘，不进待批准", async (t) => {
+test("愤怒候选也须批准", async (t) => {
   const root = await createRoot(t);
   const { candidate, profile } = await addProfileCandidate(root, { rule: "同一个错误不许犯第二次", ref: "TB-007", anger: true, topicId: "topic-b", turnId: "turn-b" });
-  assert.equal(profile.status, "added");
-  assert.equal(candidate.status, "approved");
-  assert.equal(candidate.resolution, "added");
-  assert.equal((await listProfileCandidates(root, { status: "pending" })).length, 0);
+  assert.equal(profile, null);
+  assert.equal(candidate.status, "pending");
+  assert.equal((await ruleLines(root)).length, 0);
+  await approveProfileCandidate(root, candidate.id);
   assert.equal((await ruleLines(root)).length, 1);
 });

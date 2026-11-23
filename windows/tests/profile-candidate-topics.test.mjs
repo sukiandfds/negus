@@ -39,7 +39,7 @@ test("带 profileCandidate 的草稿发布后，候选进入待批准且话题�
   assert.equal(pending[0].turnId, "turn-1");
 });
 
-test("带 anger 候选的草稿发布后，规则直接写入画像", async (t) => {
+test("带 anger 候选的草稿发布后，规则等待批准", async (t) => {
   const root = await createRoot(t);
   await publish(root, "thread-2", "turn-2", [{
     title: "愤怒事件", mainline: "开发 Negus", summary: "用户愤怒，已写回。",
@@ -47,10 +47,8 @@ test("带 anger 候选的草稿发布后，规则直接写入画像", async (t) 
   }]);
   const all = await listProfileCandidates(root);
   assert.equal(all.length, 1);
-  assert.equal(all[0].status, "approved");
-  const profile = await fs.readFile(path.join(root, "USER_PROFILE.md"), "utf8");
-  assert.ok(profile.includes("- 同一个错误不许犯第二次"));
-  assert.ok(profile.includes("TB-002"));
+  assert.equal(all[0].status, "pending");
+  await assert.rejects(fs.access(path.join(root, "USER_PROFILE.md")), { code: "ENOENT" });
 });
 
 test("不带候选的旧草稿发布行为不变，也不产生候选", async (t) => {

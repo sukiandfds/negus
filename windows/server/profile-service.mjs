@@ -11,7 +11,7 @@ import { readJsonFile, writeJsonFileAtomic, writeTextFileAtomic } from "./persis
 // Nothing here touches the injection path, its keys, or its revision logic.
 export const PROFILE_LIMIT = 12000;
 const SECTION_TITLE = "## 纠正沉淀";
-const SECTION_COMMENT = "<!-- 助手被纠正或用户愤怒后，把教训蒸馏成一行祈使句追加到这里，格式：- 规则（日期，吐血表条目编号）。已有同义规则时不重复添加，只在原规则后补记新条目编号。本区由系统每轮自动注入，写在这里的规则对所有新对话立即生效。 -->";
+const SECTION_COMMENT = "<!-- 用户批准画像候选后，把教训蒸馏成一行祈使句追加到这里，格式：- 规则（日期，吐血表条目编号）。已有同义规则时不重复添加，只在原规则后补记新条目编号。本区由系统每轮自动注入，写在这里的规则对所有新对话立即生效。 -->";
 
 const profileFile = (root) => path.join(root, "USER_PROFILE.md");
 const candidatesFile = (root) => path.join(root, "runtime", "profile-candidates.json");
@@ -128,18 +128,10 @@ export const addProfileCandidate = (root, { rule, ref = "", anger = false, topic
       status: "pending",
       at: new Date().toISOString(),
     };
-    let profile = null;
-    if (candidate.anger) {
-      // Anger is the user's explicit instruction: write immediately instead of
-      // queueing. Overflow cannot be forced, so it falls back to the queue.
-      profile = await internalAppend(root, candidate);
-      if (profile.status === "overflow") candidate.note = "画像已达上限，规则未写入，转入待批准等人工处理";
-      else { candidate.status = "approved"; candidate.resolution = profile.status; }
-    }
     const rows = await readCandidates(root);
     rows.push(candidate);
     await saveCandidates(root, rows);
-    return { candidate: { ...candidate }, profile };
+    return { candidate: { ...candidate }, profile: null };
   });
 
 export const approveProfileCandidate = (root, id) => withLock(root, async () => {
