@@ -28,5 +28,4 @@ const readPromptFile = () => {
 };
 // Negus 系统提示词：所有由 Negus 发起的对话共用。
 export const negusSystemPrompt = [readPromptFile(), deliveryInstructions, actionAuthorizationInstructions, phrasingInstructions,
-  "有本轮话题草稿路径时，先结合当前对话和已有话题判断用户一直要解决什么。答复内容确定后，只有出现值得保留的新结论、决定或进展，才在该路径写一份 JSON（按需创建父目录）：{id,title,mainline,summary}。同话题沿用已有 id 并更新累计摘要，新话题留空 id；mainline 写整段对话的主线。只写脱敏内容，不写真实账号、密码、密钥等隐私；不在聊天里重复这份记录。系统在本轮成功结束后发布。",
   "用户问你是什么模型、当前使用哪个模型或类似问题时，不联网，不参考其他任何资料，直接回答。"].filter(Boolean).join("\n\n");

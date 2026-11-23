@@ -35,17 +35,17 @@ for(const width of [1440,412]){
  const keep=p.getByRole('button',{name:'保持暂停',exact:true});if(await keep.isVisible())await keep.click();
  const geometry=()=>p.locator('.chat-primary').evaluate(el=>({w:el.clientWidth,h:el.clientHeight,scroll:[...el.querySelectorAll('*')].filter(e=>e.scrollHeight>e.clientHeight&&e.scrollTop>0).map(e=>e.scrollTop)}));
  const before=await geometry();await p.getByRole('button',{name:'对话详情',exact:true}).click();const panel=p.getByRole('complementary',{name:'对话详情'});
- await panel.getByText('统一对话体验').waitFor();await panel.getByText('跨设备置顶').click();await panel.getByText('两台设备显示相同顺序').waitFor();
- await panel.getByText('user history 47',{exact:true}).click();await panel.locator('section[aria-label="本次产物"] img').first().waitFor({state:'attached'});assert.deepEqual(await geometry(),before);
+ await panel.getByText('统一对话体验').waitFor();assert.equal(await panel.getByText('user history 47',{exact:true}).count(),0);await panel.getByText('两台设备显示相同顺序').waitFor();
+ await panel.getByText('跨设备置顶',{exact:true}).click();await panel.locator('section[aria-label="本次产物"] img').first().waitFor({state:'attached'});assert.deepEqual(await geometry(),before);
  const block=panel.locator('.sp-commands').filter({hasText:'执行命令 · 3 次'});assert.equal(await block.count(),1);
  const box=block.locator('pre');assert.equal(await box.isVisible(),false);await block.locator('summary').click();
  const details=await box.innerText();assert.ok(commands.every(cmd=>details.includes(cmd)));assert.ok(details.indexOf('pwd')<details.indexOf('cat /tmp/'));
- if(process.env.PANEL_PREVIEW && width===1440){await block.locator('summary').click();await panel.getByText('user history 47',{exact:true}).click();await panel.screenshot({path:process.env.PANEL_PREVIEW});}
+ if(process.env.PANEL_PREVIEW && width===1440){await block.locator('summary').click();await panel.getByText('跨设备置顶',{exact:true}).click();await panel.screenshot({path:process.env.PANEL_PREVIEW});}
  await panel.getByRole('button',{name:'日程',exact:true}).click();await panel.getByText('本对话的日程').click();await panel.getByText('运行历史',{exact:true}).waitFor();assert.equal(await panel.getByText('其他对话的日程').count(),0);
  await panel.getByRole('button',{name:'关闭对话详情'}).click();assert.deepEqual(await geometry(),before);assert.equal(f.calls.client,0);assert.equal(f.calls.credentials,0);
  const warm=reads.length;
  await p.getByRole('button',{name:'查看助手状态',exact:true}).click();
- await panel.getByText('user history 47',{exact:true}).click();await panel.locator('section[aria-label="本次产物"] img').first().waitFor();
+ await panel.getByText('跨设备置顶',{exact:true}).click();await panel.locator('section[aria-label="本次产物"] img').first().waitFor();
  assert.equal(reads.length,warm,'重开活动、产物、任务、日程均零请求');
  const signal=(section,versions)=>p.evaluate(payload=>window.panelStream.onmessage({data:JSON.stringify(payload)}),{type:'panel_versions',section,versions,warnings:''});
  await signal('tasks',{other:'other-version'});assert.equal(reads.length,warm);
@@ -59,7 +59,7 @@ for(const width of [1440,412]){
  const reloadStart=reads.length;await p.reload();await keep.click();
  await p.getByRole('button',{name:'查看助手状态',exact:true}).click();
  await panel.getByText('独立变化日程').waitFor();await panel.getByText('独立变化任务',{exact:true}).waitFor();
- await panel.getByText('user history 47',{exact:true}).click();await panel.locator('section[aria-label="本次产物"] img').first().waitFor();
+ await panel.getByText('跨设备置顶',{exact:true}).click();await panel.locator('section[aria-label="本次产物"] img').first().waitFor();
  assert.deepEqual(reads.slice(reloadStart),[],'硬刷新后可直接恢复当前对话缓存');
  await panel.getByRole('button',{name:'关闭对话详情'}).click();
  if(width===412){

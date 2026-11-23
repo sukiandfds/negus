@@ -13,14 +13,9 @@ export async function panelHistory(files) {
         if (r.type==='turn_context' || t==='task_started') current=p.turn_id || current;
         const id=p.turn_id || p.internal_chat_message_metadata_passthrough?.turn_id || current;
         if(!id) return;
-        const turn=turns.get(id) || {id,at:r.timestamp,title:'',summary:'',state:'',steps:[]}; turns.set(id,turn);
+        const turn=turns.get(id) || {id,at:r.timestamp,state:'',steps:[]}; turns.set(id,turn);
         turn.at ||= r.timestamp;
-        if(r.type==='response_item' && t==='message'){
-          const str=(p.content||[]).filter(x=>x.type==='input_text'||x.type==='output_text').map(x=>x.text).join(' ');
-          if(p.role==='user'&&!turn.title)turn.title=str.slice(0,160);
-        }
         if(r.type==='event_msg'){
-          if(t==='user_message' && !turn.title) turn.title=String(p.message || '').slice(0,160);
           if(t==='task_complete'||t==='turn_completed') {turn.state=p.status==='failed'?'失败':'已完成';}
           if(t==='turn_aborted') turn.state='已中断';
         }
@@ -57,5 +52,5 @@ export async function panelHistory(files) {
       carry+=decode.decode();if(carry.trimEnd().endsWith('}'))consume(carry);
     } finally {await handle.close();}
   }
-  return [...turns.values()].filter(t=>t.title||t.steps.length||t.summary).reverse();
+  return [...turns.values()].filter(t=>t.steps.length).reverse();
 }

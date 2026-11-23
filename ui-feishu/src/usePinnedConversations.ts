@@ -1,19 +1,26 @@
-import { useState } from 'react';
-import { readLocalCache, writeLocalCache } from '../shared/shared/state/localCache';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+import { pinStore } from '../shared/features/project-directory/data/conversationPins';
 import { byLatest, conversationKey } from './conversationDirectory';
 import type { Conversation } from './types';
 
-const key = 'negus:feishu:pinned-conversations:v1';
 export const pinKey = (item: Conversation) => item.main && item.agentId ? `employee:${item.agentId}` : conversationKey(item);
-export const sortPinned = (items: Conversation[], pinned: ReadonlySet<string>) => [...items].sort((a, b) => Number(pinned.has(pinKey(b))) - Number(pinned.has(pinKey(a))) || byLatest(a, b));
+export const sortPinned = (items: Conversation[], times: ReadonlyMap<string, number>) => [...items].sort((a, b) =>
+  (times.get(pinKey(b)) || 0) - (times.get(pinKey(a)) || 0) || byLatest(a, b));
 export function usePinnedConversations() {
-  const [pinned, setPinned] = useState<Set<string>>(() => new Set(readLocalCache<string[]>(key, (value): value is string[] => Array.isArray(value) && value.every(id => typeof id === 'string')) || []));
-  const toggle = (item: Conversation) => setPinned(previous => {
-    const next = new Set(previous);
-    const id = pinKey(item);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    writeLocalCache(key, [...next]);
-    return next;
-  });
-  return { pinned, toggle };
+  const { times } = useSyncExternalStore(pinStore.subscribe, pinStore.get);
+  const [error, setError] = useState('');
+  const [pending, setPending] = useState(new Map<string, number>());
+  const pinned = new Map(Object.entries(times));
+  pending.forEach((time, id) => pinned.set(id, time));
+  for (const [id, time] of pinned) if (!time) pinned.delete(id);
+  useEffect(() => { void pinStore.migrate().catch(e => setError(e.message)); }, []);
+  const toggle = async (item: Conversation) => {
+    const id = pinKey(item), next = !pinned.has(id);
+    if (pending.has(id)) return;
+    setError('');
+    setPending(old => new Map(old).set(id, next ? Date.now() : 0));
+    try { await pinStore.save({ id, pinned: next }); } catch (e) { setError(String(e)); }
+    finally { setPending(old => { const rest = new Map(old); rest.delete(id); return rest; }); }
+  };
+  return { pinned, toggle, error };
 }

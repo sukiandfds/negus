@@ -1,7 +1,8 @@
+import { OccupationNotice } from "./OccupationNotice";
 import { terminalPhases } from "../../../../../windows/server/execution/protocol.mjs";
 import { executionHandoff } from "../state/executionHandoff";
 import { Fragment, type ReactNode, type Ref, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
-import { CalendarClock, Clock3, LoaderCircle, Target } from "lucide-react";
+import { CircleAlert, CalendarClock, Clock3, LoaderCircle, Target } from "lucide-react";
 import { JumpToLatest } from "../../../components/JumpToLatest/JumpToLatest";
 import type { ContentSyncState, SessionDetail, SessionMessage } from "../model/types";
 import { MessageActions } from "./MessageActions";
@@ -105,9 +106,8 @@ export function Message({
       {!executionPlaceholder ? <div className={`${styles.body} ${message.role === "user" && !message.displaySourceAgentId ? styles.userBubble : styles.assistantBody}`}>
         {!queued && message.modelSwitchState !== "switching" && message.deliveryState === "pending" ? <Clock3 className={styles.waiting} role="status" aria-label="正在确认指令是否已送达" /> : null}
         {message.modelSwitchState !== "switching" && message.deliveryState === "sending" ? <LoaderCircle className={styles.sending} role="status" aria-label="发送中" /> : null}
-        {message.role === "assistant" && message.turnStatus === "interrupted" ? <small>已中断</small> : null}
         {streaming ? <><ContentRenderer message={shown} threadId={threadId} /><i className={styles.cursor} /></> : heartbeatUser ? <CollapsedMarkdown text={heartbeatUser.instructions} /> : <ContentRenderer message={shown} threadId={threadId} />}
-        {message.deliveryState === "occupied" ? <small>Codex 占用中，未发送</small> : message.deliveryState === "failed" && message.modelSwitchState !== "failed" ? <small>{message.deliveryError || "发送失败"}</small> : null}
+        {message.deliveryState === "occupied" ? <CircleAlert className={styles.waiting} color="var(--color-danger, #e86262)" role="img" aria-label="未发送" /> : message.deliveryState === "failed" && message.modelSwitchState !== "failed" ? <small>{message.deliveryError || "发送失败"}</small> : null}
       </div> : null}
       {!executionPlaceholder ? (
         <div className={styles.actionRow}>
@@ -415,6 +415,7 @@ export function ConversationView({
                 {item.message.modelSwitch ? <ModelSwitchNotice message={item.message} /> : null}
               </Fragment>
             ))}
+            <OccupationNotice scope={session.threadId} messages={messages} />
             {queue}
           </>
         ) : null}

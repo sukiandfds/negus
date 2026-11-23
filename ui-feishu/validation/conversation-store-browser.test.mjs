@@ -254,7 +254,7 @@ try {
     await page.locator('.chat-composer > div:visible input[type=file]').setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: png });
     await send(`图片失败-${mode}`);
     const reason = mode === 'failed' ? '模拟图片发送失败' : 'already has an active writer';
-    const shownReason = mode === 'occupied' ? 'Codex 占用中，未发送' : reason;
+    const shownReason = mode === 'occupied' ? '该对话正在被 Codex 占用中' : reason;
     await page.getByText(shownReason, { exact: true }).waitFor();
     await open('b'); await page.reload(); await bubble('历史b').waitFor(); await open('a');
     await bubble(`图片失败-${mode}`).waitFor(); await page.getByText(shownReason, { exact: true }).waitFor();

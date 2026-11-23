@@ -1,3 +1,4 @@
+import { cleanUserAttachmentEnvelope, cleanStoredUserAttachments } from "./user-attachment-envelope.mjs";
 import { submissionIdOf } from "./message-identity.mjs";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -220,16 +221,6 @@ const visibleText = (blocks) => blocks
   .join("\n")
   .trim();
 
-const cleanUserAttachmentEnvelope = (blocks) => blocks.flatMap((block) => {
-  if (block.type !== "markdown") return [block];
-  const text = String(block.text || "");
-  if (!text.trimStart().startsWith("# Files mentioned by the user:")) return [block];
-  const marker = /^## My request(?: for Codex)?:\s*$/mu.exec(text);
-  if (!marker) return [block];
-  const cleaned = text.slice(marker.index + marker[0].length).trim();
-  return cleaned ? [{ ...block, text: cleaned }] : [];
-});
-
 // Normalize attachment context before Markdown parsing: document text must not
 // become user prose (or produce inline images/options in the conversation).
 const userBlocksFromContent = (content, registerMedia) => {
@@ -284,6 +275,14 @@ const typedInputs = (value, type) => {
   return items.map((item) => typeof item === "string" ? { type, path: item } : item);
 };
 
+// Protocol metadata, not tag-shaped prose, identifies Codex-generated input.
+const noticeKinds = new Set(["generic.turn_aborted", "multi_agent.subagent_notification"]);
+const visibleUserInput = (content, metadata) => {
+  const kinds = metadata?.content_item_kinds;
+  if (!Array.isArray(content) || !Array.isArray(kinds) || content.length !== kinds.length) return content;
+  return content.filter((_, index) => !noticeKinds.has(kinds[index]));
+};
+
 const isUsefulUserMessage = (text, blocks) => {
   if (!text && !blocks.some((block) => block.type !== "markdown")) return false;
   return !text.includes("<codex_delegation>") &&
@@ -321,11 +320,15 @@ export const messageFromItem = (item, registerMedia) => {
     return null;
   }
 
-  const blocks = role === "user" ? userBlocksFromContent(content, registerMedia) : assistantBlocksFromContent(content, registerMedia);
+  if (item.type === "response_item" && item.negusCopy && Array.isArray(item.negusCopy.blocks)) {
+    const { text, blocks, authorName, modelSwitch } = item.negusCopy;
+    return cleanStoredUserAttachments({ id: payload.id, itemId: payload.id, role, text, blocks, authorName, modelSwitch, phase: payload.phase });
+  }
+  const metadata = payload?.internal_chat_message_metadata_passthrough || {};
+  const blocks = role === "user" ? userBlocksFromContent(visibleUserInput(content, metadata), registerMedia) : assistantBlocksFromContent(content, registerMedia);
   const text = visibleText(blocks);
   if (role === "user" && !isUsefulUserMessage(text, blocks)) return null;
   if (!blocks.length) return null;
-  const metadata = payload?.internal_chat_message_metadata_passthrough || {};
   const itemId = item.id || payload?.id || payload?.client_id || "";
   const idSource = itemId || `${role}:${JSON.stringify(blocks)}`;
   return {
@@ -373,7 +376,7 @@ export const dedupeAssistantMediaMessages = (messages, seen = new Set()) => (Arr
 
 export const messageFromThreadItem = (item, registerMedia) => {
   if (item?.type === "userMessage") {
-    const blocks = userBlocksFromContent(item.content, registerMedia);
+    const blocks = userBlocksFromContent(visibleUserInput(item.content, item.internal_chat_message_metadata_passthrough), registerMedia);
     const text = visibleText(blocks);
     if (!isUsefulUserMessage(text, blocks)) return null;
     const submissionId = submissionIdOf(item);

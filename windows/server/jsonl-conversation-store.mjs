@@ -426,5 +426,5 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
     watcher?.close();
   };
 
-  return { listSessions, listNativeSubagents, findSession, close };
+  return { listSessions, listNativeSubagents, findSession, getSessionResumeInfo: (id, options) => findSession(id, "all", { ...options, metadataOnly: true }), close };
 };

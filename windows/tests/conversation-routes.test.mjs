@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import test from "node:test";
@@ -68,7 +69,7 @@ test("combined session view reuses ordinary/employee readers and can skip unchan
     await full.promise;
     assert.equal(full.response.status, 200);
     assert.deepEqual(JSON.parse(full.response.body), { session, context: { model: "model-a", reasoningEffort: "high" },
-      status: { phase: "working", active: true }, goal: null, queue: [{ id: "queued" }], input: null, sourceRevision: "r1", historyFormatVersion: 3 });
+      status: { phase: "working", active: true }, goal: null, queue: [{ id: "queued" }], input: null, sourceRevision: "r1", historyFormatVersion: 4 });
     const reused = invokeGet(route, `${path}&sourceRevision=r1`);
     await reused.promise;
     assert.equal(JSON.parse(reused.response.body).session, null);
@@ -144,7 +145,8 @@ test("combined ordinary and employee views check revision after slow context com
     await call.promise;
     const result = JSON.parse(call.response.body);
     assert.equal(result.refreshBody, true);
-    assert.equal(Object.hasOwn(result, 'session'), false);
+    assert.deepEqual(result.session, session);
+    assert.equal(result.sourceRevision, 'r1');
     assert.equal(Object.hasOwn(result, 'context'), false);
     assert.equal(result.goal, null);
     assert.equal(revisionReads, 2);
@@ -597,22 +599,55 @@ test("keeps an older direct binding on the generic conversation path", async () 
   assert.equal(JSON.parse(call.response.body).turnId, "legacy-turn");
 });
 
-test("copy latest delegates to the same native fork and retains explicit message branching", async () => {
- let active=false;const calls=[];
- const route=createConversationRoutes({conversations:{
-  findSession:async()=>({messages:[{turnId:"last-turn"}]}),
-  forkSession:async(...args)=>{calls.push(args);return {threadId:"branch"};}
- },execution:{getStatus:()=>({active,turnId:"last-turn"})}});
- for(const body of [{threadId:"source",latest:true},{threadId:"source",lastTurnId:"older-turn"}]){
-  const run=invokePost(route,"/api/session/fork",body);await run.promise;assert.equal(run.response.status,201);
- }
- assert.deepEqual(calls,[["source","last-turn"],["source","older-turn"]]);
- active=true;
- for(const body of [{threadId:"source",latest:true},{threadId:"source",lastTurnId:"last-turn"}]){
-  const run=invokePost(route,"/api/session/fork",body);await run.promise;assert.equal(run.response.status,409);
- }
- const run=invokePost(route,"/api/session/fork",{threadId:"source",lastTurnId:"older-turn"});
- await run.promise;assert.equal(run.response.status,201);assert.equal(calls.length,3);
+test("copy takes the complete saved history while the source is busy; message branches still enforce their boundary", async () => {
+  const calls = [];
+  const route = createConversationRoutes({ projectRoot: process.cwd(), conversations: {
+    copyHistory: async () => ({ messages: [{ role: "user", text: "first" }, { role: "assistant", text: "last" }] }),
+    createCopy: async (source, id, info) => {
+      const records = (await readFile(info.path, "utf8")).trim().split("\n").map(JSON.parse);
+      assert.equal(records[0].payload.id, id);
+      assert.deepEqual(records.slice(1).map(r => r.payload.content[0].text), ["first", "last"]);
+      calls.push(source); return { session: { threadId: "new", createdBy: "user" } };
+    },
+    forkSession: async (...args) => { calls.push(args); return { threadId: "branch" }; }
+  }, execution: { getStatus: () => ({ active: true, turnId: "last-turn" }) } });
+  const copy = invokePost(route, "/api/session/copy", { threadId: "source" });
+  await copy.promise; assert.equal(copy.response.status, 201);
+  assert.equal(JSON.parse(copy.response.body).session.createdBy, "user");
+  for (const [turn, status] of [["last-turn", 409], ["older-turn", 201]]) {
+    const run = invokePost(route, "/api/session/fork", { threadId: "source", lastTurnId: turn });
+    await run.promise; assert.equal(run.response.status, status);
+  }
+  assert.deepEqual(calls, ["source", ["source", "older-turn"]]);
+});
+
+test("a room and an employee copy use the same user-chat destination, including older room pages", async () => {
+  const binding = { conversationKind: "direct", agentId: "employee", runtimeSessionId: "main" };
+  const room = { snapshot: () => ({ room: { name: "room" } }), getMessagePage: page => ({
+    hasOlder: !page, oldestSequence: page ? 1 : 2,
+    messages: [page ? { id: "first", type: "human", authorName: "user", text: "first" }
+      : { id: "last", type: "agent", authorName: "agent", text: "last", attachments: [{ id: "doc", name: "file", url: "/api/media/doc" }] }],
+  }) };
+  const sources = [];
+  const route = createConversationRoutes({ projectRoot: process.cwd(),
+    roomDirectory: { require: () => room },
+    agentConversationStore: { resolve: () => binding, findByRuntimeSession: () => binding },
+    employeeRuntime: { supportsEmployee: () => true, ownsConversation: () => true,
+      copyHistory: async () => ({ messages: [{ role: "assistant", text: "employee history" }] }) },
+    conversations: { createCopy: async (source, _id, info) => {
+      const rows = (await readFile(info.path, "utf8")).trim().split("\n").slice(1).map(JSON.parse);
+      if (!source) {
+        assert.deepEqual(rows.map(row => row.negusCopy.text), ["first", "last"]);
+        assert.equal(rows[1].negusCopy.blocks[1].file.id, "doc");
+        assert.equal(rows[1].negusCopy.authorName, "agent");
+      } else assert.equal(rows[0].negusCopy.text, "employee history");
+      sources.push(source);
+      return { session: { threadId: "new-user-thread" } };
+    } } });
+  for (const body of [{ roomId: "room" }, { threadId: "main", conversationId: "employee-main" }]) {
+    const run = invokePost(route, "/api/session/copy", body); await run.promise; assert.equal(run.response.status, 201);
+  }
+  assert.deepEqual(sources, ["", "main"]);
 });
 
 test('task binding opens, steers and stops its own thread while leader is busy', async () => {

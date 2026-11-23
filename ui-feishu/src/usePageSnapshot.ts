@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { HttpError } from '../shared/shared/api/http';
 import type { ConversationState, DirectoryState } from './types';
 import { writeConversationSnapshot } from '../shared/features/conversations/data/conversationSnapshot';
 import { isPendingThread } from '../shared/features/conversations/model/pendingThread';
@@ -29,6 +30,15 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
   const mounted = useRef(true), generation = useRef(0);
   const controller = useRef<AbortController | null>(null);
   const [wakeVersion, wake] = useState(0);
+  useEffect(() => {
+    const resume = () => {
+      const id = live.current.conversations.selectedId;
+      if (document.visibilityState === 'visible' && store.errors.has(id) && observed.current.delete(id)) wake(v => v + 1);
+    };
+    window.addEventListener('online', resume);
+    document.addEventListener('visibilitychange', resume);
+    return () => { window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume); };
+  }, [store]);
   const revisionKey = JSON.stringify([...store.bodyRevisions]);
   const source = useMemo(() => JSON.stringify([c.sessions, c.sessions.map(item => [item.threadId, item.title, item.updatedAt]), directory.projects, revisionKey],
     (key, value) => ['updatedAt', 'lastProbeAt', 'lastEventAt', 'eventEpoch', 'eventSeq', 'durationMs'].includes(key) ? undefined : value),
@@ -63,7 +73,7 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
 
   useEffect(() => {
     // FEAT-001: finish in-flight reads; captured signatures leave newer changes pending.
-    if (running.current || !c.initialSyncReady || directory.loading) return;
+    const listReady = c.initialSyncReady && !directory.loading;
     const rows = buildConversationDirectory(directory, c.sessions, c.archivedView, c.project?.root, undefined, c.archivedByThread).all
       .filter(row => row.threadId && !row.pending && !isPendingThread(row.threadId));
     // URL/employee navigation can select a thread that has not reached the directory yet.
@@ -71,10 +81,10 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
       rows.push({ id: c.selectedId, threadId: c.selectedId, name: '', subtitle: '' });
     }
     // FEAT-001: synchronize the latest 20 conversations and the open conversation.
-    const eligible = new Set(rows.slice(0, 20).map(row => row.threadId!));
+    const eligible = new Set(rows.slice(0, listReady && !c.archivedView ? 20 : 0).map(row => row.threadId!));
     if (c.selectedId) eligible.add(c.selectedId);
     const priority = new Set(rows.slice(0, 10).map(row => row.threadId!));
-    const entries = rows.filter(row => eligible.has(row.threadId!)).map(row => {
+    const candidates = rows.filter(row => eligible.has(row.threadId!)).map(row => {
       const id = row.threadId!, revision = store.revisions.get(id) || 0;
       return { id, revision, conversationId: row.conversationId || undefined,
         signature: JSON.stringify([row.session?.sourceRevision, row.session?.messageCount, row.preview,
@@ -97,22 +107,11 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
       return JSON.stringify(projects) === JSON.stringify(previous.projects)
         && sessions.every((item, index) => item === previous.sessions[index]) ? previous : { ...previous, projects, sessions };
     });
-    if (!entries.length) {
-      initialLoading.current = false;
-      setSyncing(false);
-      const projects = mergeDirectoryProjects(shown.projects, directory.projects);
-      if (!shown.committed || JSON.stringify(projects) !== JSON.stringify(shown.projects)
-        || shown.sessions.some(item => !c.sessions.some(next => next.threadId === item.threadId))) {
-        setShown(previous => ({ ...previous, committed: true, project: c.project, projects,
-          sessions: previous.sessions.filter(item => c.sessions.some(next => next.threadId === item.threadId)) }));
-      }
-      return;
-    }
-    const synchronize = (batch: typeof entries, abort: AbortController, isCurrent: () => boolean, initial: boolean) => {
+    const synchronize = (batch: typeof candidates, abort: AbortController, isCurrent: () => boolean, initial: boolean) => {
       const pendingPriority = new Set(batch.filter(entry => entry.priority).map(entry => entry.id));
       const candidate = new Map<string, ThreadSnapshot>();
       const earlyPublished = new Set<string>();
-      const publish = (results: { entry: typeof entries[number]; error: string }[]) => {
+      const publish = (results: { entry: typeof candidates[number]; error: string }[]) => {
         if (!mounted.current || abort.signal.aborted || !isCurrent()) return;
         const good = new Set(results.filter(result => !result.error).map(result => result.entry.id));
         let changed = false;
@@ -146,11 +145,22 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
         });
         if (changed) store.notify();
       };
-      const ordered = initial ? [...batch].sort((a, b) => Number(b.id === c.selectedId) - Number(a.id === c.selectedId)) : batch;
-      return readConversationBatches(ordered, async (entry, signal) => {
+      return readConversationBatches(batch, async (entry, signal) => {
         const cached = store.committed.get(entry.id)?.session;
         const reuse = Boolean(!store.freshBodies.has(entry.id) && cached?.sourceRevision);
-        const view = await store.read(entry.id, reuse ? cached!.sourceRevision! : '', signal, entry.conversationId);
+        let view: ThreadSnapshot;
+        for (let attempt = 0; ; attempt++) {
+          try {
+            view = await store.read(entry.id, reuse ? cached!.sourceRevision! : '', signal, entry.conversationId);
+            break;
+          } catch (error) {
+            const transient = error instanceof TypeError || (error instanceof HttpError
+              && (error.status === 409 || error.status === 408 || error.status >= 500));
+            if (!transient || attempt >= 3 || signal.aborted || entry.id !== live.current.conversations.selectedId) throw error;
+            await new Promise(resolve => setTimeout(resolve, 500 * 2 ** attempt));
+            if (signal.aborted || entry.id !== live.current.conversations.selectedId) throw error;
+          }
+        }
         if (signal.aborted) return;
         candidate.set(entry.id, view);
         // FEAT-001: only the open conversation bypasses the initial batch barrier.
@@ -160,18 +170,36 @@ export function usePageSnapshot(conversations: ConversationState, directory: Dir
         }
       }, results => publish(results.filter(result => !earlyPublished.has(result.entry.id))), abort.signal, 10000, batch.filter(entry => entry.priority).length);
     };
+    const start = (entry: typeof candidates[number]) => {
+      if (independentReads.current.has(entry.id)) return;
+      const read = { abort: new AbortController() };
+      independentReads.current.set(entry.id, read);
+      void synchronize([entry], read.abort, () => independentReads.current.get(entry.id) === read, false).finally(() => {
+        if (independentReads.current.get(entry.id) !== read) return;
+        independentReads.current.delete(entry.id);
+        if (mounted.current) wake(value => value + 1);
+      });
+    };
+    const selected = candidates.find(entry => entry.id === c.selectedId);
+    if (selected) start(selected);
+    if (!listReady || running.current) return;
+    const entries = candidates.filter(entry => !independentReads.current.has(entry.id));
+    if (!entries.length) {
+      initialLoading.current = false;
+      setSyncing(false);
+      const projects = mergeDirectoryProjects(shown.projects, directory.projects);
+      if (!shown.committed || JSON.stringify(projects) !== JSON.stringify(shown.projects)
+        || shown.sessions.some(item => !c.sessions.some(next => next.threadId === item.threadId))) {
+        setShown(previous => ({ ...previous, committed: true, project: c.project, projects,
+          sessions: previous.sessions.filter(item => c.sessions.some(next => next.threadId === item.threadId)) }));
+      }
+      return;
+    }
     if (!initialLoading.current) {
       setSyncing(false);
       for (const entry of entries) {
-        if (independentReads.current.has(entry.id)) continue;
         if (independentReads.current.size >= 4) break;
-        const read = { abort: new AbortController() };
-        independentReads.current.set(entry.id, read);
-        void synchronize([entry], read.abort, () => independentReads.current.get(entry.id) === read, false).finally(() => {
-          if (independentReads.current.get(entry.id) !== read) return;
-          independentReads.current.delete(entry.id);
-          if (mounted.current) wake(value => value + 1);
-        });
+        start(entry);
       }
       return;
     }

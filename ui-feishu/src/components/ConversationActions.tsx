@@ -1,6 +1,7 @@
 import { Archive, ArchiveRestore, Copy, Forward, MoreHorizontal, Pencil, Pin, PinOff, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { resolveConversationId } from "../../shared/shared/api/conversationScope";
 import { fetchJson, postJson } from "../../shared/shared/api/http";
 import { useDismissibleLayer } from "../../shared/shared/hooks/useDismissibleLayer";
 import type { SessionSummary } from "../../shared/features/conversations/model/types";
@@ -9,11 +10,11 @@ import styles from "../../shared/features/conversations/components/ConversationA
 import { copyWithFallback } from "../../shared/features/conversations/components/MessageActions";
 
 type Target = { threadId: string; title: string; projectName: string; employeeId: string; conversationId: string };
-type Props = { conversationId?: string; copyId?: string; session: SessionSummary; archived: boolean; disabled: boolean; onArchive: () => void; className: string; pinned?: boolean; onTogglePin?: () => void; pinOnly?: boolean; onRename?: (name: string) => Promise<void>; showForward?: boolean; showCopy?: boolean; showArchive?: boolean; unavailableForward?: boolean; unavailableCopy?: boolean };
-export function ConversationActions({ conversationId, copyId, session, archived, disabled, onArchive, className, pinned, onTogglePin, pinOnly, onRename, showForward = true, showCopy = true, showArchive = true, unavailableForward = false, unavailableCopy = false }: Props) {
+type Props = { conversationId?: string; copyId?: string; session: SessionSummary; archived: boolean; disabled: boolean; onArchive: () => void; className: string; pinned?: boolean; onTogglePin?: () => void; pinOnly?: boolean; onRename?: (name: string) => Promise<void>; showForward?: boolean; showCopy?: boolean; showArchive?: boolean; unavailableForward?: boolean; };
+export function ConversationActions({ conversationId, copyId, session, archived, disabled, onArchive, className, pinned, onTogglePin, pinOnly, onRename, showForward = true, showCopy = true, showArchive = true, unavailableForward = false }: Props) {
   const [idCopied, setIdCopied] = useState(false);
   const [menu, setMenu] = useState(false);
-  const [dialog, setDialog] = useState<"forward" | "rename" | "">("");
+  const [dialog, setDialog] = useState<"forward" | "rename" | "copy" | "">("");
   const [name, setName] = useState("");
   const [targets, setTargets] = useState<Target[]>([]);
   const [target, setTarget] = useState("");
@@ -68,14 +69,15 @@ export function ConversationActions({ conversationId, copyId, session, archived,
     if (busy) return;
     setBusy(true); setError("");
     try {
-      const conversationId = await sourceConversationId();
-      const result = await postJson<{ session: SessionSummary }>("/api/session/fork", {
-        threadId: session.threadId, conversationId, latest: true,
+      const sourceId = copyId ? undefined : conversationId || await resolveConversationId(session.threadId);
+      const result = await postJson<{ session: SessionSummary }>("/api/session/copy", {
+        threadId: session.threadId, conversationId: sourceId, roomId: copyId, title: session.title,
       });
       const url = new URL(window.location.href);
-      for (const key of ["conversation", "employee", "employeeId", "agent", "archived"]) url.searchParams.delete(key);
+      for (const key of ["roomId", "conversation", "employee", "employeeId", "agent", "archived", "managerProjectId", "managerProjectTitle", "managerProjectPhase", "managerProjectGoal"]) url.searchParams.delete(key);
       url.searchParams.set("thread", result.session.threadId);
       url.searchParams.set("view", "conversation");
+      setDialog("");
       window.history.pushState(null, "", url.toString());
       window.dispatchEvent(new Event("negus:navigate"));
       setMenu(false);
@@ -114,15 +116,20 @@ export function ConversationActions({ conversationId, copyId, session, archived,
         setMenu(false); setName(session.title); setError(""); setDialog("rename");
       }}><Pencil />重命名</button>
       {showForward && <button role="menuitem" disabled={busy} onClick={() => unavailableForward ? setError("暂不支持") : void openForward()}><Forward />转发</button>}
-      {showCopy && <button role="menuitem" disabled={busy || (!unavailableCopy && archived)} onClick={() => unavailableCopy ? setError("暂不支持") : void copy()}><Copy />{busy ? "复制中…" : "复制"}</button>}
+      {showCopy && <button role="menuitem" disabled={busy} onClick={() => { setMenu(false); setError(""); setDialog("copy"); }}><Copy />{busy ? "复制中…" : "复制"}</button>}
       {showArchive && <button role="menuitem" disabled={busy} onClick={() => { setMenu(false); onArchive(); }}>{archived ? <ArchiveRestore /> : <Archive />}{archived ? "恢复" : "归档"}</button>}
       </>}
       {error && !dialog ? <p role="alert" className={styles.error}>{error}</p> : null}
     </div>, document.body)}
-    {dialog && createPortal(<dialog ref={dialogElement} className={styles.dialog} aria-label={dialog === "rename" ? "重命名对话" : "转发对话"}
+    {dialog && createPortal(<dialog ref={dialogElement} className={styles.dialog} aria-label={dialog === "copy" ? "复制对话" : dialog === "rename" ? "重命名对话" : "转发对话"}
       onCancel={e => { e.preventDefault(); close(); }}>
-      <header><strong>{dialog === "rename" ? "重命名对话" : "转发对话"}</strong><button aria-label="关闭" disabled={busy} onClick={close}><X /></button></header>
-      {dialog === "rename" ? <form onSubmit={e => { e.preventDefault(); void rename(); }}>
+      <header><strong>{dialog === "copy" ? "复制对话" : dialog === "rename" ? "重命名对话" : "转发对话"}</strong><button aria-label="关闭" disabled={busy} onClick={close}><X /></button></header>
+      {dialog === "copy" ? <>
+        <p>将「{session.title}」复制为您创建的 Negus 对话，原对话保留。</p>
+        {error && <p role="alert" className={styles.error}>{error}</p>}
+        <footer><button disabled={busy} onClick={() => void copy()}>{busy ? "创建中…" : "创建"}</button>
+          <button autoFocus disabled={busy} onClick={close}>取消</button></footer>
+      </> : dialog === "rename" ? <form onSubmit={e => { e.preventDefault(); void rename(); }}>
         <label>对话名称<input autoFocus aria-label="对话名称" value={name} maxLength={120} disabled={busy}
           onFocus={e => e.currentTarget.select()} onChange={e => { setName(e.target.value); setError(""); }} /></label>
         {error ? <p role="alert" className={styles.error}>{error}</p> : null}

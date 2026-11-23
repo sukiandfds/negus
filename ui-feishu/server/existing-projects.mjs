@@ -43,7 +43,7 @@ export function combineConversations(current, previous, previousIds) {
       const owner = select(id);
       const value = await owner[method](id, ...args);
       if (owner === previous) {
-        const createdId = method === 'createFromProvider' ? value?.session?.threadId : method === 'forkSession' ? value?.threadId : '';
+        const createdId = ['createFromProvider', 'createCopy'].includes(method) ? value?.session?.threadId : method === 'forkSession' ? value?.threadId : '';
         if (createdId) previousIds.add(createdId);
       }
       return value;
@@ -81,7 +81,7 @@ export async function withExistingConversations(current, options) {
     for (const [id, route] of Object.entries(savedRoutes)) {
       const session = sessions.get(id) || route.summary;
       if (!session || Boolean(session.archived) !== Boolean(args[1])) continue;
-      sessions.set(id, { ...session, title: route.manualTitle || session.title,
+      sessions.set(id, { ...session, title: route.manualTitle || session.title, createdBy: route.createdBy || session.createdBy,
         cwd: session.cwd || route.resumeInfo?.cwd,
         modelProviderId: route.pendingProviderId || route.providerId || 'current' });
     }

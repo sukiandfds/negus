@@ -48,6 +48,7 @@ export const createEmployeeRuntimeService = ({
   registry,
   conversationStore,
   readHistory,
+  readSavedHistory = readHistory,
   readRuntimeContext,
   readRevision,
   projectRoot,
@@ -1250,6 +1251,13 @@ export const createEmployeeRuntimeService = ({
     hasPendingWork: () => openPromises.size > 0 || sendLocks.size > 0 || [...statuses.values()].some((status) => status.active),
     open: sessionFor,
     readSession,
+    copyHistory: async employeeId => {
+      const employee = registry.require(employeeId);
+      const history = await readSavedHistory(routeForEmployee(employee).modelProviderId, nativeThreadId(employee), "all", { metadataOnly: true });
+      if (history) return history;
+      const binding = conversationStore.findByAgentKind(employeeId, "direct");
+      return { cwd: employee.projectRoot, messages: await conversationStore.readMessages(binding.conversationId) };
+    },
     getSourceRevision: (threadId) => {
       const employee = registry.require(threadEmployees.get(threadId));
       return readRevision(routeForEmployee(employee).modelProviderId, nativeThreadId(employee));

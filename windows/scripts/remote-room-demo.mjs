@@ -187,7 +187,7 @@ const appServerConversations = createProviderConversationStore({
   historyFor: id => ({
     findSession: localFiles(id).findSession,
     listNativeSubagents: localFiles(id).listNativeSubagents,
-    getSessionResumeInfo: (threadId, options) => localFiles(id).findSession(threadId, 'all', { ...options, metadataOnly: true }),
+    getSessionResumeInfo: localFiles(id).getSessionResumeInfo,
     listSessions: async (source, archived = false) => currentConversations.summarizeThreads(
       await readLocalThreadIndex(homeFor(id), projectRoots, archived), source, archived),
   }),
@@ -453,6 +453,7 @@ agentTasks = await extendEmployeeTasks(agentTasks, {
     });
 employeeRuntime = createEmployeeRuntimeService({
   readHistory: appServerConversations.findSessionForProvider,
+  readSavedHistory: (id, ...args) => localFiles(id).findSession(...args),
   readRuntimeContext: appServerConversations.getRuntimeContextForProvider,
   readRevision: appServerConversations.getSourceRevisionForProvider,
   registerSession: appServerConversations.registerSession,

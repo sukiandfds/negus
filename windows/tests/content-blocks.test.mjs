@@ -166,3 +166,33 @@ test("native user receipt retains the submission id used by the send API", () =>
   const message = messageFromThreadItem({ id: "native-user", type: "userMessage", clientUserMessageId: "submission-1", content: [{ type: "text", text: "hello" }] }, registerMedia);
   assert.equal(message.submissionId, "submission-1");
 });
+
+test("user attachment envelopes hide paired image metadata and preserve literal examples", () => {
+  const start = '<image name=[Image #1] path="/uploads/photo.png">';
+  const text = value => ({ type: "input_text", text: value });
+  const image = { type: "input_image", image_url: "data:image/png;base64,AAAA" };
+  const content = [text(start), text("我的 /uploads/photo.png"), text(start), image, text("</image>")];
+  const payload = { type: "message", role: "user", content };
+  const oldBlocks = blocksFromContent(content, registerMedia);
+  for (const message of [
+    messageFromItem({ type: "response_item", payload }, registerMedia),
+    messageFromThreadItem({ type: "userMessage", content }, registerMedia),
+    messageFromItem({ type: "response_item", payload, negusCopy: { blocks: oldBlocks, text: oldBlocks.filter(b => b.type === "markdown").map(b => b.text).join("\n") } }, registerMedia),
+  ]) {
+    assert.equal(message.text, start + "\n我的 /uploads/photo.png");
+    assert.deepEqual(message.blocks.map(b => b.type), ["markdown", "markdown", "image"]);
+  }
+});
+
+test("Codex system notices are context, not user messages; identically worded user input survives", () => {
+  for (const [kind, tag] of [["generic.turn_aborted", "turn_aborted"], ["multi_agent.subagent_notification", "subagent_notification"]]) {
+    const text = '<' + tag + '>example</' + tag + '>';
+    const entry = { type: "input_text", text };
+    const parse = (content, kinds) => messageFromItem({ type: "response_item", payload: {
+      type: "message", role: "user", content, internal_chat_message_metadata_passthrough: { content_item_kinds: kinds },
+    } }, registerMedia);
+    assert.equal(parse([entry], [kind]), null);
+    assert.equal(parse([entry], ["user.text"]).text, text);
+    assert.equal(parse([entry, entry], [kind, "user.text"]).text, text);
+  }
+});

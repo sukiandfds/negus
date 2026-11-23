@@ -1,3 +1,5 @@
+import { isOccupied, occupationNotices } from "./occupation";
+
 export class HttpError extends Error {
   constructor(message: string, public readonly status: number) {
     super(message);
@@ -52,6 +54,9 @@ const requestJson = async <T,>(pathname: string, {
   errorMessage = "请求失败",
   requireJsonContentType = method === "GET",
 }: JsonRequestOptions = {}): Promise<T> => {
+  const scope = body as { threadId?: string; roomId?: string } | undefined;
+  const locationParams = new URLSearchParams(window.location.search);
+  const requestScope = scope?.threadId || scope?.roomId || new URL(pathname, window.location.href).searchParams.get("threadId") || locationParams.get("roomId") || locationParams.get("thread") || "";
   const response = await fetch(withAccessToken(pathname), {
     method,
     cache: "no-store",
@@ -62,6 +67,7 @@ const requestJson = async <T,>(pathname: string, {
     signal,
   });
   const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+  if (typeof payload?.error === "string" && isOccupied(payload.error)) occupationNotices.report(requestScope);
   if (!response.ok) {
     if (method === "GET" && response.status === 401) throw new HttpError("访问令牌无效，请使用启动命令输出的完整链接", response.status);
     if (method === "GET" && response.status === 404) throw new HttpError("请求的项目会话不存在", response.status);

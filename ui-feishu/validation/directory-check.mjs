@@ -39,7 +39,7 @@ const { buildConversationDirectory, buildTaskSections, sortPinned, pinKey } = aw
   assert.equal(sections[2].items[0].conversationId, 'main-binding');
   assert.match(sections[2].items[0].preview, /每天 09:00.*已暂停/);
   assert.equal(buildTaskSections([{ ...task, category: 'completed' }], [], result.all)[0].items.length, 0);
-  assert.equal(sortPinned(result.all, new Set(['employee:researcher']))[0].threadId, 'main');
-  assert.equal(sortPinned(result.all, new Set(['ordinary']))[0].threadId, 'ordinary');
+  assert.equal(sortPinned(result.all, new Map([['employee:researcher', 1]]))[0].threadId, 'main');
+  assert.equal(sortPinned(result.all, new Map([['ordinary', 1]]))[0].threadId, 'ordinary');
   assert.equal(pinKey({ main: true, agentId: 'researcher', threadId: 'new-main' }), 'employee:researcher');
   console.log('PASS: deduplication, update sorting, employee/project identity, no fabricated group, immutable input, archive view, goal and scheduled task routes.');

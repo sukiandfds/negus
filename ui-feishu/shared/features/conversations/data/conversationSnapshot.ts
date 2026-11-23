@@ -1,3 +1,4 @@
+import { cleanStoredUserAttachments } from "../../../../../windows/server/user-attachment-envelope.mjs";
 import { isOptimisticId } from "../../../../../windows/server/message-identity.mjs";
 import type { ConversationPresentation, SessionDetail, SessionSummary } from "../model/types";
 import { readStorage, writeStorage } from "../../../shared/state/storage";
@@ -42,18 +43,19 @@ const validSnapshot = (value: ConversationSnapshot | null): ConversationSnapshot
     : [];
   // Refetch only snapshots affected by the old attachment-as-prose parser.
   // Keep selection/list state and unrelated cached conversations intact.
-  const hasLegacyAttachmentText = (session: SessionDetail) => session.messages.some((message) =>
-    message.role === "user" && message.text?.includes("[附件正文：") && message.text.includes("[附件正文结束]"));
+  const needsHistoryReread = (session: SessionDetail) => session.messages.some((message) =>
+    message.role === "user" && ((message.text?.includes("[附件正文：") && message.text.includes("[附件正文结束]"))
+      || ((session.historyFormatVersion ?? 0) < 4 && /^<(?:turn_aborted|subagent_notification)>/.test(message.text || ""))));
   const sanitized = new Set<string>();
   const cleanSession = (session: SessionDetail) => {
-    const messages = session.messages.filter(message => !message.id.startsWith("stream-")
+    const messages = session.messages.map(cleanStoredUserAttachments).filter(message => !message.id.startsWith("stream-")
       && (!isOptimisticId(message.id) || message.deliveryState === "failed" || message.deliveryState === "occupied"));
-    if (messages.length === session.messages.length && !messages.some(message => isOptimisticId(message.id))) return session;
+    if (messages.length === session.messages.length && !messages.some(message => isOptimisticId(message.id))) return messages.some((m, i) => m !== session.messages[i]) ? { ...session, messages } : session;
     sanitized.add(session.threadId);
     return { ...session, messages, sourceSignature: undefined };
   };
-  const session = value.session && !hasLegacyAttachmentText(value.session) ? cleanSession(value.session) : null;
-  const recent = recentSessions.filter((entry) => !hasLegacyAttachmentText(entry.session)).map(entry => {
+  const session = value.session && !needsHistoryReread(value.session) ? cleanSession(value.session) : null;
+  const recent = recentSessions.filter((entry) => !needsHistoryReread(entry.session)).map(entry => {
     const session = cleanSession(entry.session);
     return { ...entry, session, isPartial: Boolean(entry.isPartial || sanitized.has(session.threadId)) };
   });

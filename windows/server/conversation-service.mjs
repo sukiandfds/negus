@@ -184,6 +184,13 @@ export const createConversationService = ({ primary, fallback, contentVersionSto
     createSession: (...args) => primary.createSession(...args),
     renameSession: (...args) => primary.renameSession(...args),
     findSession,
+    createCopy: (_ownerId, id, copySource) => primary.createFromProvider(id, "", { copySource }),
+    copyHistory: async id => {
+      const history = await primary.getCopySource(id);
+      const messages = await supplementalMessages?.list(id) || [];
+      if (!history && !messages.length) return findSession(id, "all", {});
+      return { ...history, title: history?.name, messages };
+    },
     getPanelHistoryInfo: id => primary.getPanelHistoryInfo(id),
     getSourceRevision: async (threadId) => {
       if (supplementalMessages && (await supplementalMessages.list(threadId)).length) return null;

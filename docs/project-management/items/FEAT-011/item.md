@@ -50,3 +50,7 @@ related: [FEAT-001]
 - `web-ui/src/features/usage-monitor/`
 - `windows/server/fusheng-usage-service.mjs`
 - `windows/tests/fusheng-usage-service.test.mjs`
+
+2026-11-23 入口迁移：用户要求「下方‘配置’旁边，加一个小图标，点击就查看今天花了多少额度的那个面板」。现有账户用量面板移到输入框模型设置，移除对话详情中原入口。
+
+钱包面板提供「更新账户令牌」入口与「保存账户令牌」按钮；保存成功立即刷新当日额度。

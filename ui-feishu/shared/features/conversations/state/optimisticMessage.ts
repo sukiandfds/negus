@@ -1,3 +1,4 @@
+import { isOccupied } from "../../../shared/api/occupation";
 import { optimisticMessageId } from "../../../../../windows/server/message-identity.mjs";
 import type { MediaFile } from "../../../shared/model/media";
 import type { FollowUpQueueItem } from "../model/followUpQueue";
@@ -46,6 +47,6 @@ export function queuedTranscriptMessage(item: FollowUpQueueItem, dispatchedId?: 
 
 // A receipt updates the existing row; the caller owns its storage and retry policy.
 export function deliveryPatch(state: SessionMessage["deliveryState"], error?: string, turnId?: string) {
-  const deliveryState = state === "failed" && /active writer/iu.test(error || "") ? "occupied" as const : state;
+  const deliveryState = state === "failed" && isOccupied(error) ? "occupied" as const : state;
   return { deliveryState, deliveryError: error, ...(turnId ? { turnId } : {}) };
 }

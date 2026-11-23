@@ -436,7 +436,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       if (!task && binding?.conversationKind !== 'task') {
         const existing = original.runtimeOptions(thread);
         if (existing || original.ownsThread(thread.id) || registry.list().some(employee => employee.mainThreadId === thread.id)) return existing;
-        return { resume: { ...executionPolicy, config: tools.config(ordinaryScope(thread.id)) },
+        return { ordinaryConversation: true, resume: { ...executionPolicy, config: tools.config(ordinaryScope(thread.id)) },
           turn: { ...turnExecutionPolicy } };
       }
       if (!task && original.ownsThread(thread.id)) return original.runtimeOptions(thread);

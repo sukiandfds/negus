@@ -102,7 +102,7 @@ export const createConversationRoutes = ({
     return agentTasks?.decorateConversationSession?.(threadId, session) ?? session;
   };
 
-  const context = { conversations, execution, followUpQueue, contextManagement, media, submissionStore, publishThreadEvent, agentConversationStore, employeeRuntime, roomDirectory, modelProviders, agentTasks, authorizeAgentThread, isEmployeeDirectBinding, sessionSource, readAgentSession, readOrdinarySession, publicUserInputRequest, publicAttachment };
+  const context = { projectRoot, conversations, execution, followUpQueue, contextManagement, media, submissionStore, publishThreadEvent, agentConversationStore, employeeRuntime, roomDirectory, modelProviders, agentTasks, authorizeAgentThread, isEmployeeDirectBinding, sessionSource, readAgentSession, readOrdinarySession, publicUserInputRequest, publicAttachment };
   const routes = [
     statusPanelRoute({ projectRoot, conversations, agentTasks, readAutomations, authorizeAgentThread }),
     createConversationMessageRoutes(context),

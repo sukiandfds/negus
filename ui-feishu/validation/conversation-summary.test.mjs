@@ -926,3 +926,30 @@ test('late detail completion preserves newer remote goal, queue and input withou
     assert.equal(store.dirty.has(id), false);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('reopening cached image history removes only the envelope without a fetch', () => {
+  storage.clear();
+  const detail = session('cached-image', 'old', '10');
+  const start = '<image name=[Image #1] path="/uploads/photo.png">';
+  const text = value => ({ type: 'markdown', text: value });
+  detail.messages = [{ id: 'old', role: 'user', text: '说明\n' + start + '\n</image>', blocks: [
+    text('说明'), text(start), { type: 'image', source: '/api/media/1' }, text('</image>'),
+  ] }];
+  writeConversationSnapshot({ selectedId: detail.threadId, sessions: [detail], session: detail });
+  window.location.search = '?thread=cached-image';
+  const [message] = readInitialConversationState().session.messages;
+  assert.equal(message.text, '说明');
+  assert.deepEqual(message.blocks.map(b => b.type), ['markdown', 'image']);
+});
+
+test('old cached notification bubbles reread the source; verified user quotations remain cached', () => {
+  storage.clear();
+  const detail = session('notice-cache', 'old', '10');
+  detail.messages = [{ id: 'u', role: 'user', text: '<turn_aborted>example</turn_aborted>' }];
+  window.location.search = '?thread=notice-cache';
+  for (const version of [3, 4]) {
+    const record = { ...detail, historyFormatVersion: version };
+    writeConversationSnapshot({ selectedId: detail.threadId, sessions: [detail], session: record });
+    assert.equal(Boolean(readInitialConversationState().session), version === 4);
+  }
+});

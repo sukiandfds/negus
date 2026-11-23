@@ -770,7 +770,7 @@ export const createAppServerConversationStore = ({
     const thread = await getThread(threadId);
     const belongsToProject = isAllowedProjectRoot(thread?.cwd);
     let runtimeOptions = await threadRuntimeOptions(thread);
-    const managed = Boolean(runtimeOptions);
+    const managed = Boolean(runtimeOptions && !runtimeOptions.ordinaryConversation);
     if (!belongsToProject && !runtimeOptions) throw foreignThreadError();
     if (belongsToProject && !runtimeOptions) {
       let permissions = {};

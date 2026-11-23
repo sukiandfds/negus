@@ -303,6 +303,14 @@ export const createProviderConversationStore = ({ current, providers, createStor
     return (await historyFor(owner(id))).getSessionResumeInfo(id, { readOnly: true, historyFile: routes[id]?.resumeInfo?.path });
   };
   service.getPanelHistoryInfo = historyInfo;
+  service.getCopySource = async id => {
+    const history = await historyInfo(id);
+    if (history) return history;
+    // A newly registered thread has a title and project before its first persisted message.
+    const route = routes[id];
+    return route?.summary && readyStores.get(owner(id))?.isFreshSession?.(id)
+      ? { cwd: route.summary.cwd, name: route.manualTitle || route.summary.title, paths: [] } : null;
+  };
   service.findSession = async (id, source, options = {}) => {
     await routesLoaded;
     return decorate(await (await historyFor(owner(id))).findSession(id, source, { ...options, ...(routes[id]?.resumeInfo?.path ? { historyFile: routes[id].resumeInfo.path } : {}) }));
@@ -483,14 +491,15 @@ export const createProviderConversationStore = ({ current, providers, createStor
     return registerSession({ ...result, forkedFromId: id }, providerId,
       providerId !== 'current' && model && !model.includes('::') ? `${providerId}::${model}` : model);
   };
-  service.createFromProvider = async (id, model, { reasoningEffort = "" } = {}) => {
+  service.createFromProvider = async (id, model, { reasoningEffort = "", copySource } = {}) => {
     await ready();
     if (!isReasoningEffort(reasoningEffort)) throw new Error("无效的思考等级");
-    const target = providers.resolveRoute({ model });
+    const target = copySource ? await backgroundTaskRoute(providers) : providers.resolveRoute({ model });
+    if (copySource) reasoningEffort = target.reasoningEffort || "";
     if (!await providerConfigured(target.modelProviderId)) throw new Error('配置 Key 尚未配置');
     const sourceProviderId = owner(id);
-    let info = null;
-    if (await providerConfigured(sourceProviderId)) {
+    let info = copySource;
+    if (!info && await providerConfigured(sourceProviderId)) {
       const source = await storeFor(sourceProviderId);
       info = await source.getSessionResumeInfo(id, { readOnly: true, historyFile: routes[id]?.resumeInfo?.path }).catch(() => null);
       if (info?.path) info = { ...info, path: await latestRolloutFile(info.path) };
@@ -499,7 +508,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
     if (!info?.path) throw Object.assign(new Error("找不到原对话记录，未创建新对话"), { statusCode: 409 });
     const threadId = randomUUID();
     const sourceTitle = routes[id]?.manualTitle || info.summary?.title || routes[id]?.summary?.title || "对话";
-    const title = `${sourceTitle} · ${target.provider?.displayName || target.modelProviderId}`;
+    const title = copySource ? sourceTitle : `${sourceTitle} · ${target.provider?.displayName || target.modelProviderId}`;
     let targetStore = null;
     let destination = null;
     try {
@@ -512,7 +521,7 @@ export const createProviderConversationStore = ({ current, providers, createStor
         model: effectiveModel, reasoningEffort,
       });
       await targetStore.resumeProviderSession(threadId, {
-        ...destination, cwd: info.cwd, model: effectiveModel,
+        ...destination, cwd: info.cwd, model: effectiveModel, ...(copySource ? { strictPath: true } : {}),
         modelProvider: target.modelProviderId === 'current' ? undefined : target.modelProviderId,
         reasoningEffort,
       });
@@ -521,11 +530,11 @@ export const createProviderConversationStore = ({ current, providers, createStor
       const registeredModel = target.modelProviderId === 'current' ? effectiveModel : `${target.modelProviderId}::${effectiveModel}`;
       const session = await registerSession({
         ...info.summary, threadId, title, cwd: info.cwd, source: "codex", archived: false,
-        updatedAt: new Date().toISOString(), model: effectiveModel, forkedFromId: id,
+        updatedAt: new Date().toISOString(), model: effectiveModel, forkedFromId: copySource ? null : id,
       }, target.modelProviderId, registeredModel,
       { createdBy: "user", manualTitle: title, reasoningEffort,
-        lastSuccessfulSettings: (await service.getRuntimeContext(id)).lastSuccessfulSettings, activeModel: effectiveModel, runtimeModel: effectiveModel,
-        crossProviderCopyFrom: id,
+        lastSuccessfulSettings: copySource ? null : (await service.getRuntimeContext(id)).lastSuccessfulSettings, activeModel: effectiveModel, runtimeModel: effectiveModel,
+        ...(copySource ? {} : { crossProviderCopyFrom: id }),
         resumeInfo: { ...destination, model: effectiveModel, reasoningEffort } });
       return { session, sourceThreadId: id, model: session.model || registeredModel, modelProvider: target.modelProviderId, reasoningEffort };
     } catch (error) {

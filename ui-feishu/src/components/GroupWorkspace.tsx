@@ -12,6 +12,7 @@ import { createClientId } from '../../shared/shared/id/clientId';
 import { conversationKey } from '../conversationDirectory';
 import type { ChatRoom } from '../useGroupChats';
 import type { Conversation } from '../types';
+import { OccupationNotice } from '../../shared/features/conversations/components/OccupationNotice';
 import { ChatHeader } from './ChatHeader';
 
 const feishuGroupComposerCopy: Partial<GroupComposerCopy> = {
@@ -157,7 +158,7 @@ export function GroupWorkspace({ room, projectName, forwardTargets = [], onOpenT
     {renameError ? <p className="list-error" role="alert">{renameError}</p> : null}
     <div className="chat-content-row">
       <div className="chat-primary">
-        {snapshot ? <><div className="chat-messages"><MessageTimeline active={true} roomId={room.id} messages={snapshot.messages} currentMemberId={group.member?.id || ''} streaming={group.streaming} localSendVersion={sent} history={snapshot.history} historyLoading={group.historyLoading} historyNavigation={group.historyNavigation} focusRequest={group.focusRequest} onLoadOlder={group.loadOlder} onLoadNewer={group.loadNewer} onReturnToLatest={group.returnToLatest} onQuote={message => setQuote({ id: message.id, authorName: message.authorName, text: message.text.slice(0, 160), sequence: message.sequence })} onEdit={message => { setEditingMessage(message); setQuote(null); }} editingMessageId={editingMessage?.id || ''} selectedMessages={selectedIds} onSelectMessage={toggleSelection} onRetry={group.retry} retryingMessageId={group.retryingMessageId} unseenLiveCount={group.unseenLiveCount} /></div>
+        {snapshot ? <><div className="chat-messages"><MessageTimeline active={true} roomId={room.id} messages={snapshot.messages} currentMemberId={group.member?.id || ''} streaming={group.streaming} localSendVersion={sent} history={snapshot.history} historyLoading={group.historyLoading} historyNavigation={group.historyNavigation} focusRequest={group.focusRequest} onLoadOlder={group.loadOlder} onLoadNewer={group.loadNewer} onReturnToLatest={group.returnToLatest} onQuote={message => setQuote({ id: message.id, authorName: message.authorName, text: message.text.slice(0, 160), sequence: message.sequence })} onEdit={message => { setEditingMessage(message); setQuote(null); }} editingMessageId={editingMessage?.id || ''} selectedMessages={selectedIds} onSelectMessage={toggleSelection} onRetry={group.retry} retryingMessageId={group.retryingMessageId} unseenLiveCount={group.unseenLiveCount} /><OccupationNotice scope={room.id} /></div>
           <div className="chat-composer">
             {selectedIds ? <MessageSelectionBar selectedCount={selectedIds.size} onForward={() => { setForwardError(''); setForwardDialog(true); }} onCancel={() => setSelection(null)} /> : null}
             <GroupComposer copy={feishuGroupComposerCopy} disabled={group.sending} busy={snapshot.agents.some(agent => agent.active)} error={group.error} notice={group.notice} quote={quote} editingMessage={editingMessage}

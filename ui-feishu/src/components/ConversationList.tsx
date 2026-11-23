@@ -23,7 +23,7 @@ type Props = {
   onRefresh: () => void;
   onCreate: () => void;
   onCreateGroup: () => void;
-  pinned: ReadonlySet<string>;
+  pinned: Pick<ReadonlySet<string>, 'has'>;
   onTogglePin: (item: Conversation) => void;
   onRenameRoom: (roomId: string, name: string) => Promise<void>;
   onArchiveRoom: (roomId: string, archived: boolean) => Promise<void>;
@@ -45,6 +45,7 @@ export function ConversationList({ c, section, query, filter, origins, onOrigins
         { label: '按时间归档', icon: <Archive size={15} />, disabled: c.archivedView, onClick: () => setArchiveRange(true) },
       ]} />{([['all', '全部'], ['employees', '员工'], ['projects', '项目'], ['background', '后台']] as const).map(([id, label]) => <button key={id} className={filter === id ? 'active' : ''} aria-pressed={filter === id} onClick={() => onFilterChange(id)}>{label}</button>)}
         <button className={`archive-filter ${c.archivedView ? 'active' : ''}`} title={c.archivedView ? '返回活动对话' : '查看已归档对话'} aria-label={c.archivedView ? '返回活动对话' : '查看已归档对话'} onClick={() => void c.setArchiveViewMode(!c.archivedView)}><Archive size={15} /></button></div>}
+      {openError && <p role="alert">{openError}</p>}
       <div className="contacts-scroll">
         {(initialReady || hasRoster) ? <ConversationRows items={visibleRoster} c={c} opening={opening} query={query} onOpen={onOpen} pinned={filter === 'all' || filter === 'background' ? pinned : undefined} onTogglePin={filter === 'all' || filter === 'background' ? onTogglePin : undefined} onRenameRoom={onRenameRoom} onArchiveRoom={onArchiveRoom} selectedRoomId={selectedRoomId} /> : null}
 

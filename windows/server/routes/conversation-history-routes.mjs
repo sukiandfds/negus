@@ -1,8 +1,9 @@
+import { roomTranscript, withCopyHistory } from '../conversation-copy.mjs';
 import { randomUUID } from 'node:crypto';
 import { resolveConversationFile } from "../conversation-file.mjs";
 import { paginationFrom, readJson, sendJson } from "../http/request-utils.mjs";
 
-export const createConversationHistoryRoutes = ({ conversations, execution, followUpQueue, contextManagement, media, publishThreadEvent, agentConversationStore, employeeRuntime, roomDirectory, agentTasks, authorizeAgentThread, isEmployeeDirectBinding, sessionSource, readAgentSession, readOrdinarySession, publicUserInputRequest }) => {
+export const createConversationHistoryRoutes = ({ projectRoot, conversations, execution, followUpQueue, contextManagement, media, publishThreadEvent, agentConversationStore, employeeRuntime, roomDirectory, agentTasks, authorizeAgentThread, isEmployeeDirectBinding, sessionSource, readAgentSession, readOrdinarySession, publicUserInputRequest }) => {
   const providerCopies = new Map();
   const detailReads = new Map();
   return async (request, response, url) => {
@@ -67,27 +68,37 @@ export const createConversationHistoryRoutes = ({ conversations, execution, foll
     sendJson(response, { threadId });
     return true;
   }
+  if (url.pathname === "/api/session/copy" && request.method === "POST") {
+    const { threadId, conversationId, roomId, title } = await readJson(request);
+    let source;
+    if (roomId) source = roomTranscript(roomDirectory.require(roomId));
+    else {
+      if (!threadId) throw Object.assign(Error("请选择要复制的对话"), { statusCode: 400 });
+      const binding = await authorizeAgentThread({ threadId, conversationId, allowGroup: true });
+      source = isEmployeeDirectBinding(binding) ? await employeeRuntime.copyHistory(binding.agentId)
+        : await conversations.copyHistory(threadId);
+    }
+    if (source) source = { ...source, title: String(title || source.title || source.name || "对话").slice(0, 120) };
+    const result = await withCopyHistory(source, source?.cwd || projectRoot,
+      (id, copySource) => conversations.createCopy(threadId || "", id, copySource));
+    publishThreadEvent(result.session.threadId, { type: "sessions_changed", threadId: result.session.threadId });
+    sendJson(response, { session: result.session }, 201);
+    return true;
+  }
   if (url.pathname === "/api/session/fork" && request.method === "POST") {
     const body = await readJson(request);
     const threadId = String(body.threadId || "").trim();
     const conversationId = String(body.conversationId || "").trim();
-    let lastTurnId = String(body.lastTurnId || "").trim();
-    if (!threadId || (!lastTurnId && body.latest !== true)) {
+    const lastTurnId = String(body.lastTurnId || "").trim();
+    if (!threadId || !lastTurnId) {
       sendJson(response, { error: "threadId and lastTurnId are required" }, 400);
       return true;
     }
     const binding = await authorizeAgentThread({ threadId, conversationId });
     const status = execution.getStatus(threadId);
-    if (status.active && (body.latest === true || !status.turnId || lastTurnId === status.turnId)) {
+    if (status.active && (!status.turnId || lastTurnId === status.turnId)) {
       sendJson(response, { error: "当前任务运行中，请完成后再从这里继续" }, 409);
       return true;
-    }
-    if (body.latest === true) {
-      const source = binding ? await readAgentSession(binding, "all", { limit: 1 })
-        : await conversations.findSession(threadId, "all", { limit: 1 });
-      if (!source || source.archived || source.readOnly) throw Object.assign(new Error("请先恢复可操作的源对话"), { statusCode: 409 });
-      lastTurnId = source.messages?.at(-1)?.turnId || "";
-      if (!lastTurnId) throw Object.assign(new Error("对话尚无可创建分支的消息"), { statusCode: 409 });
     }
     const session = isEmployeeDirectBinding(binding)
       ? await employeeRuntime.forkSession(binding.agentId, lastTurnId)
@@ -274,18 +285,18 @@ export const createConversationHistoryRoutes = ({ conversations, execution, foll
       const snapshot = (refreshBody = false, verified = false) => {
         if (errors.session) throw Object.assign(new Error(errors.session.message), { statusCode: errors.session.statusCode });
         const fields = { ...ready };
-        if (refreshBody) { delete fields.session; delete fields.context; }
+        if (refreshBody) { if (!fields.session) delete fields.session; delete fields.context; }
         // A locally validated body can ship while the independent version lookup is slow.
         if (!verified && (currentRevision === undefined || (bodyRevision !== undefined && currentRevision !== bodyRevision))) delete fields.context;
         return { ...fields, status: execution.getStatus(threadId), queue: followUpQueue.list(threadId),
-          sourceRevision: currentRevision === null ? null : bodyRevision ?? null, historyFormatVersion: 3,
+          sourceRevision: currentRevision === null ? null : bodyRevision ?? null, historyFormatVersion: 4,
           ...(refreshBody ? { refreshBody: true } : {}),
           ...(Object.keys(errors).length ? { detailErrors: { ...errors } } : {}) };
       };
       const result = async () => {
         const finalRevision = await readRevision();
-        return { ...snapshot(currentRevision !== finalRevision || (finalRevision !== null && bodyRevision !== finalRevision), true),
-          sourceRevision: finalRevision };
+        const changed = currentRevision !== finalRevision || (finalRevision !== null && bodyRevision !== finalRevision);
+        return { ...snapshot(changed, true), sourceRevision: changed ? bodyRevision ?? null : finalRevision };
       };
       const full = complete.then(result);
       void full.catch(() => {});

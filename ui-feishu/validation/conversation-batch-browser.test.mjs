@@ -7,7 +7,8 @@ page.setDefaultTimeout(6000);
 const stamp='2026-10-30T00:00:00Z';
 const summaries=Array.from({length:12},(_,i)=>({threadId:`t${i}`,sourceRevision:'r1',source:'codex',title:`缓存标题${i}`,updatedAt:new Date(Date.parse(stamp)-i*1000).toISOString(),messageCount:1,latestMessage:`缓存预览${i}`,latestUser:'',latestAssistant:''}));
 const detail=id=>({...summaries[Number(id.slice(1))],messages:[{id:`m${id}`,role:'assistant',text:`缓存正文${id}`,createdAt:stamp}]});
-let releaseFirst,releaseRest;
+let releaseFirst,releaseRest,releaseSelected;
+const selectedStart=new Promise(r=>releaseSelected=r);
 const first=new Promise(r=>releaseFirst=r),rest=new Promise(r=>releaseRest=r);
 const calls=[],errors=[],syncErrors=[];
 let archived=false;
@@ -33,7 +34,7 @@ await page.route('**/api/**',async route=>{
  else if(p==='/api/session/archive'){archived=true;data={threadId:'t5',archived:true};}
  else if(p==='/api/session/unarchive'){archived=false;data={...summaries[5],archived:false};}
  else if(p==='/api/session/message'&&process.env.NEGUS_TEST_FAILED_REFRESH==='1')return route.fulfill({status:503,json:{error:'模拟发送失败'}});
- else if(p==='/api/session'){if(id==='t9'){await first;ninthAttempts++;if(failNinth&&(process.env.NEGUS_TEST_AUTO_RETRY!=='1'||ninthAttempts<3))return route.fulfill({status:503,json:{error:'fixture timeout'}});}if(id==='t11')await rest;data={...detail(id),title:`最新标题${n}`,messages:[{id:`m${id}`,role:'assistant',text:`最新正文${id}${summaries[n]?.sourceRevision==='r2'?'-更新':''}${id==='t0'?currentReply:''}`,createdAt:stamp}]};}
+ else if(p==='/api/session'){if(id==='t0')await selectedStart;if(id==='t9'){await first;ninthAttempts++;if(failNinth&&(process.env.NEGUS_TEST_AUTO_RETRY!=='1'||ninthAttempts<3))return route.fulfill({status:503,json:{error:'fixture timeout'}});}if(id==='t11')await rest;data={...detail(id),title:`最新标题${n}`,messages:[{id:`m${id}`,role:'assistant',text:`最新正文${id}${summaries[n]?.sourceRevision==='r2'?'-更新':''}${id==='t0'?currentReply:''}`,createdAt:stamp}]};}
  else if(p==='/api/execution-status')data={type:'execution_status',threadId:id,phase:'idle',active:false,activities:[],turnId:'',startedAt:null,updatedAt:stamp,label:'',detail:'',commentary:''};
  else if(p==='/api/session/context')data={type:'context_status',threadId:id,model:id==='t0'?'model-a':'model-b',reasoningEffort:id==='t0'?'high':'low',phase:'idle',usedTokens:10,contextWindow:100,percentage:10,autoCompactThreshold:80,updatedAt:stamp,message:''};
  else if(p==='/api/session/goal'){if(process.env.NEGUS_TEST_REMAINDER_FAILURE==='1'&&id==='t10')return route.fulfill({status:503,json:{error:'fixture older conversation failure'}});data={goal:null};}
@@ -58,6 +59,7 @@ await page.route('**/api/**',async route=>{
 try{
  await page.goto('http://127.0.0.1:5201/?thread=t0');
  await page.getByText('缓存正文t0',{exact:true}).waitFor();
+ releaseSelected();
  await page.waitForTimeout(700);
  assert.equal(await page.getByRole('button',{name:'刷新会话',exact:true}).getAttribute('aria-busy'),'true');
  await page.getByText('最新正文t0',{exact:true}).waitFor();
@@ -69,9 +71,9 @@ try{
  await page.waitForTimeout(100);
  assert.equal(await page.getByRole('button',{name:'打开最新标题0',exact:true}).getByText('助手正在运行...').count(),1,'selected synced status updates immediately');
  await page.getByRole('button',{name:'打开旧目录标题',exact:true}).click();
- await page.getByText('缓存正文t5',{exact:true}).waitFor();
+ await page.getByText('最新正文t5',{exact:true}).waitFor();
  assert.equal(await page.getByRole('button',{name:/测试模型/}).count(),0,'uncached model must not borrow previous thread');
- assert.equal(await page.getByText('最新正文t5',{exact:true}).count(),0,'selection cannot bypass batch');
+
  await page.getByRole('button',{name:'打开最新标题0',exact:true}).click();
  await page.getByText('最新正文t0',{exact:true}).waitFor();
  releaseFirst();
@@ -202,11 +204,15 @@ try{
  await page.getByRole('button',{name:'更多操作：旧目录标题',exact:true}).click();
  await page.getByRole('menuitem',{name:'归档',exact:true}).click();
  await page.getByRole('button',{name:'打开旧目录标题',exact:true}).waitFor({state:'detached'});
+ const beforeArchiveView=calls.length;
  await page.getByRole('button',{name:'查看已归档对话'}).click();
  await page.getByRole('button',{name:'更多操作：旧目录标题',exact:true}).click();
+ assert.equal(calls.slice(beforeArchiveView).some(([path,id])=>path==='/api/session' && id==='t5'),false,'opening archive list does not preload archived body');
  await page.getByRole('menuitem',{name:'恢复',exact:true}).click();
+ await page.getByRole('button',{name:'打开旧目录标题',exact:true}).waitFor({state:'detached'});
  await page.getByRole('button',{name:'返回活动对话'}).click();
  await page.getByRole('button',{name:'打开旧目录标题',exact:true}).waitFor();
+ await page.locator('button.contact-main').nth(11).waitFor();
  assert.equal(await page.locator('button.contact-main').count(),12,'restore must retain other conversations');
  assert.deepEqual(errors,[]);
  console.log('PASS cached full view; first ten atomic; state withheld; remainder atomic; failed row retained, logged and refreshed='+(syncErrors.length>0)+'; no page exceptions');

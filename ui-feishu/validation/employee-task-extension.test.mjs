@@ -44,6 +44,7 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
       threads.get(value.threadId).turns[0].items = [{ type: 'userMessage', content: [{ type: 'inputText', text: value.text }] }];
       return { id: value.submissionId, state: 'pending' }; } }, broadcast: () => {} });
   t.after(async () => { await extension.close(); await growthStore.close(); await fs.rm(root, { recursive: true, force: true }); });
+  assert.equal(extension.runtimeOptions({id:'ordinary'}).ordinaryConversation,true);
   const config = extension.leaderConfig('a')['mcp_servers.negus_handoffs'];
   const delegate = async requestId => {
     const response = await fetch(config.env.NEGUS_HANDOFF_ENDPOINT, { method: 'POST', headers: { Authorization: `Bearer ${config.env.NEGUS_HANDOFF_TOKEN}` },

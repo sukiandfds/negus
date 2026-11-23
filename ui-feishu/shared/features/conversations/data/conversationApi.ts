@@ -4,7 +4,7 @@ import type { ExecutionStatus, UserInputRequest } from "../../execution/model/ty
 import type { ThreadGoal } from "../../goals/model/types";
 import type { FollowUpQueueItem } from "../model/followUpQueue";
 import { currentConversationId, resolveConversationId, conversationQuery, withConversation } from "../../../shared/api/conversationScope";
-import { fetchJson, postJson } from "../../../shared/api/http";
+import { HttpError, fetchJson, postJson } from "../../../shared/api/http";
 
 const PAGE_SIZE = 30;
 const fetchConversationJson = <T,>(pathname: string, signal?: AbortSignal): Promise<T> =>
@@ -19,10 +19,15 @@ export type ConversationRead = {
 };
 
 export const conversationApi = {
-  snapshot: async (threadId: string, sourceRevision: string, signal?: AbortSignal, conversationId = currentConversationId(threadId), onPartial?: (result: ConversationRead) => void) => {
-    conversationId ||= await resolveConversationId(threadId);
-    const pathname = `/api/session?threadId=${encodeURIComponent(threadId)}&limit=${PAGE_SIZE}&view=1${sourceRevision ? `&sourceRevision=${encodeURIComponent(sourceRevision)}` : ''}${conversationQuery(conversationId)}`;
-    const result = await fetchConversationJson<ConversationRead>(pathname, signal);
+  snapshot: async (threadId: string, sourceRevision: string, signal?: AbortSignal, conversationId = currentConversationId(threadId), onPartial?: (result: ConversationRead) => void): Promise<ConversationRead> => {
+    let pathname = `/api/session?threadId=${encodeURIComponent(threadId)}&limit=${PAGE_SIZE}&view=1${sourceRevision ? `&sourceRevision=${encodeURIComponent(sourceRevision)}` : ''}${conversationQuery(conversationId)}`;
+    const result = await fetchConversationJson<ConversationRead>(pathname, signal).catch(async error => {
+      if (conversationId || !(error instanceof HttpError) || error.status !== 409) throw error;
+      const binding = await resolveConversationId(threadId);
+      if (!binding) throw error;
+      pathname += conversationQuery(binding);
+      return fetchConversationJson<ConversationRead>(pathname, signal);
+    });
     if (!result.details) return result;
     onPartial?.(result);
     return fetchConversationJson<ConversationRead>(`${pathname}&details=${encodeURIComponent(result.details)}`, signal);

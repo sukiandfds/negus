@@ -14,7 +14,7 @@ test('跨卷只投影本轮的实际工具，单步可关联多个技能，不�
  ['response_item',{type:'web_search_call',id:'search'}],['response_item',{type:'function_call',name:'mcp__negus_handoffs__create_background_task',call_id:'dispatch'}],
  ['event_msg',{type:'entered_review_mode'}],['compacted',{}],['response_item',{type:'function_call',name:'update_goal',call_id:'goal'}],['event_msg',{type:'task_complete',turn_id:'t',last_agent_message:'结果'}]];
  for(const [i,records] of [data.slice(0,3),data.slice(3)].entries())await fs.writeFile(files[i],records.map(([type,payload])=>JSON.stringify({type,payload,timestamp:at})).join('\n')+'\n');
- const [work]=await panelHistory(files);assert.deepEqual(work.steps.map(step=>step.tags.map(t=>t.kind)),[['command','skill','skill'],['search'],['dispatch'],['review'],['compact'],['goal']]);assert.equal(work.state,'已完成');assert.ok(!JSON.stringify(work).includes('hidden-value'));
+ const [work]=await panelHistory(files);assert.deepEqual(work.steps.map(step=>step.tags.map(t=>t.kind)),[['command','skill','skill'],['search'],['dispatch'],['review'],['compact'],['goal']]);assert.equal(work.state,'已完成');assert.doesNotMatch(JSON.stringify(work),/只是讨论/);assert.ok(!JSON.stringify(work).includes('hidden-value'));
 });
 test('按当前来源对话过滤后台任务和日程',async()=>{
  const rows=['a','b'].map(threadId=>({threadId,id:threadId,background:true,source:{threadId,kind:'conversation'}}));
@@ -73,10 +73,10 @@ test('普通对话：当前助手写草稿，完成后才发布；续谈、无�
  const changed=[];
  const client={subscribe:fn=>(emit=fn,()=>{}),close(){},request:async(method,p)=>{
    if(method==='turn/start'){context={...JSON.parse(p.additionalContext['negus.topics'].value),...JSON.parse(p.additionalContext['negus.topicRecall'].value)};
-     assert.match(p.developerInstructions,/同话题沿用已有 id/);return {turn:{id:String(++turn)}};}
+     assert.match(context.记录要求,/同话题沿用已有 id/);return {turn:{id:String(++turn)}};}
    return {thread:{id:'a',cwd:root,turns:[]}};
  }};
- const store=createAppServerConversationStore({projectRoot:root,client,onTopicChanged:id=>changed.push(id),autoTitleEnabled:false});
+ const store=createAppServerConversationStore({projectRoot:root,threadRuntimeOptions:()=>({ordinaryConversation:true,turn:{}}),client,onTopicChanged:id=>changed.push(id),autoTitleEnabled:false});
  t.after(()=>store.close());
  const send=()=>store.sendMessage('a','继续');const end=status=>emit({method:'turn/completed',params:{threadId:'a',turn:{id:String(turn),status}}});
  const note=async(id,title,summary)=>{await fs.mkdir(path.dirname(context.本轮话题草稿路径),{recursive:true});await fs.writeFile(context.本轮话题草稿路径,JSON.stringify({id,title,mainline:'统一对话体验',summary}));};
@@ -87,5 +87,8 @@ test('普通对话：当前助手写草稿，完成后才发布；续谈、无�
  await send();assert.deepEqual(context.最近话题.map(r=>r.title),['模型','置顶']);assert.deepEqual(changed,['a','a','a']);
  assert.deepEqual(await readTopics(root,'b'),[]);
  let body;await statusPanelRoute({projectRoot:root,authorizeAgentThread:async()=>null})({method:'GET'},{writeHead(){},end(v){body=JSON.parse(v)}},new URL('http://localhost/api/session/status-panel?threadId=a&section=topics&delta=1'));
- assert.deepEqual(body.order,context.最近话题.map(r=>r.id));end('completed');
+ assert.deepEqual(body.order,context.最近话题.map(r=>r.id));
+ await fs.writeFile(context.本轮话题草稿路径,JSON.stringify(['复制确认','占用提示'].map(title=>({id:'',title,summary:title+'验收',mainline:'对话操作'}))));
+ end('completed');await send();const rows=await readTopics(root,'a');
+ assert.equal(new Set(rows.map(r=>r.id)).size,4);assert.deepEqual(rows.slice(0,2).map(r=>[r.title,r.turnIds]),[['复制确认',[String(turn-1)]],['占用提示',[String(turn-1)]]]);end('completed');
 });

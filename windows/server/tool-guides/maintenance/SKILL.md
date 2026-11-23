@@ -6,6 +6,8 @@
 
 修改 Negus 前先读取安装目录 AGENTS.md，再按功能和相关文件从 docs/project-management/INDEX.md 查对应条目的用户原话、后续澄清与有效决定；遵守 AI_ASSISTANT_WORK_RULES.md 的需求原话与澄清规则。用户纠正过的理解不得凭旧代码或助手摘要恢复；真实冲突且用户未明确替代时引用原话确认。新澄清更新同一条目，保留原文和替代关系；派工附条目路径，完成后记录验证及生效状态。不另建重复需求清单，不影响其他项目。
 
+发布范围遵循安装目录 AGENTS.md：用户要求上线时，发布当前 develop 完整工作区的全部更新。构建和准备后端快照时将 NEGUS_SOURCE_ROOT 显式指向该工作区，防止继承旧临时目录。
+
 按服务主机平台选择下列命令。
 
 macOS：只读健康检查 node scripts/negus-watchdog.mjs check；恢复已退出的服务 node scripts/negus-watchdog.mjs recover；后端重启 node scripts/negus-supervisor.mjs restart；前端重新构建并发布 node scripts/negus.mjs rebuild；前端回退 node scripts/negus-frontend.mjs rollback。

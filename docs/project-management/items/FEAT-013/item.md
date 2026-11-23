@@ -47,3 +47,7 @@ related: [FEAT-001]
 - `docs/negus-knowledge/features/feature-records/FEAT-013-conversation-fork.md`
 - `windows/server/app-server-conversation-store.mjs`
 - `web-ui/src/features/conversations/hooks/useProjectConversations.ts`
+
+## 后台任务分支的指令
+
+本轮质管复验后，用户要求「后台任务点『从这里继续』的原生 thread/fork 必须通过统一指令组装保留岗位指令和一份共用规则，并剥离应用内部字段」。保留分支位置和原对话，沿用现有完整指令覆盖顺序。共用指令规则见 PM-004，隔离协议验证见 [分支补验](../../../../work/config-refactor-20261119/fork-verification.md)。
