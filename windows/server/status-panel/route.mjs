@@ -1,10 +1,30 @@
 import {readTopics} from './topics.mjs';
 import {digest,taskRows} from './resources.mjs';
-import { sendJson } from '../http/request-utils.mjs';
+import { readJson, sendJson } from '../http/request-utils.mjs';
 import { panelHistory } from './activity.mjs';
+import { approveProfileCandidate, listProfileCandidates, rejectProfileCandidate } from '../profile-service.mjs';
 export function statusPanelRoute({projectRoot,conversations, agentTasks, readAutomations, authorizeAgentThread}) {
   const recent = new Map(), versions=new Map();
   return async (req,res,url)=>{
+    // Profile candidates are global (not per-thread); the upstream token check
+    // in request-handler.mjs already guards this route like every other API.
+    if(url.pathname==='/api/session/profile-candidates'){
+      if(req.method==='GET'){
+        sendJson(res,{items:await listProfileCandidates(projectRoot,{status:url.searchParams.get('status')||undefined})});
+        return true;
+      }
+      if(req.method==='POST'){
+        const body=await readJson(req);
+        if(!body.id)throw Object.assign(Error('请选择画像候选'),{statusCode:400});
+        if(body.action==='approve'){
+          const result=await approveProfileCandidate(projectRoot,body.id);
+          sendJson(res,result,result.status==='overflow'?409:200);return true;
+        }
+        if(body.action==='reject'){sendJson(res,await rejectProfileCandidate(projectRoot,body.id));return true;}
+        throw Object.assign(Error('未知的候选操作'),{statusCode:400});
+      }
+      return false;
+    }
     if(url.pathname!=='/api/session/status-panel')return false;
     const threadId=url.searchParams.get('threadId');
     if(!threadId)throw Object.assign(Error('请选择对话'),{statusCode:400});
