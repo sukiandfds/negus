@@ -63,7 +63,6 @@ export function StatusPanel({thread,revision,name,connected,status,context,goal,
     <nav aria-label="助手状态"><button aria-label="活动" title="活动" aria-pressed={tab==='activity'} onClick={()=>select('activity')}><List size={16}/></button><button aria-label="日程" title="日程" aria-pressed={tab==='schedule'} onClick={()=>select('schedule')}><CalendarClock size={16}/></button><button aria-label="会话信息" title="会话信息" aria-pressed={tab==='info'} onClick={()=>select('info')}><Fingerprint size={16}/></button></nav>
     {tab==='activity'?<>
       {topics.error && <p role="alert">{topics.error}</p>}
-      {!!topics.data?.length && <section aria-label="对话提纲"><h3>用户主线</h3><p>{topics.data[0].mainline}</p></section>}
       {current && status.active && <section><h3>正在运行</h3><ExecutionTimeline status={status} contextStatus={context} compactSummary/><ActivitySteps steps={[...liveSteps.values()]}/><button onClick={()=>void onStop()}>停止本轮</button></section>}
       {compact && <Badge kind="compact" label="正在压缩上下文"/>}
       {goal?.threadId===thread && <p><Badge kind="goal" label={goalStatusLabels[goal.status]}/> {goal.displayObjective||goal.objective}</p>}

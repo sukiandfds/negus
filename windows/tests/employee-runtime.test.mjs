@@ -692,7 +692,6 @@ test("employee native goal notifications and controls share the owned client", a
 
 const taskService = {
   leaderConfig: id => id === 'researcher' ? { 'mcp_servers.negus_tasks': { command: 'task-tools' } } : {},
-  leaderInstructions: id => id === 'researcher' ? '委派后台调研' : '',
 };
 
 test('product leader starts with task tools and sends first message without resuming an empty thread', async t => {
@@ -703,8 +702,8 @@ test('product leader starts with task tools and sends first message without resu
   assert.equal(f.calls.filter(c => c.method === 'thread/resume').length, 0);
   const start = f.calls.find(c => c.method === 'thread/start');
   assert.ok(start.params.config['mcp_servers.negus_tasks']);
-  assert.match(start.params.developerInstructions, /委派后台调研/);
-  assert.match(f.calls.find(c => c.method === 'turn/start').params.developerInstructions, /委派后台调研/);
+  assert.match(start.params.developerInstructions, /dispatch\/SKILL\.md/);
+  assert.match(f.calls.find(c => c.method === 'turn/start').params.developerInstructions, /dispatch\/SKILL\.md/);
 });
 
 for (const state of ['idle', 'active', 'unknown']) test(`existing product leader tool reload does not gate on ${state} state`, async t => {

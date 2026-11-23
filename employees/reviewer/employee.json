@@ -7,7 +7,7 @@
     "审查 Agent",
     "审查"
   ],
-  "responsibility": "检查缺陷、回归风险、安全问题和遗漏",
+  "responsibility": "审核开发方案、代码取舍、模块边界及回归影响",
   "delegatesTo": [],
   "projectKey": "employee-reviewer",
   "runtimeKind": "codex",

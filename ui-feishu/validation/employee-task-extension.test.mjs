@@ -13,7 +13,7 @@ const until = async check => { const end = Date.now() + 3000; while (!check()) {
 
 for (const background of [false, true]) test(`employee ${background ? 'background' : 'delegation'} creates an independent conversation and receives its result`, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-employee-kernel-'));
-  const employees = [{ id: 'a', name: '助手', modelProviderId: 'external', reasoningEffort: 'high', projectRoot: root, mainThreadId: 'main', conversationId: 'direct-a' }, { id: 'b', name: '研究员', modelProviderId: 'external', reasoningEffort: 'high', projectRoot: root }];
+  const employees = [{ id: 'a', name: '助手', delegatesTo: ['b'], modelProviderId: 'external', reasoningEffort: 'high', projectRoot: root, mainThreadId: 'main', conversationId: 'direct-a' }, { id: 'b', name: '研究员', modelProviderId: 'external', reasoningEffort: 'high', projectRoot: root }];
   const registry = { list: () => employees, require: id => { const employee = employees.find(item => item.id === id); if (!employee) throw Error('员工不存在'); return employee; } };
   employees.forEach(employee => { employee.contextRoot = root; });
   const growthStore = await createEmployeeGrowthStore({ stateFile: path.join(root, 'growth.json'), registry });
@@ -52,6 +52,9 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
     const body = await response.json();
     assert.equal(response.status, 200, JSON.stringify(body)); return body;
   };
+  const roster = await fetch(config.env.NEGUS_HANDOFF_ENDPOINT, { method: 'POST', headers: { Authorization: `Bearer ${config.env.NEGUS_HANDOFF_TOKEN}` },
+    body: JSON.stringify({ action: 'list' }) });
+  assert.deepEqual((await roster.json()).delegates, [{ id: 'b', name: '研究员' }]);
   const child = await delegate('tool-1');
   assert.equal(child.startup.confirmed, true);
   assert.equal(child.startup.modelProviderId, 'deepseek');
@@ -62,13 +65,9 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
   await until(() => starts.length === 1);
   assert.equal(created[0].model, 'deepseek-flash');
   assert.equal(starts[0].effort, 'high');
-  assert.match(starts[0].growth, /每次标注一手来源/);
-  assert.match(extension.runtimeOptions({ id: starts[0].threadId }).turn.additionalContext["negus.employee"].value, /每次标注一手来源/);
-  await growthService.changeRule(background ? 'a' : 'b', rule.id, 'disabled');
-  assert.doesNotMatch(extension.runtimeOptions({ id: starts[0].threadId }).turn.additionalContext["negus.employee"].value, /每次标注一手来源/);
-  assert.match(starts[0].growth, /每次标注一手来源/);
-  await growthService.changeRule(background ? 'a' : 'b', rule.id, 'deleted');
-  assert.doesNotMatch(extension.runtimeOptions({ id: starts[0].threadId }).turn.additionalContext["negus.employee"].value, /每次标注一手来源/);
+  assert.equal(starts[0].growth, "");
+  assert.equal(extension.runtimeOptions({ id: starts[0].threadId }).turn.additionalContext?.["negus.employee"], undefined);
+  assert.ok(growthService.get(background ? 'a' : 'b').proposals.some(item => item.id === rule.id));
   const agentId = background ? 'a' : 'b';
   assert.equal(bindings.length, 1); assert.equal(bindings[0].conversationKind, 'task'); assert.equal(bindings[0].agentId, agentId);
   assert.notEqual(starts[0].threadId, 'main');
@@ -103,7 +102,7 @@ for (const background of [false, true]) test(`employee ${background ? 'backgroun
   if (background) {
     assert.equal(created[0].config['mcp_servers.negus_handoffs'].enabled, false);
     assert.match(created[0].developerInstructions, /直接执行本任务/);
-    assert.match(extension.leaderInstructions('a'), /结束本轮回复/);
+    assert.doesNotMatch(created[0].developerInstructions, /员工名单：/);
     mainActive = false;
     const parent = threads.get('main').turns[0]; parent.status = 'completed';
     listeners.forEach(callback => callback({ method: 'turn/completed', params: { threadId: 'main', turn: parent } }));

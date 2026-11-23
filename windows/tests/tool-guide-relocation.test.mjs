@@ -26,7 +26,7 @@ test('moving the installation moves every guide, independently of the chat worki
       assert.match(entry.path, /^[a-z-]+\/SKILL\.md$/);
       assert.ok(prompt.includes(entry.command + ' | ') && prompt.includes(' | ' + entry.path));
       const guide = await fs.readFile(path.join(base, entry.path), 'utf8');
-      assert.ok(guide.startsWith('# ' + entry.label));
+      assert.ok(guide.startsWith('# ' + entry.label) || (guide.startsWith('---\n') && guide.split('\n---\n')[0].split('\n').includes('name: ' + entry.id)));
       assert.ok(!prompt.includes(guide.trim()));
       for (const drive of ['C:', 'D:']) {
         const winBase = drive + '\\我的 Negus\\tool-guides';

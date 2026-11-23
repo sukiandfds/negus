@@ -75,7 +75,7 @@ const logMigrationFailure = (agent, error) => {
 };
 
 export async function createGroupTaskService({ stateRoot, room, projectRoot, employeeWorkRoots = {}, modelProviders,
-  appServerClient, broadcast = () => {}, attachmentContent, resolveAttachments = () => [], resolveArtifacts = () => [], onContextDelivered = async () => {}, bindings, agentTasks, queue, execution, registerSession, growthService = null, providerForThread = async () => null, transferThread = transferConversationThread, selectGroupAgent = null }) {
+  appServerClient, broadcast = () => {}, attachmentContent, resolveAttachments = () => [], resolveArtifacts = () => [], onContextDelivered = async () => {}, bindings, agentTasks, queue, execution, registerSession, providerForThread = async () => null, transferThread = transferConversationThread, selectGroupAgent = null }) {
   const roomId = room.snapshot().room.id;
   const log = event => console.log(JSON.stringify({ scope: 'negus-tasks', roomId, at: new Date().toISOString(), ...event }));
   let kernel;
@@ -405,7 +405,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
         },
         // Group employees are user-visible agents. Keep the same host-level
         // access on the turn as on the thread, regardless of their cwd.
-        turnOptions: { cwd: projectRoot, ...turnExecutionPolicy, developerInstructions: taskInstructions, additionalContext: employeeContext([coordinationInstructions(task), growthService?.getContext(agent.id)].filter(Boolean).join("\n")), ...(task.background ? { clientUserMessageId: task.id } : {}), ...(agent.reasoningEffort ? { effort: agent.reasoningEffort } : {}) } };
+        turnOptions: { cwd: projectRoot, ...turnExecutionPolicy, developerInstructions: taskInstructions, additionalContext: employeeContext(coordinationInstructions(task)), ...(task.background ? { clientUserMessageId: task.id } : {}), ...(agent.reasoningEffort ? { effort: agent.reasoningEffort } : {}) } };
     },
     onEvent: async (task, event) => {
       const { method, params } = event;

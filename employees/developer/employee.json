@@ -7,7 +7,7 @@
     "开发 Agent",
     "开发"
   ],
-  "responsibility": "实现已确认的代码任务、进行必要验证并报告结果",
+  "responsibility": "依据产品定义输出开发方案、修改代码并验证",
   "delegatesTo": [
     "researcher",
     "reviewer"

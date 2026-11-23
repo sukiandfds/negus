@@ -1,3 +1,4 @@
+import { conversationPrompt } from "../server/conversation-prompt.mjs";
 import { loadCosAttachments } from "../server/cos-attachments.mjs";
 import { extendGroupRooms } from "../../ui-feishu/server/group-extension.mjs";
 import { extendEmployeeTasks } from "../../ui-feishu/server/employee-task-extension.mjs";
@@ -111,7 +112,9 @@ const modelProviders = createModelProviderService({
   projectRoot,
   defaultClient: appServerClient,
 });
+const employeeDefinitions = await loadEmployeeDefinitions(employeesRoot);
 const conversationStoreOptions = {
+  ordinaryRole: employeeDefinitions.find(employee => employee.id === "negus-assistant")?.instructions,
   historyFallback: (...args) => jsonlConversations.findSession(...args),
   nativeSubagents: archived => jsonlConversations.listNativeSubagents(archived),
   projectRoot,
@@ -162,9 +165,9 @@ const conversationStoreOptions = {
     if (!employee) return null;
     const policy = { sandbox: "danger-full-access", approvalPolicy: "never" };
     return {
-      resume: policy,
+      resume: { ...policy, developerInstructions: conversationPrompt(employee.instructions) },
       turn: {
-        cwd: employee.projectRoot,
+        cwd: employee.projectRoot, developerInstructions: conversationPrompt(employee.instructions),
         sandboxPolicy: { type: "dangerFullAccess" },
         approvalPolicy: "never",
       },
@@ -276,7 +279,6 @@ const employeeDefaultSettings = {
   model: employeeDefaultRoute.model,
   reasoningEffort: employeeDefaultRoute.reasoningEffort,
 };
-const employeeDefinitions = await loadEmployeeDefinitions(employeesRoot);
 employeeRegistry = await createEmployeeProjectRegistry({
   stateFile: path.join(projectRoot, "runtime", "employee-projects.json"),
   workspaceRoot: projectRoot,
@@ -440,12 +442,11 @@ const employeeGrowth = createEmployeeGrowthService({
 for (const employee of employeeRegistry.list()) await employeeGrowth.syncRules(employee.id);
 agentTasks = await createBackgroundTaskService({
   stateFile: path.join(projectRoot, "runtime", "background-tasks.json"), registry: employeeRegistry,
-  growthService: employeeGrowth,
   conversations, modelProviders, bindings: employeeConversationStore, queue: followUpQueue, execution, broadcast: realtime.broadcast,
 });
 agentTasks = await extendEmployeeTasks(agentTasks, {
       stateRoot: path.join(process.env.NEGUS_UI_STATE_ROOT || path.join(projectRoot, 'runtime', 'ui-feishu'), 'employee-tasks'),
-      registry: employeeRegistry, growthService: employeeGrowth, modelProviders, appServerClient, bindings: employeeConversationStore,
+      registry: employeeRegistry, modelProviders, appServerClient, bindings: employeeConversationStore,
       providerForThread: threadId => appServerConversations.getRecordedProviderForThread(threadId),
       conversations: appServerConversations,
       registerSession: appServerConversations.registerSession,
@@ -465,7 +466,6 @@ employeeRuntime = createEmployeeRuntimeService({
   broadcast: realtime.broadcast,
   onTurnCompleted: event => followUpQueue.handleTurnTerminal(event),
   growthService: employeeGrowth,
-  contextProvider: employeeGrowth.getContext,
   attachmentContent,
   client: appServerClient,
   modelProviders,
@@ -514,7 +514,6 @@ const resolveArtifactInputs = (artifactIds) => [...new Set(Array.isArray(artifac
 const multiAgentDirectory = new Map(groupRoomEntries.map(({ identity, room }) => {
   const roomId = room.snapshot().room.id;
   const service = createMultiAgentService({
-    growthService: { getContext: id => employeeRegistry.get(id) ? employeeGrowth.getContext(id) : "" },
     projectRoot: identity.root || identity.roots?.project || projectRoot,
     employeeWorkRoots: Object.fromEntries(employeeRegistry.list().map((employee) => [employee.id, employee.projectRoot])),
     room,
@@ -581,7 +580,7 @@ await extendGroupRooms({ stateRoot: path.resolve(process.env.NEGUS_UI_STATE_ROOT
     broadcast: event => realtime.broadcast({ ...event, roomId: room.snapshot().room.id }), webOutputs, attachmentContent,
     resolveAttachments: media.resolveMany, resolveArtifacts: resolveArtifactInputs,
     onContextDelivered: ({ agentId, threadId, messages }) => recordEmployeeGroupContext({ identity, room, agentId, threadId, messages }),
-    appServerClient, modelProviders, growthService: employeeGrowth, bindings: employeeConversationStore, agentTasks, queue: followUpQueue, execution,
+    appServerClient, modelProviders, bindings: employeeConversationStore, agentTasks, queue: followUpQueue, execution,
     registerSession: appServerConversations.registerSession, providerForThread: threadId => appServerConversations.getRecordedProviderForThread(threadId),
   }),
 });

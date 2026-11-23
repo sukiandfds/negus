@@ -261,7 +261,7 @@ test("disable-rule route forwards the requestId for an idempotent retry", async 
   assert.equal(growth.get("developer").proposals.find(item => item.id === rule.id).statusRequestId, "disable-route-1");
 });
 
-test("three execution paths load the same rule snapshot at the start of a turn", async (t) => {
+test("three execution paths omit saved growth rules from turn requests", async (t) => {
   const { root, registry, growth } = await fixture(t);
   const rule = await growth.addRule("developer", "每次标注一手来源", "rule-1");
   const requests = [];
@@ -272,12 +272,12 @@ test("three execution paths load the same rule snapshot at the start of a turn",
     if (method === "turn/start") return { turn: { id: "turn" } };
     return {};
   } };
-  const runtime = createEmployeeRuntimeService({ registry, projectRoot: root, client, growthService: growth, contextProvider: growth.getContext,
+  const runtime = createEmployeeRuntimeService({ registry, projectRoot: root, client, growthService: growth,
     conversationStore: { bindRuntime: async value => value, recordRuntimeEvent: async () => {} } });
   t.after(() => runtime.close());
   await runtime.sendMessage({ employeeId: "developer", text: "普通问题", requestId: "normal" });
-  const direct = requests.find(call => call.method === "turn/start").params.additionalContext["negus.employee"].value;
-  assert.match(direct, /每次标注一手来源/);
+  const direct = requests.find(call => call.method === "turn/start").params.additionalContext?.["negus.employee"];
+  assert.equal(direct, undefined);
   assert.equal(growth.get("developer").proposals.length, 1);
 
   let agent = { id: "developer", name: "Developer", instructions: "", threadId: "group-thread" };
@@ -293,7 +293,7 @@ test("three execution paths load the same rule snapshot at the start of a turn",
   for (let i = 0; i < 100 && !delivered; i++) await new Promise(resolve => setImmediate(resolve));
   assert.equal(delivered, true);
   const groupStart = requests.find(call => call.method === "turn/start" && call.params.threadId === "group-thread");
-  assert.match(groupStart.params.additionalContext["negus.employee"].value, /每次标注一手来源/);
+  assert.equal(groupStart.params.additionalContext?.["negus.employee"], undefined);
   await group.close();
 
   await registry.bindMainThread("developer", "leader");
@@ -309,23 +309,8 @@ test("three execution paths load the same rule snapshot at the start of a turn",
   t.after(() => tasks.close());
   await tasks.create("developer", { title: "调研", instructions: "调查来源" });
   for (let i = 0; i < 100 && !tasks.runtimeOptions({ id: "worker" }); i++) await new Promise(resolve => setTimeout(resolve, 2));
-  const snapshot = tasks.runtimeOptions({ id: "worker" }).turn.additionalContext["negus.employee"].value;
-  assert.match(snapshot, /每次标注一手来源/);
-  await growth.changeRule("developer", rule.id, "disabled");
-  assert.equal(growth.getContext("developer"), "");
-  await runtime.confirmModification("developer");
-  await runtime.sendMessage({ employeeId: "developer", text: "停用后的问题", requestId: "normal-after-disable" });
-  const latestDirect = requests.filter(call => call.method === "turn/start" && call.params.additionalContext?.["negus.employee"]).at(-1);
-  assert.doesNotMatch(latestDirect.params.additionalContext["negus.employee"].value, /每次标注一手来源/);
-  const groupAfterDisable = createMultiAgentService({ projectRoot: root, room, broadcast: () => {}, appServerClient: client, growthService: growth });
-  t.after(() => groupAfterDisable.close());
-  delivered = false;
-  await groupAfterDisable.enqueueDiscussion({ agentIds: ["developer"], requestText: "停用后的调研" });
-  for (let i = 0; i < 100 && !delivered; i++) await new Promise(resolve => setImmediate(resolve));
-  const latestGroup = requests.filter(call => call.method === "turn/start" && call.params.threadId === "group-thread").at(-1);
-  assert.doesNotMatch(latestGroup.params.additionalContext["negus.employee"].value, /每次标注一手来源/);
-  assert.doesNotMatch(tasks.runtimeOptions({ id: "worker" }).turn.additionalContext["negus.employee"].value, /每次标注一手来源/);
-  assert.match(snapshot, /每次标注一手来源/);
+  assert.equal(tasks.runtimeOptions({ id: "worker" }).turn.additionalContext?.["negus.employee"], undefined);
+  assert.equal(growth.get("developer").proposals[0].id, rule.id);
 });
 
 test("directory bounds employee history reads and shares concurrent scans without retaining stale results", async () => {

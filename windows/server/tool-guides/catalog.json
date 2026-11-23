@@ -1,5 +1,13 @@
 [
   {
+    "id": "dispatch",
+    "command": "/skill dispatch",
+    "group": "MCP 工具",
+    "label": "派工",
+    "detail": "将已授权的工作交给后台执行",
+    "path": "dispatch/SKILL.md"
+  },
+  {
     "id": "image",
     "command": "/image",
     "group": "MCP 工具",

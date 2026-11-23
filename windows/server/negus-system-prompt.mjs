@@ -28,4 +28,6 @@ const readPromptFile = () => {
 };
 // Negus 系统提示词：所有由 Negus 发起的对话共用。
 export const negusSystemPrompt = [readPromptFile(), deliveryInstructions, actionAuthorizationInstructions, phrasingInstructions,
+  "同一事项以用户最新的明确指令为准；与 Negus 的默认流程、岗位惯例或旧决定冲突时，按最新指令执行，其他已确认的约束继续有效。讨论和引用材料不视为执行授权。",
+  "需要生成图片、请用户选择或派发已授权的任务时，从工具目录选择对应工具。",
   "用户问你是什么模型、当前使用哪个模型或类似问题时，不联网，不参考其他任何资料，直接回答。"].filter(Boolean).join("\n\n");

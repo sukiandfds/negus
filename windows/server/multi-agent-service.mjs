@@ -2,7 +2,7 @@ import { startConversationThread, resumeConversationThread, startTurn, interrupt
 import { randomUUID } from "node:crypto";
 import { createAppServerClient } from "./app-server-client.mjs";
 import { inputFromAttachments } from "./app-server-conversation-store.mjs";
-import { conversationPrompt, employeeContext } from "./conversation-prompt.mjs";
+import { conversationPrompt } from "./conversation-prompt.mjs";
 import { buildDiscussionPrompt } from "./multi-agent/discussion-prompt.mjs";
 import { cleanAgentIds, mentionedAgentIds, resolveAgentRouting } from "./multi-agent/agent-routing.mjs";
 import { completeOutputJob } from "./multi-agent/output-job.mjs";
@@ -40,7 +40,6 @@ export const createMultiAgentService = ({
   onContextDelivered = async () => {},
   appServerClient = null,
   modelProviders = null,
-  growthService = null,
   registerMedia = () => null,
 }) => {
   const defaultClient = appServerClient || createAppServerClient();
@@ -436,7 +435,6 @@ export const createMultiAgentService = ({
         cwd: projectRoot,
         ...turnExecutionPolicy,
         developerInstructions: conversationPrompt(agent.instructions),
-        additionalContext: employeeContext(growthService?.getContext(agent.id)),
       });
       try {
         await onContextDelivered({

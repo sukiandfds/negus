@@ -9,7 +9,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createTaskKernel, terminalStates } from '../kernel/task-kernel.mjs';
 import { createNativeTaskRuntime } from '../kernel/native-task-runtime.mjs';
 import { createTaskTools } from '../kernel/task-tools.mjs';
-import { conversationPrompt, employeeContext, workerInstructions as backgroundInstructions } from '../../windows/server/conversation-prompt.mjs';
+import { conversationPrompt, workerInstructions as backgroundInstructions } from '../../windows/server/conversation-prompt.mjs';
 import { backgroundToolConfig, executionPolicy, turnExecutionPolicy } from './execution-policy.mjs';
 import { createEmployeeHierarchy } from '../kernel/employee-hierarchy.mjs';
 import { followupTask } from './task-followup.mjs';
@@ -17,7 +17,7 @@ import { createNativeSubagentResolver } from '../../windows/server/native-subage
 
 // Adapts the same kernel to employee conversations and existing task conversations.
 export async function extendEmployeeTasks(original, { stateRoot, registry, modelProviders, appServerClient,
-  bindings, execution, queue, conversations, registerSession, growthService = null, providerForThread = async () => null, broadcast = () => {}, employeeHierarchy = null }) {
+  bindings, execution, queue, conversations, registerSession, providerForThread = async () => null, broadcast = () => {}, employeeHierarchy = null }) {
   let kernel;
   let closing = false;
   const taskProviders = new Map();
@@ -32,10 +32,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     return { id: sourceThreadId ? `assistant:${sourceThreadId}` : `assistant:${providerId || 'current'}:${model || 'default'}`,
       name: named?.displayName || model || 'Negus 助手' };
   };
-  const handoffInstructions = '保持本员工的姓名、职位和职责，直接回答日常聊天和专业讨论，不自称“前台助手”，也不以派工为由推卸职责；尽量在30秒内回应。先判断用户是在讨论、提问、指出问题还是明确要求执行；只有本轮用户已明确要求执行，且目标、当前现状、范围、不做事项、完成标准和授权边界都足以派工时，开发、测试、验证、资料搜集、电脑操作等实操才调用 negus_handoffs.create_background_task 创建独立任务对话。后台执行优先使用带 Negus 真实来源、任务账本和自动回传的入口；只有该工具确实不可用或用户明确要求时才改用 Codex 原生子代理。派工路由读取 runtime/model-routing.json：目标模型首选渠道不可用时，先尝试同一模型的其他渠道，再按配置顺序尝试其他模型，并把实际选择和回退原因写入任务。关键信息不足时先集中提问并等待回答，不得用猜测补全，不得先创建试探任务；质疑、批评和“为什么”不等于派工授权。需要其他员工专长时才转交协作，由你负责汇总结果。派工时写清目标、输入、授权边界、验收步骤和返回格式（结论、证据路径、验证结果、失败原因）；工具返回 startup.confirmed=true 才可告知用户已经开始执行，随后结束本轮回复，不等待、轮询或停止后台任务，主对话继续接待用户。startup.confirmed=false 时必须报告真实状态、渠道或启动错误；任务只算已创建，不得宣称已安排下去。收到已有任务的结果通知时，先核对是否达到用户要求；接单或执行结束不等于工作完成。未完成则在原授权内继续处理或明确补派缺失部分，不重复派发同一任务、不只转述未完成就停下；依据返回证据核对标准，不重复执行已验证的操作；证据缺失或矛盾只补派缺项，完成后向用户简洁交付结果。';
-  const instructions = (employee, background = false) => conversationPrompt(employee.instructions, [background
-    ? backgroundInstructions
-    : `${handoffInstructions}\n你只能向这些直属下属派工：${JSON.stringify(hierarchy.childrenOf(employee.id))}\n员工名单：${JSON.stringify(registry.list().map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`].filter(Boolean).join('\n'));
+  const instructions = (employee, background = false) => conversationPrompt(employee.instructions, background ? backgroundInstructions : '');
   const followup = async (source, input) => {
     const target = kernel.get(input.taskId);
     const sameSource = target?.source?.threadId === source.runtime.threadId;
@@ -91,7 +88,9 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       }
     }
     if (!source || terminalStates.has(source.state) || source.cancelRequested) throw Object.assign(Error('来源任务已经结束'), { statusCode: 409 });
-    if (input.action === 'list') return { tasks: kernel.list().filter(task => task.parentTaskId === source.id || (source.source?.kind === 'conversation'
+    if (input.action === 'list') return { delegates: source.agentId && !source.background
+      ? hierarchy.childrenOf(source.agentId).map(id => { const { name, responsibility } = registry.require(id); return { id, name, responsibility }; }) : [],
+      tasks: kernel.list().filter(task => task.parentTaskId === source.id || (source.source?.kind === 'conversation'
       ? task.source?.threadId === source.runtime.threadId : task.agentId === source.agentId)) };
     if (source.background) throw Object.assign(Error('后台执行者不能再次派工'), { statusCode: 409 });
     if (input.action === 'followup') {
@@ -200,7 +199,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     await kernel.recordInput(task.id, { requestId: 'initial', submissionId: task.id, text: task.instructions,
       actor: task.source?.actor || (task.source?.agentId ? { id: task.source.agentId, name: registry.require(task.source.agentId).name } : null) });
     return { client, threadId, ...watch, ...(monitor?{startFields:()=>({panelCheck:{next:Date.now()+checkWindow}})}:{}), input: [{ type: 'text', text: task.instructions, text_elements: [] }],
-      turnOptions: { cwd: employee.projectRoot, ...turnExecutionPolicy, developerInstructions: taskInstructions, additionalContext: employeeContext(employee.id && growthService?.getContext(employee.id)),
+      turnOptions: { cwd: employee.projectRoot, ...turnExecutionPolicy, developerInstructions: taskInstructions,
         clientUserMessageId: task.id, ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}) } };
   } });
   const belongs = thread => kernel?.list().find(task => task.kind !== 'external' && task.runtime.threadId === thread.id);
@@ -424,7 +423,6 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
           modelProviderId: routeProviderId, model: routeModel, reasoningEffort: routeEffort }, suppressContinuation: true });
     },
     leaderConfig: employeeId => tools.config(`employee:${employeeId}`),
-    leaderInstructions: employeeId => `${handoffInstructions}\n你只能向这些直属下属派工：${JSON.stringify(hierarchy.childrenOf(employeeId))}\n员工名单：${JSON.stringify(registry.list().map(({ id, name, responsibility }) => ({ id, name, responsibility })))}`,
     runtimeOptions: thread => {
       if (thread.fresh) {
         const pending = ordinaryScope(`pending:${randomUUID()}`);
@@ -445,7 +443,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       let employee = registry.require(task?.agentId || binding.agentId);
       if (task?.background) employee = { ...employee, reasoningEffort: task.reasoningEffort || task.runtime?.reasoningEffort || employee.reasoningEffort };
       return { resume: { ...executionPolicy, developerInstructions: instructions(employee, task?.background), config: task?.background ? backgroundToolConfig : tools.config(`conversation:${thread.id}`) },
-        turn: { cwd: employee.projectRoot, ...turnExecutionPolicy, developerInstructions: instructions(employee, task?.background), additionalContext: employeeContext(growthService?.getContext(employee.id)), ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}) } };
+        turn: { cwd: employee.projectRoot, ...turnExecutionPolicy, developerInstructions: instructions(employee, task?.background), ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}) } };
     },
     ownsThread: threadId => Boolean(belongs({ id: threadId })) || original.ownsThread(threadId)
       || bindings.findByRuntimeSession?.('codex', threadId)?.conversationKind === 'task',

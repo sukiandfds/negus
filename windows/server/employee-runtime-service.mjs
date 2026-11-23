@@ -8,7 +8,7 @@ import { materializeGoalObjective, expandGoalObjective, readThreadGoal } from ".
 import { createAppServerClient } from "./app-server-client.mjs";
 import { inputFromAttachments } from "./app-server-conversation-store.mjs";
 import { messagesFromTurns } from "./codex-thread-history.mjs";
-import { conversationPrompt, modelContext, employeeContext } from "./conversation-prompt.mjs";
+import { conversationPrompt, modelContext } from "./conversation-prompt.mjs";
 import { CURRENT_MODEL_PROVIDER_ID } from "./model-provider-service.mjs";
 
 const clean = (value, maxLength = 200) => String(value || "").trim().slice(0, maxLength);
@@ -54,7 +54,6 @@ export const createEmployeeRuntimeService = ({
   projectRoot,
   broadcast = () => {},
   growthService = null,
-  contextProvider = null,
   attachmentContent = null,
   taskService = null,
   execution = null,
@@ -316,7 +315,7 @@ export const createEmployeeRuntimeService = ({
     const result = await resumeConversationThread(runtimeClient, {
       threadId,
       ...(Object.keys(config || {}).length ? { config,
-        developerInstructions: conversationPrompt(employee.instructions, taskService?.leaderInstructions(employee.id)),
+        developerInstructions: conversationPrompt(employee.instructions),
       } : {}),
       ...policyFor(employee),
     });
@@ -367,7 +366,7 @@ export const createEmployeeRuntimeService = ({
     const route = routeForEmployee(employee);
     const result = await startConversationThread(runtimeClient, {
       cwd: clean(employee.projectRoot, 400) || projectRoot,
-      developerInstructions: conversationPrompt(employee.instructions, taskService?.leaderInstructions(employee.id)),
+      developerInstructions: conversationPrompt(employee.instructions),
       config: taskService?.leaderConfig(employee.id),
       ephemeral: false,
       serviceName: `negus-${employee.projectKey}`,
@@ -833,8 +832,6 @@ export const createEmployeeRuntimeService = ({
       try {
         await resumeThread(threadId, registry.require(employee.id));
         assertSubmissionOpen();
-        const context = await contextProvider?.(employee.id);
-        assertSubmissionOpen();
         const runtimeClient = await clientForThread(threadId, registry.require(employee.id));
         assertSubmissionOpen();
         const input = await inputFromAttachments(cleanText, attachments, attachmentContent);
@@ -868,10 +865,10 @@ export const createEmployeeRuntimeService = ({
           ...(method === "turn/start" ? {
             cwd: clean(employee.projectRoot, 400) || projectRoot,
             ...turnPolicyFor(),
-            developerInstructions: conversationPrompt(employee.instructions, taskService?.leaderInstructions(employee.id)),
+            developerInstructions: conversationPrompt(employee.instructions),
             ...(employee.model ? { model: employee.model } : {}),
             ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}),
-            additionalContext: { ...modelContext(employee.model), ...employeeContext(context) },
+            additionalContext: modelContext(employee.model),
           } : {}),
         }, expectedTurnId);
         let result;
@@ -1112,7 +1109,7 @@ export const createEmployeeRuntimeService = ({
         replacement = await transferConversationThread({ source: original.nativeClient || original, target: runtimeClient, providers: modelProviders,
           threadId: nativeThreadId(employee), nextThreadId: replacementId, route: requestedRoute, reasoningEffort,
           config: { ...taskService?.leaderConfig(employee.id), ...(reasoningEffort ? { model_reasoning_effort: reasoningEffort } : {}) },
-          instructions: conversationPrompt(employee.instructions, taskService?.leaderInstructions(employee.id)),
+          instructions: conversationPrompt(employee.instructions),
           policy: policyFor(employee),
         });
       } else if (threadId && (switchingModel || reasoningEffort !== clean(employee.reasoningEffort, 40))) {

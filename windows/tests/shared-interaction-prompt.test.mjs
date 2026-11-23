@@ -32,6 +32,7 @@ test("普通后台实际首次创建、首轮、恢复、后续轮次和分支�
   const employee = { id: "fixture", name: "隔离员工", projectRoot: root, mainThreadId: "origin" };
   let worker;
   const store = createAppServerConversationStore({
+    ordinaryRole: "普通窗口岗位",
     projectRoot: root,
     autoTitleEnabled: false,
     threadRuntimeOptions: value => worker?.runtimeOptions(value),
@@ -98,12 +99,31 @@ test("普通后台实际首次创建、首轮、恢复、后续轮次和分支�
     for (const marker of ["区分可撤回的选择与真正提交", "你是临时后台任务执行者"]) {
       assert.equal(instructions.split(marker).length - 1, 1, method + ": " + marker);
     }
-    assert.ok(!instructions.includes("前台使用用户选择的模型"));
+    assert.ok(!instructions.includes("普通窗口岗位"));
     assert.ok(!params.additionalContext?.["negus.communication"]);
-    assert.equal(Boolean(params.additionalContext?.["negus.employee"]?.value.includes("隔离成长标记")), method === "turn/start");
+    assert.equal(params.additionalContext?.["negus.employee"], undefined);
     assert.equal("additionalDeveloperInstructions" in params, false);
   }
   assert.equal(protocol[1].params.clientUserMessageId, "task-" + startup.id);
   assert.equal(protocol[4].params.threadId, thread.id);
   assert.equal(protocol[4].params.lastTurnId, "fixture-turn");
+});
+
+test("普通对话新建、发送和切换渠道都使用 negus助手岗位", async t => {
+  const { loadEmployeeDefinitions } = await import("../server/employee-definitions.mjs");
+  const { createAppServerConversationStore } = await import("../server/app-server-conversation-store.mjs");
+  const role = (await loadEmployeeDefinitions()).find(employee => employee.id === "negus-assistant").instructions;
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "negus-default-role-"));
+  const thread = { id: "ordinary", cwd: root }, calls = [];
+  const store = createAppServerConversationStore({ projectRoot: root, ordinaryRole: role, autoTitleEnabled: false,
+    client: { subscribe: () => () => {}, close() {}, async request(method, params) {
+      calls.push({ method, params });
+      return method === "turn/start" ? { turn: { id: "turn" } } : { thread };
+    } } });
+  t.after(async () => { store.close(); await fs.rm(root, { recursive: true, force: true }); });
+  await store.createSession();
+  await store.sendMessage(thread.id, "快速开发");
+  await store.resumeProviderSession(thread.id, { cwd: root, path: path.join(root, "session.jsonl"), model: "test" });
+  for (const method of ["thread/start", "turn/start", "thread/resume"])
+    assert.ok(calls.findLast(call => call.method === method).params.developerInstructions.includes(role), method);
 });

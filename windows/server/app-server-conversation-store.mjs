@@ -239,6 +239,7 @@ export const createAppServerConversationStore = ({
   historyFallback,
   nativeSubagents,
   attachmentContent,
+  ordinaryRole = "",
   threadRuntimeOptions = async () => null,
   client = createAppServerClient(),
   supervision = {},
@@ -501,13 +502,13 @@ export const createAppServerConversationStore = ({
 
   const withDeveloperInstructions = async (
     { additionalDeveloperInstructions, developerInstructions, ...params } = {},
-    { inherit = false } = {},
+    { inherit = false, role = ordinaryRole } = {},
   ) => {
     if (inherit && developerInstructions == null && !additionalDeveloperInstructions) return params;
     return {
       ...params,
       developerInstructions: developerInstructions ? [developerInstructions, additionalDeveloperInstructions].filter(Boolean).join("\n")
-        : conversationPrompt("", additionalDeveloperInstructions),
+        : conversationPrompt(role, additionalDeveloperInstructions),
     };
   };
 
@@ -519,7 +520,7 @@ export const createAppServerConversationStore = ({
       cwd, sandbox: options.sandbox || "danger-full-access", approvalPolicy: options.approvalPolicy || "never",
       additionalDeveloperInstructions: options.additionalDeveloperInstructions ?? options.developerInstructions,
       ...runtimeOptions?.resume,
-    });
+    }, { role: options.managed ? "" : ordinaryRole });
     if (model) params.model = model;
     const result = await startConversationThread(client, params);
     let thread = result.thread;
@@ -1041,7 +1042,7 @@ export const createAppServerConversationStore = ({
     if (!isAllowedProjectRoot(options.cwd) || !path.isAbsolute(options.path)) throw new Error('无法验证原会话记录的位置');
     const params = {
       threadId, path: options.path, cwd: options.cwd, model: options.model,
-      developerInstructions: conversationPrompt(),
+      developerInstructions: conversationPrompt(ordinaryRole),
       ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
       ...(options.reasoningEffort ? { config: { model_reasoning_effort: options.reasoningEffort } } : {}),
       excludeTurns: true,

@@ -5,9 +5,10 @@
   "shortName": "PM",
   "aliases": [
     "项目经理 Agent",
-    "项目经理"
+    "项目经理",
+    "运行助手"
   ],
-  "responsibility": "澄清目标、拆解任务、协调执行并汇总结论",
+  "responsibility": "监督岗位履责，协调交接并核验交付",
   "delegatesTo": [
     "researcher",
     "developer",

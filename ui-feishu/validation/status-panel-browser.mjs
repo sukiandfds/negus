@@ -34,7 +34,7 @@ for(const width of [1440,412]){
  await p.goto(vite.resolvedUrls.local[0]+'?thread='+f.id);await p.locator('.chat-messages').getByText('assistant history 47',{exact:true}).waitFor().catch(async e=>{console.log((await p.locator('body').innerText()).slice(0,900));throw e});
  const geometry=()=>p.locator('.chat-primary').evaluate(el=>({w:el.clientWidth,h:el.clientHeight,scroll:[...el.querySelectorAll('*')].filter(e=>e.scrollHeight>e.clientHeight&&e.scrollTop>0).map(e=>e.scrollTop)}));
  const before=await geometry();await p.getByRole('button',{name:'对话详情',exact:true}).click();const panel=p.getByRole('complementary',{name:'对话详情'});
- await panel.getByText('统一对话体验').waitFor();assert.equal(await panel.getByText('user history 47',{exact:true}).count(),0);await panel.getByText('两台设备显示相同顺序').waitFor();
+ assert.equal(await panel.getByText('user history 47',{exact:true}).count(),0);await panel.getByText('两台设备显示相同顺序').waitFor();assert.equal(await panel.getByText('统一对话体验').count(),0);
  await panel.getByText('跨设备置顶',{exact:true}).click();await panel.locator('section[aria-label="本次产物"] img').first().waitFor({state:'attached'});assert.deepEqual(await geometry(),before);
  const block=panel.locator('.sp-commands').filter({hasText:'执行命令 · 3 次'});assert.equal(await block.count(),1);
  const box=block.locator('pre');assert.equal(await box.isVisible(),false);await block.locator('summary').click();

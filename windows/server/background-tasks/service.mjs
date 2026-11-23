@@ -1,4 +1,4 @@
-import { conversationPrompt, workerInstructions, employeeContext } from '../conversation-prompt.mjs';
+import { conversationPrompt, workerInstructions } from '../conversation-prompt.mjs';
 import { backgroundTaskRoute } from './model-policy.mjs';
 import http from 'node:http';
 import { randomUUID, randomBytes } from 'node:crypto';
@@ -8,9 +8,8 @@ import { readJsonFile, writeJsonFileAtomic } from '../persistence/json-file.mjs'
 
 const fail = (message, statusCode = 409) => Object.assign(new Error(message), { statusCode });
 const active = task => ['starting', 'running'].includes(task.state);
-const leaderTaskInstructions = `先判断能否直接回答。需要较长时间查询资料、测试或实现时，且需求及修改授权已明确，调用 create_background_task 创建独立后台对话。任务指令必须包含来源背景、已完成内容、待办范围和交付要求。优先使用这个带 Negus 真实来源、任务账本和自动回传的入口；只有入口不可用或用户明确要求时才改用 Codex 原生子代理。派工路由读取 runtime/model-routing.json：目标模型首选渠道不可用时，先尝试同一模型的其他渠道，再按配置顺序尝试其他模型，并把实际选择和回退原因写入任务。工具返回的 startup.confirmed=true 才表示已经实际开始执行；false 时必须按 startup.state 和 startup.error 说明已创建未启动、启动失败或等待状态，不得提前宣称已安排下去。确认启动后简短说明已知情况、后台待办和可观察位置，再由系统自动回传结果。`;
 
-export async function createBackgroundTaskService({ stateFile, registry, modelProviders, conversations, bindings, queue, execution, growthService = null, broadcast = () => {}, enabledEmployees = registry.list().map(employee => employee.id) }) {
+export async function createBackgroundTaskService({ stateFile, registry, modelProviders, conversations, bindings, queue, execution, broadcast = () => {}, enabledEmployees = registry.list().map(employee => employee.id) }) {
   let tasks = [];
   const stored = await readJsonFile(stateFile, null);
   if (stored) tasks = stored.tasks;
@@ -53,7 +52,7 @@ export async function createBackgroundTaskService({ stateFile, registry, modelPr
     return {
       resume: { sandbox: 'danger-full-access', approvalPolicy: 'never', developerInstructions: conversationPrompt(workerInstructions) },
       turn: { cwd: registry.require(task.employeeId).projectRoot, sandboxPolicy: { type: 'dangerFullAccess' },
-        approvalPolicy: 'never', developerInstructions: conversationPrompt(workerInstructions), additionalContext: employeeContext(growthService?.getContext(task.employeeId)),
+        approvalPolicy: 'never', developerInstructions: conversationPrompt(workerInstructions),
         ...(task.reasoningEffort ? { effort: task.reasoningEffort } : {}) },
     };
   };
@@ -192,7 +191,6 @@ export async function createBackgroundTaskService({ stateFile, registry, modelPr
   };
   return { create, onProtocolMessage, runtimeOptions, leaderConfig, actorFor,
     onHealthState: event => onProtocolMessage({ method: 'task/health', params: { ...event } }),
-    leaderInstructions: employeeId => enabledEmployees.includes(employeeId) ? leaderTaskInstructions : '',
     ownsThread: threadId => Boolean(find(threadId)),
     list: employeeId => tasks.filter(task => !employeeId || task.employeeId === employeeId).map(publicTask),
     directoryEntries: employeeId => tasks.filter(task => task.employeeId === employeeId && task.threadId).map(task => ({
