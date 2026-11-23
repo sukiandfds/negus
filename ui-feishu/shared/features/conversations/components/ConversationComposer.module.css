@@ -16,13 +16,13 @@
   min-height: 92px;
   margin: 0 auto;
   border: 1px solid var(--color-border-strong);
-  border-radius: 16px;
+  border-radius: var(--radius-large, 12px);
   background: var(--color-composer);
   box-shadow: 0 4px 16px rgba(0, 0, 0, .16);
   pointer-events: auto;
 }
 
-.composer:focus-within { border-color: var(--color-border-focus); }
+.composer:focus-within { border-color: var(--color-border-focus); box-shadow: 0 4px 16px rgba(0, 0, 0, .16), 0 0 0 3px rgba(121, 165, 255, .14); }
 
 .editingBar {
   display: flex;
@@ -119,11 +119,11 @@
   background: #cdd0d2;
   color: var(--color-bg);
   opacity: 1;
-  transition: var(--control-transition);
+  transition: var(--control-transition), opacity var(--duration-fast) var(--ease-out);
   cursor: pointer;
 }
 
-.sendButton:disabled { cursor: default; }
+.sendButton:disabled { cursor: default; opacity: .38; }
 .sendButton svg { width: var(--control-icon-size); height: var(--control-icon-size); stroke-width: 1.9; }
 .sendButton svg.stopIcon { width: 10px; height: 10px; fill: currentColor; }
 

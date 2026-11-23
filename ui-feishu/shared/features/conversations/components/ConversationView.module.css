@@ -1,5 +1,6 @@
 .viewport { position: relative; width: 100%; height: 100%; min-height: 0; }
-.jumpToLatest { position: absolute; z-index: 4; right: 50%; bottom: 12px; transform: translateX(50%); }
+.jumpToLatest { position: absolute; z-index: 4; right: 50%; bottom: 12px; transform: translateX(50%); animation: jump-in var(--duration-medium, 200ms) var(--ease-out); }
+@keyframes jump-in { from { opacity: 0; transform: translateX(50%) translateY(4px); } to { opacity: 1; transform: translateX(50%) translateY(0); } }
 .scrollArea { height: 100%; min-height: 0; overflow-y: auto; overflow-anchor: none; overscroll-behavior-y: contain; scrollbar-gutter: stable; padding: 30px 30px 24px; scrollbar-color: #3b3d3f transparent; scrollbar-width: thin; }
 .conversation { width: min(var(--content-width), 100%); min-height: 100%; margin: 0 auto; }
 .message { padding-bottom: 34px; }
@@ -8,7 +9,7 @@
 .sending, .waiting { position: absolute; left: -22px; top: 12px; width: 14px; height: 14px; color: var(--color-text-muted); }
 .sending { opacity: 0; animation: loading-spin .8s linear infinite, sending-reveal 0s 10s forwards; }
 @keyframes sending-reveal { to { opacity: 1; } }
-.userBubble { width: fit-content; max-width: min(620px, 82%); margin-left: auto; padding: 10px 14px; border: 1px solid rgba(255,255,255,.04); border-radius: 16px; background: #2b2b2b; }
+.userBubble { width: fit-content; max-width: min(620px, 82%); margin-left: auto; padding: 12px 16px; border: 1px solid rgba(255,255,255,.04); border-radius: var(--radius-large, 12px); background: var(--color-user-message); }
 .heartbeatLabel { display: flex; align-items: center; justify-content: flex-end; gap: 4px; width: fit-content; max-width: min(620px, 82%); margin: 0 0 4px auto; color: var(--color-text-muted); font-size: 12px; line-height: 1.3; }
 .heartbeatLabel svg { width: 14px; height: 14px; flex: none; }
 .assistantBody {
@@ -17,6 +18,9 @@
   padding: 2px 0;
 }
 .actionRow { display: flex; width: 100%; min-height: 24px; margin-top: 5px; }
+.message .actionRow { opacity: 0; transition: opacity var(--duration-medium, 200ms) var(--ease-out); }
+.message:hover .actionRow, .message:focus-within .actionRow { opacity: 1; }
+@media (hover: none) { .message .actionRow { opacity: 1; } }
 .user .actionRow { justify-content: flex-end; }
 .assistant .actionRow { justify-content: flex-start; }
 .timestamp { display: block; margin-bottom: 6px; color: var(--color-text-muted); font-size: 11px; line-height: 1.3; }

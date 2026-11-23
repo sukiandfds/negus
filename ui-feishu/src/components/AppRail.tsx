@@ -1,4 +1,4 @@
-import { Bot, CalendarDays, CheckSquare, ChevronDown, ContactRound, FileText, Files, Frame, Grid2X2, Hash, MessageCircle, Search, Settings, Star, Video, type LucideIcon } from 'lucide-react';
+import { Bot, CalendarDays, CheckSquare, ChevronDown, ContactRound, FileText, Files, Grid2X2, Hash, MessageCircle, Settings, Star, Video, type LucideIcon } from 'lucide-react';
 import { Avatar } from './Avatar';
 import { useRef } from 'react';
 import { useDismissibleLayer } from '../../shared/shared/hooks/useDismissibleLayer';
@@ -14,7 +14,7 @@ type Props = {
   onSettings: () => void;
 };
 
-export function AppRail({ section, connected, open, onClose, onSearch, onSectionChange, onSettings }: Props) {
+export function AppRail({ section, connected, open, onClose, onSectionChange, onSettings }: Props) {
   const rail = useRef<HTMLElement>(null);
   useDismissibleLayer({ active: open, onDismiss: onClose, isInside: target => target instanceof Node && Boolean(rail.current?.contains(target) || target instanceof Element && target.closest(".rail-backdrop, .mobile-navigation")) });
   const nav: { label: string; icon: LucideIcon; id?: Section }[] = [
@@ -29,10 +29,8 @@ export function AppRail({ section, connected, open, onClose, onSearch, onSection
   ];
   return <>{open && <div className="rail-backdrop" aria-hidden="true" onClick={onClose} />}<aside ref={rail} className={`app-rail ${open ? 'expanded' : ''}`} aria-label="功能导航" onClick={event => { if (event.target instanceof Element && event.target.closest('button:not(:disabled)')) onClose(); }}>
       <div className="rail-profile"><Avatar name="N" /><span>Negus<small>我的工作空间</small></span><ChevronDown size={15} /></div>
-      <button className="global-search" onClick={onSearch}><Search size={16} />搜索<span>⌘ K</span></button>
       <nav>{nav.map(({ label, icon: Icon, id }) => <button key={label} className={`rail-item ${id === section ? 'selected' : ''} ${label === '通讯录' ? 'rail-secondary' : ''}`} title={id ? label : `${label} · 暂未接入`} disabled={!id}
-        onClick={() => { if (id) onSectionChange(id); }}><Icon size={18} /><span>{label}</span></button>)}<div className="rail-divider" role="separator" />
-        <button className={`rail-item ${section === 'border' ? 'selected' : ''}`} title="增加边框" onClick={() => onSectionChange('border')}><Frame size={18} /><span>增加边框</span></button></nav>
+        onClick={() => { if (id) onSectionChange(id); }}><Icon size={18} /><span>{label}</span></button>)}</nav>
       <div className="rail-bottom"><button className="rail-item" onClick={onSettings}><Settings size={18} /><span>设置</span></button>
         <span className={`connection ${connected ? 'online' : ''}`}><i />{connected ? '已连接' : '正在连接'}</span></div>
     </aside></>;

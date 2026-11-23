@@ -1,22 +1,22 @@
 :root {
   color-scheme: dark;
-  --color-windowbar: #1d2021;
-  --color-bg: #171717;
-  --color-sidebar: #202426;
-  --color-surface: #262626;
-  --color-surface-soft: #202020;
-  --color-surface-hover: #2a2d2f;
-  --color-surface-active: #353a3d;
-  --color-user-message: #242424;
-  --color-composer: #2b2b2b;
-  --color-border: #2b2d2e;
-  --color-border-strong: #3a3a3a;
-  --color-text: #e7e7e7;
-  --color-text-secondary: #b9b9b9;
-  --color-text-muted: #7f8182;
+  --color-windowbar: #111318;
+  --color-bg: #0B0D10;
+  --color-sidebar: #111318;
+  --color-surface: #1A1D23;
+  --color-surface-soft: #111318;
+  --color-surface-hover: #1E222A;
+  --color-surface-active: #26314A;
+  --color-user-message: #1A1D23;
+  --color-composer: #1A1D23;
+  --color-border: rgba(255, 255, 255, .06);
+  --color-border-strong: rgba(255, 255, 255, .12);
+  --color-text: #E8EAED;
+  --color-text-secondary: #9AA0A6;
+  --color-text-muted: #60646C;
   --color-control-hover: rgba(255, 255, 255, .06);
-  --color-border-focus: #555;
-  --color-accent: #8ab4f8;
+  --color-border-focus: rgba(121, 165, 255, .55);
+  --color-accent: #79A5FF;
   --color-access: #e56f2d;
   --color-success: #69cf8d;
   --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -25,15 +25,16 @@
   --text-small: 13px;
   --text-body: 14px;
   --text-title: 15px;
-  --line-body: 1.62;
+  --line-body: 1.65;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
-  --radius-small: 5px;
+  --radius-small: 6px;
   --radius-medium: 8px;
+  --radius-large: 12px;
   --control-icon-size: 16px;
   --control-icon-size-small: 14px;
   --control-icon-button-size: 30px;
@@ -47,7 +48,9 @@
   --topbar-height: 50px;
   --content-width: 790px;
   --duration-fast: 120ms;
-  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  --duration-medium: 200ms;
+  --duration-slow: 300ms;
+  --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 @media (min-width: 761px) and (max-width: 1024px) {

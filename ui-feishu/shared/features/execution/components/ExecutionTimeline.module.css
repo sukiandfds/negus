@@ -6,6 +6,9 @@
 .spinner { width: 14px; height: 14px; animation: spin 1.15s linear infinite; }
 .failed { width: 14px; height: 14px; color: #e08b82; }
 .interrupted { width: 14px; height: 14px; color: #e7b65a; }
+.activitiesWrap { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows var(--duration-medium) var(--ease-out), opacity var(--duration-medium) var(--ease-out), visibility 0s var(--duration-medium); }
+.activitiesWrap.open { grid-template-rows: 1fr; opacity: 1; visibility: visible; transition: grid-template-rows var(--duration-medium) var(--ease-out), opacity var(--duration-medium) var(--ease-out), visibility 0s; }
+.activitiesWrap > .activities { overflow: hidden; min-height: 0; }
 .activities { display: grid; gap: 9px; margin: 5px 0 0 6px; padding: 7px 0 1px 14px; border-left: 1px solid #303233; }
 .activity { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 7px; animation: reveal 180ms var(--ease-out) both; }
 .activityIcon { display: grid; width: 18px; height: 18px; place-items: center; color: #777a7b; }

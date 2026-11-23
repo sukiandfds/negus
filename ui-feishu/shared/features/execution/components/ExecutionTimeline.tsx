@@ -69,7 +69,8 @@ export function ExecutionTimeline({
         {elapsed ? <time>{elapsed}</time> : null}
         <ChevronRight className={expanded ? styles.expanded : ""} aria-hidden="true" />
       </button>
-      {expanded ? (
+      {(
+        <div className={`${styles.activitiesWrap} ${expanded ? styles.open : ""}`} aria-hidden={!expanded}>
         <div className={styles.activities}>
           {activities.length ? activities.map((activity) => {
             const Icon = iconFor(activity);
@@ -90,7 +91,8 @@ export function ExecutionTimeline({
             );
           }) : null}
         </div>
-      ) : null}
+        </div>
+      )}
       {notices.map(notice => <div className={styles.failureDetail} role="status" key={notice}><CircleAlert aria-hidden="true" /><span>{notice}</span></div>)}
     </section>
   );

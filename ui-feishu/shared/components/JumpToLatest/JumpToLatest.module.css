@@ -6,12 +6,13 @@
   border: 1px solid rgba(255, 255, 255, .12);
   border-radius: 16px;
   padding: 0 11px;
-  background: #2b2b2b;
+  background: var(--color-surface, #1A1D23);
   box-shadow: 0 7px 20px rgba(0, 0, 0, .32);
   color: #ededed;
   cursor: pointer;
   font-size: 11px;
 }
 
-.button:hover { background: #353535; }
+.button:hover { background: var(--color-surface-hover, #1E222A); }
+.button { transition: background var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)); }
 .button svg { width: 14px; height: 14px; }
