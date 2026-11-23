@@ -1,9 +1,13 @@
 .root { position: relative; flex: 0 0 auto; }
-.trigger, .closeButton, .actionButton { display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--color-text-secondary); cursor: pointer; }
+.trigger, .closeButton, .actionButton { display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--color-text-secondary); cursor: pointer; transition: background var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), color var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), transform var(--duration-fast, 120ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)); }
+.trigger:active:not(:disabled), .closeButton:active:not(:disabled), .actionButton:active:not(:disabled) { transform: scale(var(--press-scale-small, 0.92)); }
+.filterButton, .textButton { transition: border-color var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), background var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), color var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), transform var(--duration-fast, 120ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)); }
+.filterButton:active, .textButton:active { transform: scale(var(--press-scale, 0.97)); }
 .trigger { width: 22px; height: 22px; border-radius: 5px; }
 .trigger svg { width: 15px; height: 15px; stroke-width: 1.8; }
 .trigger[aria-expanded="true"] { background: var(--color-surface-active); color: var(--color-text); }
-.popover { position: fixed; z-index: 70; top: calc(var(--topbar-height) + 28px + 10px); right: 24px; width: min(1120px, calc(100vw - 48px)); max-height: min(78dvh, 760px); overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: 8px; background: var(--color-surface); box-shadow: 0 12px 30px rgb(0 0 0 / .35); color: var(--color-text); }
+.popover { position: fixed; z-index: 70; top: calc(var(--topbar-height) + 28px + 10px); right: 24px; width: min(1120px, calc(100vw - 48px)); max-height: min(78dvh, 760px); overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: 8px; background: var(--material-bg, rgba(26, 29, 35, .72)); -webkit-backdrop-filter: var(--material-blur, blur(20px) saturate(1.5)); backdrop-filter: var(--material-blur, blur(20px) saturate(1.5)); box-shadow: var(--material-highlight, inset 0 1px 0 rgba(255, 255, 255, .07)), 0 12px 30px rgb(0 0 0 / .35); color: var(--color-text); transform-origin: top right; animation: popover-in var(--duration-overlay, 250ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)); }
+@keyframes popover-in { from { opacity: 0; transform: translateY(-6px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 14px 10px; }
 .header h2 { margin: 0; font-size: 14px; font-weight: 650; }
 .header p { margin: 3px 0 0; color: var(--color-text-muted); font-size: 11px; }

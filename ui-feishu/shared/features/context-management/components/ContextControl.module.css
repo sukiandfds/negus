@@ -36,8 +36,17 @@
   border: 1px solid var(--color-border-strong);
   border-radius: 8px;
   padding: 12px;
-  background: var(--color-surface);
-  box-shadow: 0 14px 36px rgba(0, 0, 0, .4);
+  background: var(--material-bg, rgba(26, 29, 35, .72));
+  -webkit-backdrop-filter: var(--material-blur, blur(20px) saturate(1.5));
+  backdrop-filter: var(--material-blur, blur(20px) saturate(1.5));
+  box-shadow: var(--material-highlight, inset 0 1px 0 rgba(255, 255, 255, .07)), 0 14px 36px rgba(0, 0, 0, .4);
+  transform-origin: bottom right;
+  animation: context-menu-in var(--duration-overlay, 250ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1));
+}
+
+@keyframes context-menu-in {
+  from { opacity: 0; transform: translateY(6px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .usage,
@@ -81,7 +90,9 @@
   white-space: nowrap;
 }
 
+.compactButton { transition: background var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), color var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), transform var(--duration-fast, 120ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)); }
 .compactButton:not(:disabled):hover { background: var(--color-control-hover); color: var(--color-text); cursor: pointer; }
+.compactButton:active:not(:disabled) { transform: scale(var(--press-scale, 0.97)); }
 .compactButton:disabled { opacity: .55; }
 .compactButton svg { width: 14px; height: 14px; stroke-width: 1.8; }
 .compacting svg { animation: context-spin .9s linear infinite; }

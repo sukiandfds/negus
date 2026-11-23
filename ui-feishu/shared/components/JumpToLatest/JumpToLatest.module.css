@@ -6,13 +6,16 @@
   border: 1px solid rgba(255, 255, 255, .12);
   border-radius: 16px;
   padding: 0 11px;
-  background: var(--color-surface, #1A1D23);
-  box-shadow: 0 7px 20px rgba(0, 0, 0, .32);
+  background: var(--material-bg, rgba(26, 29, 35, .72));
+  -webkit-backdrop-filter: var(--material-blur, blur(20px) saturate(1.5));
+  backdrop-filter: var(--material-blur, blur(20px) saturate(1.5));
+  box-shadow: var(--material-highlight, inset 0 1px 0 rgba(255, 255, 255, .07)), 0 7px 20px rgba(0, 0, 0, .32);
   color: #ededed;
   cursor: pointer;
   font-size: 11px;
 }
 
 .button:hover { background: var(--color-surface-hover, #1E222A); }
-.button { transition: background var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)); }
+.button { transition: background var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), transform var(--duration-fast, 120ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)); }
+.button:active { transform: scale(var(--press-scale-small, 0.92)); }
 .button svg { width: 14px; height: 14px; }

@@ -15,7 +15,10 @@
   place-items: center;
   padding: 20px;
   background: rgb(0 0 0 / 68%);
+  animation: backdrop-in var(--duration-medium, 200ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1));
 }
+
+@keyframes backdrop-in { from { opacity: 0; } to { opacity: 1; } }
 
 .dialog {
   width: min(360px, 100%);
@@ -23,7 +26,13 @@
   border: 1px solid var(--color-border-strong);
   border-radius: 8px;
   background: var(--color-surface-soft);
-  box-shadow: 0 20px 70px rgb(0 0 0 / 55%);
+  box-shadow: var(--material-highlight, inset 0 1px 0 rgba(255, 255, 255, .07)), 0 20px 70px rgb(0 0 0 / 55%);
+  animation: dialog-in var(--duration-overlay, 250ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1));
+}
+
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(8px) scale(.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .header {
@@ -51,7 +60,9 @@
   cursor: pointer;
 }
 
+.closeButton { transition: background var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), color var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), transform var(--duration-fast, 120ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)); }
 .closeButton:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-text); }
+.closeButton:active:not(:disabled) { transform: scale(var(--press-scale-small, 0.92)); }
 .closeButton:disabled { cursor: default; opacity: .5; }
 .closeButton svg { width: 16px; height: 16px; }
 
@@ -74,7 +85,9 @@
   text-align: left;
 }
 
+.roomButton { transition: border-color var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), transform var(--duration-fast, 120ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)); }
 .roomButton:hover:not(:disabled) { border-color: var(--color-text-secondary); }
+.roomButton:active:not(:disabled) { transform: scale(var(--press-scale, 0.97)); }
 .roomButton:disabled { cursor: default; opacity: .55; }
 .roomButton svg { width: 16px; height: 16px; color: var(--color-text-muted); }
 

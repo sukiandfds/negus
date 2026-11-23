@@ -54,8 +54,17 @@
   border: 1px solid var(--color-border-strong);
   border-radius: 8px;
   padding: 7px;
-  background: var(--color-surface);
-  box-shadow: 0 14px 36px rgba(0, 0, 0, .4);
+  background: var(--material-bg, rgba(26, 29, 35, .72));
+  -webkit-backdrop-filter: var(--material-blur, blur(20px) saturate(1.5));
+  backdrop-filter: var(--material-blur, blur(20px) saturate(1.5));
+  box-shadow: var(--material-highlight, inset 0 1px 0 rgba(255, 255, 255, .07)), 0 14px 36px rgba(0, 0, 0, .4);
+  transform-origin: bottom left;
+  animation: settings-menu-in var(--duration-overlay, 250ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1));
+}
+
+@keyframes settings-menu-in {
+  from { opacity: 0; transform: translateY(6px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .settingRow {
@@ -97,7 +106,9 @@
   color: var(--color-text-muted);
   cursor: pointer;
 }
+.refreshButton { transition: background var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), color var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), transform var(--duration-fast, 120ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)); }
 .refreshButton:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-text); }
+.refreshButton:active:not(:disabled) { transform: scale(var(--press-scale-small, 0.92)); }
 .refreshButton:disabled { opacity: .45; cursor: default; }
 .menuError { padding: 4px 7px 0; color: var(--color-danger, #e57373); font-size: 11px; line-height: 1.4; }
 

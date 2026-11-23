@@ -1,13 +1,15 @@
 .timeline { padding: 8px 0 0; color: var(--color-text-secondary); }
 .header { display: inline-flex; min-height: 30px; align-items: center; gap: 7px; border: 0; padding: 0; background: transparent; color: var(--color-text-muted); cursor: pointer; font-size: 13px; }
 .header time { color: #686a6b; font-size: 11px; }
-.header > svg:last-child { width: 14px; height: 14px; transition: transform var(--duration-fast) var(--ease-out); }
+.header { transition: transform var(--duration-fast) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)); }
+.header:active { transform: scale(var(--press-scale, 0.97)); }
+.header > svg:last-child { width: 14px; height: 14px; transition: transform var(--duration-medium) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)); }
 .header > svg.expanded { transform: rotate(90deg); }
 .spinner { width: 14px; height: 14px; animation: spin 1.15s linear infinite; }
 .failed { width: 14px; height: 14px; color: #e08b82; }
 .interrupted { width: 14px; height: 14px; color: #e7b65a; }
-.activitiesWrap { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows var(--duration-medium) var(--ease-out), opacity var(--duration-medium) var(--ease-out), visibility 0s var(--duration-medium); }
-.activitiesWrap.open { grid-template-rows: 1fr; opacity: 1; visibility: visible; transition: grid-template-rows var(--duration-medium) var(--ease-out), opacity var(--duration-medium) var(--ease-out), visibility 0s; }
+.activitiesWrap { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows var(--duration-overlay, 250ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)), opacity var(--duration-medium) var(--ease-out), visibility 0s var(--duration-medium); }
+.activitiesWrap.open { grid-template-rows: 1fr; opacity: 1; visibility: visible; transition: grid-template-rows var(--duration-overlay, 250ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)), opacity var(--duration-medium) var(--ease-out), visibility 0s; }
 .activitiesWrap > .activities { overflow: hidden; min-height: 0; }
 .activities { display: grid; gap: 9px; margin: 5px 0 0 6px; padding: 7px 0 1px 14px; border-left: 1px solid #303233; }
 .activity { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 7px; animation: reveal 180ms var(--ease-out) both; }

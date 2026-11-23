@@ -24,13 +24,21 @@
   width: min(360px, calc(100vw - 24px));
   max-height: min(600px, calc(100dvh - 76px));
   overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 14px;
   border: 1px solid var(--color-border-strong);
   border-radius: 8px;
-  background: var(--color-surface);
-  box-shadow: 0 12px 30px rgb(0 0 0 / .35);
+  background: var(--material-bg, rgba(26, 29, 35, .72));
+  -webkit-backdrop-filter: var(--material-blur, blur(20px) saturate(1.5));
+  backdrop-filter: var(--material-blur, blur(20px) saturate(1.5));
+  box-shadow: var(--material-highlight, inset 0 1px 0 rgba(255, 255, 255, .07)), 0 12px 30px rgb(0 0 0 / .35);
   color: var(--color-text);
+  transform-origin: top center;
+  animation: popover-in var(--duration-overlay, 250ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1));
 }
+
+@keyframes popover-in { from { opacity: 0; transform: translateY(-6px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
 .popoverHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .popoverHeader h2 { margin: 0; font-size: 14px; font-weight: 650; }

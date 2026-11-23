@@ -17,12 +17,15 @@
   margin: 0 auto;
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-large, 12px);
-  background: var(--color-composer);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, .16);
+  background: var(--material-bg, rgba(26, 29, 35, .72));
+  -webkit-backdrop-filter: var(--material-blur, blur(20px) saturate(1.5));
+  backdrop-filter: var(--material-blur, blur(20px) saturate(1.5));
+  box-shadow: var(--material-highlight, inset 0 1px 0 rgba(255, 255, 255, .07)), 0 4px 16px rgba(0, 0, 0, .16);
   pointer-events: auto;
+  transition: border-color var(--duration-medium, 200ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)), box-shadow var(--duration-medium, 200ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1));
 }
 
-.composer:focus-within { border-color: var(--color-border-focus); box-shadow: 0 4px 16px rgba(0, 0, 0, .16), 0 0 0 3px rgba(121, 165, 255, .14); }
+.composer:focus-within { border-color: var(--color-border-focus); box-shadow: var(--material-highlight, inset 0 1px 0 rgba(255, 255, 255, .07)), 0 4px 16px rgba(0, 0, 0, .16), 0 0 0 3px rgba(121, 165, 255, .14); }
 
 .editingBar {
   display: flex;
@@ -106,6 +109,9 @@
   color: var(--color-text, #eee);
 }
 
+.commandButton { transition: var(--control-transition), transform var(--duration-fast, 120ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)); }
+.commandButton:active:not(:disabled) { transform: scale(var(--press-scale-small, 0.92)); }
+
 .commandButton:disabled { opacity: .4; cursor: default; }
 .commandButton svg { width: var(--control-icon-size); height: var(--control-icon-size); stroke-width: 1.8; }
 
@@ -119,10 +125,11 @@
   background: #cdd0d2;
   color: var(--color-bg);
   opacity: 1;
-  transition: var(--control-transition), opacity var(--duration-fast) var(--ease-out);
+  transition: var(--control-transition), opacity var(--duration-medium, 200ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)), transform var(--duration-fast, 120ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1));
   cursor: pointer;
 }
 
+.sendButton:active:not(:disabled) { transform: scale(var(--press-scale-small, 0.92)); }
 .sendButton:disabled { cursor: default; opacity: .38; }
 .sendButton svg { width: var(--control-icon-size); height: var(--control-icon-size); stroke-width: 1.9; }
 .sendButton svg.stopIcon { width: 10px; height: 10px; fill: currentColor; }

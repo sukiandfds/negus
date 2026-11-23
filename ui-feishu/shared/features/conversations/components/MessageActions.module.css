@@ -18,10 +18,14 @@
   cursor: pointer;
 }
 
+.button { transition: background var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), color var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), transform var(--duration-fast, 120ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)); }
+
 .button:hover:not(:disabled) {
   background: rgba(255, 255, 255, .06);
   color: var(--color-text);
 }
+
+.button:active:not(:disabled) { transform: scale(var(--press-scale-small, 0.92)); }
 
 .button:focus-visible {
   outline: 2px solid var(--color-text-secondary);

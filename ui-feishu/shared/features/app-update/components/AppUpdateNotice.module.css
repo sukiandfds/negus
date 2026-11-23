@@ -2,7 +2,7 @@
   position: fixed;
   z-index: 18;
   right: 14px;
-  animation: notice-in var(--duration-medium, 200ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1));
+  animation: notice-in var(--duration-overlay, 250ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1));
   display: flex;
   width: min(390px, calc(100vw - 28px));
   align-items: center;
@@ -10,8 +10,10 @@
   padding: 10px 10px 10px 13px;
   border: 1px solid var(--color-border-strong, #3a3a3a);
   border-radius: var(--radius-medium, 8px);
-  background: var(--color-surface, #202020);
-  box-shadow: 0 14px 36px rgb(0 0 0 / 32%);
+  background: var(--material-bg, rgba(26, 29, 35, .72));
+  -webkit-backdrop-filter: var(--material-blur, blur(20px) saturate(1.5));
+  backdrop-filter: var(--material-blur, blur(20px) saturate(1.5));
+  box-shadow: var(--material-highlight, inset 0 1px 0 rgba(255, 255, 255, .07)), 0 14px 36px rgb(0 0 0 / 32%);
   color: var(--color-text, #ededed);
 }
 
@@ -41,11 +43,13 @@
   font-weight: 600;
 }
 
+.notice button { transition: transform var(--duration-fast, 120ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)), opacity var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)); }
+.notice button:active:not(:disabled) { transform: scale(var(--press-scale, 0.97)); }
 .notice button:disabled { cursor: default; opacity: .62; }
 
 @keyframes notice-in {
-  from { opacity: 0; transform: translateX(12px); }
-  to { opacity: 1; transform: translateX(0); }
+  from { opacity: 0; transform: translateY(-8px) scale(.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @media (max-width: 760px) {

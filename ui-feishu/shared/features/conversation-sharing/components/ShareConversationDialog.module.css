@@ -6,7 +6,10 @@
   place-items: center;
   padding: 20px;
   background: rgb(0 0 0 / 68%);
+  animation: backdrop-in var(--duration-medium, 200ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1));
 }
+
+@keyframes backdrop-in { from { opacity: 0; } to { opacity: 1; } }
 
 .dialog {
   width: min(390px, 100%);
@@ -14,7 +17,13 @@
   border-radius: 8px;
   padding: 18px;
   background: var(--color-surface-soft);
-  box-shadow: 0 20px 70px rgb(0 0 0 / 55%);
+  box-shadow: var(--material-highlight, inset 0 1px 0 rgba(255, 255, 255, .07)), 0 20px 70px rgb(0 0 0 / 55%);
+  animation: dialog-in var(--duration-overlay, 250ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1));
+}
+
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(8px) scale(.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .header { display: flex; align-items: flex-start; gap: 12px; }
@@ -32,7 +41,9 @@
   border-radius: 6px;
   background: transparent;
   color: var(--color-text-secondary);
+  transition: background var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), color var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), transform var(--duration-fast, 120ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1));
 }
+.iconButton:active { transform: scale(var(--press-scale-small, 0.92)); }
 .iconButton svg { width: 16px; height: 16px; }
 
 .qrArea {
@@ -78,6 +89,8 @@
   font-weight: 600;
 }
 .copyButton svg { width: 14px; height: 14px; }
+.copyButton { transition: opacity var(--duration-fast, 120ms) var(--ease-out, cubic-bezier(0.25, 1, 0.5, 1)), transform var(--duration-fast, 120ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1)); }
+.copyButton:active:not(:disabled) { transform: scale(var(--press-scale, 0.97)); }
 .copyButton:disabled { opacity: .45; }
 
 @media (hover: hover) {

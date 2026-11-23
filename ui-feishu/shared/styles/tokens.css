@@ -50,7 +50,15 @@
   --duration-fast: 120ms;
   --duration-medium: 200ms;
   --duration-slow: 300ms;
+  --duration-overlay: 250ms;
   --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --press-scale: 0.97;
+  --press-scale-small: 0.92;
+  --material-bg: rgba(26, 29, 35, .72);
+  --material-bg-dim: rgba(11, 13, 16, .72);
+  --material-blur: blur(20px) saturate(1.5);
+  --material-highlight: inset 0 1px 0 rgba(255, 255, 255, .07);
 }
 
 @media (min-width: 761px) and (max-width: 1024px) {
