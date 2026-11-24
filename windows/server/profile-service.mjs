@@ -6,18 +6,20 @@ import { readJsonFile, writeJsonFileAtomic, writeTextFileAtomic } from "./persis
 // USER_PROFILE.md is injected into every turn by conversation-context.mjs, which
 // trims the file and truncates it at 12000 characters. This service is the
 // writing side of that channel: it appends distilled correction rules to the
-// 纠正沉淀 section, refuses writes that would push the injected content past
-// the limit, and keeps a candidate queue for rules that need user approval.
+// 纠正沉淀 section and refuses writes that would push the injected content past
+// the limit. Per the user's decision (2026-11-24), profile candidates are
+// written through immediately without approval; only a candidate that would
+// overflow the limit stays queued for manual handling.
 // Nothing here touches the injection path, its keys, or its revision logic.
 export const PROFILE_LIMIT = 12000;
 const SECTION_TITLE = "## 纠正沉淀";
-const SECTION_COMMENT = "<!-- 用户批准画像候选后，把教训蒸馏成一行祈使句追加到这里，格式：- 规则（日期，吐血表条目编号）。已有同义规则时不重复添加，只在原规则后补记新条目编号。本区由系统每轮自动注入，写在这里的规则对所有新对话立即生效。 -->";
+const SECTION_COMMENT = "<!-- 助手被纠正或用户愤怒后，把教训蒸馏成一行祈使句追加到这里，格式：- 规则（日期，吐血表条目编号）。已有同义规则时不重复添加，只在原规则后补记新条目编号。本区由系统每轮自动注入，写在这里的规则对所有新对话立即生效。 -->";
 
 const profileFile = (root) => path.join(root, "USER_PROFILE.md");
 const candidatesFile = (root) => path.join(root, "runtime", "profile-candidates.json");
 
-// Serialize operations per root so a topic publish and an approval cannot
-// interleave reads and writes of the profile or the candidate queue.
+// Serialize operations per root so a topic publish and a candidate write
+// cannot interleave reads and writes of the profile or the candidate queue.
 const chains = new Map();
 const withLock = (root, task) => {
   const previous = chains.get(root) || Promise.resolve();
@@ -128,10 +130,20 @@ export const addProfileCandidate = (root, { rule, ref = "", anger = false, topic
       status: "pending",
       at: new Date().toISOString(),
     };
+    // 用户已决定画像规则不需要批准：候选产生即经画像写入落盘（保留去重与上限）。
+    // 只有写不下（overflow）时才留待批准队列等人工处理。
+    const profile = await internalAppend(root, candidate);
+    if (profile.status === "overflow") {
+      candidate.note = "画像已达上限，规则未写入，留待人工处理";
+    } else {
+      candidate.status = "approved";
+      candidate.resolution = profile.status;
+      candidate.resolvedAt = new Date().toISOString();
+    }
     const rows = await readCandidates(root);
     rows.push(candidate);
     await saveCandidates(root, rows);
-    return { candidate: { ...candidate }, profile: null };
+    return { candidate: { ...candidate }, profile };
   });
 
 export const approveProfileCandidate = (root, id) => withLock(root, async () => {

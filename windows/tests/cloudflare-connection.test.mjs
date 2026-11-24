@@ -102,7 +102,8 @@ test('real stdio bridge stays available before authorization and never exposes c
   t.after(() => client.close());
   await client.connect(new StdioClientTransport({ command: process.execPath, args: [path.resolve('windows/server/connections/cloudflare-mcp.mjs')], env: { ...process.env, NEGUS_INSTALL_ROOT: f.directory } }));
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map(t => t.name).sort(), ['call', 'discover', 'status']);
+  // request_secret_input 是 baa3cd8 有意新增的凭据输入工具（只开私有对话框、不经手密钥值），工具面包含它。
+  assert.deepEqual(tools.map(t => t.name).sort(), ['call', 'discover', 'request_secret_input', 'status']);
   const status = await client.callTool({ name: 'status', arguments: {} });
   assert.equal(JSON.parse(status.content[0].text).connected, false);
   const discovery = await client.callTool({ name: 'discover', arguments: {} });

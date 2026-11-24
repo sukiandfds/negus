@@ -18,7 +18,8 @@ test("existing and switched threads receive current GitHub instructions through 
         if (method === 'thread/read' || method === 'thread/resume') return { thread };
         if (method === 'turn/start') {
           const resume = calls.findLast((call) => call.method === 'thread/resume');
-          assert.match(resume.params.developerInstructions, /gh api user\/repos/);
+          // 工具指南按索引注入（ee4b55c）：resume 指令带目录条目，全文在 github/SKILL.md 按需读取。
+          assert.match(resume.params.developerInstructions, /\/skill github \| 操作 GitHub：查询或管理 GitHub 仓库 \| github\/SKILL\.md/);
           return { turn: { id: 'turn' } };
         }
         throw new Error(`Unexpected request: ${method}`);
@@ -28,7 +29,7 @@ test("existing and switched threads receive current GitHub instructions through 
   try {
     await store.sendMessage(thread.id, '查询私有仓库');
     await store.resumeProviderSession(thread.id, { cwd: root, path: path.join(root, 'rollout.jsonl'), model: 'test' });
-    assert.match(calls.at(-1).params.developerInstructions, /gh api user\/repos/);
+    assert.match(calls.at(-1).params.developerInstructions, /\/skill github \| 操作 GitHub：查询或管理 GitHub 仓库 \| github\/SKILL\.md/);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -851,8 +852,8 @@ test("sorts the sidebar by the latest assistant reply instead of stale thread me
   const newerReply = path.join(root, "newer.jsonl");
   const writeRollout = (file, timestamp) => writeFile(file, `${JSON.stringify({
     timestamp,
-    type: "response_item",
-    payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "done" }] },
+    type: "event_msg",
+    payload: { type: "agent_message", phase: "final_answer", message: "done" },
   })}\n`, "utf8");
   await writeRollout(olderReply, "2026-09-22T05:47:00.000Z");
   await writeRollout(newerReply, "2026-09-22T09:25:00.000Z");

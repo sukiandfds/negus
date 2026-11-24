@@ -20,7 +20,7 @@ const publish = async (root, threadId, turn, items) => {
   await writer.finish(threadId, turn, "completed");
 };
 
-test("带 profileCandidate 的草稿发布后，候选进入待批准且话题照常发布", async (t) => {
+test("带 profileCandidate 的草稿发布后，候选直接写入画像且话题照常发布", async (t) => {
   const root = await createRoot(t);
   await publish(root, "thread-1", "turn-1", [{
     title: "修复对话摘要", mainline: "开发 Negus", summary: "已修复。",
@@ -30,16 +30,21 @@ test("带 profileCandidate 的草稿发布后，候选进入待批准且话题�
   assert.equal(topics.length, 1);
   assert.equal(topics[0].title, "修复对话摘要");
   assert.ok(!("profileCandidate" in topics[0]));
-  const pending = await listProfileCandidates(root, { status: "pending" });
-  assert.equal(pending.length, 1);
-  assert.equal(pending[0].rule, "给结论前先核对远端状态");
-  assert.equal(pending[0].ref, "TB-001");
-  assert.equal(pending[0].anger, false);
-  assert.equal(pending[0].topicId, "turn-1");
-  assert.equal(pending[0].turnId, "turn-1");
+  const all = await listProfileCandidates(root);
+  assert.equal(all.length, 1);
+  assert.equal(all[0].status, "approved");
+  assert.equal(all[0].rule, "给结论前先核对远端状态");
+  assert.equal(all[0].ref, "TB-001");
+  assert.equal(all[0].anger, false);
+  assert.equal(all[0].topicId, "turn-1");
+  assert.equal(all[0].turnId, "turn-1");
+  assert.equal((await listProfileCandidates(root, { status: "pending" })).length, 0);
+  const profile = await fs.readFile(path.join(root, "USER_PROFILE.md"), "utf8");
+  assert.ok(profile.includes("- 给结论前先核对远端状态"));
+  assert.ok(profile.includes("TB-001"));
 });
 
-test("带 anger 候选的草稿发布后，规则等待批准", async (t) => {
+test("带 anger 候选的草稿发布后，规则直接写入画像", async (t) => {
   const root = await createRoot(t);
   await publish(root, "thread-2", "turn-2", [{
     title: "愤怒事件", mainline: "开发 Negus", summary: "用户愤怒，已写回。",
@@ -47,8 +52,10 @@ test("带 anger 候选的草稿发布后，规则等待批准", async (t) => {
   }]);
   const all = await listProfileCandidates(root);
   assert.equal(all.length, 1);
-  assert.equal(all[0].status, "pending");
-  await assert.rejects(fs.access(path.join(root, "USER_PROFILE.md")), { code: "ENOENT" });
+  assert.equal(all[0].status, "approved");
+  const profile = await fs.readFile(path.join(root, "USER_PROFILE.md"), "utf8");
+  assert.ok(profile.includes("- 同一个错误不许犯第二次"));
+  assert.ok(profile.includes("TB-002"));
 });
 
 test("不带候选的旧草稿发布行为不变，也不产生候选", async (t) => {

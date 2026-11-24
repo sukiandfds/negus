@@ -176,6 +176,19 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
     try {
       const item = JSON.parse(line);
       const eventType = item.payload?.type;
+      // 回执（UserMessage item_completed）只用于恢复消息时间戳，不是消息本体：
+      // 必须先于下面的 legacy 跳过判断记录，否则 legacy 模式下回执永远记不上、steer 时间戳恢复失效。
+      if (item.type === "event_msg" && item.payload?.type === "item_completed" && item.payload.item?.type === "UserMessage") {
+        const event = item.payload;
+        if (!state.userMessageEvents.has(JSON.stringify([event.turn_id, event.item.id]))) {
+          const completed = new Date(event.completed_at_ms);
+          const time = Number.isFinite(event.completed_at_ms) && Number.isFinite(completed.getTime()) ? completed.toISOString() : item.timestamp;
+          if (time && Number.isFinite(Date.parse(time))) {
+            const receipt = { itemId: event.item.id, submissionId: submissionIdOf(event.item), turnId: event.turn_id, createdAt: time };
+            state.userMessageEvents.set(JSON.stringify([event.turn_id, event.item.id]), receipt);
+          }
+        }
+      }
       if (item.type === "event_msg" && (state.historyMode === "paginated"
         ? ["user_message", "agent_message"].includes(eventType)
         : eventType === "item_completed" && ["UserMessage", "AgentMessage"].includes(item.payload.item?.type))) return;
@@ -185,19 +198,6 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
         state.messages = state.messages.filter(message => !(message.protocolTurnId === turn_id && message.role === "assistant"
           && message.phase === "final_answer" && Date.parse(message.createdAt) >= started_at_ms && Date.parse(message.createdAt) <= completed_at_ms));
         return;
-      }
-      if (item.type === "event_msg" && item.payload?.type === "item_completed" && item.payload.item?.type === "UserMessage") {
-        const event = item.payload;
-        if (state.userMessageEvents.has(JSON.stringify([event.turn_id, event.item.id]))) {
-          return;
-        }
-        const completed = new Date(event.completed_at_ms);
-        const time = Number.isFinite(event.completed_at_ms) && Number.isFinite(completed.getTime()) ? completed.toISOString() : item.timestamp;
-        if (time && Number.isFinite(Date.parse(time))) {
-          const receipt = { itemId: event.item.id, submissionId: submissionIdOf(event.item), turnId: event.turn_id, createdAt: time };
-          state.userMessageEvents.set(JSON.stringify([event.turn_id, event.item.id]), receipt);
-
-        }
       }
       if (item.type === "event_msg" && item.payload?.type === "task_started") state.currentTurnId = item.payload.turn_id;
       if (item.type === "event_msg" && ["task_complete", "turn_aborted"].includes(item.payload?.type)) {
@@ -375,7 +375,9 @@ export const createJsonlConversationStore = ({ sessionRoot, fallbackSessionRoots
     const ordered = await Promise.all(files.map(async file => ({ header: headers.find(header => header.file === file), stat: await fsp.stat(file) })));
     const header = ordered.at(-1).header;
     const fileRevision = ordered.map(({ stat }) => conversationSourceRevision(stat)).join('|');
-    const sourceRevision = 'native-history-v5:' + fileRevision;
+    // revision 格式与 app-server store 的 conversationSourceRevision 保持一致（裸哈希、多文件以 | 连接），
+    // 跨 store 比较同一会话的 revision 时必须相等；不要加私有前缀。
+    const sourceRevision = fileRevision;
     if (metadataOnly) return { id: threadId, path: header.file, paths: files, cwd: header.cwd, name: header.title, sourceRevision };
     const parts = await Promise.all(ordered.map(({ header }) => readSession(header)));
     const after = await Promise.all(files.map(file => fsp.stat(file).then(conversationSourceRevision)));

@@ -1,6 +1,7 @@
 import { terminalPhases } from "../server/execution/protocol.mjs";
 import { isOptimisticId, optimisticMessageId } from "../server/message-identity.mjs";
 import { deliveryPatch, messageContentBlocks, queuedTranscriptMessage, beginOptimisticSend } from "../../ui-feishu/shared/features/conversations/state/optimisticMessage.ts";
+import { switchingTo, switchedTo, settleSwitch } from "../../ui-feishu/shared/features/conversations/model/providerSwitch.ts";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -20,7 +21,7 @@ async function harness(file, dependencies) {
     useCallback: fn => fn, useEffect() {},
   };
   const key = `__conversationState${Math.random().toString(36).slice(2)}`;
-  globalThis[key] = { ...hooks, terminalPhases, deliveryPatch, messageContentBlocks, isOptimisticId, optimisticMessageId, queuedTranscriptMessage, beginOptimisticSend, goalCompletionKey: goal => JSON.stringify([goal.createdAt, goal.updatedAt, goal.objective]), ...dependencies };
+  globalThis[key] = { ...hooks, terminalPhases, deliveryPatch, messageContentBlocks, isOptimisticId, optimisticMessageId, queuedTranscriptMessage, beginOptimisticSend, switchingTo, switchedTo, settleSwitch, goalCompletionKey: goal => JSON.stringify([goal.createdAt, goal.updatedAt, goal.objective]), ...dependencies };
   const source = ts.transpileModule(await fs.readFile(new URL(`../../ui-feishu/shared/${file}`, import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
   }).outputText.replace(/import \{([^}]+)\} from "[^"]+";/g, (_, names) => `const {${names}} = globalThis.${key};`);

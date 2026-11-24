@@ -275,8 +275,8 @@ test("sorts a switched channel by the latest assistant reply instead of the stal
   const rollout = path.join(root, "rollout.jsonl");
   await fs.writeFile(rollout, `${JSON.stringify({ type: "session_meta", payload: { id: "original" } })}\n${JSON.stringify({
     timestamp: "2026-09-23T02:45:20.909Z",
-    type: "response_item",
-    payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "done" }] },
+    type: "event_msg",
+    payload: { type: "agent_message", phase: "final_answer", message: "done" },
   })}\n`, "utf8");
   const stale = {
     threadId: "original",

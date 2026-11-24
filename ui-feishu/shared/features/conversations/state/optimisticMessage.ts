@@ -1,4 +1,4 @@
-import { isOccupied } from "../../../shared/api/occupation";
+import { isOccupied } from "../../../shared/api/occupation.ts";
 import { optimisticMessageId } from "../../../../../windows/server/message-identity.mjs";
 import type { MediaFile } from "../../../shared/model/media";
 import type { FollowUpQueueItem } from "../model/followUpQueue";
