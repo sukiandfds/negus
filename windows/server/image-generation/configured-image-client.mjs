@@ -21,9 +21,18 @@ export const createConfiguredImageClient = ({ store = createImageSettingsStore()
       model: mode === "legacy" ? entry.model || undefined : process.env.NEGUS_FAST_IMAGE_MODEL || "gpt-image-2.5-flare",
       outputDirectory: path.resolve(process.env.NEGUS_IMAGE_OUTPUT_DIR || path.join(process.cwd(), "runtime/generated-images")),
     } : {};
+    const catalog = createHappyEveringImageClient(options);
+    if (operation === "listModels") return catalog.listModels();
+    if (operation === "listPrices") return catalog.listPrices(args);
     // Preserve explicit resolution switching for the existing GPT Image family.
     const configuredModel = entry ? entry.model : process.env.NEGUS_IMAGE_MODEL || process.env.LYNN_IMAGE_MODEL || "";
     const model = configuredModel && !(args.resolution && /^gpt-image-2(?:-[24]k)?$/u.test(configuredModel)) ? configuredModel : undefined;
+    let chosen = args.model || model;
+    if (createClient === createHappyEveringImageClient && (!chosen || /^gpt-image-/.test(chosen))) {
+      const available = await catalog.listModels();
+      chosen = args.model || (chosen && chosen !== "gpt-image-2" ? chosen : available[0]);
+      if (!available.includes(chosen)) throw new Error("Unavailable image model: " + chosen);
+    }
     let size = args.size;
     if (!size && /^gpt-image-2\.5-/u.test(model || "") && args.image_paths?.length) {
       const index = (args.aspect_source_image_index || 1) - 1;
@@ -31,8 +40,8 @@ export const createConfiguredImageClient = ({ store = createImageSettingsStore()
       const dimensions = imageSize(await fs.readFile(args.image_paths[index]));
       size = `${dimensions.width}:${dimensions.height}`;
     }
-    const request = { ...providerImageRequestFromArgs({ ...args, size, model }), imagePaths: args.image_paths, maskPath: args.mask_path };
+    const request = { ...providerImageRequestFromArgs({ ...args, size, model: chosen }), complexity: args.complexity, resolution: args.resolution, imagePaths: args.image_paths, maskPath: args.mask_path };
     return selectedFactory(options)[operation](request);
   };
-  return { generate: args => invoke("generate", args), edit: args => invoke("edit", args) };
+  return { listModels: () => invoke("listModels", {}), listPrices: models => invoke("listPrices", models), generate: args => invoke("generate", args), edit: args => invoke("edit", args) };
 };

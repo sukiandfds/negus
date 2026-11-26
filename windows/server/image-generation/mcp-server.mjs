@@ -7,6 +7,9 @@ import { createConfiguredImageClient } from "./configured-image-client.mjs";
 import { providerImageRequestFromArgs } from "./image-contract.mjs";
 
 const commonInput = {
+  model: z.string().min(1).optional().describe("Optional exact ID from list_image_models. Defaults to the newest available GPT Image Flare, then Sunburst, then the base model. Use Sunburst for precision when requested."),
+  quality: z.enum(["auto","low","medium","high","xhigh","max"]).optional().describe("Optional provider quality setting. Base GPT Image 2 supports up to high."),
+  complexity: z.enum(["low","medium","high"]).optional().describe("Optional planning effort for GPT Image 2.6; independent of quality."),
   prompt: z.string().min(1).describe("Use the user's original visual request. Do not rewrite it or add extra quality terms unless requested."),
   quality: z.enum(["auto", "low", "medium", "high", "xhigh", "max"]).optional().describe("Independent of pixel resolution. Set only when explicitly requested; supported levels depend on the configured image model."),
   resolution: z.enum(["1K", "2K", "4K"]).optional().describe("Set only when the user explicitly requests 1K, 2K, or 4K. Omit otherwise."),
@@ -50,6 +53,8 @@ const toolResult = async (operation, successVerb) => {
 
 export const createImageMcpServer = ({ client } = {}) => {
   const configured = client ? {
+    listModels: () => client.listModels(),
+    listPrices: models => client.listPrices(models),
     generate: args => client.generate(providerImageRequestFromArgs(args)),
     edit: args => client.edit({ ...providerImageRequestFromArgs(args), imagePaths: args.image_paths, maskPath: args.mask_path }),
   } : createConfiguredImageClient();
@@ -71,6 +76,17 @@ export const createImageMcpServer = ({ client } = {}) => {
     }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, (args) => toolResult(() => configured.edit(args), "Edited"));
+  server.registerTool("list_image_models", {
+    title: "List current image models",
+    description: "Refresh available GPT Image models using the generation key. Ordered newest first, Flare before Sunburst. No generation charge. Optional pricing lookup for FlowRealm.",
+    inputSchema: z.object({ pricing: z.boolean().optional() }),
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  }, async ({ pricing }) => {
+    const models = await configured.listModels();
+    const result = {models, default_model: models[0] || null};
+    if (pricing) Object.assign(result, await configured.listPrices(models));
+    return {content: [{type:"text", text:JSON.stringify(result)}], structuredContent:result};
+  });
   return server;
 };
 

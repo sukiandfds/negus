@@ -141,22 +141,22 @@ export const createFastImageClient = ({
     };
   };
 
-  const generate = async ({ prompt, size, n = 1, quality, targetSize, stream = false, model: selectedModel } = {}) => {
+  const generate = async ({ prompt, size, n = 1, quality, complexity, resolution, targetSize, stream = false, model: selectedModel } = {}) => {
     const startedAt = Date.now();
     const requestModel = selectedModel || model;
     const body = await call("/images/generations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: requestModel, prompt, size: normalizeRequestSize(size, requestModel), target_size: targetSize, n, quality, response_format: "url", ...(stream ? { stream: true } : {}) }),
+      body: JSON.stringify({ model: requestModel, prompt, size: normalizeRequestSize(resolution && /^\d+:\d+$/.test(size) ? resolution + ":" + size : size, requestModel), target_size: targetSize, n, quality, complexity, response_format: "url", ...(stream ? { stream: true } : {}) }),
     });
     return finish(body, startedAt, Date.now(), "generated");
   };
 
-  const edit = async ({ prompt, imagePaths, size, n = 1, quality, targetSize, maskPath, stream = false, model: selectedModel } = {}) => {
+  const edit = async ({ prompt, imagePaths, size, n = 1, quality, complexity, resolution, targetSize, maskPath, stream = false, model: selectedModel } = {}) => {
     const startedAt = Date.now();
     const requestModel = selectedModel || model;
     const form = new FormData();
-    for (const [key, value] of Object.entries({ model: requestModel, prompt, size: normalizeRequestSize(size, requestModel), target_size: targetSize, n, quality, response_format: "url", ...(stream ? { stream: true } : {}) })) {
+    for (const [key, value] of Object.entries({ model: requestModel, prompt, size: normalizeRequestSize(resolution && /^\d+:\d+$/.test(size) ? resolution + ":" + size : size, requestModel), target_size: targetSize, n, quality, complexity, response_format: "url", ...(stream ? { stream: true } : {}) })) {
       if (value !== undefined && value !== "") form.append(key, String(value));
     }
     for (const imagePath of imagePaths || []) form.append("image", new Blob([await fs.readFile(imagePath)]), path.basename(imagePath));

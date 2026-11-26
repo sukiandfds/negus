@@ -244,6 +244,11 @@ test("stdio MCP advertises the image tools and completes a mocked tool call", as
   const outputDirectory = await temporaryRoot(t);
   let providerRequest;
   const baseUrl = await mockServer(t, async (request, response) => {
+    if (request.url.endsWith("/models")) {
+      response.setHeader("Content-Type", "application/json");
+      response.end(JSON.stringify({data: [{id:"gpt-image-2.6-sunburst"}, {id:"gpt-image-2.6-flare"}]}));
+      return;
+    }
     providerRequest = JSON.parse((await readRequestBody(request)).toString("utf8"));
     response.writeHead(200, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ data: [{ b64_json: pngBase64 }] }));
@@ -298,7 +303,7 @@ test("stdio MCP advertises the image tools and completes a mocked tool call", as
   send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
   send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
   const listed = await responseFor(2);
-  assert.deepEqual(listed.result.tools.map((tool) => tool.name), ["generate_image", "edit_image"]);
+  assert.deepEqual(listed.result.tools.map((tool) => tool.name), ["generate_image", "edit_image", "list_image_models"]);
   assert.ok(listed.result.tools[1].inputSchema.properties.aspect_source_image_index);
   send({
     jsonrpc: "2.0",
@@ -317,7 +322,7 @@ test("stdio MCP advertises the image tools and completes a mocked tool call", as
   assert.equal(called.result.content[1].data, pngBase64);
   assert.equal(called.result.structuredContent.outputs[0].width, 1);
   assert.equal(providerRequest.prompt, "mocked MCP cinematic image");
-  assert.equal(providerRequest.model, "gpt-image-2-4k");
+  assert.equal(providerRequest.model, "gpt-image-2.6-flare");
   assert.equal(providerRequest.size, "3840x1632");
   assert.equal(providerRequest.n, 1);
   await fs.access(called.result.structuredContent.outputs[0].path);

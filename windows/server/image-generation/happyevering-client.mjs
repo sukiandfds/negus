@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -118,6 +120,10 @@ const mimeFromPath = (filePath) => ({
 }[path.extname(filePath).toLowerCase()] || "application/octet-stream");
 
 const addOptionalFields = (target, request) => {
+  if (request.complexity) target.complexity = request.complexity;
+  if (request.resolution && !/-[24]k$/i.test(target.model)) {
+    if (/^\d+:\d+$/.test(target.size)) target.size = request.resolution + ":" + target.size;
+  }
   if (request.quality) target.quality = request.quality;
   if (request.targetSize) target.target_size = request.targetSize;
   return target;
@@ -136,7 +142,7 @@ const greatestCommonDivisor = (left, right) => {
   return a;
 };
 
-const sizeFromReferenceImage = async (imagePath, model) => {
+const sizeFromReferenceImage = async (imagePath, model, resolution) => {
   let dimensions;
   try {
     dimensions = imageSize(await fs.readFile(imagePath));
@@ -149,7 +155,7 @@ const sizeFromReferenceImage = async (imagePath, model) => {
   const divisor = greatestCommonDivisor(dimensions.width, dimensions.height);
   return normalizeProviderImageSize(
     `${dimensions.width / divisor}:${dimensions.height / divisor}`,
-    imageResolutionForModel(model),
+    resolution || imageResolutionForModel(model),
   );
 };
 
@@ -262,7 +268,7 @@ export const createHappyEveringImageClient = ({
       if (!Number.isInteger(index) || index < 1 || index > imagePaths.length) {
         throw new Error(`aspect_source_image_index must reference one of the ${imagePaths.length} input images`);
       }
-      selectedSize = await sizeFromReferenceImage(imagePaths[index - 1], selectedModel);
+      selectedSize = await sizeFromReferenceImage(imagePaths[index - 1], selectedModel, requestArgs.resolution);
     }
     const formData = new FormData();
     const requestBody = addOptionalFields({
@@ -292,5 +298,32 @@ export const createHappyEveringImageClient = ({
     });
   };
 
-  return { generate, edit };
+  const listModels = async () => {
+    const {body} = await request("/models", {method:"GET"}, AbortSignal.timeout(10000));
+    if (!Array.isArray(body.data)) throw new Error("Provider returned an invalid model catalog");
+    return body.data.map(entry => entry.id)
+      .filter(id => /^gpt-image-\d+(?:\.\d+)*(?:-(?:flare|sunburst))?$/.test(id))
+      .sort((a,b) => {
+        const version = id => id.slice(10).split("-")[0];
+        const rank = id => id.endsWith("-flare") ? 0 : id.endsWith("-sunburst") ? 1 : 2;
+        return version(b).localeCompare(version(a), "en", {numeric:true}) || rank(a)-rank(b);
+      });
+  };
+
+  const listPrices = async (models) => {
+    if (normalizedBaseUrl !== defaultBaseUrl || process.platform !== "win32") return {pricing_status:"Panel pricing unavailable for this endpoint"};
+    const command = `
+      $ErrorActionPreference='Stop'
+      $s=Import-Clixml (Join-Path $env:LOCALAPPDATA 'NegusImage/panel-token.xml')
+      $headers=@{Authorization="Bearer "+[Net.NetworkCredential]::new('',$s).Password}
+      $r=Invoke-RestMethod https://api.happyevering.xyz/api/pricing -Headers $headers -TimeoutSec 8
+      if (!$r.success) {throw 'Pricing unavailable'}
+      ConvertTo-Json -Compress -Depth 6 -InputObject @($r.data | Where-Object model_name -like 'gpt-image-*' | Select-Object model_name,model_price,billing_mode,billing_expr,enable_groups)
+    `;
+    try {
+      const {stdout} = await promisify(execFile)("powershell.exe", ["-NoProfile","-NonInteractive","-Command",command], {windowsHide:true,timeout:12000});
+      return {prices:JSON.parse(stdout).filter(row => models.includes(row.model_name)), pricing_note:"Provider pricing fields. For tiered_expr use billing_expr; model_price zero does not mean free."};
+    } catch { return {pricing_status:"Panel pricing unavailable"}; }
+  };
+  return { generate, edit, listModels, listPrices };
 };
