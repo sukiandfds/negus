@@ -8,10 +8,6 @@
     "开发"
   ],
   "responsibility": "依据产品定义输出开发方案、修改代码并验证",
-  "delegatesTo": [
-    "researcher",
-    "reviewer"
-  ],
   "projectKey": "employee-developer",
   "runtimeKind": "codex",
   "instructions": ""

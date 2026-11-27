@@ -50,11 +50,23 @@ export const neutralThreadInstructions = async file => {
 // FEAT-001: every ordinary/employee/task client shares old-thread identity cleanup.
 export async function requestWithNeutralIdentity(method, params, send, cleaned = new Set()) {
   if (params.baseInstructions) params = { ...params, baseInstructions: neutralModelInstructions(params.baseInstructions) };
-  const result = await send(method, params);
+  const resumeCurrent = async (method, params) => {
+    try { return await send(method, params); }
+    catch (error) {
+      // Native resume by ID can resolve an old compressed index for a live thread.
+      if (method !== 'thread/resume' || params.path || !/^cannot resume running thread .* with stale path:.*active `/su.test(String(error.message))) throw error;
+      const { thread } = await send('thread/read', { threadId: params.threadId, includeTurns: false });
+      if (thread?.id !== params.threadId || !thread.path || !path.isAbsolute(thread.path)) throw error;
+      return send(method, { ...params, path: thread.path });
+    }
+  };
+  const result = await resumeCurrent(method, params);
   if (!['thread/resume', 'thread/fork'].includes(method) || params.baseInstructions || cleaned.has(result?.thread?.id)) return result;
   const neutral = await neutralThreadInstructions(result?.thread?.path);
   if (!neutral.baseInstructions) { cleaned.add(result?.thread?.id); return result; }
-  const resumed = await send('thread/resume', { ...(method === 'thread/resume' ? params : {}),
+  // The first resume has established native ownership; do not reapply its archived path.
+  const { path: previousPath, ...byId } = method === 'thread/resume' ? params : {};
+  const resumed = await resumeCurrent('thread/resume', { ...byId,
     threadId: result.thread.id, persistExtendedHistory: true, ...neutral });
   cleaned.add(result.thread.id);
   return resumed;

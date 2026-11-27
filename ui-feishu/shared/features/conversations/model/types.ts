@@ -71,6 +71,7 @@ export interface SessionSummary {
 }
 
 export interface SessionDetail extends SessionSummary {
+  externalWork?: ExternalWorkRecord[];
   historyFormatVersion?: number;
   sourceSignature?: string;
   messages: SessionMessage[];
@@ -93,4 +94,9 @@ export interface ConversationPresentation {
   userInputRequest: import('../../execution/model/types').UserInputRequest | null;
   streamingText: string;
   commentaryText: string;
+}
+
+export interface ExternalWorkRecord {
+  id:string; threadId:string; callId:string; actor:string; employeeName:string; tool:string;
+  state:string; text:string; acceptance:string; result?:string; error?:string;
 }

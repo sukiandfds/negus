@@ -10,6 +10,8 @@ import { fileURLToPath } from "node:url";
 import { createHash } from 'node:crypto';
 import { createAppServerClient } from "./app-server-client.mjs";
 import { createCcSwitchConfigService } from "./cc-switch-config-service.mjs";
+import { createModelExecutionRecords, modelFailure } from "./model-execution-records.mjs";
+import { projectEvents } from "./external-assistant/project-events.mjs";
 import { readRolloutHead } from "./rollout-file.mjs";
 
 export const CURRENT_MODEL_PROVIDER_ID = "current";
@@ -241,6 +243,7 @@ export const createModelProviderService = ({
   fetchModels = globalThis.fetch,
   fetchResponse = globalThis.fetch,
   currentApiConfiguration = readCurrentApiConfiguration,
+  executionRecords = createModelExecutionRecords(path.join(projectRoot, 'runtime', 'model-execution.sqlite')),
 } = {}) => {
   if (!projectRoot) throw new Error("Project root is required for model provider routing.");
   const providerMap = new Map(providers.map(normalizeProvider).map((provider) => [provider.id, provider]));
@@ -249,6 +252,9 @@ export const createModelProviderService = ({
     throw new Error(`Provider ${CURRENT_MODEL_PROVIDER_ID} must use the current runtime.`);
   }
   const nativeConfiguration = Promise.resolve().then(currentApiConfiguration).catch(() => null);
+  const events = projectEvents(projectRoot);
+  const modelEvents = { events, record: (change, state) => events.append(change.project,
+    { actor: change.actor, callId: change.callId, objectId: change.threadId, tool: 'conversation_model_set', state, modelChange: change }) };
   const clientPromises = new Map();
   const removing = new Set();
   const activeUses = new Map();
@@ -279,6 +285,35 @@ export const createModelProviderService = ({
   const catalogReady = fs.readFile(catalogFile, 'utf8').then((text) => { catalogs = JSON.parse(text); }).catch(() => {});
   const catalogId = (id) => id === "current" && currentProvider.sharedConfigId
     ? `ccswitch_${currentProvider.sharedConfigId}` : id;
+  let sharedBillingAliases = new Map();
+  let billingAccounts = new Map();
+  const billingAccountId = (baseUrl, key) => 'account:' + createHash('sha256')
+    .update(JSON.stringify([baseUrl.replace(/\/$/u, ''), key])).digest('hex');
+  const billingChannelId = id => {
+    const nativeId = catalogId("current");
+    const actual = id === 'current'
+      ? (nativeId !== id ? nativeId : [...providerMap.keys()].find(usesDefaultHome) || id)
+      : usesDefaultHome(id) && nativeId !== "current" ? nativeId : id;
+    return sharedBillingAliases.get(actual) || actual;
+  };
+  const channelContext = id => {
+    const channel = billingChannelId(id);
+    const account = billingAccounts.get(id) || billingAccounts.get(channel);
+    const unavailable = executionRecords.disabled(id, account) || executionRecords.disabled(channel);
+    return { billingChannelId: channel, available: !unavailable,
+      ...(account ? { billingAccountId: account } : {}),
+      ...(unavailable ? { reason: '所选计费渠道因余额不足已停用', since: unavailable.at } : {}) };
+  };
+  const channelAvailability = id => {
+    const { billingAccountId: _internal, ...status } = channelContext(id);
+    return status;
+  };
+  const assertChannelAvailable = id => {
+    const status = channelContext(id);
+    if (!status.available) throw Object.assign(statusError(status.reason + '，请选择其他渠道', 409),
+      { code: 'MODEL_CHANNEL_BALANCE', publicWorkError: true });
+    return status;
+  };
   const applyCatalog = (provider) => {
     const cached = catalogs?.[catalogId(provider.id)];
     if (cached?.baseUrl !== provider.baseUrl || !Array.isArray(cached.models)) return;
@@ -286,7 +321,6 @@ export const createModelProviderService = ({
     // A completed supplier read is authoritative: keep local capability
     // metadata for surviving models, but never append removed presets.
     provider.models = cached.models.map((model) => ({ ...previous.get(model.model), ...model }));
-    if (provider.mode === "current") provider.activeModels = provider.models.map((model) => model.model);
   };
   const refreshShared = ({ force = false } = {}) => {
     if (!force && sharedConfigRefreshedAt && Date.now() - sharedConfigRefreshedAt < SHARED_CONFIG_CACHE_MS) return Promise.resolve();
@@ -296,6 +330,18 @@ export const createModelProviderService = ({
       const entries = await sharedConfig.runtimeProviders({ force });
       const native = await nativeConfiguration;
       if (revision !== sharedDeletionRevision) return;
+      const aliases = new Map(), billing = new Map(), accounts = new Map(billingAccounts);
+      for (const entry of [...entries].sort((a,b)=>a.id.localeCompare(b.id))) {
+        if (!entry.baseUrl || !entry.key) continue;
+        if (!clientPromises.has(entry.id) || !accounts.has(entry.id))
+          accounts.set(entry.id, billingAccountId(entry.baseUrl, entry.key));
+        const group = accounts.get(entry.id);
+        if (!billing.has(group)) billing.set(group, entry.id);
+        aliases.set(entry.id, billing.get(group));
+      }
+      if (native?.baseUrl && native.key) accounts.set('current', billingAccountId(native.baseUrl, native.key));
+      billingAccounts = accounts;
+      sharedBillingAliases = aliases;
       if (native) {
         const match = entries.find(entry => entry.baseUrl.replace(/\/$/u, "") === native.baseUrl && entry.key === native.key);
         currentProvider.sharedConfigId = match?.id?.replace(/^ccswitch_/u, '') || '';
@@ -304,7 +350,6 @@ export const createModelProviderService = ({
         // The active shared configuration is authoritative. The native Codex
         // file can retain a model from a previously selected channel.
         currentProvider.activeModel = match?.defaultModel || "";
-        currentProvider.activeModels = match?.models?.map(model => model.model).filter(Boolean) || [];
         applyCatalog(currentProvider);
       }
       for (const entry of entries) {
@@ -412,10 +457,8 @@ export const createModelProviderService = ({
     if (!allowRetired && requestedModel && activeCatalog?.baseUrl === provider.baseUrl && !provider.models.some(entry => entry.model === requestedModel)) {
       throw statusError(`模型 ${requestedModel} 已不在此配置目录，请换一个模型`, 400);
     }
-    const activeModel = !activeCatalog && provider.mode === "current" && provider.activeModel
-      && (!requestedModel || !provider.activeModels.length || !provider.activeModels.includes(requestedModel))
-      ? provider.activeModel : "";
-    const modelId = activeModel || requestedModel || (provider.models.some(entry => entry.model === provider.defaultModel) ? provider.defaultModel : provider.models[0]?.model) || "";
+    const modelId = requestedModel || (!activeCatalog && provider.mode === "current" && provider.activeModel)
+      || (provider.models.some(entry => entry.model === provider.defaultModel) ? provider.defaultModel : provider.models[0]?.model) || "";
     if (!allowRetired && provider.mode !== 'current' && modelId && !provider.models.some((entry) => entry.model === modelId)) {
       throw statusError(`Model ${modelId || "(default)"} does not belong to provider ${provider.id}.`, 400);
     }
@@ -450,13 +493,13 @@ export const createModelProviderService = ({
         ? { id: `current::${model.model}`, model: `current::${model.model}` } : {}),
       modelProviderId: CURRENT_MODEL_PROVIDER_ID,
       providerDisplayName: currentProvider.displayName,
-      available: true,
+      available: channelAvailability(CURRENT_MODEL_PROVIDER_ID).available,
       experimental: Boolean(model?.experimental),
     }));
     const external = [];
     for (const provider of providerMap.values()) {
       if (provider.mode === "current") continue;
-      const available = await isProviderConfigured(provider.id);
+      const available = channelAvailability(provider.id).available && await isProviderConfigured(provider.id);
       external.push(...provider.models.map((storedModel) => {
         const nativeEfforts = provider.id === `ccswitch_${currentProvider.sharedConfigId}` || /^gpt-/u.test(storedModel.model)
           ? nativeByModel.get(storedModel.model)?.supportedReasoningEfforts : null;
@@ -519,11 +562,12 @@ export const createModelProviderService = ({
   };
 
   const complete = async (routeInput = {}, {
-    instructions = '', input = '', maxOutputTokens = 320, textFormat = null, timeoutMs = 30000,
+    instructions = '', input = '', maxOutputTokens = 320, textFormat = null, timeoutMs = 30000, origin,
   } = {}) => {
     if (String(routeInput.modelProviderId || routeInput.model).startsWith('ccswitch_')) await refreshShared();
     const route = resolveRoute(routeInput);
-    return withProviderUse(route.provider.id, async () => {
+    let channel = assertChannelAvailable(route.modelProviderId);
+    try { return await withProviderUse(route.provider.id, async () => {
       const provider = route.provider;
       const source = provider.id === CURRENT_MODEL_PROVIDER_ID ? await nativeConfiguration
         : provider.id.startsWith('ccswitch_') && sharedConfig.readCatalogConfig ? await sharedConfig.readCatalogConfig(provider.id)
@@ -531,7 +575,12 @@ export const createModelProviderService = ({
           ? await sharedConfig.readCredential(provider.id) : await credentialStore.read(provider.id) };
       const baseUrl = String(source?.baseUrl || '').replace(/\/$/u, '');
       const credential = source?.key;
-      if (!baseUrl || !credential) throw statusError('选定渠道缺少可用的 Responses API 配置', 503);
+      if (!baseUrl || !credential) throw Object.assign(statusError('选定渠道缺少可用的 Responses API 配置', 503), { safeModelError: true });
+      const account = billingAccountId(baseUrl, credential);
+      channel = { ...assertChannelAvailable(route.modelProviderId), billingAccountId: account };
+      if (executionRecords.disabled(route.modelProviderId, account)) {
+        throw Object.assign(statusError('所选计费渠道因余额不足已停用，请选择其他渠道', 409), { code: 'MODEL_CHANNEL_BALANCE' });
+      }
       const response = await fetchResponse(`${baseUrl}/responses`, {
         method: 'POST',
         redirect: 'error',
@@ -548,27 +597,34 @@ export const createModelProviderService = ({
         }),
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw statusError(payload?.error?.message || `选定渠道返回 HTTP ${response.status}`, 502);
+      if (!response.ok) throw Object.assign(statusError(payload?.error?.message || `选定渠道返回 HTTP ${response.status}`, 502),
+        { httpStatus: response.status });
       const text = (payload.output || [])
         .flatMap(item => item?.content || [])
         .map(item => item?.text || '')
         .filter(Boolean)
         .join('\n')
         .trim();
-      if (!text) throw statusError('选定渠道没有返回文本', 502);
+      if (!text) throw Object.assign(statusError('选定渠道没有返回文本', 502), { safeModelError: true });
       return { text, modelProviderId: provider.id, model: route.model,
         reasoningEffort: routeInput.reasoningEffort || '' };
-    });
+    }); } catch (error) {
+      if (error.code === 'MODEL_CHANNEL_BALANCE' || error.statusCode === 409) throw error;
+      executionRecords.fail({ ...origin, ...route, ...channel }, error);
+      if (error.safeModelError) throw error;
+      throw statusError(modelFailure(error).reason, error.statusCode || 502);
+    }
   };
 
   const close = () => {
     for (const client of ownedClients.values()) client.close?.();
     ownedClients.clear();
     clientPromises.clear();
+    executionRecords.close();
   };
   const prepareResumeFile = async (providerId, info, ancestors = new Set(), { threadId = "" } = {}) => {
     const home = providerId === CURRENT_MODEL_PROVIDER_ID
-      ? process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
+      ? defaultCodexHome
       : path.join(path.resolve(runtimeRoot), providerId, 'codex-home');
     const basename = path.basename(info.path);
     const date = /^rollout-(\d{4})-(\d{2})-(\d{2})T/u.exec(basename);
@@ -618,6 +674,11 @@ export const createModelProviderService = ({
 
   return {
     catalogId,
+    channelAvailability,
+    assertChannelAvailable,
+    executionRecords,
+    channelContext,
+    modelEvents,
     removeSharedProvider: async (providerId, remove, { requireEmpty = false } = {}) => {
       if (removing.has(providerId) || isInUse(providerId)) {
         throw statusError("配置仍在使用或正在删除", 409);

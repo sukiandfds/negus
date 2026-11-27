@@ -5,12 +5,16 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { readJson, sendJson } from '../http/request-utils.mjs';
 import { readJsonFile, writeJsonFileAtomic } from '../persistence/json-file.mjs';
+import { finalModelError } from '../model-execution-records.mjs';
 
 const fail = (message, statusCode = 409) => Object.assign(new Error(message), { statusCode });
 const active = task => ['starting', 'running'].includes(task.state);
 
 export async function createBackgroundTaskService({ stateFile, registry, modelProviders, conversations, bindings, queue, execution, broadcast = () => {}, enabledEmployees = registry.list().map(employee => employee.id) }) {
   let tasks = [];
+  const recordFailure = (task, error, turnId) => modelProviders.executionRecords?.fail({
+    ...task, ...modelProviders.channelContext?.(task.modelProviderId), taskId: task.id, submissionId: `task-${task.id}`, turnId,
+  }, error).reason;
   const stored = await readJsonFile(stateFile, null);
   if (stored) tasks = stored.tasks;
   if (!Array.isArray(tasks)) throw new Error('后台任务记录格式错误');
@@ -78,6 +82,9 @@ export async function createBackgroundTaskService({ stateFile, registry, modelPr
       const start = (async () => {
         try {
           const route = await backgroundTaskRoute(modelProviders);
+          task.modelProviderId = route.modelProviderId;
+          task.model = route.model;
+          task.billingChannelId = modelProviders.channelAvailability?.(route.modelProviderId)?.billingChannelId;
           task.reasoningEffort = route.reasoningEffort || task.reasoningEffort;
           const session = await conversations.createSession(route.model, employee.projectRoot, route.modelProviderId, {
             managed: true, sandbox: 'danger-full-access', approvalPolicy: 'never', additionalDeveloperInstructions: workerInstructions,
@@ -91,7 +98,10 @@ export async function createBackgroundTaskService({ stateFile, registry, modelPr
           await conversations.renameSession(task.threadId, task.title);
           await conversations.sendMessage(task.threadId, task.instructions, [], `task-${task.id}`);
           if (task.state === 'starting') task.state = 'running';
-        } catch (error) { task.state = 'failed'; task.error = error.message; }
+        } catch (error) {
+          task.state = 'failed';
+          task.error = (task.modelProviderId && recordFailure(task, error)) || error.message;
+        }
         publish(task);
         await persist();
         if (task.state === 'failed') await notify(task, `task-${task.id}-start-failed`, `启动失败：${task.error}`);
@@ -107,6 +117,12 @@ export async function createBackgroundTaskService({ stateFile, registry, modelPr
   const handleEvent = async ({ method, params = {} }) => {
     const task = find(params.threadId);
     if (!task) return;
+    if (finalModelError(method, params)) {
+      const turnId = params.turn?.id || params.turnId;
+      if (!active(task) || task.turnId !== turnId) return;
+      method = 'turn/completed';
+      params = { ...params, turn: { id: turnId, status: 'failed', error: params.error } };
+    }
     if (method === 'task/health') {
       if (!active(task)) return;
       const ended = params.phase === 'authoritative' && params.status?.type === 'idle';
@@ -137,17 +153,21 @@ export async function createBackgroundTaskService({ stateFile, registry, modelPr
       }
     }
     if (method === 'turn/completed') {
+      if (!active(task)) return;
       const turnId = params.turn?.id || params.turnId;
       if (task.turnId && turnId && task.turnId !== turnId) return;
       task.state = params.turn?.status === 'completed' ? 'completed' : params.turn?.status === 'interrupted' ? 'interrupted' : 'failed';
       task.error = params.turn?.error?.message || '';
+      if (task.state === 'failed' && task.modelProviderId)
+        task.error = recordFailure(task, params.turn?.error, turnId) || task.error;
       if (task.state === 'completed' && !task.result) { task.state = 'failed'; task.error = '任务结束但未取得最终结果'; }
       publish(task); await persist();
       await notify(task, `task-${task.id}-terminal-${turnId}`, `状态：${task.state}\n${task.error || task.result}`);
     }
   };
   const onProtocolMessage = event => {
-    if (!['turn/started', 'item/completed', 'turn/completed', 'task/health'].includes(event.method) || !find(event.params?.threadId)) return Promise.resolve();
+    if ((!['turn/started', 'item/completed', 'turn/completed', 'task/health'].includes(event.method) &&
+      !finalModelError(event.method, event.params)) || !find(event.params?.threadId)) return Promise.resolve();
     events = events.catch(() => {}).then(() => handleEvent(event));
     return events;
   };

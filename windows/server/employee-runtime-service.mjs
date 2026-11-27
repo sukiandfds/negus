@@ -6,10 +6,11 @@ import path from "node:path";
 import os from "node:os";
 import { materializeGoalObjective, expandGoalObjective, readThreadGoal } from "./thread-goal-objective.mjs";
 import { createAppServerClient } from "./app-server-client.mjs";
-import { inputFromAttachments } from "./app-server-conversation-store.mjs";
+import { inputFromAttachments, latestAssistantReplyAtFromRollout } from "./app-server-conversation-store.mjs";
 import { messagesFromTurns } from "./codex-thread-history.mjs";
 import { conversationPrompt, modelContext } from "./conversation-prompt.mjs";
 import { CURRENT_MODEL_PROVIDER_ID } from "./model-provider-service.mjs";
+import { finalModelError, modelFailure, withModelFailures } from './model-execution-records.mjs';
 
 const clean = (value, maxLength = 200) => String(value || "").trim().slice(0, maxLength);
 const statusError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
@@ -112,6 +113,16 @@ export const createEmployeeRuntimeService = ({
     model: clean(employee?.model, 120),
     ...(employee?.modelProviderId ? { modelProviderId: clean(employee.modelProviderId, 80) } : {}),
   });
+  const records = modelProviders?.executionRecords;
+  const modelSwitchEvent = (change, state) => change && modelProviders?.modelEvents?.record(change, state);
+  const assertSendAvailable = async (employeeId, { modelSettings } = {}) => {
+    if (!modelProviders?.assertChannelAvailable) return;
+    await modelProviders.refreshShared?.().catch(() => {});
+    const employee = registry.require(employeeId);
+    const route = modelSettings?.model ? modelProviders.resolveRoute({ model: modelSettings.model, allowRetired: true })
+      : routeForEmployee(statusFor(employeeId).active ? employee : employee.pendingModelSettings || employee);
+    return modelProviders.assertChannelAvailable(route.modelProviderId);
+  };
 
   const clientForEmployee = async (employee) => {
     if (!modelProviders) return defaultClient;
@@ -257,7 +268,9 @@ export const createEmployeeRuntimeService = ({
     return next;
   };
 
-  const publishTurnCompletion = ({ employeeId, threadId, turnId, status, error }, syncExecution = true) => {
+  const publishTurnCompletion = ({ employeeId, threadId, turnId, status, error, modelError = error }, syncExecution = true) => {
+    if (records?.terminal(threadId, turnId, modelError, { failed: status === 'failed', completed: status === 'completed' }) && status === 'failed')
+      error = modelFailure(modelError).reason;
     publishStatus(employeeId, {
       phase: status === "failed" ? "failed" : status === "interrupted" ? "interrupted" : "idle",
       label: status === "failed" ? "执行失败" : status === "interrupted" ? "已中断" : "等待任务",
@@ -491,7 +504,17 @@ export const createEmployeeRuntimeService = ({
     const binding = opened?.binding || conversationStore.findByAgentKind?.(employee.id, "direct");
     const threadId = readOnly ? clean(employee.mainThreadId, 120) : binding?.runtimeSessionId;
     if (!threadId || binding?.runtimeSessionId !== threadId) throw statusError("员工对话记录不存在", 404);
-    const session = await readHistory(routeForEmployee(employee).modelProviderId, nativeThreadId(employee), "all", page);
+    const recent = page.before === undefined && page.cursor === undefined && !page.beforeMessageId;
+    const attempts = records?.list(threadId);
+    let session;
+    try {
+      session = await (readOnly ? readSavedHistory : readHistory)(routeForEmployee(employee).modelProviderId, nativeThreadId(employee), "all", page);
+    } catch (error) {
+      if (!recent || !attempts?.some(row => row.state === 'failed' && row.text !== undefined)
+        || !/no persisted turns|not found|no rollout/i.test(error.message)) throw error;
+    }
+    if (!session && recent && attempts?.some(row => row.state === 'failed' && row.text !== undefined))
+      session = { messages: [], hasMore: false };
     if (!session) throw statusError("员工对话记录不存在", 404);
     const turns = new Set(session.messages.filter(message => message.role === "user").map(message => message.turnId));
     const notices = turns.size && employee.runtimeThreadIds?.length
@@ -499,7 +522,7 @@ export const createEmployeeRuntimeService = ({
         .filter(message => message.source === "employee-model-switch" && turns.has(message.turnId))
         .map(message => [message.turnId, message]))
       : new Map();
-    return {
+    return withModelFailures({
       ...session,
       threadId,
       modelProviderId: routeForEmployee(employee).modelProviderId,
@@ -511,7 +534,7 @@ export const createEmployeeRuntimeService = ({
       archived: employee.conversationArchived === true,
       conversationKind: "direct",
       conversationId: binding.conversationId,
-    };
+    }, attempts, { recent });
   };
 
   const withEmployeeThread = async (employeeId, operation) => {
@@ -609,6 +632,10 @@ export const createEmployeeRuntimeService = ({
           return;
         }
       }
+      if (finalModelError(method, params)) {
+        initialSubmission.earlyEvents.push(structuredClone(message));
+        return;
+      }
       if (method === "turn/completed") {
         if (turnId) {
           initialSubmission.earlyEvents.push(structuredClone(message));
@@ -630,7 +657,11 @@ export const createEmployeeRuntimeService = ({
       if (current.phase !== waitingPhase
         && ["waitingOnApproval", "waitingOnUserInput"].includes(current.phase)) return;
     }
-    const executionMessage = normalizeExecutionProtocolMessage(message);
+    let executionMessage = normalizeExecutionProtocolMessage(message);
+    if (executionMessage && records && finalModelError(method, params)) {
+      records.terminal(threadId, turnIdFromMessage(message), params.error, { failed: true });
+      executionMessage = { ...executionMessage, params: { ...params, error: { message: modelFailure(params.error).reason } } };
+    }
     if (executionMessage) execution?.handleProtocolMessage?.(executionMessage);
     const publishNativeStatus = patch => publishStatus(employeeId, patch, false);
     if (clean(registry.get(employeeId)?.mainThreadId, 120) !== threadId) return;
@@ -663,7 +694,7 @@ export const createEmployeeRuntimeService = ({
       if (eventTurnId && current.turnId !== eventTurnId) {
         return;
       }
-      publishTurnCompletion({ employeeId, threadId, turnId, status, error }, false);
+      publishTurnCompletion({ employeeId, threadId, turnId, status, error, modelError: params.turn?.error }, false);
       return;
     }
     if (method === "item/agentMessage/delta") {
@@ -755,11 +786,15 @@ export const createEmployeeRuntimeService = ({
   const sendMessage = async ({ employeeId, text, attachments = [], requestId = "" }) => {
     await modelChanges.get(employeeId);
     await reconcileEmployeeIdle(employeeId);
+    await assertSendAvailable(employeeId);
     let employee = registry.require(employeeId);
     const cleanText = String(text || "").trim();
     if (!cleanText && !attachments.length) throw statusError("消息不能为空", 400);
     if (cleanText.length > 32000) throw statusError("消息过长", 413);
     const cleanRequestId = clean(requestId, 120) || randomUUID();
+    const attempted = { ...routeForEmployee(employee.pendingModelSettings || employee), threadId: employee.mainThreadId,
+      reasoningEffort: (employee.pendingModelSettings || employee).reasoningEffort, submissionId: cleanRequestId, text: cleanText, attachments };
+    Object.assign(attempted, modelProviders?.channelContext?.(attempted.modelProviderId) || modelProviders?.channelAvailability?.(attempted.modelProviderId));
     if (sendLocks.has(employee.id)) throw statusError("员工消息正在提交", 409);
     const submissionBaseline = statusFor(employee.id);
     const submission = {
@@ -804,8 +839,10 @@ export const createEmployeeRuntimeService = ({
       assertSubmissionOpen();
       const pending = employee.pendingModelSettings;
       if (pending) {
-        await applyModelSettings(employeeId, pending, { source: pending.modelSelectionSource || "default" });
+        try { await applyModelSettings(employeeId, pending, { source: pending.modelSelectionSource || "default" }); }
+        catch (error) { await modelSwitchEvent(pending.modelChange, 'apply_failed'); throw error; }
         employee = registry.require(employeeId);
+        await modelSwitchEvent(pending.modelChange, 'applied');
       }
       assertSubmissionOpen();
       if (employee.mainThreadId && employee.modelSwitchPending) {
@@ -815,6 +852,7 @@ export const createEmployeeRuntimeService = ({
         });
       }
       const { binding, threadId } = await ensureOpen(employee.id);
+      attempted.threadId = threadId;
       assertSubmissionOpen();
       submission.threadId = threadId;
       if (registry.require(employee.id).conversationArchived) await unarchiveSession(employee.id);
@@ -858,7 +896,9 @@ export const createEmployeeRuntimeService = ({
           active: true,
           turnId: requestMethod === "turn/steer" ? expectedTurnId : "",
         });
-        const requestTurn = method => (method === "turn/steer" ? steerTurn : startTurn)(runtimeClient, {
+        const requestTurn = method => {
+          Object.assign(attempted, modelProviders?.assertChannelAvailable?.(attempted.modelProviderId));
+          return (method === "turn/steer" ? steerTurn : startTurn)(runtimeClient, {
           threadId,
           input,
           clientUserMessageId: cleanRequestId,
@@ -870,7 +910,8 @@ export const createEmployeeRuntimeService = ({
             ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}),
             additionalContext: modelContext(employee.model),
           } : {}),
-        }, expectedTurnId);
+          }, expectedTurnId);
+        };
         let result;
         try {
           assertSubmissionOpen();
@@ -952,6 +993,7 @@ export const createEmployeeRuntimeService = ({
         }
         assertSubmissionOpen();
         submission.boundTurnId = completedTurnId;
+        records?.active({ ...attempted, turnId: completedTurnId });
         if (requestMethod === "turn/start" && employee.modelSwitchPending) {
           const model = employee.modelSwitchPending;
           try {
@@ -998,7 +1040,7 @@ export const createEmployeeRuntimeService = ({
         publishStatus(employee.id, {
           phase: isOccupiedError(error) ? (failure.known && !failure.active ? "idle" : "occupied") : "failed",
           label: isOccupiedError(error) ? (failure.known && !failure.active ? "等待任务" : "被占用中") : "提交失败",
-          detail: String(error?.message || error),
+          detail: records && !isOccupiedError(error) ? modelFailure(error).reason : String(error?.message || error),
           active: isOccupiedError(error) ? (!failure.known || failure.active) : false,
           turnId: failure.active ? failure.turnId : "",
         });
@@ -1008,6 +1050,12 @@ export const createEmployeeRuntimeService = ({
     submission.promise = sending;
     try {
       return await sending;
+    } catch (error) {
+      if (records && attempted.threadId && error.code !== 'EMPLOYEE_RUNTIME_CLOSED') {
+        const failure = records.fail(attempted, error);
+        if (failure.code !== 'execution_failed' || !error.statusCode) error.message = failure.reason;
+      }
+      throw error;
     } finally {
       if (sendLocks.get(employee.id) === submission) sendLocks.delete(employee.id);
       clearEarlyEvents(submission);
@@ -1041,7 +1089,7 @@ export const createEmployeeRuntimeService = ({
     };
   };
 
-  const updateModelSettings = (employeeId, settings = {}) => {
+  const updateModelSettings = (employeeId, settings = {}, { modelChange } = {}) => {
     const previous = modelChanges.get(employeeId);
     const task = (async () => {
       await previous?.catch(() => {});
@@ -1057,9 +1105,12 @@ export const createEmployeeRuntimeService = ({
       if (modelProviders.catalogId && modelProviders.catalogId(originalId) === modelProviders.catalogId(route.modelProviderId)) {
         route = modelProviders.resolveRoute({ model: route.model, modelProviderId: originalId });
       }
-      const pending = { modelProviderId: route.modelProviderId, model: route.model, reasoningEffort: selected.reasoningEffort, modelSelectionSource: "explicit" };
+      modelProviders.assertChannelAvailable?.(route.modelProviderId);
+      const next = { modelProviderId: route.modelProviderId, model: route.model, reasoningEffort: selected.reasoningEffort };
+      const pending = { ...next, modelSelectionSource: "explicit", ...(modelChange ? { modelChange: { ...modelChange, next } } : {}) };
       if (!employee.mainThreadId) return applyModelSettings(employeeId, pending);
       await registry.setPendingModelSettings(employeeId, pending);
+      await modelSwitchEvent(employee.pendingModelSettings?.modelChange, 'superseded');
       return { employee: { ...employee, ...pending }, status: statusFor(employeeId) };
     })();
     modelChanges.set(employeeId, task);
@@ -1088,6 +1139,7 @@ export const createEmployeeRuntimeService = ({
       model: clean(settings.model, 120),
     };
     const currentRoute = routeForEmployee(employee);
+    modelProviders?.assertChannelAvailable?.(requestedRoute.modelProviderId);
     const switchingProvider = currentRoute.modelProviderId !== requestedRoute.modelProviderId;
     const switchingModel = currentRoute.model !== requestedRoute.model;
     const runtimeClient = modelProviders
@@ -1103,10 +1155,15 @@ export const createEmployeeRuntimeService = ({
     let replacement;
     try {
       if (threadId && switchingProvider && modelProviders) {
-        const original = await clientForThread(threadId, employee);
+        const previous = records && (await getModelSelection(employeeId)).lastSuccessfulSettings;
+        if (previous) records.rememberSuccess(threadId, previous, true);
+        const originalAvailable = modelProviders.channelAvailability?.(currentRoute.modelProviderId)?.available !== false;
+        const sourceInfo = !originalAvailable && await readSavedHistory(currentRoute.modelProviderId, nativeThreadId(employee), 'all', { metadataOnly: true });
+        if (!originalAvailable && !sourceInfo?.path) throw statusError('找不到原对话记录，未切换配置', 409);
+        const original = originalAvailable ? await clientForThread(threadId, employee) : null;
         replacementId = randomUUID();
         nativeThreads.set(replacementId, employee.id);
-        replacement = await transferConversationThread({ source: original.nativeClient || original, target: runtimeClient, providers: modelProviders,
+        replacement = await transferConversationThread({ source: original?.nativeClient || original, sourceInfo, target: runtimeClient, providers: modelProviders,
           threadId: nativeThreadId(employee), nextThreadId: replacementId, route: requestedRoute, reasoningEffort,
           config: { ...taskService?.leaderConfig(employee.id), ...(reasoningEffort ? { model_reasoning_effort: reasoningEffort } : {}) },
           instructions: conversationPrompt(employee.instructions),
@@ -1135,10 +1192,27 @@ export const createEmployeeRuntimeService = ({
       }
       return { employee: updated, status: statusFor(employee.id) };
     } catch (error) {
+      if (replacementId) nativeThreads.delete(replacementId);
       await replacement?.discard();
       throw error;
     }
 
+  };
+
+  const getModelSelection = async employeeId => {
+    const saved = registry.require(employeeId);
+    const pick = profile => ({ ...routeForEmployee(profile), reasoningEffort: profile.reasoningEffort || '' });
+    const recorded = records?.lastSuccess(saved.mainThreadId);
+    const history = (!recorded || !saved.model) && saved.mainThreadId && await readSavedHistory?.(routeForEmployee(saved).modelProviderId, nativeThreadId(saved), 'all', { metadataOnly: true });
+    const last = recorded || history && await latestAssistantReplyAtFromRollout(history.paths || [history.path], true);
+    const current = pick(saved);
+    if (!current.model && history?.path) {
+      const persisted = await latestAssistantReplyAtFromRollout(history.path, 'latest');
+      current.model = persisted?.model || '';
+      current.reasoningEffort ||= persisted?.reasoningEffort || '';
+    }
+    return { threadId: saved.mainThreadId, current, next: saved.pendingModelSettings ? pick(saved.pendingModelSettings) : current,
+      lastSuccessfulSettings: last ? { ...last, modelProviderId: last.modelProviderId || routeForEmployee(saved).modelProviderId } : null };
   };
 
   const runtimeContextForThread = async (threadId) => {
@@ -1148,10 +1222,17 @@ export const createEmployeeRuntimeService = ({
     const saved = registry.require(employeeId);
     const employee = saved.pendingModelSettings || saved;
     const runtime = await readRuntimeContext?.(saved.modelProviderId || CURRENT_MODEL_PROVIDER_ID, nativeThreadId(saved));
+    const selection = records && await getModelSelection(employeeId);
     return {
       model: employee.modelProviderId?.startsWith("ccswitch_") ? employee.modelProviderId + "::" + employee.model : employee.model || "",
       modelProvider: employee.modelProviderId || CURRENT_MODEL_PROVIDER_ID,
       reasoningEffort: employee.reasoningEffort || "",
+      ...(selection ? { lastSuccessfulSettings: selection.lastSuccessfulSettings && {
+        ...selection.lastSuccessfulSettings,
+        model: selection.lastSuccessfulSettings.modelProviderId?.startsWith("ccswitch_") && !selection.lastSuccessfulSettings.model?.includes("::")
+          ? selection.lastSuccessfulSettings.modelProviderId + "::" + selection.lastSuccessfulSettings.model
+          : selection.lastSuccessfulSettings.model,
+      } } : {}),
       ...(runtime?.usage && runtime.model === employee.model && employee.modelProviderId === saved.modelProviderId ? { usage: runtime.usage } : {}),
     };
   };
@@ -1265,6 +1346,8 @@ export const createEmployeeRuntimeService = ({
     unarchiveSession,
     reviewSession,
     sendMessage,
+    assertSendAvailable,
+    getModelSelection,
     confirmModification,
     getStatus,
     acceptsProtocolMessage,

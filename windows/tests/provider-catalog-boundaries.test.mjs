@@ -78,8 +78,9 @@ test("真实直连直到响应体完成均占用，多个请求独立释放，�
   const removing = Promise.withResolvers(), releaseDelete = Promise.withResolvers();
   let requestCount = 0;
   const f = await fixture(t, {
-    providers: { fetchResponse: async () => {
-      const index = requestCount++;
+    providers: { fetchResponse: async (_url, options) => {
+      requestCount++;
+      const index = JSON.parse(options.body).input === 'fixture-failure' ? 1 : 0;
       return { ok: true, json: async () => { entered[index].resolve(); return body[index].promise; } };
     }},
     sharedOverrides: shared => ({ remove: async (id, version) => {
@@ -88,11 +89,14 @@ test("真实直连直到响应体完成均占用，多个请求独立释放，�
       return shared.remove(id, version);
     }}),
   });
-  const connect = name => f.providers.complete({ model: "fixture-model", modelProviderId: f.id(name) });
+  const connect = (name, input = '') => f.providers.complete({ model: "fixture-model", modelProviderId: f.id(name) }, { input });
   const direct = connect("busy");
-  const failing = connect("busy");
-  await Promise.all(entered.map(gate => gate.promise));
+  const failing = connect("busy", 'fixture-failure');
   try {
+    await Promise.race([
+      Promise.all(entered.map(gate => gate.promise)),
+      ...[direct, failing].map(request => request.then(() => assert.fail("direct request ended before entering its response body"))),
+    ]);
     assert.equal((await f.remove("busy")).status, 409);
     body[0].resolve({ output: [{ content: [{ text: "fixture complete" }] }] });
     assert.equal((await direct).text, "fixture complete");
@@ -127,6 +131,26 @@ test("真实原生匹配和已获得的原生客户端受保护，受控关闭�
   assert.equal((await f.remove("owned")).deleted, true);
   assert.equal(await f.has("owned"), false);
   assert.equal((await f.remove("native")).status, 409);
+});
+
+test("直连模型的 402 留下原提交与计费配置，下一次调用在请求前拒绝", async t => {
+  let requests = 0;
+  const f = await fixture(t, { providers: { fetchResponse: async () => {
+    requests++;
+    return Response.json({ error: { message: "private-upstream-body" } }, { status: 402 });
+  }}});
+  const modelProviderId = f.id("busy");
+  const route = { model: "fixture-model", modelProviderId };
+  await assert.rejects(f.providers.complete(route, {
+    origin: { threadId: "fixture-room", submissionId: "original-group-post" },
+  }), /余额不足/);
+  const [record] = f.providers.executionRecords.list("fixture-room");
+  assert.equal(record.submissionId, "original-group-post");
+  assert.equal(record.billingChannelId, modelProviderId);
+  assert.equal(record.turnId, "");
+  assert.doesNotMatch(JSON.stringify(record), /private-upstream-body/);
+  await assert.rejects(f.providers.complete(route), error => error.code === "MODEL_CHANNEL_BALANCE");
+  assert.equal(requests, 1);
 });
 
 test("删除成功后迟到的共享配置读不能把行复活", async t => {

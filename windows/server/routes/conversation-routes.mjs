@@ -38,9 +38,9 @@ const publicUserInputRequest = (message) => {
 };
 
 export const createConversationRoutes = ({
-  projectRoot, conversations, execution, followUpQueue, contextManagement, media, submissionStore,
+  projectRoot, museMessages, conversations, execution, followUpQueue, contextManagement, media, submissionStore,
   broadcast = () => {}, publishThreadEvent = (_threadId, event) => broadcast(event), agentConversationStore,
-  employeeRuntime, roomDirectory, modelProviders, agentTasks, readAutomations,
+  employeeRuntime, roomDirectory, modelProviders, agentTasks, readAutomations, externalDispatch,
 }) => {
   const authorizeAgentThread = async ({ threadId, conversationId, allowGroup = false }) => {
     if (!agentConversationStore) return null;
@@ -102,7 +102,7 @@ export const createConversationRoutes = ({
     return agentTasks?.decorateConversationSession?.(threadId, session) ?? session;
   };
 
-  const context = { projectRoot, conversations, execution, followUpQueue, contextManagement, media, submissionStore, publishThreadEvent, agentConversationStore, employeeRuntime, roomDirectory, modelProviders, agentTasks, authorizeAgentThread, isEmployeeDirectBinding, sessionSource, readAgentSession, readOrdinarySession, publicUserInputRequest, publicAttachment };
+  const context = { projectRoot, museMessages, externalDispatch, conversations, execution, followUpQueue, contextManagement, media, submissionStore, publishThreadEvent, agentConversationStore, employeeRuntime, roomDirectory, modelProviders, agentTasks, authorizeAgentThread, isEmployeeDirectBinding, sessionSource, readAgentSession, readOrdinarySession, publicUserInputRequest, publicAttachment };
   const routes = [
     statusPanelRoute({ projectRoot, conversations, agentTasks, readAutomations, authorizeAgentThread }),
     createConversationMessageRoutes(context),

@@ -4,11 +4,13 @@
 
 开发或审核 Negus 代码前，先读[傻逼程序员表](docs/project-management/reviews/傻逼程序员表.md)和[用户吐血表](docs/project-management/reviews/用户吐血表.md)的案例，再核对本次需求原话。验收应覆盖用户要完成的最后一个动作。
 
+维护 FEAT-001 时，从 [按操作找定义](docs/project-management/items/FEAT-001/按操作找定义.md) 定位当前行为。新增或纠正需求时同步更新对应操作入口、用户原话和日期；说明替代了哪条决定，保留原文。仅排查、测试或发布记录不要当成用户定义。
+
 # Negus 分支约定
 
 用户明确要求只保留长期分支 `develop` 和 `main`。
 
-- 当前工作区始终使用 `develop`；开发、修复、提交和推送默认直接在 `develop` 上进行。
+- 当前工作区始终使用 `develop`；开发、修复和提交默认在 `develop` 上进行。任何分支的推送均须本人确认。
 - 不自行创建临时分支或额外 worktree，不切换到 `main`。只有用户明确提出新的要求时才改变此约定。
 - `develop` 跟踪 `origin/develop`；交付时核对本地与远端同步。
 - `main` 保持不动，未经用户明确要求，不向其提交、合并、重置或推送。

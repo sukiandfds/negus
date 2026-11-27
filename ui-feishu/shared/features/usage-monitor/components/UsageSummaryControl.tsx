@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { ModelInfoDialog } from "../../../shared/components/ModelInfoDialog";
+import { useEffect, useState } from "react";
 import { RefreshCw, Wallet, X } from "lucide-react";
 import type { FushengUsageSnapshot } from "../model/types";
 import styles from "./UsageSummaryControl.module.css";
@@ -72,23 +73,6 @@ export function UsageSummaryControl({ snapshot, loading, error, onRefresh, curre
       setCredentialMessage(reason instanceof Error ? reason.message : '保存失败');
     } finally { setSaving(false); }
   };
-  const rootRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const closeOnPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOnPointerDown);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnPointerDown);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
-
   const updatedAt = snapshot ? formatUpdatedAt(snapshot.updatedAt) : "未更新";
   const isGrok = /^grok-/i.test(currentModel);
   const groupEntries = Object.entries(snapshot?.groupRatios || {}).sort(([left], [right]) => left.localeCompare(right, "zh-CN"));
@@ -101,7 +85,7 @@ export function UsageSummaryControl({ snapshot, loading, error, onRefresh, curre
   };
 
   return (
-    <div className={styles.root} ref={rootRef}>
+    <div className={styles.root}>
       <button
         className={styles.summaryButton}
         type="button"
@@ -114,7 +98,7 @@ export function UsageSummaryControl({ snapshot, loading, error, onRefresh, curre
       </button>
 
       {open ? (
-        <section className={styles.popover} role="dialog" aria-label="浮生云算用量详情">
+        <ModelInfoDialog className={styles.popover} label="浮生云算用量详情" onClose={() => setOpen(false)}>
           <header className={styles.popoverHeader}>
             <div>
               <h2>浮生云算</h2>
@@ -158,7 +142,7 @@ export function UsageSummaryControl({ snapshot, loading, error, onRefresh, curre
             </>
           ) : <p className={styles.empty}>{loading ? "正在读取真实用量..." : "回复完成后自动更新，也可以点击右上角刷新。"}</p>}
           {error ? <p className={styles.error}>{error}</p> : null}
-        </section>
+        </ModelInfoDialog>
       ) : null}
     </div>
   );

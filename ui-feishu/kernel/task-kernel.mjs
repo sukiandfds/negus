@@ -13,7 +13,7 @@ const fail = (message, statusCode = 409) => Object.assign(new Error(message), { 
  * deliver MUST deduplicate by delivery.id. Startup never replays an ambiguous native start.
  */
 export async function createTaskKernel({ stateFile, runtime, deliver, validate = () => {},
-  broadcast = () => {}, log = () => {}, now = () => new Date().toISOString(), recoveryIntervalMs = 15000 }) {
+  broadcast = () => {}, log = () => {}, recoverDelivery = () => false, now = () => new Date().toISOString(), recoveryIntervalMs = 15000 }) {
   let state = { version: 1, tasks: [], deliveries: [] };
   try { state = JSON.parse(await fs.readFile(stateFile, 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -73,6 +73,7 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
       if (terminalStates.has(current.state)) return current;
       const stopped = current.cancelRequested && result.status === 'completed';
       Object.assign(current, { state: stopped ? 'interrupted' : result.status, result: stopped ? '' : String(result.text || ''), error: stopped ? '' : String(result.error || ''), updatedAt: now() });
+      if (current.state === 'interrupted' && !current.cancelRequested && result.interruptionReason) current.interruptionReason = result.interruptionReason;
       data.deliveries.push({ id: `result:${id}`, taskId: id, state: 'pending', attempts: 0 });
       return current;
     });
@@ -310,10 +311,13 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
     delete target.requestId;
     return enqueue(target);
   }
-  const cancel = async (id, { suppressContinuation = false } = {}) => {
+  const cancel = async (id, { suppressContinuation = false, nativeAlreadyInterrupted = false } = {}) => {
     const task = await mutate(data => {
       const task = requireTask(data, id);
-      if (terminalStates.has(task.state)) return task;
+      if (terminalStates.has(task.state)) {
+        if (nativeAlreadyInterrupted) task.cancelRequested = true;
+        return task;
+      }
       if (suppressContinuation) task.suppressContinuation = true;
       task.cancelRequested = true; task.updatedAt = now();
       if (task.state === 'queued') {
@@ -322,8 +326,10 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
       } else if (task.state !== 'needs-reconciliation') task.state = 'stopping';
       return task;
     });
-    running.get(id)?.controller.abort();
-    if (!terminalStates.has(task.state)) await runtime.cancel?.(task);
+    if (!nativeAlreadyInterrupted) {
+      running.get(id)?.controller.abort();
+      if (!terminalStates.has(task.state)) await runtime.cancel?.(task);
+    }
     emit({ event: 'task_stop_requested', taskId: id });
     schedule();
     return copy(find(id));
@@ -339,11 +345,21 @@ export async function createTaskKernel({ stateFile, runtime, deliver, validate =
       const verifiable = !exhausted && hasRecoveryEvidence(task)
         && Number.isFinite(lastActivity) && currentTime - lastActivity <= 30 * 60 * 1000;
       task.state = verifiable ? 'recovering' : 'interrupted';
-      if (!verifiable && !exhausted) task.error = task.runtime?.threadId && task.runtime?.turnId
-        ? '服务重启时任务已超过 30 分钟没有活动'
-        : '服务重启时没有可核对的运行证据';
+      if (!verifiable && !exhausted) {
+        if (!task.cancelRequested) task.interruptionReason = 'serviceRestart';
+        task.error = task.runtime?.threadId && task.runtime?.turnId
+          ? '服务重启时任务已超过 30 分钟没有活动'
+          : '服务重启时没有可核对的运行证据';
+      }
     }
-    for (const delivery of data.deliveries) if (delivery.state === 'delivering') delivery.state = 'pending';
+    for (const delivery of data.deliveries) {
+      if (delivery.state === 'delivering') delivery.state = 'pending';
+      else if (delivery.state === 'failed') {
+        const task = data.tasks.find(candidate => candidate.id === delivery.taskId);
+        const parent = data.tasks.find(candidate => candidate.id === (task?.assistantFollowup?.sourceTaskId || task?.parentTaskId));
+        if (recoverDelivery(delivery, task, parent)) delivery.state = 'pending';
+      }
+    }
   });
   const recoveryTimer = setInterval(() => {
     if (closed || !state.tasks.some(task => task.state === 'needs-reconciliation')) return;

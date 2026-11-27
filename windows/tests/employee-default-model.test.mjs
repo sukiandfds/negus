@@ -34,7 +34,7 @@ test('every employee default uses the injected DeepSeek route including Grok', a
   ]), definitions.map(definition => [definition.id, 'ccswitch_deepseek', 'deepseek-flash', 'high', 'default']));
 });
 
-test('legacy employee threads receive a pending DeepSeek switch while explicit selections survive restart', async t => {
+test('existing threads keep their route and explicit selections across restart', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-employee-default-switch-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const stateFile = path.join(root, 'employees.json');
@@ -52,7 +52,7 @@ test('legacy employee threads receive a pending DeepSeek switch while explicit s
   const developer = registry.get('developer');
   assert.equal(manager.modelProviderId, 'current');
   assert.equal(manager.model, 'gpt-old');
-  assert.deepEqual(manager.pendingModelSettings, { ...deepseek, modelSelectionSource: 'default' });
+  assert.equal(manager.pendingModelSettings, null);
   assert.equal(manager.mainThreadId, 'manager-thread');
   assert.equal(developer.modelProviderId, 'channel-explicit');
   assert.equal(developer.model, 'model-explicit');

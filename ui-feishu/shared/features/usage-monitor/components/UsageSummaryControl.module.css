@@ -16,29 +16,10 @@
   white-space: nowrap;
 }
 
-.popover {
-  position: fixed;
-  z-index: 60;
-  top: max(16px, 10dvh);
-  right: max(12px, calc(50vw - 180px));
-  width: min(360px, calc(100vw - 24px));
-  max-height: min(600px, calc(100dvh - 76px));
-  overflow: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-  padding: 14px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 8px;
-  background: var(--material-bg, rgba(26, 29, 35, .72));
-  -webkit-backdrop-filter: var(--material-blur, blur(20px) saturate(1.5));
-  backdrop-filter: var(--material-blur, blur(20px) saturate(1.5));
-  box-shadow: var(--material-highlight, inset 0 1px 0 rgba(255, 255, 255, .07)), 0 12px 30px rgb(0 0 0 / .35);
-  color: var(--color-text);
-  transform-origin: top center;
-  animation: popover-in var(--duration-overlay, 250ms) var(--ease-spring, cubic-bezier(0.32, 0.72, 0, 1));
-}
-
-@keyframes popover-in { from { opacity: 0; transform: translateY(-6px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.popover { --model-dialog-width: 440px; }
+.popover > * { margin-inline: 14px; }
+.popoverHeader { margin-block-start: 14px; }
+.popover > :last-child { margin-block-end: 14px; }
 
 .popoverHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .popoverHeader h2 { margin: 0; font-size: 14px; font-weight: 650; }
@@ -60,7 +41,7 @@
 .refreshButton svg { width: 15px; height: 15px; }
 .spinning { animation: usage-spin .8s linear infinite; }
 
-.metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; margin: 14px 0 0; }
+.metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; margin-block: 14px 0; }
 .metrics div { display: flex; min-width: 0; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--color-border); }
 .metrics dt { color: var(--color-text-muted); font-size: 11px; }
 .metrics dd { margin: 0; overflow: hidden; color: var(--color-text); font-size: 12px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
@@ -70,23 +51,12 @@
 .groups > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; font-size: 12px; }
 .groups strong { font-variant-numeric: tabular-nums; font-weight: 600; }
 .featuredGroup { color: var(--color-text); }
-.empty { margin: 16px 0 4px; color: var(--color-text-muted); font-size: 12px; }
-.error { margin: 12px 0 0; color: var(--color-danger, #e36b6b); font-size: 11px; }
+.empty { margin-block: 16px 4px; color: var(--color-text-muted); font-size: 12px; }
+.error { margin-block: 12px 0; color: var(--color-danger, #e36b6b); font-size: 11px; }
 
 @media (hover: hover) {
   .summaryButton:hover { color: var(--color-text); }
   .refreshButton:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-text); }
-}
-
-@media (max-width: 760px) {
-  .popover {
-    position: fixed;
-    top: calc(env(safe-area-inset-top) + var(--topbar-height) + 8px);
-    right: 8px;
-    left: 8px;
-    width: auto;
-    max-height: calc(100dvh - var(--topbar-height) - env(safe-area-inset-top) - 16px);
-  }
 }
 
 @media (max-width: 420px) {

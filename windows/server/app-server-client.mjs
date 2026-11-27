@@ -301,7 +301,7 @@ export const createAppServerClient = ({
           if (!request) continue;
           clearTimeout(request.timer);
           pending.delete(message.id);
-          if (message.error) request.reject(new Error(message.error.message || JSON.stringify(message.error)));
+          if (message.error) request.reject(Object.assign(new Error(message.error.message || JSON.stringify(message.error)), { data: message.error.data }));
           else request.resolve(message.result);
         } catch (error) {
           console.warn(`[app-server-client] ignored malformed message: ${error.message}`);

@@ -65,7 +65,6 @@ interface ConversationComposerProps {
   modelsLoading: boolean;
   modelChanging: boolean;
   modelError: string;
-  selectedModelUnavailable?: boolean;
   sendPreparationError?: string;
   onPrepareSend?: (queue: boolean) => Promise<string | false>;
   onSend: (text: string, attachments?: MediaFile[], preparedThread?: string, finishUpload?: (submissionId: string) => Promise<MediaFile[]>) => Promise<boolean>;
@@ -94,7 +93,7 @@ export function ConversationComposer({
   connected, selected, archived, status, contextStatus,
   shownModel, shownEffort,
   models, modelsLoading, modelChanging, modelError,
-  onSend, onPrepareSend, selectedModelUnavailable, sendPreparationError, onQueue, queueing,
+  onSend, onPrepareSend, sendPreparationError, onQueue, queueing,
   editingMessage, onCancelEdit,
   onInterrupt, onReview, goal, goalBusy, goalError, onChangeGoalStatus, onClearGoal, onSetGoal, onEditGoal,
   onCompactContext, onAutoCompactThresholdChange, onModelChange,
@@ -371,7 +370,6 @@ export function ConversationComposer({
           onRemove={draft.removeFile}
         />
         <label className={styles.srOnly} htmlFor={promptId}>给 Codex 发送指令</label>
-        {selectedModelUnavailable ? <small role="alert">所选模型已下架，请换一个模型</small> : null}
         {sendPreparationError ? <small role="alert">{sendPreparationError}</small> : null}
         <QuoteDraft quote={quote} onClear={() => setQuote(null)} />
         {sendToQueue ? <div className={styles.editingBar} role="status">消息将进入等候队列</div> : null}

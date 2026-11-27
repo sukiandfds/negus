@@ -3,6 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { removeTransferredThread, setTransferredProvider } from './provider-transfer.mjs';
 import { latestRolloutFile } from './rollout-file.mjs';
+import { finalModelError } from './model-execution-records.mjs';
 
 const canonicalPath = async file => file && fs.realpath(file).catch(() => path.resolve(file));
 
@@ -45,6 +46,7 @@ export async function transferConversationThread({ source, target, providers, th
       await resume(nextThreadId, { ...info, model: route.model, modelProvider: route.modelProviderId === 'current' ? undefined : route.modelProviderId, reasoningEffort, strictPath: true });
       if (target) {
         resumed = true;
+        providers.assertChannelAvailable?.(route.modelProviderId);
         await compactHandoff(target, nextThreadId);
       }
       return info;
@@ -59,6 +61,7 @@ export async function transferConversationThread({ source, target, providers, th
       throw Error('原对话恢复校验失败，未切换配置');
     }
     if (!fresh) return result;
+    providers.assertChannelAvailable?.(route.modelProviderId);
     await compactHandoff(target, nextThreadId);
     return { ...result, discard };
   } catch (error) {
@@ -75,9 +78,13 @@ async function compactHandoff(client, threadId) {
   const unsubscribe = client.subscribe(({ method, params }) => {
     if (params?.threadId !== threadId) return;
     if (method === 'turn/started') turnId ||= params.turn?.id;
+    if (turnId && (params.turn?.id || params.turnId) === turnId && finalModelError(method, params)) {
+      reject(Object.assign(new Error(params.error.message || '对话接续失败，请重试'), params.error));
+      return;
+    }
     if (method !== 'turn/completed' || (turnId && params.turn?.id !== turnId)) return;
     if (params.turn?.status === 'completed') resolve();
-    else reject(new Error(params.turn?.error?.message || '对话接续失败，请重试'));
+    else reject(Object.assign(new Error(params.turn?.error?.message || '对话接续失败，请重试'), params.turn?.error));
   });
   const timer = setTimeout(() => {
     if (turnId) void interruptTurn(client, threadId, turnId).catch(() => {});

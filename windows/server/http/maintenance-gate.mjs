@@ -32,14 +32,15 @@ export const createMaintenanceGate = ({ projectRoot, isBusy, pid = process.pid, 
       sendJson(response, { protocol: 1, pid, root: projectRoot, busy: busy(), draining: expiresAt > now() });
       return true;
     }
-    if (expiresAt > now() && url.pathname.startsWith("/api/")) {
+    const managed = url.pathname.startsWith("/api/") || url.pathname === "/mcp/muse";
+    if (expiresAt > now() && managed) {
       response.setHeader("Retry-After", "5");
       sendJson(response, { error: "服务正在安全重启，请稍后重试。" }, 503);
       return true;
     }
     // Track both async reads (some resolve/create runtime bindings) and writes.
     // The long-lived event stream does not start work and must not block draining.
-    if (url.pathname.startsWith("/api/")) {
+    if (managed) {
       pending.add(request);
     }
     return false;

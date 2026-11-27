@@ -1,3 +1,4 @@
+import { ExternalAssistant } from './ExternalAssistant';
 import { ConnectionsSettings } from './ConnectionsSettings';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Link, BarChart3, Check, ClipboardList, Copy, Image, LayoutDashboard, Plus, RefreshCw, Search, Settings2, Trash2 } from 'lucide-react';
@@ -11,6 +12,7 @@ import type { DeviceInfo } from '../device/model/types';
 const endpoint = '/api/settings/image-generation';
 const blankSnapshot: SettingsSnapshot = { revision: '', defaultId: '', configurations: [] };
 const categories = [
+  { id: 'external', label: '外部助手活动', icon: ClipboardList },
   { id: 'connections', label: '账号连接', icon: Link },
   { id: 'image', label: '图片生成', icon: Image },
   { id: 'model', label: '模型设置', icon: Settings2 },
@@ -144,7 +146,7 @@ export function SettingsPage({ onClose, connected = false, device = null, projec
       <span className={styles.brand}>NEGUS</span>
     </aside>
     <main className={styles.content}><div className={styles.contentInner}>
-      {category === 'connections' ? <ConnectionsSettings /> : category === 'image' || category === 'model'
+      {category === 'external' ? <ExternalAssistant /> : category === 'connections' ? <ConnectionsSettings /> : category === 'image' || category === 'model'
         ? <ProviderSettings key={category} preview={category === 'model'} onDirty={setDirty} />
         : <LegacyFeaturePanel feature={category} onClose={onClose} connected={connected} device={device} projectId={projectId} projectRoot={projectRoot} />}
     </div></main>

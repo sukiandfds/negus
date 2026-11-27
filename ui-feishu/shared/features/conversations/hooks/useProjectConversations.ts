@@ -104,27 +104,25 @@ export function useProjectConversations() {
   const modelManager = useModels();
   const modelDefaults = useModelDefaults();
   const recordedModel = contextManagement.status.threadId === selection.selectedId ? contextManagement.status.model : "";
-  const sessionModel = (selection.session?.threadId === selection.selectedId ? selection.session.model || "" : "")
-    || catalog.sessions.find((item) => item.threadId === selection.selectedId)?.model
-    || "";
-  const recordedEffort = contextManagement.status.threadId === selection.selectedId ? contextManagement.status.reasoningEffort : "";
-  const sessionEffort = (selection.session?.threadId === selection.selectedId ? selection.session.reasoningEffort || "" : "")
-    || catalog.sessions.find((item) => item.threadId === selection.selectedId)?.reasoningEffort
-    || "";
-  const persistedModel = resolveVisibleModel(modelManager.models, modelDefaults, recordedModel, sessionModel);
+  const successfulSettings = contextManagement.status.threadId === selection.selectedId
+    ? contextManagement.status.lastSuccessfulSettings : undefined;
+  const savedModel = successfulSettings?.model || "";
+  const savedProvider = successfulSettings?.modelProviderId;
+  const persistedModel = resolveVisibleModel(modelManager.models, modelDefaults,
+    savedModel && savedProvider && savedProvider !== "current" && !savedModel.includes("::") ? savedProvider + "::" + savedModel : savedModel, "");
   const draftSettingsRef = useRef(new Map<string, { model: string; reasoningEffort: string }>());
   const [, setDraftVersion] = useState(0);
-  const modelDraftKey = (id: string) => "negus-model-draft-v1:" + encodeURIComponent(conversationScope + ":" + id);
-  const readDraft = (id: string) => draftSettingsRef.current.get(id) || readLocalCache(modelDraftKey(id),
-    (value): value is { model: string; reasoningEffort: string } => Boolean(value && typeof (value as { model?: unknown }).model === "string" &&
-      typeof (value as { reasoningEffort?: unknown }).reasoningEffort === "string"));
-  const modelDraft = readDraft(selection.selectedId);
+  useEffect(() => {
+    const id = selection.selectedId;
+    return () => { if (!isPendingThread(id)) draftSettingsRef.current.delete(id); };
+  }, [selection.selectedId]);
+  const modelDraft = draftSettingsRef.current.get(selection.selectedId);
   const visibleModel = modelDraft?.model || persistedModel;
   const visibleEffort = modelDraft?.reasoningEffort
-    ?? resolveVisibleEffort(modelManager.models, modelDefaults, visibleModel, recordedEffort || sessionEffort);
+    ?? resolveVisibleEffort(modelManager.models, modelDefaults, visibleModel, successfulSettings?.reasoningEffort || "");
   if (execution.status.active && execution.status.threadId === selection.selectedId) {
     const previous = runningModelRef.current.get(selection.selectedId);
-    if (!previous || !previous.model || previous.turnId !== execution.status.turnId) runningModelRef.current.set(selection.selectedId, { turnId: execution.status.turnId, model: recordedModel || sessionModel });
+    if (!previous || !previous.model || previous.turnId !== execution.status.turnId) runningModelRef.current.set(selection.selectedId, { turnId: execution.status.turnId, model: recordedModel || visibleModel });
   } else runningModelRef.current.delete(selection.selectedId);
   const usageModel = execution.status.active ? runningModelRef.current.get(selection.selectedId)?.model || '' : persistedModel;
   const modelChoiceRef = useRef({ threadId: "", contextSettled: false });
@@ -133,13 +131,8 @@ export function useProjectConversations() {
     contextSettled: contextManagement.status.threadId === selection.selectedId && !selection.loadingSession
       && (selection.store.synced.has(selection.selectedId) || Boolean(contextManagement.status.updatedAt) || contextManagement.status.phase === "failed"),
   };
-  const unavailableModel = (model: string) => modelManager.loaded && Boolean(model)
-    && !modelManager.models.some(entry => entry.model === model
-      || (canonicalChannelId(providerIdOf(entry)) === canonicalChannelId(providerIdForModel(modelManager.models, model))
-        && entry.model.split("::").at(-1) === model.split("::").at(-1)));
   const commitSettings = async (threadId: string, model: string, reasoningEffort: string, scope = conversationScope, continueSubmission = "") => {
     if (!model) return { threadId };
-    if (unavailableModel(model)) throw new Error("所选模型已下架，请换一个模型");
     const result = await modelApi.update(threadId, model, undefined, reasoningEffort, scope, continueSubmission);
     const target = result.threadId || threadId;
     if (reasoningEffort && result.reasoningEffort !== reasoningEffort) {
@@ -289,7 +282,6 @@ export function useProjectConversations() {
     if (!threadId || threadId !== selection.selectedId || switchResponse.current) return false;
     setSendPreparationError(null);
     const fail = (message: string) => { setSendPreparationError({ threadId, message }); return false as const; };
-    if (unavailableModel(visibleModel)) return false;
     if (isPendingThread(threadId) || !crossProvider) return threadId;
     if (execution.status.active) return fail("当前任务运行中，请完成后再发送到其他配置");
     if (queue) return fail("切换配置需要先退出等候队列模式，再点击发送");
@@ -338,7 +330,6 @@ export function useProjectConversations() {
     const messageText = text.trim();
     const requestedThreadId = preparedThread || selection.selectedId;
     if ((!messageText && !attachments.length) || !requestedThreadId || submittingThreads.current.has(requestedThreadId)) return false;
-    if (unavailableModel(retryModel || visibleModel)) { selection.setSessionError("所选模型已下架，请换一个模型"); return false; }
     submittingThreads.current.add(requestedThreadId);
     const settings = { model: retryModel || visibleModel, reasoningEffort: visibleEffort };
     const current = selection.store.get(requestedThreadId);
@@ -438,7 +429,7 @@ export function useProjectConversations() {
       submittingThreads.current.delete(threadId);
     }
   }, [selection.selectedId, visibleModel, visibleEffort, conversationScope, waitForThread, execution.sendMessage, providerOf, selection.store,
-    selection.addOptimisticMessage, selection.removeOptimisticMessage, selection.updateCurrentSession, selection.selectSession, selection.loadSession, selection.updateOptimisticMessage, selection.setSessionError, commitSettings, crossProvider, unavailableModel, reconcileMessage, catalog.updateSessionSummary]);
+    selection.addOptimisticMessage, selection.removeOptimisticMessage, selection.updateCurrentSession, selection.selectSession, selection.loadSession, selection.updateOptimisticMessage, selection.setSessionError, commitSettings, crossProvider, reconcileMessage, catalog.updateSessionSummary]);
 
   useEffect(() => {
     const threadId = selection.selectedId;
@@ -673,7 +664,6 @@ export function useProjectConversations() {
     setSendPreparationError(null);
     const draft = { model, reasoningEffort };
     draftSettingsRef.current.set(id, draft);
-    if (!isPendingThread(id)) writeLocalCache(modelDraftKey(id), draft);
     setDraftVersion(version => version + 1);
     return true;
   };
@@ -707,7 +697,6 @@ export function useProjectConversations() {
       if (selection.selectedIdRef.current !== request.threadId || selection.store.get(request.threadId).executionStatus.active) {
         throw new Error("对话已切换或任务正在运行，请返回重试");
       }
-      if (unavailableModel(request.model)) throw new Error("所选模型已下架，请换一个模型");
       const result = await modelApi.copyToProvider(request.threadId, request.model, request.reasoningEffort, conversationScope, request.requestId);
       catalog.updateSessionSummary(result.session);
       contextManagement.applyModelSettings(result.session.threadId, {
@@ -871,7 +860,6 @@ export function useProjectConversations() {
     models: modelManager.models,
     modelsLoading: modelManager.loading,
     modelChanging: false,
-    selectedModelUnavailable: unavailableModel(visibleModel),
     sendPreparationError: sendPreparationError?.threadId === selection.selectedId ? sendPreparationError.message : "",
     prepareSend,
     modelError: modelManager.error,

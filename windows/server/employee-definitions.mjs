@@ -17,8 +17,6 @@ const normalize = (value, workRoot) => {
     shortName: clean(value.shortName, 40) || id.slice(0, 2),
     aliases: [...new Set((Array.isArray(value.aliases) ? value.aliases : [])
       .map((alias) => clean(alias, 80)).filter(Boolean))],
-    delegatesTo: [...new Set((Array.isArray(value.delegatesTo) ? value.delegatesTo : [])
-      .map((delegate) => clean(delegate, 80)).filter(Boolean))],
     responsibility: clean(value.responsibility, 500),
     projectKey: clean(value.projectKey, 120) || `employee-${id}`,
     runtimeKind: clean(value.runtimeKind, 80) || "codex",

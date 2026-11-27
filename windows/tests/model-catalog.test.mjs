@@ -44,7 +44,8 @@ test('decimal model names and every shared resume/fork path lose only fixed iden
     for (const method of ['thread/resume', 'thread/fork']) {
       const calls = [], cleaned = new Set();
       const send = async (method, params) => { calls.push({method,params}); return {thread:{id:'employee',path:file}}; };
-      await requestWithNeutralIdentity(method, {threadId:'employee'}, send, cleaned);
+      await requestWithNeutralIdentity(method, {threadId:'employee', path: file + '.zst'}, send, cleaned);
+      assert.equal(calls[1].params.path, undefined, 'cleanup must resume the already loaded ID');
       assert.equal(calls[1].params.baseInstructions, 'You are a coding assistant. Keep employee duties.');
       await requestWithNeutralIdentity('thread/resume', {threadId:'employee'}, send, cleaned);
       assert.equal(calls.length, 3, 'no duplicate cleanup during subsequent sends');
@@ -73,4 +74,23 @@ test('DeepSeek effective context follows official capacity and native 95 percent
     for (const [key, value] of Object.entries(saved)) value === undefined ? delete process.env[key] : process.env[key] = value;
     await fs.rm(home, { recursive: true, force: true });
   }
+});
+
+test('Muse native resume by ID resolves the live rollout instead of stale compressed index', async t => {
+  const { requestWithNeutralIdentity } = await import('../server/model-catalog.mjs');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-native-resume-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const current = path.join(root, 'rollout.jsonl');
+  await fs.writeFile(current, JSON.stringify({type:'session_meta',payload:{}})+'\n');
+  const threadId = 'b4907209-6fe8-4701-b2cd-b8765e904327';
+  const thread = { id: threadId, path: current, cwd: root };
+  const calls = [];
+  const send = async (method, params) => {
+    calls.push({method,params});
+    if (method === 'thread/resume' && !params.path) throw Error(`cannot resume running thread ${threadId} with stale path: requested \`${current}.zst\`, active \`${current}\``);
+    if (method === 'thread/resume') assert.equal(params.path, current);
+    return { thread };
+  };
+  assert.equal((await requestWithNeutralIdentity('thread/resume', { threadId }, send)).thread.id, threadId);
+  assert.deepEqual(calls.map(c=>c.method), ['thread/resume','thread/read','thread/resume']);
 });

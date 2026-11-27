@@ -1,6 +1,7 @@
+import { ModelInfoDialog } from "../../../shared/components/ModelInfoDialog";
 import {createCachedResource} from '../../../shared/state/localCache';
 import { formatModelDisplayName } from '../../models/model/modelDisplayName';
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useMemo, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { ArrowDown, ArrowUp, Radar, RefreshCw, RotateCcw, X } from "lucide-react";
 import { readIntelligenceEfficiency } from "../data/intelligenceEfficiencyApi";
 import type { IntelligenceEfficiencyPoint, IntelligenceEfficiencySnapshot } from "../model/types";
@@ -14,6 +15,9 @@ const FILTER_STORAGE_KEY = "negus:radar-hidden-models";
 type SortKey = "iq" | "average_minutes" | "average_price_usd";
 
 const modelLabel = formatModelDisplayName;
+const modelColors = ["#80b1ff", "#c4a1ff", "#66dfbf", "#ffb76d", "#f89fca", "#68d9f2", "#e7d775", "#fa9c99", "#a8dc83", "#a6a9ff"];
+const versionOf = (model: string) => modelLabel(model).match(/^[a-z][a-z0-9]*[- ]\d+(?:\.\d+)*/i)?.[0] ?? "其他模型";
+const versionOrder = (a: string, b: string) => a === "其他模型" ? 1 : b === "其他模型" ? -1 : b.localeCompare(a, "en", { numeric: true });
 const sortedPoints = (points: IntelligenceEfficiencyPoint[], sortKey: SortKey, direction: "asc" | "desc") => {
   const multiplier = direction === "asc" ? 1 : -1;
   return [...points].sort((left, right) => (left[sortKey]===null?1:right[sortKey]===null?-1:(left[sortKey]! - right[sortKey]!) * multiplier));
@@ -25,27 +29,26 @@ export function IntelligenceEfficiencyControl() {
   const [hiddenModels,setHiddenModels]=useState<string[]>(()=>{const v=readStorage<unknown>(FILTER_STORAGE_KEY);return Array.isArray(v)?v:[];});
   const [sortKey, setSortKey] = useState<SortKey>("iq");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  const availableModels = useMemo(() => snapshot ? [...new Set(snapshot.points.map((point) => point.model))] : [], [snapshot]);
+  const versions = useMemo(() => {
+    const groups = new Map<string, Map<string, IntelligenceEfficiencyPoint[]>>();
+    for (const point of snapshot?.points ?? []) {
+      const version = versionOf(point.model);
+      if (!groups.has(version)) groups.set(version, new Map());
+      const models = groups.get(version)!;
+      if (!models.has(point.model)) models.set(point.model, []);
+      models.get(point.model)!.push(point);
+    }
+    let colorIndex = 0;
+    return [...groups].sort(([a], [b]) => versionOrder(a, b)).map(([version, models]) => ({
+      version, models: [...models].map(([model, points]) => {
+        const index = colorIndex++;
+        return { model, points, color: modelColors[index] ?? `hsl(${(index * 137.508) % 360} 72% 74%)` };
+      }),
+    }));
+  }, [snapshot]);
+  const availableModels = versions.flatMap(({models}) => models.map(({model}) => model));
   const visibleModels = availableModels.filter((model) => !hiddenModels.includes(model));
   const allSelected = availableModels.length > 0 && visibleModels.length === availableModels.length;
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOutside = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOutside);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
 
   const persistModels = (models: string[]) => {
     setHiddenModels(models);
@@ -67,12 +70,12 @@ export function IntelligenceEfficiencyControl() {
   };
 
   return (
-    <div className={styles.root} ref={rootRef}>
+    <div className={styles.root}>
       <button className={styles.trigger} type="button" aria-label="查看智力效率" title="智力效率" aria-expanded={open} aria-haspopup="dialog" onClick={toggle}>
         <Radar aria-hidden="true" />
       </button>
       {open ? (
-        <section className={styles.popover} role="dialog" aria-label="智力效率">
+        <ModelInfoDialog className={styles.popover} label="智力效率" onClose={() => setOpen(false)}>
           <header className={styles.header}>
             <div><h2>智力效率</h2><p>{snapshot ? `150 分制 · ${snapshot.round}` : "Codex Radar 社区众测数据"}</p></div>
             <div className={styles.headerActions}>
@@ -83,10 +86,21 @@ export function IntelligenceEfficiencyControl() {
           {snapshot ? (
             <>
               <div className={styles.controls}>
-                <div className={styles.filterRow}>
-                  <span className={styles.controlLabel}>模型</span>
+                <div className={styles.sortRow}>
+                  <span className={styles.controlLabel}>版本</span>
                   <button className={`${styles.filterButton} ${allSelected ? styles.active : ""}`} type="button" aria-pressed={allSelected} onClick={showAll}>全部</button>
-                  {availableModels.map((model) => <button key={model} className={`${styles.filterButton} ${!hiddenModels.includes(model) ? styles.active : ""}`} type="button" aria-pressed={!hiddenModels.includes(model)} onClick={() => toggleModel(model)}>{modelLabel(model)}</button>)}
+                  {versions.map(({version, models}) => {
+                    const selected = visibleModels.length === models.length && models.every(({model}) => visibleModels.includes(model));
+                    return <button key={version} className={`${styles.filterButton} ${selected ? styles.active : ""}`} type="button" aria-pressed={selected}
+                      onClick={() => persistModels(availableModels.filter(model => !models.some(entry => entry.model === model)))}>{version}</button>;
+                  })}
+                </div>
+                <div className={styles.modelFilters}>
+                  {versions.map(({version, models}) => <div key={version} className={styles.filterRow} role="group" aria-label={`${version} 模型`}>
+                    <span className={styles.controlLabel}>{version}</span>
+                    {models.map(({model, color}) => <button key={model} className={`${styles.filterButton} ${styles.modelFilter}`} style={{ "--model-color": color } as CSSProperties}
+                      type="button" aria-pressed={!hiddenModels.includes(model)} onClick={() => toggleModel(model)}>{modelLabel(model)}</button>)}
+                  </div>)}
                 </div>
                 <div className={styles.sortRow}>
                   <label className={styles.sortLabel} htmlFor="intelligence-efficiency-sort">排序</label>
@@ -96,26 +110,33 @@ export function IntelligenceEfficiencyControl() {
                 </div>
               </div>
               <div className={styles.cardViewport}>
-                {visibleModels.length ? visibleModels.map((model) => (
-                  <section className={`${styles.modelGroup} ${styles.defaultTone}`} key={model}>
-                    <h3>{modelLabel(model)}</h3>
-                    <div className={styles.cardGrid}>
-                      {sortedPoints(snapshot.points.filter((point) => point.model === model), sortKey, direction).map((point) => (
+                {visibleModels.length ? versions.map(({version, models}) => {
+                  const visible = models.filter(({model}) => !hiddenModels.includes(model));
+                  if (!visible.length) return null;
+                  return <section className={styles.versionSection} key={version} aria-label={version}>
+                    <h3>{version}</h3>
+                    {visible.map(({model, color, points}) => <section className={styles.modelGroup} aria-label={modelLabel(model)} key={model}
+                      style={{ "--model-color": color, "--columns": points.length <= 6 ? points.length : Math.ceil(points.length / 2),
+                        "--compact-columns": points.length <= 3 ? points.length : Math.ceil(points.length / 2) } as CSSProperties}>
+                      <h4>{modelLabel(model)}</h4>
+                      <div className={styles.cardGrid}>
+                      {sortedPoints(points, sortKey, direction).map((point) => (
                         <article className={styles.card} key={`${point.model}:${point.effort}`}>
-                          <div className={styles.cardHead}><strong>{modelLabel(point.model)} {point.effort}</strong>{point.valid_tasks ? <span>{point.valid_tasks}</span> : null}</div>
+                          <div className={styles.cardHead}><strong>{point.effort}</strong>{point.valid_tasks ? <span>{point.valid_tasks}</span> : null}</div>
                           <div className={styles.cardMain}>{point.iq.toFixed(1)}</div>
                           <div className={styles.cardMeta}><span>{point.average_price_usd===null?'—':'$'+point.average_price_usd.toFixed(2)}</span><span>{point.average_minutes===null?'—':point.average_minutes.toFixed(1)+' 分钟'}</span></div>
                         </article>
                       ))}
-                    </div>
-                  </section>
-                )) : <div className={styles.empty}>请至少选择一个模型</div>}
+                      </div>
+                    </section>)}
+                  </section>;
+                }) : <div className={styles.empty}>请至少选择一个模型</div>}
               </div>
             </>
           ) : <div className={styles.state}><p>{loading ? "正在读取智力效率数据..." : error || "暂无数据"}</p>{error ? <button type="button" onClick={() => void load()}>重试</button> : null}</div>}
           {error && snapshot && <p role="alert">读取最新榜单失败，当前显示上次结果。</p>}
           <footer className={styles.footer}><span>数据仅供模型选择参考</span><a href="https://codexradar.com" target="_blank" rel="noreferrer">Codex Radar</a></footer>
-        </section>
+        </ModelInfoDialog>
       ) : null}
     </div>
   );

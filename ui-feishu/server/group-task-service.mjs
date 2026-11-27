@@ -303,7 +303,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
         text: item.text, preserveText: true, replyTo: replyToFor(task) });
     }
   };
-  const runtime = createNativeTaskRuntime({ log,
+  const runtime = createNativeTaskRuntime({ log, modelProviders,
     resolve: async (task, controls, { recovering }) => {
       let agent = room.getAgent(task.agentId);
       if (!agent) throw Error('执行员工已不在当前群聊');
@@ -316,6 +316,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       if (task.conversationId === roomId && agent.threadId
         && (agent.pendingModelSettings || (taskRoute && taskRoute.modelProviderId !== agent.modelProviderId))) {
         const requested = taskRoute || agent.pendingModelSettings;
+        if (!recovering) modelProviders?.assertChannelAvailable?.(requested.modelProviderId);
         agent = await migrateGroupAgentThread({
           agent: { ...agent, pendingModelSettings: {
             modelProviderId: requested.modelProviderId,
@@ -334,6 +335,8 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       if (task.background || task.reasoningEffort || task.runtime.reasoningEffort)
         agent = { ...agent, reasoningEffort: task.reasoningEffort || task.runtime.reasoningEffort || agent.reasoningEffort };
       const modelProviderId = task.runtime.modelProviderId || agent.modelProviderId || 'current';
+      if (!recovering) modelProviders?.assertChannelAvailable?.(modelProviderId);
+      const modelExecution = { modelProviderId, model: agent.model, ...modelProviders?.channelAvailability?.(modelProviderId) };
       const client = await clientFor({ ...agent, modelProviderId });
       const independent = task.conversationId !== roomId;
       let threadId = task.runtime.threadId || task.resumeThreadId || (recovering || independent ? '' : agent.threadId);
@@ -343,7 +346,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
         providerForThread, registerSession, bindings, bindingScope: { targetProjectId: room.snapshot().room.projectId, executionRoot: projectRoot } });
       if (recovering) {
         if (threadId && independent) await registerBackground();
-        return { client, threadId, onHistory: async turn => {
+        return { client, threadId, modelExecution, onHistory: async turn => {
           await publishCommentary(task, turn.items);
           if (turn.status === 'completed') await ensureCoordinatedDelegations(task);
         } };
@@ -392,7 +395,7 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
         ...resolveArtifacts([...new Set(sources.flatMap(message => message.artifactIds || []))]),
       ].map(file => [file.id, file])).values()];
       const input = await inputFromAttachments(prompt, attachments, attachmentContent);
-      return { client, threadId, input, previousTurnIds: turns.map(turn => turn.id),
+      return { client, threadId, input, modelExecution, previousTurnIds: turns.map(turn => turn.id),
         onHistory: async turn => {
           await publishCommentary(task, turn.items);
           if (turn.status === 'completed') await ensureCoordinatedDelegations(task);
@@ -576,7 +579,8 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
         const prior = running.inputs?.find(input => input.requestId === requestKey);
         log({ event: 'group_message_steered', messageId: sourceMessageId, taskId: running.id,
           agentId, role: running.publication?.role || 'reply' });
-        const client = await clientFor({ modelProviderId: running.runtime.modelProviderId, model: '' });
+        const modelProviderId = running.runtime.modelProviderId || running.modelProviderId || 'current';
+        const client = await clientFor({ modelProviderId, model: '' });
         let delivered = prior?.accepted;
         if (prior && !delivered) {
           const history = await client.request('thread/read', { threadId: running.runtime.threadId, includeTurns: true });
@@ -595,8 +599,19 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
           const files = resolveAttachments(attachments.map(file => file.id));
           if (files.length !== attachments.length) throw Object.assign(Error('补充消息附件不可用'), { statusCode: 400 });
           const input = await inputFromAttachments(requestText, files, attachmentContent);
+          modelProviders?.assertChannelAvailable?.(modelProviderId);
           await kernel.recordInput(running.id, { requestId: requestKey, submissionId: requestKey, messageId: sourceMessageId, turnId: running.runtime.turnId, text: requestText });
-          await steerTurn(client, { threadId: running.runtime.threadId, clientUserMessageId: requestKey, input }, running.runtime.turnId);
+          let channel;
+          try {
+            channel = modelProviders?.assertChannelAvailable?.(modelProviderId);
+            await steerTurn(client, { threadId: running.runtime.threadId, clientUserMessageId: requestKey, input }, running.runtime.turnId);
+          } catch (error) {
+            const failed = modelProviders?.executionRecords?.fail({ ...channel, modelProviderId, taskId: running.id,
+              submissionId: sourceMessageId, threadId: running.runtime.threadId, turnId: running.runtime.turnId,
+              model: running.runtime.model || running.model }, error);
+            if (failed && error.code !== 'MODEL_CHANNEL_BALANCE') error.message = failed.reason;
+            throw error;
+          }
         }
         await kernel.acceptInput(running.id, requestKey);
         tasks.push(running);
@@ -632,7 +647,9 @@ export async function createGroupTaskService({ stateRoot, room, projectRoot, emp
       const selector = selectGroupAgent === false ? null : selectGroupAgent ? { select: selectGroupAgent }
         : modelProviders ? groupMessageSelector : null;
       const routing = intake.routing || await routeMessage({ text: message.text, members, explicitIds: mentionedAgentIds(message.text, members),
-        requestedIds: input.agentIds, replyAgentId, select: selector?.select, context: selectionContext,
+        requestedIds: input.agentIds, replyAgentId, select: selector && (args => selector.select({
+          ...args, origin: { threadId: roomId, submissionId: message.id },
+        })), context: selectionContext,
         log });
       if (!intake.routing) await intake.saveRouting(routing);
       log({ event: 'message_routed', messageId: message.id, agentIds: routing.agentIds, reason: routing.reason });

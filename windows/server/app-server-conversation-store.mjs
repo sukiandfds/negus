@@ -532,6 +532,8 @@ export const createAppServerConversationStore = ({
     if (!isSameProjectRoot(thread.cwd, cwd)) {
       throw Object.assign(new Error("新对话未创建在所选项目中，请检查项目路径后重试。"), { statusCode: 502 });
     }
+    // Native empty threads otherwise have no rollout to resume after a restart.
+    if (options.persistEmptyThread) await client.request("thread/name/set", { threadId: thread.id, name: summaryFromThread(thread).title });
     runtimeOptions?.bindThread?.(thread.id);
     threadCache.set(thread.id, thread);
     freshThreadRuntime.set(thread.id, {
@@ -594,13 +596,16 @@ export const createAppServerConversationStore = ({
     await loadAutoTitles();
     if (autoTitleAttempts.has(threadId) || autoTitles.has(threadId)) return;
     const cached = threadCache.get(threadId);
-    if (cached?.name?.trim()) return;
+    const initialTitle = `新对话 · ${threadId.slice(-6)}`;
+    if (cached?.name?.trim() && cached.name.trim() !== initialTitle) return;
     autoTitleAttempts.add(threadId);
     try {
       const generatedTitle = await generateAutoTitle(text, cached?.cwd || projectRoot);
       if (!generatedTitle) return;
       const current = await client.request("thread/read", { threadId, includeTurns: false });
-      if (String(current.thread?.name || "").trim()) return;
+      const name = String(current.thread?.name || "").trim();
+      if (name && name !== initialTitle) return;
+      if (name === initialTitle) await renameSession(threadId, generatedTitle);
       await saveAutoTitle(threadId, generatedTitle);
       onAutoTitleChanged?.(threadId);
     } catch (error) {
@@ -842,7 +847,7 @@ export const createAppServerConversationStore = ({
       const runtime = await resumeThread(threadId);
       const { runtimeOptions, managed } = await ensureProjectThread(threadId);
       const topic = managed ? null : await topics.prepare(threadId);
-      const result = await startTurn(client, await withDeveloperInstructions({
+      const input = await withDeveloperInstructions({
         threadId,
         input: await inputFromAttachments(text, attachments, attachmentContent),
         ...(submissionId ? { clientUserMessageId: submissionId } : {}),
@@ -850,7 +855,9 @@ export const createAppServerConversationStore = ({
         additionalContext: { ...(topic && { "negus.topics": topic.context, "negus.topicRecall":topic.recall }), ...modelContext(settings.model || runtime?.model), ...runtimeOptions?.turn?.additionalContext },
         ...(settings.model ? { model: settings.model } : {}),
         ...(settings.reasoningEffort ? { effort: settings.reasoningEffort } : {}),
-      }));
+      });
+      settings.assertExecution?.();
+      const result = await startTurn(client, input);
       if(topic) topics.bind(threadId,result?.turn?.id,topic.draft);
       freshThreadRuntime.delete(threadId);
       const cached = threadCache.get(threadId);
@@ -867,11 +874,13 @@ export const createAppServerConversationStore = ({
     }
   };
 
-  const steerMessage = async (threadId, turnId, text, attachments = [], submissionId = "") => {
+  const steerMessage = async (threadId, turnId, text, attachments = [], submissionId = "", { assertExecution } = {}) => {
     await assertAccessibleThread(await getThread(threadId));
+    const input = await inputFromAttachments(text, attachments, attachmentContent);
+    assertExecution?.();
     return steerTurn(client, {
       threadId,
-      input: await inputFromAttachments(text, attachments, attachmentContent),
+      input,
       ...(submissionId ? { clientUserMessageId: submissionId } : {}),
     }, turnId);
   };
@@ -1048,7 +1057,7 @@ export const createAppServerConversationStore = ({
       excludeTurns: true,
     };
     const result = await client.request('thread/resume', params).catch(error => {
-      if (options.strictPath || !/with stale path:.*omit path and resume by thread id/su.test(String(error.message))) throw error;
+      if (options.strictPath || !/with stale path:.*(?:omit path and resume by thread id|active `[^`]+`)/su.test(String(error.message))) throw error;
       const { path: stalePath, ...byId } = params;
       return client.request('thread/resume', byId);
     });

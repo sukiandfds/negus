@@ -144,6 +144,11 @@ export const selectTaskRoute = async (providers, request = {}, {
   }
   const consider = async (provider, model, channel = '') => {
     if (attempted.some(item => item.providerId === provider.id && item.model === model)) return null;
+    const availability = providers.channelAvailability?.(provider.id);
+    if (availability?.available === false) {
+      attempted.push({ providerId: provider.id, displayName: provider.displayName || provider.id, model, reason: availability.reason });
+      return null;
+    }
     const previousFailure = recentFailures.get(`${provider.id}::${model}`);
     if (previousFailure) {
       attempted.push({ providerId: provider.id, displayName: provider.displayName || provider.id, model,
@@ -163,6 +168,7 @@ export const selectTaskRoute = async (providers, request = {}, {
     }
     try {
       const route = providers.resolveRoute({ modelProviderId: provider.id, model });
+      providers.assertChannelAvailable?.(route.modelProviderId);
       if (route.model !== model) {
         attempted.push({ providerId: provider.id, displayName: provider.displayName || provider.id, model,
           reason: `实际路由为 ${route.model || '(空)'}` });

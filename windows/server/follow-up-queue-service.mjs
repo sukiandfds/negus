@@ -79,15 +79,20 @@ export const createFollowUpQueueService = ({
 
   const dispatchNext = (threadId) => withThreadLock(threadId, async () => {
     const status = execution.getStatus(threadId);
-    if (isCompacting(threadId) || status.active || ["failed", "interrupted", "systemError", "waitingOnApproval", "waitingOnUserInput"].includes(status.phase)) {
+    if (isCompacting(threadId) || status.active || ["waitingOnApproval", "waitingOnUserInput"].includes(status.phase)) {
       return null;
     }
-    const item = store.claimNext(threadId);
+    // An explicit Muse submission starts a new turn after a stopped run.
+    // Leave ordinary pending items and failed delivery attempts untouched.
+    const stopped = ["failed","interrupted","systemError"].includes(status.phase);
+    const next = stopped && store.list(threadId).find(i=>i.state==="pending" && !i.held && actorFor(i)?.authorId==="external:muse");
+    const item = stopped ? next && store.claim(threadId,next.id) : store.claimNext(threadId);
     if (!item) return null;
     return dispatchClaimed(threadId, item, status);
   });
 
   const enqueue = async ({ threadId, text, attachmentIds = [], attachments = [], submissionId = "", modelSettings, stableDispatchId = "", held = false }) => {
+    await conversations.assertSendAvailable?.(threadId, { modelSettings });
     const item = store.enqueue({ threadId, text, attachmentIds, attachments, submissionId, modelSettings, stableDispatchId, held });
     await store.flush();
     broadcastQueue(threadId, "queued");
@@ -150,14 +155,14 @@ export const createFollowUpQueueService = ({
   });
 
   const handleTurnTerminal = ({ threadId, status }) => {
-    if (!["completed", "idle"].includes(status)) return;
+    if (!["completed", "idle", "failed", "interrupted", "systemError"].includes(status)) return;
     if (!execution.getStatus(threadId).active) void dispatchNext(threadId);
   };
 
   const start = async () => {
     for (const threadId of store.threadIds()) {
       const status = execution.getStatus(threadId);
-      if (!status.active && ["idle", "completed"].includes(status.phase)) void dispatchNext(threadId);
+      if (!status.active && ["idle", "completed","failed","interrupted","systemError"].includes(status.phase)) void dispatchNext(threadId);
     }
   };
 

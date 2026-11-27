@@ -8,9 +8,6 @@
     "研究"
   ],
   "responsibility": "澄清需求、对照竞品、定义并验收最终产品体验",
-  "delegatesTo": [
-    "grok"
-  ],
   "projectKey": "employee-researcher",
   "runtimeKind": "codex",
   "instructions": ""

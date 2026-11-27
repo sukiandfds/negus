@@ -106,6 +106,8 @@ export const resolveVisibleModel = (
   sessionModel: string,
 ) => {
   if (recordedModel || sessionModel) return recordedModel || sessionModel;
+  if (defaults.model) return defaults.model.includes("::") || !defaults.providerId || defaults.providerId === "current"
+    ? defaults.model : `${defaults.providerId}::${defaults.model}`;
   const pool = availableModels(models, defaults);
   if (!pool.length) return defaults.model || "";
   const preferred = pool.find((entry) => (entry.model === defaults.model || entry.model.split('::').at(-1) === defaults.model.split('::').at(-1)) && (!defaults.providerId || providerIdOf(entry) === defaults.providerId));

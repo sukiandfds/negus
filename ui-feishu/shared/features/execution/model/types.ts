@@ -43,6 +43,7 @@ export interface ExecutionStatus {
   label: string;
   detail: string;
   commentary: string;
+  interruptionReason?: string;
   notices?: string[];
   hasFinalAnswer?: boolean;
   streamingItemId?: string;

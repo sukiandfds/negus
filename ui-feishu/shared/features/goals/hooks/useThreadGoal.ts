@@ -18,7 +18,6 @@ const empty = (): Snapshot => ({ goal: null, completed: null, error: "", busy: f
 import type { ConversationStore } from "../../conversations/state/conversationStore";
 
 export function useThreadGoal(threadId: string, store: ConversationStore) {
-  const conversationId = currentConversationId();
   const entries = useRef(new Map<string, Snapshot>());
   const [, render] = useState(0);
   const entry = useCallback((id: string) => {
@@ -54,7 +53,7 @@ export function useThreadGoal(threadId: string, store: ConversationStore) {
   ) => {
     if (!targetId) return null;
     const value = entry(targetId);
-    value.conversationId = conversationId;
+    value.conversationId = currentConversationId(targetId) || value.conversationId;
     if (value.busy) return null;
     const mutation = ++value.mutation;
     const revision = ++value.revision;
@@ -75,7 +74,7 @@ export function useThreadGoal(threadId: string, store: ConversationStore) {
     } finally {
       if (value.mutation === mutation) { value.busy = false; notify(targetId); }
     }
-  }, [threadId, conversationId, entry, accept, notify]);
+  }, [threadId, entry, accept, notify]);
 
   const clear = useCallback(async (preserveCompletion = false, targetId = threadId) => {
     if (!targetId) return false;
@@ -94,7 +93,7 @@ export function useThreadGoal(threadId: string, store: ConversationStore) {
     value.error = "";
     notify(targetId);
     try {
-      await goalApi.clear(targetId, undefined, value.conversationId);
+      await goalApi.clear(targetId, undefined, currentConversationId(targetId) || value.conversationId);
       if (completed) {
         store.dismissedGoals.set(targetId, goalCompletionKey(completed));
         if (value.completed && goalCompletionKey(value.completed) === goalCompletionKey(completed)) value.completed = null;

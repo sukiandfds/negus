@@ -44,7 +44,7 @@ export function ExecutionTimeline({
   const failed = status.phase === "failed" || status.phase === "systemError";
   const interrupted = status.phase === "interrupted";
   const terminalIssue = failed || interrupted;
-  const notices = [...new Set([...(status.notices || []), ...(terminalIssue && status.detail ? [status.detail] : [])])];
+  const notices = interrupted && status.interruptionReason === "serviceRestart" ? [] : [...new Set([...(status.notices || []), ...(terminalIssue && status.detail ? [status.detail] : [])])];
   const activities = status.activities || [];
   const startedAt = Date.parse(status.startedAt || "");
   const liveDurationMs = Number.isFinite(startedAt) ? now - startedAt : 0;
@@ -72,7 +72,6 @@ export function ExecutionTimeline({
       {(
         <div className={`${styles.activitiesWrap} ${expanded ? styles.open : ""}`} aria-hidden={!expanded}>
         <div className={styles.activities}>
-          {status.commentary && <p>{status.commentary}</p>}
           {activities.length ? activities.map((activity) => {
             const Icon = iconFor(activity);
             return (

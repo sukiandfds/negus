@@ -1,4 +1,4 @@
-import { Bot, CalendarDays, CheckSquare, ChevronDown, ContactRound, FileText, Files, Grid2X2, Hash, MessageCircle, Settings, Star, Video, type LucideIcon } from 'lucide-react';
+import { Bot, CalendarDays, CheckSquare, ChevronDown, ContactRound, FileText, Files, Grid2X2, Hash, Image, MessageCircle, Puzzle, Settings, Star, Video, type LucideIcon } from 'lucide-react';
 import { Avatar } from './Avatar';
 import { useRef } from 'react';
 import { useDismissibleLayer } from '../../shared/shared/hooks/useDismissibleLayer';
@@ -30,7 +30,13 @@ export function AppRail({ section, connected, open, onClose, onSectionChange, on
   return <>{open && <div className="rail-backdrop" aria-hidden="true" onClick={onClose} />}<aside ref={rail} className={`app-rail ${open ? 'expanded' : ''}`} aria-label="功能导航" onClick={event => { if (event.target instanceof Element && event.target.closest('button:not(:disabled)')) onClose(); }}>
       <div className="rail-profile"><Avatar name="N" /><span>Negus<small>我的工作空间</small></span><ChevronDown size={15} /></div>
       <nav>{nav.map(({ label, icon: Icon, id }) => <button key={label} className={`rail-item ${id === section ? 'selected' : ''} ${label === '通讯录' ? 'rail-secondary' : ''}`} title={id ? label : `${label} · 暂未接入`} disabled={!id}
-        onClick={() => { if (id) onSectionChange(id); }}><Icon size={18} /><span>{label}</span></button>)}</nav>
+        onClick={() => { if (id) onSectionChange(id); }}><Icon size={18} /><span>{label}</span></button>)}
+        <div className="rail-plugins" role="group" aria-label="自制插件">
+          <div className="rail-item" title="自制插件"><Puzzle size={18} aria-hidden="true" /><span>自制插件</span></div>
+          <button type="button" className={`rail-item ${section === 'border' ? 'selected' : ''}`} title="增加边框" aria-label="增加边框"
+            onClick={() => onSectionChange('border')}><Image size={18} /><span>增加边框</span></button>
+        </div>
+      </nav>
       <div className="rail-bottom"><button className="rail-item" onClick={onSettings}><Settings size={18} /><span>设置</span></button>
         <span className={`connection ${connected ? 'online' : ''}`}><i />{connected ? '已连接' : '正在连接'}</span></div>
     </aside></>;

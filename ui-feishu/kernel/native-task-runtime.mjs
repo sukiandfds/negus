@@ -1,21 +1,42 @@
 import { turnCompletion, turnOutcomes as terminal, startTurn, interruptTurn } from "../../windows/server/execution/protocol.mjs";
+import { finalModelError, modelFailure } from '../../windows/server/model-execution-records.mjs';
 const resultFrom = turn => ({ ...turnCompletion(turn, "unknown"),
+  ...(turn.error ? { modelError: turn.error } : {}),
   text: (turn.items || []).filter(item => item.type === 'agentMessage' && item.phase !== 'commentary').map(item => item.text || '').join('\n') });
 
 // Shared protocol adapter. resolve supplies the existing provider/client and channel context.
-export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () => {}, healthIntervalMs = 10000 }) {
+export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () => {}, healthIntervalMs = 10000, modelProviders }) {
   const active = new Map();
   const trace = event => { try { log(event); } catch {} };
   const run = async (task, controls, recovering) => {
     if (recovering && (!task.runtime?.threadId || !task.runtime?.turnId))
       return { status: 'interrupted', text: '', error: '重启恢复缺少可核验的原执行编号' };
-    const prepared = await resolve(task, controls, { recovering });
+    const initial = { taskId: task.id, submissionId: task.source?.messageId || task.id,
+      modelProviderId: task.runtime?.modelProviderId || task.modelProviderId, model: task.runtime?.model || task.model };
+    const records = modelProviders?.executionRecords;
+    const fail = (error, route = initial, threadId = task.runtime?.threadId, turnId = task.runtime?.turnId) => {
+      if (!records || !route.modelProviderId) return;
+      const channel = route.billingChannelId ? {} : (modelProviders.channelContext?.(route.modelProviderId) || modelProviders.channelAvailability(route.modelProviderId));
+      return records.fail({ ...initial, ...route, ...channel, threadId, turnId }, error).reason;
+    };
+    let prepared;
+    try { prepared = await resolve(task, controls, { recovering }); }
+    catch (error) {
+      const reason = fail(error);
+      if (reason && (modelFailure(error).code !== 'execution_failed' || !error.ambiguous)) error.message = reason;
+      throw error;
+    }
     const { client, threadId, input, turnOptions = {}, previousTurnIds = [] } = prepared;
     if (!threadId) return recovering && !task.runtime.starting
       ? { status: 'interrupted', text: '', error: '服务在任务启动前退出' }
       : recovering ? { status: 'unknown', error: '尚未确认原任务的会话编号' } : { status: 'failed', error: '无法建立执行会话' };
     let turnId = recovering ? task.runtime.turnId || '' : '';
     let startRequested = false;
+    const route = prepared.modelExecution || initial;
+    const settleModelFailure = result => {
+      const { modelError, ...outcome } = result;
+      return outcome.status === 'failed' ? { ...outcome, error: fail(modelError || outcome.error, route, threadId, turnId) || outcome.error } : outcome;
+    };
     let text = '';
     let ended = false;
     let announcePromise;
@@ -28,6 +49,7 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
       await prepared.onStarted?.();
     })();
     const ignored = new Set(recovering ? task.runtime.previousTurnIds || [] : previousTurnIds);
+    const earlyErrors = new Map();
     const finish = result => { if (!ended) { ended = true; resolveResult(result); } };
     const interrupt = async () => {
       if (ended || !turnId || interrupting) return;
@@ -42,6 +64,7 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
       const { method, params = {} } = event || {};
       if (ended || params.threadId !== threadId) return;
       const eventTurnId = params.turn?.id || params.turnId;
+      const finalError = finalModelError(method, params);
       if (eventTurnId && (ignored.has(eventTurnId) || (turnId && eventTurnId !== turnId))) return;
       // Do not attach unscoped item events to a new run.
       if (!eventTurnId) return;
@@ -49,6 +72,7 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
         if (ended || (turnId && eventTurnId !== turnId)) return;
         if (!turnId) {
           // Recovery identifies a unique candidate from history, never from an arbitrary arriving event.
+          if (!recovering && startRequested && finalError) earlyErrors.set(eventTurnId, params.error);
           if (recovering || !startRequested || method !== 'turn/started') return;
           turnId = eventTurnId;
         }
@@ -57,6 +81,11 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
           if (controls.signal.aborted) await interrupt();
         }
         if (method === 'item/completed' && params.item?.type === 'agentMessage' && params.item.phase !== 'commentary') text = params.item.text || '';
+        const modelError = finalError ? params.error : earlyErrors.get(turnId);
+        if (modelError) {
+          finish({ status: 'failed', modelError, error: modelError.message || '', text });
+          return;
+        }
         await onEvent(task, event);
         if (method === 'turn/completed') {
           const result = resultFrom(params.turn || {});
@@ -80,13 +109,13 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
       if (found) await prepared.onHistory?.(found);
       const idle = value.thread?.status?.type === 'idle' || value.thread?.status === 'idle';
       if (recovering && value.thread?.status?.type === 'notLoaded') return {
-        status: 'interrupted', error: '重启后原执行会话未加载，任务未自动重复启动',
+        status: 'interrupted', interruptionReason: 'serviceRestart', error: '重启后原执行会话未加载，任务未自动重复启动',
       };
       if ((recovering || turnId) && idle && found && !terminal.has(found.status)) return {
         status: 'interrupted', text: resultFrom(found).text, error: '原执行已不在运行，任务未自动重复启动',
       };
       if (!found) return recovering
-        ? { status: 'interrupted', error: '重启后未找到原执行，任务未自动重复启动' }
+        ? { status: 'interrupted', interruptionReason: 'serviceRestart', error: '重启后未找到原执行，任务未自动重复启动' }
         : { status: 'unknown', error: '尚未在原会话中确认这次执行' };
       if (!turnId) {
         await controls.checkpoint({ threadId, turnId: found.id });
@@ -118,11 +147,15 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
     try {
       if (recovering) {
         const result = await check();
-        if (result) return result;
+        if (result) return settleModelFailure(result);
       } else {
         if (controls.signal.aborted) return { status: 'interrupted', text: '' };
         // Persist intent before the side effect. Lost RPC acknowledgment is reconciled, never replayed.
         await controls.checkpoint({ threadId, starting: true, registrationPending: false, previousTurnIds });
+        if (route.modelProviderId) {
+          try { Object.assign(route, modelProviders?.assertChannelAvailable?.(route.modelProviderId)); }
+          catch (error) { return { status: 'failed', text: '', error: fail(error, route, threadId, turnId) || error.message }; }
+        }
         startRequested = true;
         try {
           const response = await startTurn(client, { ...turnOptions, threadId, input });
@@ -130,17 +163,22 @@ export function createNativeTaskRuntime({ resolve, onEvent = () => {}, log = () 
           turnId ||= response.turn.id;
           await started();
           if (controls.signal.aborted) await interrupt();
+          if (earlyErrors.has(turnId)) finish({ status: 'failed', modelError: earlyErrors.get(turnId), text });
           if (terminal.has(response.turn.status)) {
             await prepared.onHistory?.(response.turn);
             finish(resultFrom(response.turn));
           }
         } catch (error) {
+          const known = modelFailure(error).code;
+          const reason = fail(error, route, threadId, turnId);
+          if (known === 'balance' || known === 'rate_limit' || known === 'authentication')
+            return { status: 'failed', text: '', error: reason || error.message };
           trace({ event: 'native_start_reconcile', taskId: task.id });
-          try { const result = await check(); if (result) return result; }
-          catch { throw Object.assign(new Error(error.message), { ambiguous: true }); }
+          try { const result = await check(); if (result) return settleModelFailure(result); }
+          catch { throw Object.assign(new Error(reason || error.message), { ambiguous: true }); }
         }
       }
-      return await completion;
+      return settleModelFailure(await completion);
     } finally {
       prepared.onFinished?.();
       clearInterval(healthTimer);

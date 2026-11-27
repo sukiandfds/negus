@@ -120,7 +120,7 @@ export function createGroupMessageSelector({
   modelProviders, tasks = () => [], timeoutMs = GROUP_SELECTOR_TIMEOUT_MS,
 } = {}) {
   return {
-    async select({ text = '', members = [], context = {} } = {}) {
+    async select({ text = '', members = [], context = {}, origin } = {}) {
       if (!modelProviders) throw new Error('群聊选人模型服务未连接');
       if (typeof modelProviders.complete !== 'function') throw new Error('群聊选人需要无工具 Responses 文本接口');
       const startedAt = Date.now();
@@ -141,6 +141,7 @@ export function createGroupMessageSelector({
         maxOutputTokens: GROUP_SELECTOR_MAX_OUTPUT_TOKENS,
         textFormat: GROUP_SELECTION_FORMAT,
         timeoutMs,
+        origin,
       });
       return {
         agentIds: parseGroupAgentSelection(completion.text, members),

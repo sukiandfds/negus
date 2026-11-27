@@ -1,0 +1,42 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {realpathSync} from 'node:fs';
+import {mkdtemp,rm} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {createServer} from 'node:http';
+import {externalRoutes} from '../../windows/server/external-assistant/routes.mjs';
+import {sendJson} from '../../windows/server/http/request-utils.mjs';
+const require=createRequire(realpathSync(new URL('../node_modules/vite/package.json',import.meta.url)));
+const {build}=require('esbuild');
+const {chromium}=require(process.env.PLAYWRIGHT_PATH||'/Users/hans/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+test('本人在设置中授权、取得链接、查看项目调用和待审版本，撤销后客户端失效',async t=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'negus-panel-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const bundle=await build({stdin:{contents:`import React from 'react';import{createRoot}from'react-dom/client';import{SettingsPage}from'./shared/features/settings/SettingsPage';createRoot(document.querySelector('main')).render(<SettingsPage onClose={()=>{}}/>);`,loader:'tsx',resolveDir:new URL('..',import.meta.url).pathname},bundle:true,jsx:'automatic',write:false,loader:{'.css':'empty','.module.css':'empty'},define:{'process.env.NODE_ENV':'"production"',__APP_BUILD_ID__:'"test"'}});
+ const artifact={id:'doc',currentVersion:2,taskId:'job',versions:[{version:2,name:'项目交付.pdf'}]};
+ const endpoint=externalRoutes({projectRoot:root,directory:{list:async()=>({projects:[{name:'验收项目',projectId:'project1',conversations:[{threadId:'thread1'}]}]})},tasks:{tasks:()=>[{id:'job',source:{kind:'conversation',threadId:'thread1'}}]},artifacts:{list:()=>[artifact],review:async(id,decision)=>{artifact.versions[0].reviewDecision=decision}},
+ ownerOptions:{configured:'owner',request:async(url)=>Response.json(url.endsWith('/sign-in/email-otp')?{user:{id:'owner',email:'owner@example.org',emailVerified:true}}:{success:true})}});
+ const host=createServer(async(req,res)=>{try{const u=new URL(req.url,'http://localhost');
+ if(u.pathname==='/mcp/muse')await endpoint.mcp(req,res,u);
+ else if(await endpoint.admin(req,res,u))return;
+ else if(u.pathname==='/app.js'){res.writeHead(200,{'content-type':'application/javascript'});res.end(bundle.outputFiles[0].contents);}
+ else if(u.pathname==='/'){res.setHeader('content-type','text/html; charset=utf-8');res.end('<meta charset=utf-8><main></main><script src="/app.js"></script>');}else sendJson(res,{},404);
+ }catch(e){sendJson(res,{error:e.message},e.statusCode||500);}});
+ await new Promise(r=>host.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>host.close(r)));
+ const browser=await chromium.launch({executablePath:process.env.CHROME_BIN||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});t.after(()=>browser.close());
+ const page=await browser.newPage();page.setDefaultTimeout(8000);page.on('pageerror',e=>console.error('测试页面异常:',e.message));page.on('dialog',d=>d.accept());
+ await page.goto('http://127.0.0.1:'+host.address().port+'/?settings=external');
+ await page.getByLabel('账号邮箱').waitFor().catch(async e=>{throw Error((await page.locator('body').innerText()).slice(0,400)+' '+e.message)});await page.getByLabel('账号邮箱').fill('owner@example.org');await page.getByRole('button',{name:'发送验证码'}).click();
+ await page.getByLabel('邮箱验证码').fill('123456');await page.getByRole('button',{name:'验证本人账号'}).click();
+ await page.getByLabel('验收项目',{exact:true}).click();await page.waitForFunction(()=>document.querySelector('input[type=checkbox]')?.checked);await page.getByRole('button',{name:'为 00 发放接入链接'}).click();
+ const link=await page.getByLabel('接入链接（仅本次显示）').inputValue();
+ const rpc=()=>fetch(link,{method:'POST',headers:{accept:'application/json,text/event-stream','content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'project_get',arguments:{project:'project1'}}})});
+ const result=await (await rpc()).json();assert.equal(JSON.parse(result.result.content[0].text).name,'验收项目');
+ await page.getByLabel('查看范围').selectOption('project1');
+ await page.getByText(/project_get · 完成/).waitFor();await page.getByText(/项目交付.pdf\s*· 版本 2/).waitFor();
+ await page.getByRole('button',{name:'批准',exact:true}).click();await page.getByText('没有待审批事项。').waitFor();
+ assert.equal(artifact.versions[0].reviewDecision,'approve');
+ await page.getByRole('button',{name:'撤销接入令牌'}).click();await page.getByRole('button',{name:'为 00 发放接入链接'}).waitFor();
+ assert.equal((await rpc()).status,403);
+});

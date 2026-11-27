@@ -91,9 +91,11 @@ test('completion before history, commentary only, remount, final handoff and dif
     const handoff = executionHandoff('a',messages,status);
     assert.equal(handoff.waitingForReply,true);
     const view = advanceLiveTranscript(createLiveTranscriptMemory(),{threadId:'a',messages,turnId:'protocol',streamingText:'',streamingItemId:'',active:false,showExecution:handoff.showExecution,retainPlaceholder:handoff.waitingForReply,now:'2026-10-27T06:30:00Z'});
-    assert.equal(Boolean(view.placeholder), true);
+    assert.deepEqual(view.persisted, messages);
+    assert.equal(Boolean(view.placeholder), messages.length === 0);
+    if (messages.length) assert.equal(view.executionMessageId, commentary.id);
   }
-  assert.deepEqual(projectTranscript({ messages:[commentary, final], turnId:'protocol' }).persisted,[final]);
+  assert.deepEqual(projectTranscript({ messages:[commentary, final], turnId:'protocol' }).persisted,[commentary, final]);
   const handoff = executionHandoff('a',[final,commentary],status);
   assert.equal(handoff.waitingForReply,false);
   assert.equal(handoff.latestReplyAt,final.createdAt);
@@ -216,7 +218,7 @@ test('empty completion keeps placeholder through late final, remount and next-tu
     const handoff=executionHandoff('a',messages,current);
     assert.equal(handoff.waitingForReply,expected);
     const view=advanceLiveTranscript(createLiveTranscriptMemory(),{threadId:'a',messages,turnId:current.turnId,streamingText:'',streamingItemId:'',active:false,showExecution:handoff.showExecution,retainPlaceholder:handoff.waitingForReply});
-    if(expected) assert.equal(Boolean(view.placeholder), !messages.some(message => message.phase !== "commentary" && (message.protocolTurnId || message.turnId) === current.turnId));
+    if(expected) assert.equal(Boolean(view.placeholder), !messages.some(message => message.role === "assistant" && (message.protocolTurnId || message.turnId) === current.turnId));
   };
   send('turn/started',{turn:{id:'protocol'}});
   send('turn/completed',{turn:{id:'protocol',status:'completed',items:[]}});

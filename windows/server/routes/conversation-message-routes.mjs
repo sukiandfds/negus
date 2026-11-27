@@ -5,7 +5,7 @@ import { resolveIncoming } from "../cos-attachments.mjs";
 import { randomUUID } from "node:crypto";
 import { readJson, sendJson } from "../http/request-utils.mjs";
 
-export const createConversationMessageRoutes = ({ conversations, execution, followUpQueue, media, submissionStore, publishThreadEvent, employeeRuntime, authorizeAgentThread, isEmployeeDirectBinding, sessionSource, publicAttachment }) => {
+export const createConversationMessageRoutes = ({ conversations, execution, followUpQueue, media, submissionStore, publishThreadEvent, employeeRuntime, agentTasks, authorizeAgentThread, isEmployeeDirectBinding, sessionSource, publicAttachment }) => {
   const inFlightSubmissions = new Map();
   const submissionTtlMs = 60000;
   const maxSubmissions = 200;
@@ -88,6 +88,8 @@ export const createConversationMessageRoutes = ({ conversations, execution, foll
     const run = async () => {
       const status = execution.getStatus(threadId);
       if (!employeeDirect) assertTurnReady(status);
+      if (employeeDirect) await employeeRuntime.assertSendAvailable?.(binding.agentId);
+      else await conversations.assertSendAvailable?.(threadId, { active: status.active });
       publishSubmitted(publishThreadEvent, { threadId, submissionId, text, attachments: attachments.map(publicAttachment), createdAt });
       let result;
       try {
@@ -102,7 +104,7 @@ export const createConversationMessageRoutes = ({ conversations, execution, foll
           result = await submitThreadInput(conversations, status, threadId, text, attachments, submissionId);
         }
       } catch (error) {
-        if (employeeDirect) throw error;
+        if (employeeDirect || error.code === 'MODEL_CHANNEL_BALANCE' || error.modelExecutionFailed) throw error;
         const recovered = execution.getStatus(threadId);
         if (status.active || !recovered.turnId || recovered.turnId === status.turnId) throw error;
         return {
@@ -201,6 +203,7 @@ export const createConversationMessageRoutes = ({ conversations, execution, foll
     }
     if (isEmployeeDirectBinding(binding)) await employeeRuntime.interrupt(binding.agentId, status.turnId);
     else await conversations.interrupt(threadId, status.turnId);
+    await agentTasks?.cancelRelatedTasks?.(threadId, status.turnId);
     if (pauseError) throw pauseError;
     sendJson(response, { threadId, turnId: status.turnId, status: "interrupting" }, 202);
     return true;

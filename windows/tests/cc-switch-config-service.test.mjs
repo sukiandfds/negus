@@ -39,6 +39,21 @@ test('shared database round trip preserves metadata and selection; backs up; nev
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
+test('restoring a saved model keeps its name on either channel; an empty selection uses the active default', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-restore-model-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const entry = { id: 'ccswitch_sample', displayName: 'Sample', baseUrl: 'https://example.invalid/v1',
+    key: 'fixture', defaultModel: 'B', models: [{ model: 'B' }] };
+  const service = createModelProviderService({ projectRoot: root, currentApiConfiguration: async () => entry,
+    sharedConfig: { runtimeProviders: async () => [entry] } });
+  t.after(() => service.close());
+  await service.refreshShared();
+  for (const modelProviderId of ['current', entry.id]) {
+    assert.equal(service.resolveRoute({ modelProviderId, model: 'A', allowRetired: true }).model, 'A');
+    assert.equal(service.resolveRoute({ modelProviderId }).model, 'B');
+  }
+});
+
 test('same model on two channels has unique selection and routes to requested provider', async () => {
   const saves = [];
   const service = createModelProviderService({ currentApiConfiguration: async () => null, projectRoot: process.cwd(),

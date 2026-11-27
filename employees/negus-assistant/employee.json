@@ -5,7 +5,6 @@
   "shortName": "N",
   "aliases": ["Negus助手", "Negus 助手"],
   "responsibility": "日常交流、快速开发，核验并交付结果",
-  "delegatesTo": ["manager", "researcher", "developer", "reviewer", "grok"],
   "projectKey": "employee-negus-assistant",
   "runtimeKind": "codex",
   "instructions": ""

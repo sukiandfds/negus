@@ -13,7 +13,7 @@ const until = async check => { const end = Date.now() + 3000; while (!check()) {
 
 for (const background of [false, true]) test(`employee ${background ? 'background' : 'delegation'} creates an independent conversation and receives its result`, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-employee-kernel-'));
-  const employees = [{ id: 'a', name: '助手', delegatesTo: ['b'], modelProviderId: 'external', reasoningEffort: 'high', projectRoot: root, mainThreadId: 'main', conversationId: 'direct-a' }, { id: 'b', name: '研究员', modelProviderId: 'external', reasoningEffort: 'high', projectRoot: root }];
+  const employees = [{ id: 'a', name: '助手', modelProviderId: 'external', reasoningEffort: 'high', projectRoot: root, mainThreadId: 'main', conversationId: 'direct-a' }, { id: 'b', name: '研究员', modelProviderId: 'external', reasoningEffort: 'high', projectRoot: root }];
   const registry = { list: () => employees, require: id => { const employee = employees.find(item => item.id === id); if (!employee) throw Error('员工不存在'); return employee; } };
   employees.forEach(employee => { employee.contextRoot = root; });
   const growthStore = await createEmployeeGrowthStore({ stateFile: path.join(root, 'growth.json'), registry });
@@ -644,4 +644,40 @@ test('ordinary assistant can delegate directly to a named employee through the s
   await until(() => deliveries.length === 1);
   assert.match(deliveries[0].text, /验收通过/);
   assert.equal(registrations[0][3].createdBy, 'assistant');
+});
+
+test('user stop interrupts linked running tasks without touching other turns or threads', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-stop-related-'));
+  const now = new Date().toISOString();
+  const task = (id, threadId, turnId, parentTaskId) => ({ id, requestKey: id, kind: parentTaskId ? 'delegation' : 'external',
+    parentTaskId, agentId: 'a', lane: id, conversationId: id, state: 'running',
+    source: { threadId: 'source', agentId: 'a' }, runtime: { threadId, turnId, modelProviderId: 'current' }, createdAt: now, updatedAt: now });
+  await fs.writeFile(path.join(root, 'tasks.json'), JSON.stringify({ version: 1, deliveries: [], tasks: [
+    task('parent', 'source', 'turn-current'), task('previous', 'source', 'turn-previous'), task('outside', 'other', 'turn-current'),
+    task('linked', 'linked', 'turn-linked', 'parent'), task('nested', 'nested', 'turn-nested', 'linked'),
+    task('unrelated', 'unrelated', 'turn-unrelated', 'previous'), task('other-child', 'other-child', 'turn-other-child', 'outside'),
+  ] }));
+  const listeners = new Set(), interrupts = [], reads = new Set();
+  const client = { subscribe: callback => { listeners.add(callback); return () => listeners.delete(callback); }, request: async (method, params) => {
+    const { threadId, turnId } = params;
+    if (method === 'thread/read') {
+      reads.add(threadId);
+      const ids = threadId === 'source' ? ['turn-current', 'turn-previous'] : [threadId === 'other' ? 'turn-current' : `turn-${threadId}`];
+      return { thread: { status: { type: 'active' }, turns: ids.map(id => ({ id, status: 'inProgress', items: [] })) } };
+    }
+    assert.equal(method, 'turn/interrupt');
+    interrupts.push(threadId);
+    listeners.forEach(fn => fn({ method: 'turn/completed', params: { threadId, turn: { id: turnId, status: 'interrupted', items: [] } } }));
+    return {};
+  } };
+  const employee = { id: 'a', name: '助手', projectRoot: root };
+  const extension = await extendEmployeeTasks({ close: async () => {} }, { stateRoot: root, registerSession: async () => {}, providerForThread: async () => 'current',
+    registry: { list: () => [employee], require: () => employee }, appServerClient: client,
+    bindings: { bindRuntime: async () => {} }, execution: { getStatus: () => ({ active: false, phase: 'interrupted' }) }, queue: {} });
+  t.after(async () => { await extension.close(); await fs.rm(root, { recursive: true, force: true }); });
+  await until(() => reads.size === 6);
+  await extension.cancelRelatedTasks('source', 'turn-current');
+  await until(() => extension.tasks().filter(item => ['linked','nested'].includes(item.id)).every(item => item.state === 'interrupted'));
+  assert.deepEqual(interrupts.sort(), ['linked', 'nested']);
+  assert.ok(extension.tasks().filter(item => ['unrelated','other-child'].includes(item.id)).every(item => item.state === 'running' && !item.cancelRequested));
 });

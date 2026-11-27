@@ -11,20 +11,34 @@ import { createNativeTaskRuntime } from '../kernel/native-task-runtime.mjs';
 import { createTaskTools } from '../kernel/task-tools.mjs';
 import { conversationPrompt, workerInstructions as backgroundInstructions } from '../../windows/server/conversation-prompt.mjs';
 import { backgroundToolConfig, executionPolicy, turnExecutionPolicy } from './execution-policy.mjs';
-import { createEmployeeHierarchy } from '../kernel/employee-hierarchy.mjs';
 import { followupTask } from './task-followup.mjs';
 import { createNativeSubagentResolver } from '../../windows/server/native-subagent-source.mjs';
 
+const blockedMessage = '来源对话已停止或暂停，结果尚未送达；可点击重新发送结果';
+const systemInterrupted = task => task?.state === 'interrupted' && !task.cancelRequested && (
+  task.interruptionReason === 'serviceRestart' || /^(?:重启后原执行会话未加载，任务未自动重复启动|重启后未找到原执行，任务未自动重复启动|服务重启时)/u.test(task.error || ''));
+
 // Adapts the same kernel to employee conversations and existing task conversations.
 export async function extendEmployeeTasks(original, { stateRoot, registry, modelProviders, appServerClient,
-  bindings, execution, queue, conversations, registerSession, providerForThread = async () => null, broadcast = () => {}, employeeHierarchy = null }) {
+  bindings, execution, queue, conversations, registerSession, providerForThread = async () => null, broadcast = () => {} }) {
   let kernel;
   let closing = false;
   const taskProviders = new Map();
-  const hierarchy = createEmployeeHierarchy({ employees: registry.list(), hierarchy: employeeHierarchy });
   const nativeResolver = createNativeSubagentResolver({ registry, employeeConversations: bindings });
   const log = event => console.log(JSON.stringify({ scope: 'negus-tasks', channel: 'employee', at: new Date().toISOString(), ...event }));
   const clientFor = employee => modelProviders ? modelProviders.getClient(modelProviders.resolveRoute({ modelProviderId: employee.modelProviderId || 'current', model: employee.model || '' })) : appServerClient;
+  // Employee conversations keep their public ID when a provider switch creates a new native thread.
+  const employeeSourceClient = async (employee, threadId) => {
+    const nativeId = employee.runtimeThreadIds?.at(-1) || threadId;
+    const client = await clientFor({ ...employee, model: '' });
+    if (nativeId === threadId) return client;
+    return {
+      request: (method, params, options) => client.request(method, { ...params, threadId: nativeId }, options),
+      subscribe: callback => client.subscribe(event => callback(event?.params?.threadId === nativeId
+        ? { ...event, params: { ...event.params, threadId } } : event)),
+      subscribeHealth: callback => client.subscribeHealth?.(callback),
+    };
+  };
   const ordinaryScope = threadId => `ordinary:${threadId}`;
   const sourceActor = (providerId, model, sourceThreadId = '') => {
     const provider = modelProviders?.providers?.().find(entry => entry.id === providerId);
@@ -32,7 +46,8 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     return { id: sourceThreadId ? `assistant:${sourceThreadId}` : `assistant:${providerId || 'current'}:${model || 'default'}`,
       name: named?.displayName || model || 'Negus 助手' };
   };
-  const instructions = (employee, background = false) => conversationPrompt(employee.instructions, background ? backgroundInstructions : '');
+  const instructions = (employee, task) => conversationPrompt(employee.instructions, task?.background ? backgroundInstructions
+    : task?.kind === 'delegation' ? `你是任务 ${task.id} 的受派执行人，已接单。直接在本单执行；要求本人完成或禁止转派时，不另建任务、不转给同事。完成后直接在本单回复，结果由系统回传。` : '');
   const followup = async (source, input) => {
     const target = kernel.get(input.taskId);
     const sameSource = target?.source?.threadId === source.runtime.threadId;
@@ -89,7 +104,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     }
     if (!source || terminalStates.has(source.state) || source.cancelRequested) throw Object.assign(Error('来源任务已经结束'), { statusCode: 409 });
     if (input.action === 'list') return { delegates: source.agentId && !source.background
-      ? hierarchy.childrenOf(source.agentId).map(id => { const { name, responsibility } = registry.require(id); return { id, name, responsibility }; }) : [],
+      ? registry.list().filter(employee => employee.id !== source.agentId).map(({ id, name, responsibility }) => ({ id, name, responsibility })) : [],
       tasks: kernel.list().filter(task => task.parentTaskId === source.id || (source.source?.kind === 'conversation'
       ? task.source?.threadId === source.runtime.threadId : task.agentId === source.agentId)) };
     if (source.background) throw Object.assign(Error('后台执行者不能再次派工'), { statusCode: 409 });
@@ -98,10 +113,8 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     }
     const background = input.action === 'background';
     if (!background && input.action !== 'delegate') throw Object.assign(Error('不支持的任务操作'), { statusCode: 400 });
-    // Resolve the actual source owner above, then enforce one downward edge in
-    // the employee DAG at the handoff endpoint.
     const agentId = background ? source.agentId : input.agentId;
-    if (!background && source.agentId) hierarchy.assertCanDelegate(source.agentId, agentId);
+    if (!background && source.agentId === agentId && agentId) throw Object.assign(Error('不能派给自己'), { statusCode: 400 });
     if (agentId) registry.require(agentId);
     else if (source.source?.kind !== 'conversation' || !background) throw Object.assign(Error('执行员工不存在'), { statusCode: 400 });
     const selection = await routeForTask(modelProviders, agentId ? registry.require(agentId) : null, input, kernel.list());
@@ -124,7 +137,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     if(ordinary && background && receipt.state==='running') receipt.nextStatusCheckAt=kernel.get(task.id)?.runtime?.panelCheck?.next;
     return receipt;
   } });
-  const runtime = createNativeTaskRuntime({ log, resolve: async (task, controls, { recovering }) => {
+  const runtime = createNativeTaskRuntime({ log, modelProviders, resolve: async (task, controls, { recovering }) => {
     const agentless = task.source?.kind === 'conversation' && !task.agentId;
     let employee = agentless ? { id: '', name: task.source.actor?.name || 'Negus 助手', projectRoot: task.source.cwd || '',
       modelProviderId: task.source.providerId, model: '', reasoningEffort: '' } : registry.require(task.agentId);
@@ -136,8 +149,12 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       ...(task.reasoningEffort ? { reasoningEffort: task.reasoningEffort } : {}) };
     const observed = ['external', 'followup'].includes(task.kind);
     const related = observed && kernel?.list().find(candidate => candidate.runtime.threadId === task.runtime.threadId && candidate.runtime.modelProviderId);
-    const modelProviderId = (observed && await providerForThread(task.runtime.threadId)) || task.runtime.modelProviderId || related?.runtime?.modelProviderId || employee.modelProviderId || 'current';
-    const client = await clientFor({ ...employee, modelProviderId, ...(observed ? { model: '' } : {}) });
+    const employeeMain = observed && task.kind === 'external' && employee.mainThreadId === task.runtime.threadId;
+    const modelProviderId = (employeeMain && employee.modelProviderId) || (observed && await providerForThread(task.runtime.threadId)) || task.runtime.modelProviderId || related?.runtime?.modelProviderId || employee.modelProviderId || 'current';
+    if (!observed && !recovering) modelProviders?.assertChannelAvailable?.(modelProviderId);
+    const modelExecution = { modelProviderId, model: employee.model, ...modelProviders?.channelAvailability?.(modelProviderId) };
+    const client = employeeMain ? await employeeSourceClient(employee, task.runtime.threadId)
+      : await clientFor({ ...employee, modelProviderId, ...(observed ? { model: '' } : {}) });
     let threadId = task.runtime.threadId;
     if (observed) {
       if (!recovering) {
@@ -149,14 +166,14 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
           await resumeConversationThread(client, { ...executionPolicy, threadId });
         }
       }
-      return { client, threadId };
+      return { client, threadId, modelExecution };
     }
     if (!registerSession) throw Error('任务对话登记服务未连接');
     const register = () => registerTaskThread({ task, threadId, actor: employee, modelProviderId, cwd: employee.projectRoot,
       providerForThread, registerSession, bindings: agentless ? null : bindings });
     const taskInstructions = agentless
       ? conversationPrompt('', backgroundInstructions)
-      : instructions(employee, task.background);
+      : instructions(employee, task);
     const panelTask = agentless && task.background;
     const monitor = panelTask && backgroundChecks({
       read:()=>kernel.get(task.id)?.runtime?.panelCheck,
@@ -178,7 +195,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     const options = taskThreadOptions(executionPolicy, taskInstructions, panelTask ? {...backgroundToolConfig,...reports.config(task.id)} : task.background ? backgroundToolConfig : tools.config(task.id), employee.model);
     if (recovering) {
       if (threadId) await register();
-      return { client, threadId, ...watch };
+      return { client, threadId, modelExecution, ...watch };
     }
     if (controls.signal.aborted) return { client, threadId: threadId || 'cancelled-before-start', input: [] };
     if (threadId) {
@@ -198,7 +215,7 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     }
     await kernel.recordInput(task.id, { requestId: 'initial', submissionId: task.id, text: task.instructions,
       actor: task.source?.actor || (task.source?.agentId ? { id: task.source.agentId, name: registry.require(task.source.agentId).name } : null) });
-    return { client, threadId, ...watch, ...(monitor?{startFields:()=>({panelCheck:{next:Date.now()+checkWindow}})}:{}), input: [{ type: 'text', text: task.instructions, text_elements: [] }],
+    return { client, threadId, modelExecution, ...watch, ...(monitor?{startFields:()=>({panelCheck:{next:Date.now()+checkWindow}})}:{}), input: [{ type: 'text', text: task.instructions, text_elements: [] }],
       turnOptions: { cwd: employee.projectRoot, ...turnExecutionPolicy, developerInstructions: taskInstructions,
         clientUserMessageId: task.id, ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}) } };
   } });
@@ -302,6 +319,11 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
     };
   };
   kernel = await createTaskKernel({ stateFile: path.join(stateRoot, 'tasks.json'), runtime, broadcast, log,
+    recoverDelivery: (delivery, task, parent) => {
+      if (delivery.error !== blockedMessage || task?.state !== 'completed' || !systemInterrupted(parent)) return false;
+      const status = execution.getStatus(task.source?.threadId);
+      return status.active || ['idle', 'completed'].includes(status.phase) || status.interruptionReason === 'serviceRestart';
+    },
     validate: input => { if (input.source?.kind === 'conversation' && !input.agentId) {
       if (!input.source.threadId || !input.source.providerId || !input.source.actor?.id) throw Error('普通来源信息不完整');
     } else registry.require(input.agentId);
@@ -317,22 +339,23 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
         ? { ...registeredEmployee, modelProviderId: recordedSourceProvider || registeredEmployee.modelProviderId,
           ...(recordedSourceProvider ? { model: '' } : {}) }
         : { modelProviderId: source.providerId, model: '' };
-      const client = await clientFor(sourceEmployee);
+      const client = registeredEmployee?.mainThreadId === source.threadId
+        ? await employeeSourceClient(registeredEmployee, source.threadId) : await clientFor(sourceEmployee);
       const marker = `[Negus任务结果 ${task.id}]`;
       const history = await client.request('thread/read', { threadId: source.threadId, includeTurns: true });
       const acknowledged = history.thread?.turns?.some(turn => turn.items?.some(item => item.type === 'userMessage' && JSON.stringify(item.content || []).includes(marker)));
       if (acknowledged) return { acknowledged: true, threadId: source.threadId };
+      const parentTask = () => kernel.get(task.assistantFollowup?.sourceTaskId || task.parentTaskId);
       const sourceRestarted = () => {
         const status = execution.getStatus(source.threadId);
-        return !kernel.get(task.parentTaskId)?.cancelRequested && !status.active && status.phase === 'interrupted' && status.interruptionReason === 'serviceRestart';
+        return !parentTask()?.cancelRequested && !status.active && status.phase === 'interrupted' && status.interruptionReason === 'serviceRestart';
       };
       const sourceBlocked = (includeParent = true) => {
         const status = execution.getStatus(source.threadId);
-        const parent = kernel.get(task.assistantFollowup?.sourceTaskId || task.parentTaskId);
-        return !status.active && !sourceRestarted() && ((includeParent && (parent?.cancelRequested || ['failed', 'interrupted'].includes(parent?.state)))
+        const parent = parentTask();
+        return !status.active && !sourceRestarted() && ((includeParent && (parent?.cancelRequested || parent?.state === 'failed' || (parent?.state === 'interrupted' && !systemInterrupted(parent))))
           || ['failed', 'interrupted', 'systemError', 'waitingOnApproval', 'waitingOnUserInput'].includes(status.phase));
       };
-      const blockedMessage = '来源对话已停止或暂停，结果尚未送达；可点击重新发送结果';
       if (!retryRequested && sourceBlocked()) throw Error(blockedMessage);
       const resultSubmissionId = `result:${id}`;
       const reportSourceTaskId = task.assistantFollowup?.sourceTaskId || task.parentTaskId;
@@ -442,8 +465,8 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
         turn: { ...turnExecutionPolicy, developerInstructions: conversationPrompt('', backgroundInstructions) } };
       let employee = registry.require(task?.agentId || binding.agentId);
       if (task?.background) employee = { ...employee, reasoningEffort: task.reasoningEffort || task.runtime?.reasoningEffort || employee.reasoningEffort };
-      return { resume: { ...executionPolicy, developerInstructions: instructions(employee, task?.background), config: task?.background ? backgroundToolConfig : tools.config(`conversation:${thread.id}`) },
-        turn: { cwd: employee.projectRoot, ...turnExecutionPolicy, developerInstructions: instructions(employee, task?.background), ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}) } };
+      return { resume: { ...executionPolicy, developerInstructions: instructions(employee, task), config: task?.background ? backgroundToolConfig : tools.config(`conversation:${thread.id}`) },
+        turn: { cwd: employee.projectRoot, ...turnExecutionPolicy, developerInstructions: instructions(employee, task), ...(employee.reasoningEffort ? { effort: employee.reasoningEffort } : {}) } };
     },
     ownsThread: threadId => Boolean(belongs({ id: threadId })) || original.ownsThread(threadId)
       || bindings.findByRuntimeSession?.('codex', threadId)?.conversationKind === 'task',
@@ -454,6 +477,25 @@ export async function extendEmployeeTasks(original, { stateRoot, registry, model
       status: execution.getStatus(task.threadId).active ? execution.getStatus(task.threadId)
         : { ...execution.getStatus(task.threadId), active: !terminalStates.has(task.state), phase: task.state, label: task.state, detail: task.error || '' },
     }))],
+    dispatchOrigin: id => {
+      const task=kernel.get(id);
+      if(task?.kind!=='delegation' || !task.parentTaskId)return null;
+      const parent=kernel.get(task.parentTaskId);
+      return parent?.kind==='external' && parent.runtime.threadId===task.source?.threadId ? parent.runtime : null;
+    },
+    cancelRelatedTasks: async (threadId, turnId) => {
+      if (!threadId || !turnId) return;
+      const tasks = kernel.list();
+      const related = new Set(tasks.filter(task => task.runtime.threadId === threadId && task.runtime.turnId === turnId).map(task => task.id));
+      const roots = new Set(related);
+      for (let size = -1; size !== related.size;) {
+        size = related.size;
+        for (const task of tasks) if (related.has(task.parentTaskId)) related.add(task.id);
+      }
+      await Promise.all([...roots].map(id => kernel.cancel(id, { suppressContinuation: true, nativeAlreadyInterrupted: true })));
+      await Promise.all(tasks.filter(task => related.has(task.id) && !roots.has(task.id) && !terminalStates.has(task.state))
+        .map(task => kernel.cancel(task.id, { suppressContinuation: true })));
+    },
     tasks: publicTasks, onTaskCommit: kernel.onTaskCommit, deliveries: kernel.deliveries, cancelTask: kernel.cancel, reconcileTask: kernel.reconcile, retryDelivery: kernel.retryDelivery,
     decorateTaskSession, decorateConversationSession, sourceActorFor, actorRevisionFor,
     providerForThread: threadId => conversationTasks().find(task => task.threadId === threadId)?.runtime.modelProviderId,

@@ -15,3 +15,13 @@ export function publishSubmitted(publish, { threadId, submissionId, text, attach
 export const acceptedInputEvent = (threadId, submissionId, turnId, extra) => ({
   ...extra, type: "user_message_accepted", threadId, submissionId, turnId,
 });
+
+export async function sendQueuedConversation(conversations,threadId,text,attachments,requestId) {
+  let session;
+  try { session=await conversations.findSession(threadId,"all",{limit:1}); }
+  catch(error){ if(error.statusCode!==404 && (error.statusCode || !/no persisted turns/i.test(error.message)))throw error; }
+  // New threads are registered before their first turn has any history.
+  session ??= (await conversations.listSessions("all",false)).find(s=>s.threadId===threadId);
+  if(!session || session.archived)throw new Error("目标对话已归档或不可用");
+  return conversations.sendMessage(threadId,text,attachments,requestId);
+}

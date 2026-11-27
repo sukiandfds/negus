@@ -1,3 +1,6 @@
+import { projectEvents } from './external-assistant/project-events.mjs';
+import { scopedDispatch } from './external-assistant/dispatch.mjs';
+import { externalRoutes } from './external-assistant/routes.mjs';
 import { panelSignals } from './status-panel/resources.mjs';
 import { createGroupCreationRoute } from "../../ui-feishu/server/group-extension.mjs";
 import { createTaskRoutes } from "../../ui-feishu/server/task-routes.mjs";
@@ -22,25 +25,32 @@ import { createEmployeeProjectDirectoryRoutes } from "./routes/employee-project-
 import { createEmployeeGrowthRoutes } from "./routes/employee-growth-routes.mjs";
 import { createProjectReviewRoutes } from "./routes/project-review-routes.mjs";
 import { createDesktopAutomationReader } from "./desktop-automations.mjs";
+import { createModelDefaultsStore } from './model-defaults-store.mjs';
+import path from 'node:path';
 
 export const createRequestHandler = ({
-  token, project, projectRoot, device, observerPort, conversations, execution, media, realtime, submissions,
+  museMessages, token, project, projectRoot, device, observerPort, conversations, execution, media, realtime, submissions,
   conversationForward, followUpQueue, contextManagement, groupRoom, roomDirectory, multiAgent, multiAgentDirectory, artifacts, webOutputs, fushengUsage, readWebVersion, serveStatic,
   agentConversationStore, agentPublicationService,
   employeeRuntime, employeeProjectDirectory, employeeGrowth, modelProviders, projectActivityIndex, projectStatus, agentTasks,
 }) => {
   const readAutomations = createDesktopAutomationReader();
   const connectPanel=panelSignals({readAutomations,agentTasks});
+  const externalEvents = modelProviders?.modelEvents?.events || projectEvents(projectRoot);
+  const modelDefaults = createModelDefaultsStore(path.join(projectRoot, 'runtime/model-defaults.json'));
+  const externalDispatch = employeeProjectDirectory && scopedDispatch({projectRoot, directory:employeeProjectDirectory, events:externalEvents, broadcast:realtime.broadcast});
   const maintenance = createMaintenanceGate({
     projectRoot,
     isBusy: () => {
-      const services = [execution, followUpQueue, employeeRuntime, conversationForward, agentTasks,
+      const services = [execution, followUpQueue, employeeRuntime, conversationForward, agentTasks, externalDispatch,
         ...(multiAgentDirectory ? [...multiAgentDirectory.values()] : multiAgent ? [multiAgent] : [])].filter(Boolean);
       // A service missing its busy contract is unknown, never safe to stop.
       return services.some((service) => typeof service.hasPendingWork !== "function" || service.hasPendingWork());
     },
   });
+  const external = externalRoutes({projectRoot, execution, employeeRuntime, museMessages, followUpQueue, externalDispatch, events:externalEvents, workspaceToken:token, directory:employeeProjectDirectory, roomDirectory, agentConversationStore, multiAgentDirectory, tasks:agentTasks, artifacts, schedules:readAutomations, conversations, media, fushengUsage, readWebVersion, modelProviders, modelDefaults});
   const routes = [
+    external.admin,
     ...(roomDirectory?.create ? [createGroupCreationRoute({ roomDirectory }), createTaskRoutes({ roomDirectory, multiAgentDirectory, groupRoom, media, agentTasks, employeeProjectDirectory })] : []),
     secureInputRoute,
     createConnectionRoutes(),
@@ -62,10 +72,10 @@ export const createRequestHandler = ({
     ...(employeeRuntime ? [createEmployeeRoutes({ employeeRuntime })] : []),
     ...(employeeProjectDirectory ? [createEmployeeProjectDirectoryRoutes({ directory: employeeProjectDirectory, projectRoot })] : []),
     ...(employeeGrowth ? [createEmployeeGrowthRoutes({ growth: employeeGrowth })] : []),
-    ...(projectActivityIndex ? [createProjectReviewRoutes({ activityIndex: projectActivityIndex, projectStatus })] : []),
+    ...(projectActivityIndex ? [createProjectReviewRoutes({ activityIndex: projectActivityIndex, projectStatus, projectActivity:external.projectActivity })] : []),
     createGroupRoutes({ groupRoom, roomDirectory, media, multiAgent, multiAgentDirectory, webOutputs }),
     createFollowUpQueueRoutes({ queue: followUpQueue, media }),
-    createConversationRoutes({ projectRoot, readAutomations,
+    createConversationRoutes({ projectRoot, museMessages, externalDispatch, readAutomations,
       conversations, execution, followUpQueue, contextManagement, media, submissionStore: submissions,
       broadcast: realtime.broadcast,
       publishThreadEvent: execution.publishThreadEvent,
@@ -76,11 +86,18 @@ export const createRequestHandler = ({
       modelProviders,
     }),
     createUsageRoutes({ fushengUsage }),
-    createSystemRoutes({ token, project, projectRoot, device, observerPort, media, realtime:{...realtime,connect(req,res){realtime.connect(req,res);connectPanel(req,res);}}, modelProviders, fushengUsage }),
+    createSystemRoutes({ token, project, projectRoot, device, observerPort, media, realtime:{...realtime,connect(req,res){realtime.connect(req,res);connectPanel(req,res);}}, modelProviders, modelDefaults, fushengUsage }),
   ];
 
   return async (request, response) => {
     const url = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`);
+    if(url.pathname === '/mcp/muse') {
+      if (maintenance(request,response,url)) return;
+      try { await external.mcp(request,response,url); }
+      catch(error) { if(!response.headersSent) sendJson(response,{error:error.statusCode===403?'接入已撤销或未获授权':'请求无法处理'},error.statusCode||503); else response.end(); }
+      finally { maintenance.release(request); }
+      return;
+    }
     const protectedRoute = url.pathname.startsWith("/api/") || url.pathname === "/events";
     if (protectedRoute && !authorized(request, token)) {
       response.writeHead(401);

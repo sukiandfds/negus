@@ -156,43 +156,20 @@ test('failed switch leaves previous provider usable and settings unchanged', asy
   assert.equal(f.histories.get('current').at(-1), 'still works');
 });
 
-test('automatic default migration stays default and follows a later default change', async t => {
-  const firstDefault = { modelProviderId: 'ccswitch_deepseek', model: 'deepseek-flash', reasoningEffort: 'high' };
+test('reopening an employee thread does not migrate it when the global default changes', async t => {
   const f = await fixture(t, {
-    defaultModelSettings: firstDefault,
-    initialEmployee: { modelProviderId: 'current', model: 'model-a', reasoningEffort: 'medium', mainThreadId: 'original-thread' },
+    defaultModelSettings: { modelProviderId: 'ccswitch_default', model: 'default-model', reasoningEffort: 'high' },
+    initialEmployee: { modelProviderId: 'current', model: 'model-a', reasoningEffort: 'medium', mainThreadId: 'original-thread',
+      pendingModelSettings: { modelProviderId: 'ccswitch_old_default', model: 'old-default', modelSelectionSource: 'default' } },
   });
-  assert.deepEqual(f.registry.get('researcher').pendingModelSettings, {
-    ...firstDefault, modelSelectionSource: 'default',
-  });
-  await f.service.sendMessage({ employeeId: 'researcher', text: 'default migration' });
-  f.complete('ccswitch_deepseek');
-  assert.equal(f.registry.get('researcher').modelSelectionSource, 'default');
   assert.equal(f.registry.get('researcher').pendingModelSettings, null);
-  await f.restart({ defaultModelSettings: {
-    modelProviderId: 'ccswitch_next', model: 'deepseek-v4-pro', reasoningEffort: 'high',
-  } });
-  assert.equal(f.registry.get('researcher').modelProviderId, 'ccswitch_deepseek');
-  assert.equal(f.registry.get('researcher').pendingModelSettings.modelSelectionSource, 'default');
-  assert.equal(f.registry.get('researcher').pendingModelSettings.modelProviderId, 'ccswitch_next');
-  await f.service.sendMessage({ employeeId: 'researcher', text: 'second default migration' });
-  assert.equal(f.registry.get('researcher').modelProviderId, 'ccswitch_next');
-  assert.equal(f.registry.get('researcher').modelSelectionSource, 'default');
-});
-
-test('failed automatic default migration leaves the old provider and source unchanged', async t => {
-  const defaultModelSettings = { modelProviderId: 'ccswitch_deepseek', model: 'deepseek-flash', reasoningEffort: 'high' };
-  const f = await fixture(t, {
-    defaultModelSettings,
-    initialEmployee: { modelProviderId: 'current', model: 'model-a', reasoningEffort: 'medium', mainThreadId: 'original-thread' },
-  });
-  f.fail();
-  await assert.rejects(f.service.sendMessage({ employeeId: 'researcher', text: 'must not migrate' }), /target unavailable/);
-  const employee = f.registry.get('researcher');
-  assert.equal(employee.modelProviderId, 'current');
-  assert.equal(employee.model, 'model-a');
-  assert.equal(employee.modelSelectionSource, 'default');
-  assert.equal(employee.pendingModelSettings.modelSelectionSource, 'default');
+  await f.service.sendMessage({ employeeId: 'researcher', text: 'continue existing thread' });
+  f.complete('current');
+  await f.restart({ defaultModelSettings: { modelProviderId: 'ccswitch_new_default', model: 'new-default' } });
+  assert.equal(f.registry.get('researcher').model, 'model-a');
+  assert.equal(f.registry.get('researcher').pendingModelSettings, null);
+  await f.service.sendMessage({ employeeId: 'researcher', text: 'continue after restart' });
+  assert.equal(f.calls.filter(call => call.method === 'turn/start').at(-1).id, 'current');
 });
 
 test('switching away from an unavailable old provider does not resume it before migrating history', async t => {

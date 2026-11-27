@@ -1344,3 +1344,32 @@ test("refuses to read or drive a thread from another project", async () => {
   }
   store.close();
 });
+
+// Muse 11/25: native thread is already running with its uncompressed rollout.
+test('running thread resumes after compressed path conflict and accepts one original input', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'negus-muse-resume-'));
+  const nativeId = 'b4907209-6fe8-4701-b2cd-b8765e904327';
+  const current = path.join(root, 'rollout.jsonl');
+  const thread = { id: nativeId, cwd: root, path: current, turns: [] };
+  const calls = [];
+  const store = createAppServerConversationStore({ projectRoot: root, registerMedia: () => null, autoTitleEnabled: false,
+    client: { subscribe: () => () => {}, close() {}, request: async (method, params) => {
+      calls.push({ method, params });
+      if (method === 'thread/resume' && params.path) throw Error(`cannot resume running thread ${nativeId} with stale path: requested \`${current}.zst\`, active \`${current}\``);
+      if (method === 'thread/resume' || method === 'thread/read') return { thread };
+      if (method === 'turn/start') {
+        assert.equal(params.threadId, nativeId);
+        const turn = { id: 'reply-turn', status: 'completed', items: [{ type: 'userMessage', id: 'input', content: params.input }, { type: 'agentMessage', id: 'reply', text: '原处回复' }] };
+        thread.turns.push(turn); return { turn };
+      }
+      throw Error(`unexpected ${method}`);
+    } } });
+  try {
+    await store.resumeProviderSession(nativeId, { path: current + '.zst', cwd: root, model: 'test' });
+    await store.sendMessage(nativeId, 'Muse 原始输入', [], 'muse-sample');
+    assert.equal(calls.filter(c => c.method === 'turn/start').length, 1);
+    assert.equal(thread.turns.length, 1);
+    assert.equal(thread.turns[0].items[0].content[0].text, 'Muse 原始输入');
+    assert.equal(thread.turns[0].items[1].text, '原处回复');
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});

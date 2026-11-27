@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { resolveConversationFile } from "../conversation-file.mjs";
 import { paginationFrom, readJson, sendJson } from "../http/request-utils.mjs";
 
-export const createConversationHistoryRoutes = ({ projectRoot, conversations, execution, followUpQueue, contextManagement, media, publishThreadEvent, agentConversationStore, employeeRuntime, roomDirectory, agentTasks, authorizeAgentThread, isEmployeeDirectBinding, sessionSource, readAgentSession, readOrdinarySession, publicUserInputRequest }) => {
+export const createConversationHistoryRoutes = ({ projectRoot, museMessages, externalDispatch, conversations, execution, followUpQueue, contextManagement, media, publishThreadEvent, agentConversationStore, employeeRuntime, roomDirectory, agentTasks, modelProviders, authorizeAgentThread, isEmployeeDirectBinding, sessionSource, readAgentSession, readOrdinarySession, publicUserInputRequest }) => {
   const providerCopies = new Map();
   const detailReads = new Map();
   return async (request, response, url) => {
@@ -250,10 +250,11 @@ export const createConversationHistoryRoutes = ({ projectRoot, conversations, ex
     const requestedRevision = view ? url.searchParams.get("sourceRevision") : null;
     const revisionSource = sessionSource(binding);
     const actor = Promise.resolve(agentTasks?.actorRevisionFor?.(threadId));
-    const combineRevision = (revision, actorRevision, liveRevision) => revision
-      ? [revision, actorRevision && `actor:${actorRevision}`, liveRevision && `live:${liveRevision}`].filter(Boolean).join('|') : null;
+    const combineRevision = (revision, actorRevision, liveRevision, workRevision) => revision
+      ? [revision, actorRevision && `actor:${actorRevision}`, liveRevision && `live:${liveRevision}`, workRevision && `work:${workRevision}`,
+        modelProviders?.executionRecords?.revision(threadId) && `failure:${modelProviders.executionRecords.revision(threadId)}`].filter(Boolean).join('|') : null;
     const readRevision = async () => combineRevision(await revisionSource.getSourceRevision?.(threadId),
-      await agentTasks?.actorRevisionFor?.(threadId), execution.getHistoryRevision?.(threadId));
+      await agentTasks?.actorRevisionFor?.(threadId), execution.getHistoryRevision?.(threadId), externalDispatch?.revision(threadId));
     let currentRevision, bodyRevision;
     const initialRevision = view ? readRevision().then(value => { currentRevision = value; return value; }) : null;
     const readBody = async () => {
@@ -266,8 +267,11 @@ export const createConversationHistoryRoutes = ({ projectRoot, conversations, ex
       if (session && execution.completeSession) session = execution.completeSession(session,
         !url.searchParams.has("before") && !url.searchParams.has("cursor") && !url.searchParams.has("beforeMessageId"));
       if (!session) throw Object.assign(new Error("session not found"), { statusCode: 404 });
+      if(museMessages) session=museMessages.decorate(threadId,session);
+      const workRevision = externalDispatch?.revision(threadId);
+      if (workRevision) session = {...session,externalWork:await externalDispatch.forView(threadId)};
       if (view) bodyRevision = session.sourceRevision
-        ? combineRevision(session.sourceRevision, await actor, execution.getHistoryRevision?.(threadId)) : await initialRevision;
+        ? combineRevision(session.sourceRevision, await actor, execution.getHistoryRevision?.(threadId), workRevision) : await initialRevision;
       return session;
     };
     if (view) {

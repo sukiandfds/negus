@@ -1,10 +1,12 @@
+import {sendQueuedConversation} from '../server/conversation-input.mjs';
+import {externalMessages} from '../server/external-assistant/messages.mjs';
 import { conversationPrompt } from "../server/conversation-prompt.mjs";
 import { loadCosAttachments } from "../server/cos-attachments.mjs";
 import { extendGroupRooms } from "../../ui-feishu/server/group-extension.mjs";
 import { extendEmployeeTasks } from "../../ui-feishu/server/employee-task-extension.mjs";
 import { existingProjects, withExistingConversations } from "../../ui-feishu/server/existing-projects.mjs";
 import { createBackgroundTaskService } from "../server/background-tasks/service.mjs";
-import { backgroundTaskRoute } from "../server/background-tasks/model-policy.mjs";
+import { createModelDefaultsStore } from "../server/model-defaults-store.mjs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -48,6 +50,7 @@ import { createAttachmentContentService } from "../server/attachment-content-ser
 import { loadEmployeeDefinitions } from "../server/employee-definitions.mjs";
 import { createBusinessProjectLoader } from "../server/business-project-config.mjs";
 import { createModelProviderService } from "../server/model-provider-service.mjs";
+import { finalModelError, modelFailure } from '../server/model-execution-records.mjs';
 import { createProjectActivityIndex } from "../server/project-activity-index.mjs";
 import { createProjectStatusService } from "../server/project-status-service.mjs";
 
@@ -84,6 +87,7 @@ const imageGenerationRuns = createImageGenerationRunStore({
   media,
 });
 const realtime = createRealtimeHub();
+const museMessages=externalMessages(projectRoot);
 const submissions = createSubmissionStore({
   stateFile: path.join(projectRoot, "runtime", "session-submissions.json"),
 });
@@ -134,11 +138,16 @@ const conversationStoreOptions = {
         return;
       }
     }
-    if (!employeeRuntime?.ownsThread(message?.params?.threadId)) execution.handleProtocolMessage(message);
-    void agentTasks?.onProtocolMessage(message).catch(error => console.error("[agent-tasks]", error.message));
     void appServerConversations.handleProtocolMessage(message).catch((error) => {
       console.error("[model-settings] Could not save successful selection:", error.message);
     });
+    const turn = message?.method === 'turn/completed' && message.params?.turn;
+    if (!employeeRuntime?.ownsThread(message?.params?.threadId)) execution.handleProtocolMessage(turn?.status === 'failed'
+      ? { ...message, params: { ...message.params, turn: { ...turn, error: { message: modelFailure(turn.error).reason } } } }
+      : finalModelError(message?.method, message?.params)
+        ? { ...message, params: { ...message.params, error: { message: modelFailure(message.params.error).reason } } }
+        : message);
+    void agentTasks?.onProtocolMessage(message).catch(error => console.error("[agent-tasks]", error.message));
     contextManagement?.handleProtocolMessage(message);
     void agentConversationStore?.recordRuntimeEvent?.(message);
     if (message?.method === "thread/name/updated" && message.params?.threadId) {
@@ -152,7 +161,7 @@ const conversationStoreOptions = {
     }
   },
   onSubmitted: execution.markSubmitted,
-  onFailed: execution.markFailed,
+  onFailed: (threadId, error) => execution.markFailed(threadId, modelFailure(error).reason),
   onHealthState: event => {
     execution.handleHealthState(event);
     if (event.phase === "authoritative") followUpQueue?.handleTurnTerminal({ threadId: event.threadId, status: event.status?.type });
@@ -226,6 +235,11 @@ followUpQueue = createFollowUpQueueService({
   execution,
   conversations: {
     ...conversations,
+    assertSendAvailable: (threadId, options) => {
+      const employee = employeeRegistry?.list().find(e => e.mainThreadId === threadId);
+      return employee ? employeeRuntime.assertSendAvailable(employee.id, options)
+        : conversations.assertSendAvailable(threadId, options);
+    },
     steerMessage: async (threadId, _turnId, text, attachments, requestId) => {
       const employee = employeeRegistry?.list().find(e => e.mainThreadId === threadId);
       return employee
@@ -234,10 +248,12 @@ followUpQueue = createFollowUpQueueService({
     },
     sendMessage: async (threadId, text, attachments, requestId) => {
       const employee = employeeRegistry?.list().find(e => e.mainThreadId === threadId);
-      if (employee) return employeeRuntime.sendMessage({ employeeId: employee.id, text, attachments, requestId });
-      const session = await conversations.findSession(threadId, "all", { limit: 1 });
-      if (!session || session.archived) throw new Error("目标对话已归档或不可用");
-      return conversations.sendMessage(threadId, text, attachments, requestId);
+      const reply=employee ? await employeeRuntime.sendMessage({ employeeId: employee.id, text, attachments, requestId })
+        : await sendQueuedConversation(conversations,threadId,text,attachments,requestId);
+      // Delivery already succeeded: a receipt write failure must not replay the message.
+      try { museMessages.recordStartedTurn(threadId,requestId,reply); }
+      catch(error){ console.error('[external-assistant] 保存轮次来源失败',error.message); }
+      return reply;
     },
     updateModel: async (threadId, model, settings = {}) => {
       const employee = employeeRegistry?.list().find(e => e.mainThreadId === threadId);
@@ -254,7 +270,7 @@ followUpQueue = createFollowUpQueueService({
   },
   media,
   publishThreadEvent: execution.publishThreadEvent,
-  sourceActorFor: (threadId, submissionId) => agentTasks?.sourceActorFor?.(threadId, submissionId),
+  sourceActorFor: (threadId, submissionId) => museMessages.actorFor(threadId,submissionId) || agentTasks?.sourceActorFor?.(threadId, submissionId),
 });
 
 contextManagement = await createContextManagementService({
@@ -273,11 +289,11 @@ contextManagement = await createContextManagementService({
     ? employeeRuntime.compactContext(threadId)
     : conversations.compactContext(threadId),
 });
-const employeeDefaultRoute = await backgroundTaskRoute(modelProviders);
+const userModelDefaults = await createModelDefaultsStore(path.join(projectRoot, "runtime", "model-defaults.json")).read();
 const employeeDefaultSettings = {
-  modelProviderId: employeeDefaultRoute.modelProviderId,
-  model: employeeDefaultRoute.model,
-  reasoningEffort: employeeDefaultRoute.reasoningEffort,
+  modelProviderId: userModelDefaults.providerId,
+  model: userModelDefaults.model.split("::").at(-1),
+  reasoningEffort: userModelDefaults.effort,
 };
 employeeRegistry = await createEmployeeProjectRegistry({
   stateFile: path.join(projectRoot, "runtime", "employee-projects.json"),
@@ -584,7 +600,7 @@ await extendGroupRooms({ stateRoot: path.resolve(process.env.NEGUS_UI_STATE_ROOT
     registerSession: appServerConversations.registerSession, providerForThread: threadId => appServerConversations.getRecordedProviderForThread(threadId),
   }),
 });
-const requestHandler = createRequestHandler({
+const requestHandler = createRequestHandler({museMessages,
   conversationForward, agentTasks,
   token, project, projectRoot, device, observerPort, conversations, execution, media, realtime, submissions,
   followUpQueue, contextManagement, groupRoom, roomDirectory: groupRoomDirectory, multiAgent, multiAgentDirectory, artifacts, webOutputs, fushengUsage, readWebVersion, serveStatic,

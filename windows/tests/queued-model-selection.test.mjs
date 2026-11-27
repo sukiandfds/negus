@@ -111,3 +111,28 @@ test("compaction holds both send paths, including before execution turns active"
   await queue.withThreadLock("t", async () => {});
   assert.deepEqual(sent, ["after"]);
 });
+
+test('restart consumes a pending Muse input after interruption without replaying ordinary work', async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'negus-muse-resume-'));
+ t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ let active=true;const sent=[];
+ const options={stateFile:path.join(root,'queue.json'),execution:{getStatus:()=>({active,phase:active?'working':'interrupted'})},
+   media:{resolveMany:()=>[]},publishThreadEvent(){},sourceActorFor:(_,id)=>id==='verified'?{authorId:'external:muse'}:null,
+   conversations:{sendMessage:async(_,text)=>sent.push(text)}};
+ let q=createFollowUpQueueService(options);
+ for(const id of ['ordinary','verified'])await q.enqueue({threadId:'t',submissionId:id,text:id});
+ await q.close();active=false;q=createFollowUpQueueService(options);t.after(()=>q.close());await q.start();
+ for(let i=0;i<100 && q.list('t').length!==1;i++)await sleep(10);
+ assert.deepEqual(sent,['verified']);assert.deepEqual(q.list('t').map(i=>i.text),['ordinary']);
+});
+
+test('first queued message uses its registered empty thread; archived or missing destinations never receive it',async()=>{
+ const {sendQueuedConversation}=await import('../server/conversation-input.mjs');
+ const sent=[], service={findSession:async()=>null,listSessions:async()=>[{threadId:'fresh',archived:false}],
+   sendMessage:async(...args)=>sent.push(args)};
+ await sendQueuedConversation(service,'fresh','hello',[],'muse-first');
+ await assert.rejects(sendQueuedConversation(service,'missing','hello',[],'muse-second'),/不可用/);
+ service.findSession=async()=>({threadId:'fresh',archived:true});
+ await assert.rejects(sendQueuedConversation(service,'fresh','hello',[],'muse-third'),/已归档/);
+ assert.deepEqual(sent,[['fresh','hello',[],'muse-first']]);
+});

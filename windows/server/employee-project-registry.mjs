@@ -23,19 +23,12 @@ const normalize = (definition, saved = {}, workspaceRoot, defaultModelSettings =
   const defaultProviderId = defaults?.providerId || defaults?.modelProviderId || '';
   const defaultModel = defaults?.model || '';
   const defaultEffort = defaults?.effort || defaults?.reasoningEffort || '';
-  const needsDefaultSettings = Boolean(saved.mainThreadId && !explicitSelection && defaults
-    && (savedProviderId !== defaultProviderId || savedModel !== defaultModel || savedEffort !== defaultEffort));
-  const modelProviderId = needsDefaultSettings ? savedProviderId : defaultProviderId || savedProviderId;
-  const model = needsDefaultSettings ? savedModel : defaultModel || savedModel;
-  const reasoningEffort = needsDefaultSettings ? savedEffort : defaultEffort || savedEffort;
-  const pendingModelSettings = saved.pendingModelSettings ? {
-    ...saved.pendingModelSettings,
-    modelSelectionSource: explicitSelection ? 'explicit'
-      : saved.pendingModelSettings.modelSelectionSource || 'default',
-  } : needsDefaultSettings ? {
-    modelProviderId: defaultProviderId, model: defaultModel, reasoningEffort: defaultEffort,
-    modelSelectionSource: 'default',
-  } : null;
+  const existingThread = Boolean(saved.mainThreadId);
+  const modelProviderId = existingThread || explicitSelection ? savedProviderId : defaultProviderId || savedProviderId;
+  const model = existingThread || explicitSelection ? savedModel : defaultModel || savedModel;
+  const reasoningEffort = existingThread || explicitSelection ? savedEffort : defaultEffort || savedEffort;
+  const pendingModelSettings = saved.pendingModelSettings?.modelSelectionSource === 'explicit'
+    ? saved.pendingModelSettings : null;
   return {
     ...definition,
     // User-visible employees operate on the same project workspace as the main

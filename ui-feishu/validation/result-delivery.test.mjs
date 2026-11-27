@@ -11,14 +11,14 @@ const until = async check => {
   const end = Date.now() + 1500;
   while (!check()) { if (Date.now() > end) assert.fail('condition timed out'); await new Promise(resolve => setTimeout(resolve, 5)); }
 };
-async function fixture(t, initialPhase = 'completed', failSend = false, parentState, interruptionReason) {
+async function fixture(t, initialPhase = 'completed', failSend = false, parentState, interruptionReason, sample = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'negus-result-delivery-'));
   const task = { id: 'child', kind: 'delegation', agentId: 'b', conversationId: 'child-conversation',
     title: '调研', state: 'completed', result: '调研结果', runtime: { threadId: 'child-thread', turnId: 'child-turn' },
     source: { threadId: 'main', agentId: 'a', conversationId: 'direct-a' }, suppressContinuation: true };
   const tasks = [task];
-  if (parentState) { task.parentTaskId = 'parent'; tasks.push({ id: 'parent', kind: 'external', state: parentState, runtime: { threadId: 'main', turnId: 'main-turn' } }); }
-  await fs.writeFile(path.join(root, 'tasks.json'), JSON.stringify({ version: 1, tasks, deliveries: [{ id: 'result:child', taskId: 'child', state: 'pending', attempts: 0 }] }));
+  if (parentState) { task.parentTaskId = 'parent'; tasks.push({ id: 'parent', kind: 'external', state: parentState, runtime: { threadId: 'main', turnId: 'main-turn' }, ...sample.parent }); }
+  await fs.writeFile(path.join(root, 'tasks.json'), JSON.stringify({ version: 1, tasks, deliveries: [{ id: 'result:child', taskId: 'child', state: 'pending', attempts: 0, ...sample.delivery }] }));
   const f = { phase: initialPhase, interruptionReason, failSend, sent: [], turns: [] };
   const execution = { getStatus: () => ({ active: f.phase === 'working', phase: f.phase, turnId: 'main-turn', interruptionReason: f.interruptionReason }) };
   const queue = createFollowUpQueueService({ stateFile: path.join(root, 'queue.json'), execution,
@@ -129,4 +129,42 @@ test('shutdown preserves an unacknowledged result for delivery after restart', a
   await until(() => recovered.deliveries()[0].state === 'delivered');
   assert.equal(delivered, 1);
   await recovered.close();
+});
+
+// The production sample has an already completed child and a failed receipt,
+// while the parent was interrupted by restart and the visible thread is completed.
+for (const cancelRequested of [false, true]) test(`restart sample with cancelRequested=${cancelRequested}`, async t => {
+  const f = await fixture(t, 'completed', false, 'interrupted', undefined, {
+    parent: { cancelRequested, error: '重启后原执行会话未加载，任务未自动重复启动' },
+    delivery: { state: 'failed', attempts: 1, error: '来源对话已停止或暂停，结果尚未送达；可点击重新发送结果' },
+  });
+  if (cancelRequested) {
+    await new Promise(resolve => setTimeout(resolve, 50));
+    assert.equal(f.delivery().state, 'failed');
+    assert.equal(f.sent.length, 0);
+    return;
+  }
+  await until(() => f.delivery().state === 'delivered');
+  assert.equal(f.sent.length, 1);
+  assert.equal(f.turns.length, 1);
+  assert.equal(f.extension.tasks().find(task => task.id === 'child').state, 'completed');
+  assert.equal(JSON.parse(await fs.readFile(path.join(f.root, 'tasks.json'), 'utf8')).tasks.length, 2);
+  await f.extension.retryDelivery('result:child');
+  assert.equal(f.sent.length, 1);
+  await f.extension.close();
+  let replays = 0;
+  const reopened = await createTaskKernel({ stateFile: path.join(f.root, 'tasks.json'), runtime: { execute: async () => { replays++; }, observe: async () => { replays++; } }, deliver: async () => { replays++; }, recoverDelivery: () => true });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(reopened.deliveries()[0].state, 'delivered');
+  assert.equal(replays, 0);
+  await reopened.close();
+});
+
+test('explicit source stop is retained across a service restart', async t => {
+  const f = await fixture(t, 'interrupted', false, 'interrupted', 'serviceRestart', {
+    parent: { cancelRequested: true, error: '重启后原执行会话未加载，任务未自动重复启动' },
+  });
+  await until(() => f.delivery().state === 'failed');
+  assert.equal(f.sent.length, 0);
+  assert.equal(f.queue.list('main').length, 0);
 });

@@ -1,3 +1,4 @@
+import {ThreadExternalWork} from '../../shared/features/conversations/components/ExternalWorkResult';
 import { UsageSummaryControl } from '../../shared/features/usage-monitor/components/UsageSummaryControl';
 import { isOptimisticId } from "../../../windows/server/message-identity.mjs";
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -127,6 +128,7 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
           <button className={`icon-button ${details ? 'pressed' : ''}`} title="对话详情" aria-label="对话详情" aria-expanded={details} onClick={() => setDetails(!details)}><PanelRight size={17} /></button>
         </>} />
       {renaming && <form className="rename-bar" onSubmit={e => { e.preventDefault(); void saveName(); }}><input aria-label="对话名称" value={renameDraft} maxLength={120} onChange={e => setRenameDraft(e.target.value)} autoFocus /><button className="icon-button" aria-label="保存对话名称" disabled={!renameDraft.trim() || c.renaming}><Check size={17} /></button><button type="button" className="icon-button" aria-label="取消重命名" onClick={() => setRenaming(false)}><X size={17} /></button></form>}
+      {c.session?.threadId===c.selectedId && <ThreadExternalWork key={c.selectedId} rows={c.session?.externalWork}/>}
       <div className="chat-content-row">
         <div className="chat-primary">
           <div className="chat-messages" style={{ display: tab === 'messages' ? undefined : 'none' }}>
@@ -154,7 +156,7 @@ export function ChatWorkspace({ visible, c, usage, initialReady, tab, setTab, de
               <ConversationComposer usageControl={<UsageSummaryControl currentModel={entry.state.visibleModel} snapshot={usage.snapshot} loading={usage.loading} error={usage.error} onRefresh={()=>void usage.refresh(true)} />} ref={instance => { if (instance) composerRefs.current.set(key, instance); else composerRefs.current.delete(key); }} connected={entry.state.connected} selected={Boolean(entry.state.selectedId)} archived={Boolean(entry.state.session?.archived)}
               status={entry.state.executionStatus} contextStatus={entry.state.contextStatus}
               shownModel={entry.state.visibleModel} shownEffort={entry.state.visibleEffort} models={entry.state.models} modelsLoading={entry.state.modelsLoading} modelChanging={entry.state.modelChanging} modelError={entry.state.modelError}
-              selectedModelUnavailable={entry.state.selectedModelUnavailable} sendPreparationError={entry.state.sendPreparationError} onPrepareSend={entry.state.prepareSend} onSend={entry.state.sendMessage} onQueue={entry.state.queueMessage} queueing={entry.state.queueBusy}
+              sendPreparationError={entry.state.sendPreparationError} onPrepareSend={entry.state.prepareSend} onSend={entry.state.sendMessage} onQueue={entry.state.queueMessage} queueing={entry.state.queueBusy}
               editingMessage={entry.state.editingMessage} onCancelEdit={entry.state.cancelEditMessage} onInterrupt={entry.state.interrupt} onReview={entry.state.review}
               goal={entry.state.goal} goalBusy={entry.state.goalBusy} goalError={entry.state.goalError}
               onChangeGoalStatus={entry.state.changeGoalStatus} onClearGoal={entry.state.clearGoal} onSetGoal={entry.state.setGoal} onEditGoal={entry.state.editGoal}

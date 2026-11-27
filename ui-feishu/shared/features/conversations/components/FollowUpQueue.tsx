@@ -36,7 +36,7 @@ export function FollowUpQueue({ items, onlyId, compacting, isHidden, busy, error
           <Message key={item.id}
             message={{ ...queuedTranscriptMessage(item), authorName: item.authorName || "我",
               ...deliveryPatch(item.state === "dispatching" ? "sending" : item.state === "failed" ? "failed" : undefined, item.error) }}
-            threadId={item.threadId} queued={item.state !== "dispatching"}
+            threadId={item.threadId} queued={item.state === "pending"}
             onFork={async () => false} onEdit={() => void onEdit(item)}
             actions={<MessageActions text={item.text} forkable={false} forking={false} onFork={async () => false} editable editing={locked} onEdit={() => void onEdit(item)}>
                   <button className={actions.button} type="button" title="直接发送" aria-label="直接发送" disabled={locked} onClick={() => compacting ? setNotice(value => value + 1) : void onSendNow(item.id)}><Send aria-hidden="true" /></button>

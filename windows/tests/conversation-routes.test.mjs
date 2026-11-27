@@ -654,7 +654,7 @@ test('task binding opens, steers and stops its own thread while leader is busy',
   const binding = { conversationId: 'task-chat', runtimeSessionId: 'worker', agentId: 'researcher', runtimeKind: 'codex', conversationKind: 'task' };
   const calls = [];
   const route = createConversationRoutes({
-    agentTasks: { ownsThread: id => id === 'worker' },
+    agentTasks: { ownsThread: id => id === 'worker', cancelRelatedTasks: async (...args) => { calls.push(['related', ...args]); } },
     agentConversationStore: { findByRuntimeSession: () => binding, resolve: async () => binding },
     employeeRuntime: { supportsEmployee: () => true, ownsConversation: () => false, sendMessage: () => assert.fail('must not send to leader') },
     conversations: {
@@ -672,7 +672,7 @@ test('task binding opens, steers and stops its own thread while leader is busy',
   const body = { threadId: 'worker', conversationId: 'task-chat', text: '补充资料', submissionId: 'amend-task' };
   await invoke(route, body).promise;
   await invokePost(route, '/api/session/interrupt', body).promise;
-  assert.deepEqual(calls.map(c => c.slice(0, 3)), [['steer', 'worker', 'worker-turn'], ['stop', 'worker', 'worker-turn']]);
+  assert.deepEqual(calls.map(c => c.slice(0, 3)), [['steer', 'worker', 'worker-turn'], ['stop', 'worker', 'worker-turn'], ['related', 'worker', 'worker-turn']]);
   await assert.rejects(invoke(route, { ...body, threadId: 'leader', submissionId: 'wrong-thread' }).promise, /不匹配/);
   await assert.rejects(invoke(route, { ...body, conversationId: '', submissionId: 'missing-binding' }).promise, /conversationId/);
 });

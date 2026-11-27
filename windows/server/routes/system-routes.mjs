@@ -25,8 +25,8 @@ const createObserverReader = (observerPort) => async (threadId = "") => {
   }
 };
 
-export const createSystemRoutes = ({ token, project, projectRoot, device, observerPort, media, realtime, modelProviders, fushengUsage }) => {
-  const defaults = createModelDefaultsStore(path.join(projectRoot, "runtime/model-defaults.json"));
+export const createSystemRoutes = ({ token, project, projectRoot, device, observerPort, media, realtime, modelProviders, fushengUsage,
+  modelDefaults: defaults = createModelDefaultsStore(path.join(projectRoot, "runtime/model-defaults.json")) }) => {
   const probe = modelProviders?.sharedConfig?.resolveDraft
     ? createProviderProbe({ resolveDraft: modelProviders.sharedConfig.resolveDraft }) : null;
   const emptyTickets = new Map();
@@ -49,7 +49,11 @@ export const createSystemRoutes = ({ token, project, projectRoot, device, observ
         model: provider.defaultModel, owner: isNative ? "native" : "builtin", editable: false,
         configured: Boolean(configured), switchable: Boolean(configured || isNative) });
     }));
-    return rows;
+    return rows.map(entry => {
+      const health = modelProviders.channelAvailability?.(providerIdOf(entry));
+      return health?.available === false
+        ? { ...entry, switchable: false, availability: health } : entry;
+    });
   };
   const refreshChannelCatalog = async (providerId) => {
     const entries = await listChannels(true, false);

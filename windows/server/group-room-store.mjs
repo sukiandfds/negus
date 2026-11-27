@@ -61,15 +61,10 @@ const validDate = (value) => /^\d{4}-\d{2}-\d{2}$/u.test(String(value || ""));
 const initialAgent = (definition, saved = {}, defaultModelSettings = null) => {
   const explicitSelection = saved.modelSelectionSource === 'explicit';
   const savedProviderId = cleanText(saved.modelProviderId, 80);
-  const crossProviderThread = Boolean(saved.threadId && savedProviderId
-    && defaultModelSettings && savedProviderId !== defaultModelSettings.modelProviderId);
-  const defaults = defaultModelSettings && !explicitSelection && !crossProviderThread ? defaultModelSettings : null;
-  const pendingModelSettings = saved.pendingModelSettings || (crossProviderThread ? {
-    modelProviderId: defaultModelSettings.modelProviderId,
-    model: defaultModelSettings.model,
-    reasoningEffort: defaultModelSettings.reasoningEffort,
-    modelSelectionSource: 'default',
-  } : null);
+  const hasThread = Boolean(saved.threadId);
+  const defaults = defaultModelSettings && !explicitSelection && !hasThread ? defaultModelSettings : null;
+  const pendingModelSettings = saved.pendingModelSettings?.modelSelectionSource === 'explicit'
+    ? saved.pendingModelSettings : null;
   return {
     ...definition,
     modelProviderId: defaults?.modelProviderId
